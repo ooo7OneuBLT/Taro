@@ -1,0 +1,43 @@
+# ============================================================
+# 太郎 A1 設定ファイル
+# ============================================================
+
+# --- 太郎の脳 ---
+brain:
+  type: gru                # 再帰ネットの種類（gru / lstm）
+  embedding_dim: 64        # 文字埋め込みの次元数
+  hidden_dim: 128          # 隠れ状態の次元数
+  num_layers: 1            # 再帰層の数
+  initial_temperature: 2.0 # 出力のゆらぎ（τ）。高い＝喃語、低い＝安定
+  min_temperature: 0.3     # τの下限（完全に0にはしない＝探索を残す）
+  temperature_decay: 0.998  # τの減衰率（1ステップごとに掛ける）
+  device: auto             # auto=CUDA使えればCUDA、なければCPU
+
+# --- 報酬の重み ---
+reward:
+  w_imit: 0.5    # 模倣衝動の重み
+  w_pred: 0.3    # 予測成功の重み
+  w_social: 0.2  # 社会的報酬（親の笑顔）の重み
+
+# --- 学習 ---
+learning:
+  lr: 0.005                   # 学習率（重みを1回でどれくらい動かすか）
+  baseline_momentum: 0.95     # baseline（報酬予測）の移動平均の慣性
+  max_output_length: 50       # 太郎が1回に産出できる最大文字数
+  grad_clip: 1.0              # 勾配の上限（学習の暴走防止）
+
+# --- シミュレーション内時間 ---
+sim_clock:
+  seconds_per_turn: 5.0       # 1回のやり取り＝sim時間で何秒
+  log_interval_turns: 10      # 何ターンごとにログ出力するか
+
+# --- 成長アーカイブ ---
+archive:
+  snapshot_interval_turns: 100  # 何ターンごとに自動スナップショット
+  archive_dir: archive          # 保存先ディレクトリ
+
+# --- ログ ---
+logging:
+  log_dir: logs
+  log_every_turn: true         # 毎ターンのJSONLログ
+  plot_interval_turns: 50      # 何ターンごとに学習曲線PNGを更新
