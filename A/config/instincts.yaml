@@ -1,0 +1,102 @@
+# ============================================================
+# 太郎の本能定義（コードが読む正式な定義）
+# ============================================================
+# 各本能に対し:
+#   enabled    : この段階で有効か
+#   location   : "internal"（太郎の中身）or "environment"（親の入力）
+#   source     : 人間での根拠（文献）
+#   label      : 【人間模倣】or【既存AI研究】or 両方
+#   decay      : 消滅/減衰の仕方（none=恒久, relative=他の報酬源が育つと相対的に減衰）
+#   notes      : 補足
+
+instincts:
+
+  imitation:
+    name: 模倣衝動（真似したい）
+    enabled: true
+    location: internal
+    source: >
+      新生児模倣（Meltzoff & Moore, 1977）。
+      ただし近年反論あり（Oostenbroek et al., 2016）。
+      学術的に未決着のため、仮説的な本能として採用。
+    label: 人間模倣
+    reward_key: r_imit
+    decay: relative
+    notes: >
+      親の発話と太郎の出力の類似度を [0,1] で算出。
+      報酬量は固定だが、他の報酬源が増えると相対的に小さくなる（創発的減衰）。
+
+  prediction:
+    name: 予測（予測誤差最小化）
+    enabled: true
+    location: internal
+    source: >
+      予測処理 / 自由エネルギー原理（Friston）。
+      脳は次の入力を絶えず予測し、予測が当たると安定する。
+    label: 人間模倣
+    reward_key: r_pred
+    decay: none
+    notes: >
+      次トークンの予測が的中するほど報酬。
+      知覚の学習（cross-entropy loss最小化）としても機能。
+
+  dopamine:
+    name: 報酬予測誤差（ドーパミン）
+    enabled: true
+    location: internal
+    source: >
+      ドーパミンニューロンの発火パターンが
+      「もらえた報酬 − 予想した報酬」を表す（Schultz, 1997）。
+      強化学習のTD誤差と数式上一致。
+    label: 人間模倣＝既存AI研究
+    reward_key: null
+    decay: none
+    notes: >
+      報酬そのものではなく、学習信号 δ = R − baseline。
+      全学習を駆動する。baseline は報酬の移動平均。
+
+  social_reward:
+    name: 社会的報酬（親の反応で喜ぶ）
+    enabled: true
+    location: environment
+    source: >
+      新生児は笑顔・親の声・対乳児発話・視線・随伴性に
+      生まれつき反応する。
+    label: 人間模倣
+    reward_key: r_social
+    decay: none
+    notes: >
+      親の「笑顔の強さ」を連続値 [0,1] で入力。
+      将来は注目・呼応等のバリエーションを追加可。
+
+# --- A2以降で追加予定（現時点では無効）---
+
+  statistical_learning:
+    name: 統計学習
+    enabled: false
+    location: internal
+    source: 音の並びの遷移確率を学び単語を切り出す（Saffran, 1996）
+    label: 人間模倣
+    reward_key: null
+    decay: none
+    notes: A2で追加予定
+
+  novelty:
+    name: 新奇性／好奇心
+    enabled: false
+    location: internal
+    source: 馴化と新奇選好（見慣れぬものを好む）
+    label: 人間模倣
+    reward_key: null
+    decay: none
+    notes: A2以降で追加予定
+
+  sleep_consolidation:
+    name: 睡眠定着（海馬→大脳皮質リプレイ）
+    enabled: false
+    location: internal
+    source: 補完学習系 CLS（McClelland, 1995）
+    label: 人間模倣
+    reward_key: null
+    decay: none
+    notes: A2以降で追加予定

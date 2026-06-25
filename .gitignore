@@ -1,0 +1,33 @@
+# 太郎の脳の状態（大きなバイナリ）→ archiveシステムで管理
+A/archive/
+B/archive/
+
+# ログデータ（実験ごとに大量に増える）→ 別途保存
+A/logs/
+B/logs/
+
+# リプレイビューア用に書き出したトレース（大量・生成物）
+replayViewer/data/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Claude Code
+.claude/
+
+CLAUDE.md
+手順.md
+
+# リプレイビューアの実行時制御ファイル（Claudeがデータ差し替え/ジャンプに使う一時状態）
+replayViewer/application/_goto.json
+replayViewer/application/_meta.json
