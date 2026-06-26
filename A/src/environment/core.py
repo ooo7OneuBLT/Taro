@@ -94,12 +94,14 @@ class TaroEnvironment:
         listen_input = torch.tensor([full_tokens], device=self.device)
         with torch.no_grad():
             _, h = self.brain.forward_hidden(listen_input)
+        ne_level = self.locus_coeruleus.get_ne_level()
         generated, log_probs, _ = self.brain.generate(
             hidden=h,
             max_length=self.max_output_length,
             eos_idx=2,
             stamina=self.stamina.get(),
             vocal_tract=self.vocal_tract,
+            ne_level=ne_level,
         )
         taro_text = self.vocab.decode(generated)
 
@@ -122,14 +124,10 @@ class TaroEnvironment:
             decouple_time=vm.get("decouple_time", 1200),
         )
 
-        # A2-9：青斑核がNEを放出 → 脳の受容体がτを調整
-        # τを直接制御するコードはない。青斑核→NE→受容体の間接経路。
+        # A2-9：青斑核がNEを放出 → 次ターンの生成時に局所ノイズとして反映
         self.locus_coeruleus.observe_reward(R)
-        ne_level = self.locus_coeruleus.release_ne()
-        bc = self.cfg["brain"]
-        self.brain.receive_ne(ne_level,
-                              min_temp=bc["min_temperature"],
-                              max_temp=bc["initial_temperature"] * 1.5)
+        self.locus_coeruleus.release_ne()
+        self.brain.receive_ne(self.locus_coeruleus.get_ne_level())
 
         self.stamina.grow()
         self.clock.tick(tokens_heard=len(parent_tokens))

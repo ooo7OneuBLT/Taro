@@ -87,7 +87,18 @@ class TaroBrain(nn.Module):
             self.head_vowel(gru_output),
         )
 
-    def generate(self, hidden, max_length, eos_idx, stamina=None, vocal_tract=None):
+    def generate(self, hidden, max_length, eos_idx, stamina=None,
+                 vocal_tract=None, ne_level=0.5):
+        """
+        太郎の番に文字を産出する。
+
+        A2-9b変更：τによる全体ランダム化を廃止。
+        脳が選んだパラメータに、NEに比例した局所ノイズを加える。
+        【人間模倣】鳥のLMANが運動指令にノイズを注入するのと同じ原理。
+        NEが高い→少しずれる（探索）、NE低い→そのまま（搾取）。
+        """
+        import random
+
         if vocal_tract is None:
             vocal_tract = VocalTract()
 
@@ -108,27 +119,32 @@ class TaroBrain(nn.Module):
 
             log_prob = torch.tensor(0.0, device=self._device())
 
-            s_place, lp = self._sample_param(pl, allowed_place)
+            # 脳が選んだパラメータ（意図）
+            s_place, lp = self._choose_param(pl, allowed_place)
             log_prob = log_prob + lp
 
-            # A2-6：連動モード時は調音法を調音点から自動決定
             if vocal_tract.is_coupled():
-                p_val = s_place if isinstance(s_place, int) else s_place.item()
-                s_manner = vocal_tract.get_manner_for_place(p_val)
+                s_manner = vocal_tract.get_manner_for_place(s_place)
             else:
-                s_manner, lp = self._sample_param(ml, allowed_manner)
+                s_manner, lp = self._choose_param(ml, allowed_manner)
                 log_prob = log_prob + lp
 
-            s_voicing, lp = self._sample_param(vl, allowed_voicing)
+            s_voicing, lp = self._choose_param(vl, allowed_voicing)
             log_prob = log_prob + lp
-            s_vowel, lp = self._sample_param(vol, allowed_vowel)
+            s_vowel, lp = self._choose_param(vol, allowed_vowel)
             log_prob = log_prob + lp
 
-            p = s_place if isinstance(s_place, int) else s_place.item()
-            m = s_manner if isinstance(s_manner, int) else s_manner.item()
-            v = s_voicing if isinstance(s_voicing, int) else s_voicing.item()
-            w = s_vowel if isinstance(s_vowel, int) else s_vowel.item()
-            char = vocal_tract.speak(p, m, v, w)
+            # NEによる局所ノイズ注入（アドレナリン受容体の応答）
+            # NEが高いほど「隣の値にずれる」確率が上がる
+            s_place = self._apply_ne_noise(s_place, ne_level, allowed_place)
+            if not vocal_tract.is_coupled():
+                s_manner = self._apply_ne_noise(s_manner, ne_level, allowed_manner)
+            else:
+                s_manner = vocal_tract.get_manner_for_place(s_place)
+            s_voicing = self._apply_ne_noise(s_voicing, ne_level, allowed_voicing)
+            s_vowel = self._apply_ne_noise(s_vowel, ne_level, allowed_vowel)
+
+            char = vocal_tract.speak(s_place, s_manner, s_voicing, s_vowel)
 
             if char in self._vocab_char2idx:
                 token_idx = self._vocab_char2idx[char]
@@ -146,7 +162,8 @@ class TaroBrain(nn.Module):
 
         return generated, log_probs_all, hidden
 
-    def _sample_param(self, logits, allowed_indices):
+    def _choose_param(self, logits, allowed_indices):
+        """脳がパラメータを選ぶ（意図）。ノイズなし。"""
         if len(allowed_indices) == 1:
             return allowed_indices[0], torch.tensor(0.0, device=logits.device)
 
@@ -154,28 +171,42 @@ class TaroBrain(nn.Module):
         for i in allowed_indices:
             mask[i] = 0.0
         masked_logits = logits + mask
-        probs = F.softmax(masked_logits / max(self.temperature, 1e-8), dim=-1)
+        probs = F.softmax(masked_logits, dim=-1)
         dist = torch.distributions.Categorical(probs)
         sample = dist.sample()
         return sample.item(), dist.log_prob(sample)
 
+    def _apply_ne_noise(self, value, ne_level, allowed):
+        """
+        NEによる局所ノイズ注入。
+
+        【人間模倣】鳥のLMANが運動指令にノイズを注入するのと同じ原理。
+        元の値から1つ隣にずれる確率がNEに比例する。
+        NE=0 → ずれない。NE=1 → 高確率でずれる。ただし2つ以上は稀。
+        """
+        import random
+        if len(allowed) <= 1:
+            return value
+
+        if random.random() < ne_level * 0.7:
+            idx = allowed.index(value) if value in allowed else 0
+            direction = random.choice([-1, 1])
+            new_idx = max(0, min(len(allowed) - 1, idx + direction))
+            return allowed[new_idx]
+
+        return value
+
     def set_vocab_mapping(self, char2idx):
         self._vocab_char2idx = char2idx
 
-    def receive_ne(self, ne_level, min_temp=0.3, max_temp=3.0):
+    def receive_ne(self, ne_level):
         """
-        アドレナリン受容体 — ノルエピネフリン（NE）を検出してτを調整する。
+        アドレナリン受容体 — NEレベルを記録する。
 
-        【人間模倣】運動野のアドレナリン受容体がNEを検出し、
-        NE濃度に応じて神経のばらつきが変わる。
-        τを直接制御するコードはどこにもない。
-        青斑核がNEを出し、受容体がそれを受け取った結果としてτが変わる。
-
-        NE高い（探索モード）→ τ上がる → 出力がバラバラ（色々試す）
-        NE低い（搾取モード）→ τ下がる → 出力が安定（うまいやり方を繰り返す）
+        A2-9b：τを直接制御するのではなく、generate時に
+        NEレベルに応じた局所ノイズとして反映する。
         """
-        self.temperature = min_temp + (max_temp - min_temp) * ne_level
-        self.temperature = max(min_temp, min(max_temp, self.temperature))
+        self.current_ne = ne_level
 
     def resize_embedding(self, new_vocab_size):
         old_size = self.embedding.num_embeddings
