@@ -25,6 +25,7 @@ vocal_maturation:
   stage1_time: 300    # 5分：唇＋鼻音・破裂音が使える（規準喃語）
   stage2_time: 900    # 15分：舌（歯茎以降）も使える
   stage3_time: 1500   # 25分：声帯の有声/無声制御
+  decouple_time: 1200 # 20分：調音点と調音法が独立制御可能になる（A2-6）
 
 # --- 報酬の重み ---
 reward:

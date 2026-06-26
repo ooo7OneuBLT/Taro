@@ -118,6 +118,7 @@ class TaroEnvironment:
             vm.get("stage1_time", 300),
             vm.get("stage2_time", 900),
             vm.get("stage3_time", 1500),
+            decouple_time=vm.get("decouple_time", 1200),
         )
 
         self.cumulative_r_imit += r_imit

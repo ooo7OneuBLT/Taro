@@ -138,6 +138,30 @@ STAGE_ALLOWED_VOICING = {
 # 母音は最初から全部使える（顎の開閉）
 STAGE_ALLOWED_VOWEL = {s: list(range(NUM_VOWEL)) for s in range(4)}
 
+# --- A2-6：調音パラメータの連動パターン ---
+# 赤ちゃんの口は最初、調音点と調音法が「くっついて」一緒に動く。
+# 調音点を選ぶと調音法が自動的に決まる（独立に選べない）。
+# 発達に応じて独立制御が可能になる。
+#
+# coupled=True のとき、脳は調音点だけを選び、調音法は以下のマッピングで決まる：
+#   なし(0) → なし(0)        ＝母音のみ
+#   両唇(1) → 鼻音(1)       ＝「ま」系が出る（赤ちゃんの最初の子音）
+#   歯茎(2) → 破裂音(2)     ＝「だ」系が出る
+#   歯茎硬口蓋(3) → 破擦音(4)
+#   硬口蓋(4) → 半母音(6)   ＝「や」系
+#   軟口蓋(5) → 破裂音(2)   ＝「が」系
+#   声門(6) → 摩擦音(3)     ＝「は」系
+
+COUPLED_PLACE_TO_MANNER = {
+    0: 0,  # なし→なし（母音のみ）
+    1: 1,  # 両唇→鼻音（ま行）
+    2: 2,  # 歯茎→破裂音（だ行）
+    3: 4,  # 歯茎硬口蓋→破擦音
+    4: 6,  # 硬口蓋→半母音（や行）
+    5: 2,  # 軟口蓋→破裂音（が行）
+    6: 3,  # 声門→摩擦音（は行）
+}
+
 
 class VocalTract:
     """
@@ -145,12 +169,14 @@ class VocalTract:
 
     赤ちゃんの口・舌・喉の物理的構造をテキスト世界で再現する。
     A2-3：身体の成熟に応じてパラメータが段階的に解放される。
+    A2-6：調音点と調音法の連動→独立の発達を追加。
     """
 
     def __init__(self):
         self.params_to_char = dict(_ARTICULATION_TABLE)
         self.char_to_params = dict(_CHAR_TO_PARAMS)
         self.stage = 0
+        self.coupled = True  # True=調音点と調音法が連動（初期状態）
 
     def speak(self, place, manner, voicing, vowel):
         """
@@ -203,8 +229,9 @@ class VocalTract:
                 best_char = char
         return best_char
 
-    def update_stage(self, sim_seconds, stage1_time, stage2_time, stage3_time):
-        """sim時間に応じて成熟ステージを更新する。"""
+    def update_stage(self, sim_seconds, stage1_time, stage2_time, stage3_time,
+                     decouple_time=None):
+        """sim時間に応じて成熟ステージと連動/独立を更新する。"""
         if sim_seconds >= stage3_time:
             self.stage = 3
         elif sim_seconds >= stage2_time:
@@ -214,6 +241,10 @@ class VocalTract:
         else:
             self.stage = 0
 
+        # A2-6：調音パラメータの独立制御
+        if decouple_time is not None and sim_seconds >= decouple_time:
+            self.coupled = False
+
     def get_allowed(self):
         """現在のステージで使えるパラメータ値を返す。"""
         return (
@@ -222,6 +253,16 @@ class VocalTract:
             STAGE_ALLOWED_VOICING[self.stage],
             STAGE_ALLOWED_VOWEL[self.stage],
         )
+
+    def get_manner_for_place(self, place):
+        """
+        連動モード時：調音点から調音法を自動決定する。
+        【人間模倣・身体的制約】赤ちゃんの口は最初、全部くっついて動く。
+        """
+        return COUPLED_PLACE_TO_MANNER.get(place, 0)
+
+    def is_coupled(self):
+        return self.coupled
 
     def clamp_to_stage(self, place, manner, voicing, vowel):
         """ロックされたパラメータを許可値に制限する（身体的制約）。"""
