@@ -11,7 +11,7 @@ A2-10：旧core.pyから改名。人間の脳の部品名に合わせた。
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from taro.body.vocal_tract import VocalTract, NUM_PLACE, NUM_MANNER, NUM_VOICING, NUM_VOWEL
+from taro.body import VocalTract, NUM_PLACE, NUM_MANNER, NUM_VOICING, NUM_VOWEL
 
 
 class Vocabulary:
