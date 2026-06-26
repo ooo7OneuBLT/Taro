@@ -11,7 +11,8 @@ import yaml
 from taro.brain import Vocabulary, TaroBrain
 from taro.body import VocalTract, Stamina
 from taro.brain.instincts import (compute_imitation_reward, compute_prediction_reward,
-                                   Dopamine, Habituation, compute_total_reward)
+                                   Dopamine, Habituation, LocusCoeruleus,
+                                   compute_total_reward)
 from taro.brain.learning import TaroLearner
 from sim_clock import SimClock
 from archive import Archive
@@ -73,7 +74,7 @@ class TaroEnvironment:
         self.brain.set_vocab_mapping(self.vocab.char2idx)
 
         self.habituation = Habituation(history_size=20, decay_rate=0.05)
-        self.cumulative_r_imit = 0.0
+        self.locus_coeruleus = LocusCoeruleus()
 
         succ = self.cfg.get("success", {})
         self.partial_threshold = succ.get("partial_threshold", 0.8)
@@ -121,14 +122,14 @@ class TaroEnvironment:
             decouple_time=vm.get("decouple_time", 1200),
         )
 
-        self.cumulative_r_imit += r_imit
+        # A2-9：青斑核がNEを放出 → 脳の受容体がτを調整
+        # τを直接制御するコードはない。青斑核→NE→受容体の間接経路。
+        self.locus_coeruleus.observe_reward(R)
+        ne_level = self.locus_coeruleus.release_ne()
         bc = self.cfg["brain"]
-        self.brain.update_temperature(
-            self.cumulative_r_imit,
-            bc.get("temperature_alpha", 0.02),
-            bc["initial_temperature"],
-            bc["min_temperature"],
-        )
+        self.brain.receive_ne(ne_level,
+                              min_temp=bc["min_temperature"],
+                              max_temp=bc["initial_temperature"] * 1.5)
 
         self.stamina.grow()
         self.clock.tick(tokens_heard=len(parent_tokens))

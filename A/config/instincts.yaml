@@ -87,6 +87,21 @@ instincts:
       新奇性/好奇心の裏面。固着を防ぎ、探索を促す本能。
       A2-4で追加。
 
+  locus_coeruleus:
+    name: 青斑核（ノルエピネフリン系）
+    enabled: true
+    location: internal
+    source: >
+      青斑核は脳幹にあり、ノルエピネフリン(NE)を脳全体に放出する。
+      報酬がないとき→NE増加→探索モード、報酬があるとき→NE低下→搾取モード。
+      ドーパミンとは別の物質・別の回路。
+    label: 人間模倣
+    reward_key: null
+    decay: none
+    notes: >
+      τを直接制御しない。NEを放出し、脳の受容体がτを調整する間接経路。
+      将来は覚醒・注意・記憶強化の機能も追加可能。A2-9で追加。
+
   statistical_learning:
     name: 統計学習
     enabled: false

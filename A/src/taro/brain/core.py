@@ -162,8 +162,20 @@ class TaroBrain(nn.Module):
     def set_vocab_mapping(self, char2idx):
         self._vocab_char2idx = char2idx
 
-    def update_temperature(self, cumulative_r_imit, alpha, initial_temp, min_temp):
-        self.temperature = max(initial_temp / (1.0 + alpha * cumulative_r_imit), min_temp)
+    def receive_ne(self, ne_level, min_temp=0.3, max_temp=3.0):
+        """
+        アドレナリン受容体 — ノルエピネフリン（NE）を検出してτを調整する。
+
+        【人間模倣】運動野のアドレナリン受容体がNEを検出し、
+        NE濃度に応じて神経のばらつきが変わる。
+        τを直接制御するコードはどこにもない。
+        青斑核がNEを出し、受容体がそれを受け取った結果としてτが変わる。
+
+        NE高い（探索モード）→ τ上がる → 出力がバラバラ（色々試す）
+        NE低い（搾取モード）→ τ下がる → 出力が安定（うまいやり方を繰り返す）
+        """
+        self.temperature = min_temp + (max_temp - min_temp) * ne_level
+        self.temperature = max(min_temp, min(max_temp, self.temperature))
 
     def resize_embedding(self, new_vocab_size):
         old_size = self.embedding.num_embeddings
