@@ -92,16 +92,17 @@ class TaroBrain(nn.Module):
 
     def generate(self, hidden, max_length, eos_idx, stamina=None,
                  vocal_tract=None, ne_level=0.5, cerebellum=None,
-                 parent_tokens=None, vocab=None):
+                 speech_plan=None):
         """
         太郎の番に文字を産出する。
 
-        A2-10：小脳（cerebellum）の逆モデルを使って、親の発話に近い
-        口の動きを探す。逆モデルにない音は大脳皮質が自力で選ぶ。
-        NEによる局所ノイズは引き続き適用。
-        """
-        import random
+        A2-11：発話計画ベースに変更（GODIVAモデル）。
+        1文字ずつ独立に生成するのではなく、
+        「発話計画を立てる→バッファから順に実行→計画が終わったら止まる」。
 
+        speech_plan: SpeechPlannerが作った計画（plan()済み）
+        計画がなければ体力分だけ探索的に発声する（喃語期）
+        """
         if vocal_tract is None:
             vocal_tract = VocalTract()
 
@@ -110,51 +111,59 @@ class TaroBrain(nn.Module):
         bos = torch.tensor([[1]], device=self._device())
         out, hidden = self.forward_hidden(bos, hidden)
 
-        effective_max = max_length
-        if stamina is not None:
-            effective_max = min(max_length, int(stamina))
-
         allowed_place, allowed_manner, allowed_voicing, allowed_vowel = vocal_tract.get_allowed()
 
-        # A2-10：小脳の逆モデルで親の発話に対応する口の動きを取得
-        target_motors = []
-        if cerebellum is not None and parent_tokens is not None and vocab is not None:
-            parent_text = vocab.decode(parent_tokens)
-            target_motors = cerebellum.lookup_motor_sequence(parent_text)
+        # 発話計画がある場合：計画に沿って実行（計画が終わったら止まる）
+        # 発話計画がない場合：体力分だけ探索的に発声（喃語）
+        if speech_plan is not None and speech_plan.has_next():
+            max_chars = min(speech_plan.get_plan_length(), int(stamina) if stamina else max_length)
+        else:
+            max_chars = min(max_length, int(stamina) if stamina else max_length)
+            speech_plan = None
 
-        char_idx = 0
-        for _ in range(effective_max):
+        for _ in range(max_chars):
             h_last = out[0, -1]
             pl, ml, vl, vol = self.forward_articulation(h_last)
-
             log_prob = torch.tensor(0.0, device=self._device())
 
-            # 小脳に逆モデルがある → そのパラメータを使う（学習済みの運動スキル）
-            # ない → 大脳皮質が自力で選ぶ（まだ覚えていない音）
-            if char_idx < len(target_motors):
-                t_place, t_manner, t_voicing, t_vowel = target_motors[char_idx]
-                s_place = t_place if t_place in allowed_place else allowed_place[0]
-                s_manner = t_manner
-                s_voicing = t_voicing if t_voicing in allowed_voicing else allowed_voicing[0]
-                s_vowel = t_vowel if t_vowel in allowed_vowel else allowed_vowel[0]
-                lp = self._log_prob_of(pl, s_place, allowed_place)
-                log_prob = log_prob + lp
+            if speech_plan is not None and speech_plan.has_next():
+                # 発話計画からモーラを取り出す
+                item = speech_plan.next_motor()
+                if item["motor"] is not None:
+                    s_place, s_manner, s_voicing, s_vowel = item["motor"]
+                    s_place = s_place if s_place in allowed_place else allowed_place[0]
+                    s_voicing = s_voicing if s_voicing in allowed_voicing else allowed_voicing[0]
+                    s_vowel = s_vowel if s_vowel in allowed_vowel else allowed_vowel[0]
+                    lp = self._log_prob_of(pl, s_place, allowed_place)
+                    log_prob = log_prob + lp
+                else:
+                    # 計画にあるが口の動きが不明 → 大脳皮質が自力で選ぶ
+                    s_place, lp = self._choose_param(pl, allowed_place)
+                    log_prob = log_prob + lp
+                    if vocal_tract.is_coupled():
+                        s_manner = vocal_tract.get_manner_for_place(s_place)
+                    else:
+                        s_manner, lp = self._choose_param(ml, allowed_manner)
+                        log_prob = log_prob + lp
+                    s_voicing, lp = self._choose_param(vl, allowed_voicing)
+                    log_prob = log_prob + lp
+                    s_vowel, lp = self._choose_param(vol, allowed_vowel)
+                    log_prob = log_prob + lp
             else:
+                # 発話計画なし（喃語期）→ 大脳皮質が自力で選ぶ
                 s_place, lp = self._choose_param(pl, allowed_place)
                 log_prob = log_prob + lp
-
                 if vocal_tract.is_coupled():
                     s_manner = vocal_tract.get_manner_for_place(s_place)
                 else:
                     s_manner, lp = self._choose_param(ml, allowed_manner)
                     log_prob = log_prob + lp
-
                 s_voicing, lp = self._choose_param(vl, allowed_voicing)
                 log_prob = log_prob + lp
                 s_vowel, lp = self._choose_param(vol, allowed_vowel)
                 log_prob = log_prob + lp
 
-            # NEによる局所ノイズ注入
+            # NEによる局所ノイズ注入（計画があっても少しずれる＝人間的な誤差）
             s_place = self._apply_ne_noise(s_place, ne_level, allowed_place)
             if not vocal_tract.is_coupled():
                 s_manner = self._apply_ne_noise(s_manner, ne_level, allowed_manner)
@@ -165,7 +174,7 @@ class TaroBrain(nn.Module):
 
             char = vocal_tract.speak(s_place, s_manner, s_voicing, s_vowel)
 
-            # 小脳に体験を記録（「この動きでこの音が出た」）
+            # 小脳に体験を記録
             if cerebellum is not None:
                 cerebellum.learn_from_experience(s_place, s_manner, s_voicing, s_vowel, char)
 
@@ -177,11 +186,10 @@ class TaroBrain(nn.Module):
             if token_idx == eos_idx:
                 break
 
-            char_idx += 1
-
             generated.append(token_idx)
             log_probs_all.append(log_prob)
 
+            # 自己聴取
             token_input = torch.tensor([[token_idx]], device=self._device())
             out, hidden = self.forward_hidden(token_input, hidden)
 

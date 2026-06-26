@@ -9,5 +9,6 @@ instincts/       本能（模倣・予測・ドーパミン・馴化・青斑核
 """
 from taro.brain.cortex import TaroBrain, Vocabulary
 from taro.brain.cerebellum import Cerebellum
+from taro.brain.speech_planner import SpeechPlanner
 from taro.brain.basal_ganglia import TaroLearner
 from taro.brain.hippocampus import Hippocampus
