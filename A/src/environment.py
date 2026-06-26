@@ -9,6 +9,7 @@ import os
 import torch
 import yaml
 from brain import Vocabulary, TaroBrain
+from vocal_tract import VocalTract
 from instincts import (compute_imitation_reward, compute_prediction_reward,
                         Dopamine, compute_total_reward)
 from learning import TaroLearner
@@ -64,6 +65,16 @@ class TaroEnvironment:
         self.stamina_growth_rate = float(sc.get("growth_rate", 0.005))
         self.max_stamina = float(sc.get("max_stamina", 30))
 
+        # A2-2追加：声道シミュレータ（太郎の口）
+        self.vocal_tract = VocalTract()
+
+        # 声道の全文字を語彙に事前登録
+        for ch in self.vocal_tract.get_all_chars():
+            self.vocab.encode(ch)
+        self.brain.resize_embedding(self.vocab.size)
+        self.brain.to(self.device)
+        self.brain.set_vocab_mapping(self.vocab.char2idx)
+
         # A2追加：τの適応的減衰用の累積模倣報酬
         self.cumulative_r_imit = 0.0
 
@@ -95,12 +106,13 @@ class TaroEnvironment:
         # 【人間模倣】赤ちゃんは聞いた音の短期記憶を使って直後に真似る
         listen_input = torch.tensor([full_tokens], device=self.device)
         with torch.no_grad():
-            _, h = self.brain(listen_input)
+            _, h = self.brain.forward_hidden(listen_input)
         generated, log_probs, _ = self.brain.generate(
             hidden=h,
             max_length=self.max_output_length,
             eos_idx=2,
             stamina=self.stamina,
+            vocal_tract=self.vocal_tract,
         )
         taro_text = self.vocab.decode(generated)
 

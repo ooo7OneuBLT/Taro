@@ -3,15 +3,16 @@
 
 【人間模倣】脳は「次に何が来るか」を絶えず予測する機械である（Friston）。
 太郎の脳はこれを1つの再帰ネットで実装する。
-「翻訳装置（seq2seq）」のような人間にない構造は持たない。
 
-オウム返しは脳に組み込むのではなく、本能（報酬）に導かれて
-「行動」として創発する。
+A2-2変更：出力を「文字番号を1つ選ぶ」から「口の4つのパラメータを決める」に変更。
+脳 →（口の動かし方）→ 声道シミュレータ → 文字
+これにより「ま」と「ぱ」がパラメータ空間で近くなり、汎化的模倣が可能になる。
 """
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from vocal_tract import VocalTract, NUM_PLACE, NUM_MANNER, NUM_VOICING, NUM_VOWEL
 
 
 class Vocabulary:
@@ -23,7 +24,6 @@ class Vocabulary:
         self.size = 3
 
     def encode(self, text):
-        """文字列 → トークン列（未知文字は自動追加）"""
         indices = []
         for ch in text:
             if ch not in self.char2idx:
@@ -34,7 +34,6 @@ class Vocabulary:
         return indices
 
     def decode(self, indices):
-        """トークン列 → 文字列（特殊トークンは除外）"""
         chars = []
         for idx in indices:
             ch = self.idx2char.get(idx, "?")
@@ -45,10 +44,12 @@ class Vocabulary:
 
 class TaroBrain(nn.Module):
     """
-    太郎の脳。次のトークンを予測し続ける単一の再帰ネット。
+    太郎の脳。
 
-    知覚：入力トークンを受け取り、次を予測（予測処理）
-    行動：温度τでサンプリングし文字を産出（初期は喃語）
+    知覚：入力トークン（文字）を受け取り、隠れ状態を更新（予測処理）
+    行動：隠れ状態から口の4パラメータを出力 → 声道が文字に変換
+
+    A2-2：出力層が「文字番号」から「口の4パラメータ」に変更。
     """
 
     def __init__(self, vocab_size, embedding_dim=64, hidden_dim=128,
@@ -57,101 +58,150 @@ class TaroBrain(nn.Module):
         self.hidden_dim = hidden_dim
         self.num_layers = num_layers
         self.temperature = temperature
+        self.vocab_size = vocab_size
 
         self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=0)
         self.gru = nn.GRU(embedding_dim, hidden_dim, num_layers, batch_first=True)
-        self.output_layer = nn.Linear(hidden_dim, vocab_size)
 
-    def forward(self, x, hidden=None):
-        """
-        x: (batch, seq_len) のトークン列
-        戻り値: logits (batch, seq_len, vocab_size), hidden
-        """
+        # A2-2：出力を4つの口パラメータに分割
+        self.head_place = nn.Linear(hidden_dim, NUM_PLACE)     # 7
+        self.head_manner = nn.Linear(hidden_dim, NUM_MANNER)   # 7
+        self.head_voicing = nn.Linear(hidden_dim, NUM_VOICING) # 2
+        self.head_vowel = nn.Linear(hidden_dim, NUM_VOWEL)     # 5
+
+        # 【人間模倣】赤ちゃんの口は最初、顎の開閉（母音）が主で
+        # 子音の制御は未発達。調音点=なし、調音法=なしにバイアスを掛けて
+        # 母音が出やすい初期状態にする（新生児の声道構造の再現）
+        with torch.no_grad():
+            self.head_place.bias.data[0] += 2.0   # 「なし」（母音のみ）を優先
+            self.head_manner.bias.data[0] += 2.0  # 「なし」（母音のみ）を優先
+            self.head_voicing.bias.data[1] += 1.0 # 有声を少し優先（赤ちゃんは有声音が多い）
+
+        # 知覚用：次トークン予測（従来と同じ、聞く側の学習に使用）
+        self.perception_head = nn.Linear(hidden_dim, vocab_size)
+
+    def forward_hidden(self, x, hidden=None):
+        """入力トークンを受け、隠れ状態を返す。"""
         emb = self.embedding(x)
         out, hidden = self.gru(emb, hidden)
-        logits = self.output_layer(out)
+        return out, hidden
+
+    def forward_perception(self, x, hidden=None):
+        """知覚用：次トークン予測のlogitsを返す（聞く側の学習）。"""
+        out, hidden = self.forward_hidden(x, hidden)
+        logits = self.perception_head(out)
         return logits, hidden
 
-    def predict_next(self, token_idx, hidden=None):
+    def forward_articulation(self, gru_output):
         """
-        1トークンを受け取り、次トークンの確率分布を返す（知覚）。
+        行動用：GRU出力から口の4パラメータのlogitsを返す。
 
-        戻り値: probs (vocab_size,), hidden
+        戻り値: (place_logits, manner_logits, voicing_logits, vowel_logits)
         """
-        x = torch.tensor([[token_idx]], device=self._device())
-        logits, hidden = self.forward(x, hidden)
-        logits = logits[0, 0]
-        probs = F.softmax(logits / max(self.temperature, 1e-8), dim=-1)
-        return probs, hidden
+        return (
+            self.head_place(gru_output),
+            self.head_manner(gru_output),
+            self.head_voicing(gru_output),
+            self.head_vowel(gru_output),
+        )
 
-    def generate(self, hidden, max_length, eos_idx, stamina=None):
+    def generate(self, hidden, max_length, eos_idx, stamina=None, vocal_tract=None):
         """
         太郎の番に文字を産出する（行動）。
-        温度τでサンプリング＝初期は喃語（ばらつき大）、成長で安定。
 
-        【人間模倣】喃語＝運動探索。τが高いと出力がランダム。
-        【人間模倣・A2追加】stamina＝発声体力。赤ちゃんは口・喉・肺が
-        未熟で長く発声できない。体力が尽きたら発声終了。
-
-        戻り値: generated_indices, log_probs_list, hidden
+        A2-2変更：脳が口のパラメータを出力 → 声道が文字に変換。
+        【人間模倣】赤ちゃんは口を動かして音を作る。
         """
+        if vocal_tract is None:
+            vocal_tract = VocalTract()
+
         generated = []
-        log_probs = []
-        bos = torch.tensor([[1]], device=self._device())  # <BOS>
-        logits, hidden = self.forward(bos, hidden)
+        log_probs_all = []
+        bos = torch.tensor([[1]], device=self._device())
+        out, hidden = self.forward_hidden(bos, hidden)
 
         effective_max = max_length
         if stamina is not None:
             effective_max = min(max_length, int(stamina))
 
         for _ in range(effective_max):
-            logits_last = logits[0, -1]
-            probs = F.softmax(logits_last / max(self.temperature, 1e-8), dim=-1)
-            dist = torch.distributions.Categorical(probs)
-            token = dist.sample()
-            log_prob = dist.log_prob(token)
+            h_last = out[0, -1]
+            pl, ml, vl, vol = self.forward_articulation(h_last)
 
-            if token.item() == eos_idx:
+            # 各パラメータを温度τでサンプリング（喃語＝ランダムな口の動き）
+            p_place = F.softmax(pl / max(self.temperature, 1e-8), dim=-1)
+            p_manner = F.softmax(ml / max(self.temperature, 1e-8), dim=-1)
+            p_voicing = F.softmax(vl / max(self.temperature, 1e-8), dim=-1)
+            p_vowel = F.softmax(vol / max(self.temperature, 1e-8), dim=-1)
+
+            d_place = torch.distributions.Categorical(p_place)
+            d_manner = torch.distributions.Categorical(p_manner)
+            d_voicing = torch.distributions.Categorical(p_voicing)
+            d_vowel = torch.distributions.Categorical(p_vowel)
+
+            s_place = d_place.sample()
+            s_manner = d_manner.sample()
+            s_voicing = d_voicing.sample()
+            s_vowel = d_vowel.sample()
+
+            log_prob = (d_place.log_prob(s_place)
+                        + d_manner.log_prob(s_manner)
+                        + d_voicing.log_prob(s_voicing)
+                        + d_vowel.log_prob(s_vowel))
+
+            # 声道シミュレータが口のパラメータを文字に変換
+            char = vocal_tract.speak(
+                s_place.item(), s_manner.item(),
+                s_voicing.item(), s_vowel.item()
+            )
+
+            # 出た文字を語彙で引いてトークンにする（自己聴取の準備）
+            # 未知文字の場合はEOSとして扱う
+            if char in self._vocab_char2idx:
+                token_idx = self._vocab_char2idx[char]
+            else:
                 break
 
-            generated.append(token.item())
-            log_probs.append(log_prob)
+            if token_idx == eos_idx:
+                break
 
-            token_input = token.unsqueeze(0).unsqueeze(0)
-            logits, hidden = self.forward(token_input, hidden)
+            generated.append(token_idx)
+            log_probs_all.append(log_prob)
 
-        return generated, log_probs, hidden
+            # 自己聴取：自分が出した音を自分で聞く【人間模倣】
+            token_input = torch.tensor([[token_idx]], device=self._device())
+            out, hidden = self.forward_hidden(token_input, hidden)
+
+        return generated, log_probs_all, hidden
+
+    def set_vocab_mapping(self, char2idx):
+        """語彙マッピングを設定する（声道出力→トークン変換に使用）。"""
+        self._vocab_char2idx = char2idx
 
     def update_temperature(self, cumulative_r_imit, alpha, initial_temp, min_temp):
-        """
-        温度τを模倣成功の累積に応じて減衰させる。
-
-        【人間模倣・A2変更】A1では時間で一律減衰（⚠️逸脱）だったが、
-        A2では練習量（模倣の成功体験）に連動。
-        たくさん上手く真似できた赤ちゃんほど早く発声が安定する。
-
-        τ = τ_initial / (1 + α × cumulative_r_imit)
-        """
+        """温度τを模倣成功の累積に応じて減衰させる。"""
         self.temperature = max(initial_temp / (1.0 + alpha * cumulative_r_imit), min_temp)
 
     def resize_embedding(self, new_vocab_size):
-        """語彙が増えたとき埋め込み層と出力層を拡張する。"""
+        """語彙が増えたとき埋め込み層と知覚用出力層を拡張する。"""
         old_size = self.embedding.num_embeddings
         if new_vocab_size <= old_size:
+            self.vocab_size = new_vocab_size
             return
 
         old_emb_weight = self.embedding.weight.data
-        new_emb = nn.Embedding(new_vocab_size, self.embedding.embedding_dim,
-                               padding_idx=0)
+        new_emb = nn.Embedding(new_vocab_size, self.embedding.embedding_dim, padding_idx=0)
         new_emb.weight.data[:old_size] = old_emb_weight
         self.embedding = new_emb
 
-        old_out_weight = self.output_layer.weight.data
-        old_out_bias = self.output_layer.bias.data
+        old_out_weight = self.perception_head.weight.data
+        old_out_bias = self.perception_head.bias.data
         new_out = nn.Linear(self.hidden_dim, new_vocab_size)
         new_out.weight.data[:old_size] = old_out_weight
         new_out.bias.data[:old_size] = old_out_bias
-        self.output_layer = new_out
+        self.perception_head = new_out
+
+        self.vocab_size = new_vocab_size
 
     def _device(self):
         return self.embedding.weight.device
