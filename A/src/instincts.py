@@ -14,6 +14,18 @@
 import torch
 
 
+def _edit_distance(a, b):
+    """レーベンシュタイン距離（挿入・削除・置換の最小回数）を計算する。"""
+    n, m = len(a), len(b)
+    dp = list(range(m + 1))
+    for i in range(1, n + 1):
+        prev, dp[0] = dp[0], i
+        for j in range(1, m + 1):
+            cost = 0 if a[i - 1] == b[j - 1] else 1
+            prev, dp[j] = dp[j], min(dp[j] + 1, dp[j - 1] + 1, prev + cost)
+    return dp[m]
+
+
 def compute_imitation_reward(parent_tokens, taro_tokens):
     """
     模倣衝動：親の発話と太郎の出力の類似度 → 内的報酬 [0, 1]
@@ -21,7 +33,8 @@ def compute_imitation_reward(parent_tokens, taro_tokens):
     【人間模倣】乳児は親の発声に似せようとする衝動を生まれつき持つ。
     似ているほど心地よい（連続的な報酬）。
 
-    算出方法：位置ごとの文字一致率。長さが違う場合は長い方で割る。
+    A2で変更：位置一致率 → 正規化edit distance（編集距離）ベースに。
+    「あまま」→「まま」のように1文字ずれても類似度が高くなる。
     """
     if len(parent_tokens) == 0 and len(taro_tokens) == 0:
         return 1.0
@@ -29,12 +42,8 @@ def compute_imitation_reward(parent_tokens, taro_tokens):
         return 0.0
 
     max_len = max(len(parent_tokens), len(taro_tokens))
-    matches = 0
-    for i in range(min(len(parent_tokens), len(taro_tokens))):
-        if parent_tokens[i] == taro_tokens[i]:
-            matches += 1
-
-    return matches / max_len
+    dist = _edit_distance(parent_tokens, taro_tokens)
+    return 1.0 - dist / max_len
 
 
 def compute_prediction_reward(prediction_probs, actual_tokens):

@@ -84,12 +84,14 @@ class TaroBrain(nn.Module):
         probs = F.softmax(logits / max(self.temperature, 1e-8), dim=-1)
         return probs, hidden
 
-    def generate(self, hidden, max_length, eos_idx):
+    def generate(self, hidden, max_length, eos_idx, stamina=None):
         """
         太郎の番に文字を産出する（行動）。
         温度τでサンプリング＝初期は喃語（ばらつき大）、成長で安定。
 
         【人間模倣】喃語＝運動探索。τが高いと出力がランダム。
+        【人間模倣・A2追加】stamina＝発声体力。赤ちゃんは口・喉・肺が
+        未熟で長く発声できない。体力が尽きたら発声終了。
 
         戻り値: generated_indices, log_probs_list, hidden
         """
@@ -98,7 +100,11 @@ class TaroBrain(nn.Module):
         bos = torch.tensor([[1]], device=self._device())  # <BOS>
         logits, hidden = self.forward(bos, hidden)
 
-        for _ in range(max_length):
+        effective_max = max_length
+        if stamina is not None:
+            effective_max = min(max_length, int(stamina))
+
+        for _ in range(effective_max):
             logits_last = logits[0, -1]
             probs = F.softmax(logits_last / max(self.temperature, 1e-8), dim=-1)
             dist = torch.distributions.Categorical(probs)
@@ -116,9 +122,17 @@ class TaroBrain(nn.Module):
 
         return generated, log_probs, hidden
 
-    def decay_temperature(self, decay_rate, min_temp):
-        """温度τを減衰させる（発達＝発話の安定化）。"""
-        self.temperature = max(self.temperature * decay_rate, min_temp)
+    def update_temperature(self, cumulative_r_imit, alpha, initial_temp, min_temp):
+        """
+        温度τを模倣成功の累積に応じて減衰させる。
+
+        【人間模倣・A2変更】A1では時間で一律減衰（⚠️逸脱）だったが、
+        A2では練習量（模倣の成功体験）に連動。
+        たくさん上手く真似できた赤ちゃんほど早く発声が安定する。
+
+        τ = τ_initial / (1 + α × cumulative_r_imit)
+        """
+        self.temperature = max(initial_temp / (1.0 + alpha * cumulative_r_imit), min_temp)
 
     def resize_embedding(self, new_vocab_size):
         """語彙が増えたとき埋め込み層と出力層を拡張する。"""

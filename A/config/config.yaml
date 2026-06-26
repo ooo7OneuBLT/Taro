@@ -1,5 +1,5 @@
 # ============================================================
-# 太郎 A1 設定ファイル
+# 太郎 A2 設定ファイル
 # ============================================================
 
 # --- 太郎の脳 ---
@@ -10,8 +10,14 @@ brain:
   num_layers: 1            # 再帰層の数
   initial_temperature: 2.0 # 出力のゆらぎ（τ）。高い＝喃語、低い＝安定
   min_temperature: 0.3     # τの下限（完全に0にはしない＝探索を残す）
-  temperature_decay: 0.998  # τの減衰率（1ステップごとに掛ける）
+  temperature_alpha: 0.02  # τの適応減衰係数（A2変更：成功体験に連動）
   device: auto             # auto=CUDA使えればCUDA、なければCPU
+
+# --- 発声体力（A2追加）【人間模倣・身体的制約】---
+stamina:
+  initial: 3               # 初期体力（最大何文字出せるか）
+  growth_rate: 0.005        # 1ターンごとの体力上限の成長量
+  max_stamina: 30           # 体力の上限（成長しきった大人）
 
 # --- 報酬の重み ---
 reward:
@@ -23,8 +29,14 @@ reward:
 learning:
   lr: 0.005                   # 学習率（重みを1回でどれくらい動かすか）
   baseline_momentum: 0.95     # baseline（報酬予測）の移動平均の慣性
-  max_output_length: 50       # 太郎が1回に産出できる最大文字数
+  max_output_length: 50       # 太郎が1回に産出できる最大文字数（体力が優先）
   grad_clip: 1.0              # 勾配の上限（学習の暴走防止）
+
+# --- 成功条件（A2変更）---
+success:
+  partial_threshold: 0.8      # 基本達成：edit distance類似度がこの値以上
+  partial_streak: 10          # 基本達成：何回連続で閾値を超えるか
+  exact_streak: 10            # 完全達成：完全一致の連続回数（参考記録）
 
 # --- シミュレーション内時間 ---
 sim_clock:

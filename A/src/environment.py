@@ -57,7 +57,23 @@ class TaroEnvironment:
                              run_name=run_name)
         self.weights = self.cfg["reward"]
         self.max_output_length = lc["max_output_length"]
-        self.consecutive_matches = 0
+
+        # A2追加：発声体力
+        sc = self.cfg.get("stamina", {})
+        self.stamina = float(sc.get("initial", 3))
+        self.stamina_growth_rate = float(sc.get("growth_rate", 0.005))
+        self.max_stamina = float(sc.get("max_stamina", 30))
+
+        # A2追加：τの適応的減衰用の累積模倣報酬
+        self.cumulative_r_imit = 0.0
+
+        # A2変更：成功条件（部分一致＋完全一致の2段階）
+        succ = self.cfg.get("success", {})
+        self.partial_threshold = succ.get("partial_threshold", 0.8)
+        self.partial_streak_target = succ.get("partial_streak", 10)
+        self.exact_streak_target = succ.get("exact_streak", 10)
+        self.partial_streak = 0
+        self.exact_streak = 0
 
     def step(self, parent_text, r_social=0.0):
         """
@@ -84,6 +100,7 @@ class TaroEnvironment:
             hidden=h,
             max_length=self.max_output_length,
             eos_idx=2,
+            stamina=self.stamina,
         )
         taro_text = self.vocab.decode(generated)
 
@@ -95,14 +112,34 @@ class TaroEnvironment:
         a_loss = self.learner.learn_action(log_probs, delta)
         pl, al = self.learner.update(p_loss, a_loss)
 
+        # A2変更：τを成功体験に連動させる【人間模倣】
+        self.cumulative_r_imit += r_imit
         bc = self.cfg["brain"]
-        self.brain.decay_temperature(bc["temperature_decay"], bc["min_temperature"])
+        self.brain.update_temperature(
+            self.cumulative_r_imit,
+            bc.get("temperature_alpha", 0.02),
+            bc["initial_temperature"],
+            bc["min_temperature"],
+        )
+
+        # A2追加：発声体力の成長
+        self.stamina = min(self.stamina + self.stamina_growth_rate, self.max_stamina)
+
         self.clock.tick(tokens_heard=len(parent_tokens))
 
-        if taro_text == parent_text:
-            self.consecutive_matches += 1
+        # A2変更：成功条件（部分一致＋完全一致の2段階）
+        exact_match = taro_text == parent_text
+        partial_match = r_imit >= self.partial_threshold
+
+        if partial_match:
+            self.partial_streak += 1
         else:
-            self.consecutive_matches = 0
+            self.partial_streak = 0
+
+        if exact_match:
+            self.exact_streak += 1
+        else:
+            self.exact_streak = 0
 
         turn = self.clock.total_turns
         self.logger.log_turn(
@@ -133,8 +170,11 @@ class TaroEnvironment:
             "p_loss": pl,
             "a_loss": al,
             "temperature": self.brain.temperature,
-            "consecutive_matches": self.consecutive_matches,
-            "exact_match": taro_text == parent_text,
+            "stamina": self.stamina,
+            "partial_streak": self.partial_streak,
+            "exact_streak": self.exact_streak,
+            "exact_match": exact_match,
+            "partial_match": partial_match,
         }
 
     def save(self, tag="manual"):
