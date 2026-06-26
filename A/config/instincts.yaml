@@ -71,6 +71,22 @@ instincts:
 
 # --- A2以降で追加予定（現時点では無効）---
 
+  habituation:
+    name: 馴化（飽き）
+    enabled: true
+    location: internal
+    source: >
+      馴化(habituation)は胎児・新生児にも確認される最も基本的な
+      神経メカニズム。同じ刺激を繰り返すと反応が弱まる。
+      ドーパミン系とは別の仕組みとして独立に存在する。
+    label: 人間模倣
+    reward_key: r_habit
+    decay: none
+    notes: >
+      同じ出力を繰り返すと内的報酬が減衰し、新しい出力を試すと回復する。
+      新奇性/好奇心の裏面。固着を防ぎ、探索を促す本能。
+      A2-4で追加。
+
   statistical_learning:
     name: 統計学習
     enabled: false

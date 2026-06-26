@@ -106,6 +106,54 @@ def compute_prediction_reward(prediction_probs, actual_tokens):
     return total / n
 
 
+class Habituation:
+    """
+    馴化（飽き）— 同じ出力を繰り返すと報酬が減衰する。
+
+    【人間模倣】胎児・新生児にも確認される最も基本的な神経メカニズム。
+    ドーパミン系とは独立に存在する。
+
+    同じ音を出し続けると「つまらなくなる」。
+    新しい音を試すと「面白い」。
+    これにより固着を防ぎ、探索を促す。
+    """
+
+    def __init__(self, history_size=20, decay_rate=0.05):
+        self.history = []
+        self.history_size = history_size
+        self.decay_rate = decay_rate
+
+    def compute_penalty(self, output_text):
+        """
+        直近の出力履歴と比べて、同じ出力の繰り返しにペナルティを与える。
+        フレーズ全体の繰り返し＋文字レベルの繰り返しの両方を考慮。
+
+        戻り値: 0.0（新しい出力）〜 -1.0（ずっと同じ出力）
+        """
+        if not self.history or not output_text:
+            self._add(output_text)
+            return 0.0
+
+        # フレーズ全体の繰り返し
+        phrase_repeats = sum(1 for h in self.history if h == output_text)
+        phrase_penalty = -self.decay_rate * phrase_repeats
+
+        # 文字レベル：出力の中で同じ文字が繰り返されていると飽きる
+        if len(output_text) > 1:
+            unique_ratio = len(set(output_text)) / len(output_text)
+            monotony_penalty = -self.decay_rate * (1.0 - unique_ratio) * 3
+        else:
+            monotony_penalty = 0.0
+
+        self._add(output_text)
+        return max(-1.0, phrase_penalty + monotony_penalty)
+
+    def _add(self, text):
+        self.history.append(text)
+        if len(self.history) > self.history_size:
+            self.history.pop(0)
+
+
 class Dopamine:
     """
     ドーパミン — 報酬予測誤差（RPE）を計算する。
@@ -139,13 +187,15 @@ class Dopamine:
         return self.baseline
 
 
-def compute_total_reward(r_imit, r_pred, r_social, weights):
+def compute_total_reward(r_imit, r_pred, r_social, r_habit, weights):
     """
-    合成報酬 R = w_imit * r_imit + w_pred * r_pred + w_social * r_social
+    合成報酬 R = w_imit * r_imit + w_pred * r_pred + w_social * r_social + r_habit
 
-    weights: dict with keys 'w_imit', 'w_pred', 'w_social'
+    r_habit（馴化ペナルティ）は重みなしで直接加算。
+    同じ出力の繰り返しで報酬が下がり、新しい出力で回復する。
     """
     R = (weights["w_imit"] * r_imit
          + weights["w_pred"] * r_pred
-         + weights["w_social"] * r_social)
-    return R
+         + weights["w_social"] * r_social
+         + r_habit)
+    return max(0.0, R)
