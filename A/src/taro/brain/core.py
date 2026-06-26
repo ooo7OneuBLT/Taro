@@ -110,8 +110,15 @@ class TaroBrain(nn.Module):
 
             s_place, lp = self._sample_param(pl, allowed_place)
             log_prob = log_prob + lp
-            s_manner, lp = self._sample_param(ml, allowed_manner)
-            log_prob = log_prob + lp
+
+            # A2-6：連動モード時は調音法を調音点から自動決定
+            if vocal_tract.is_coupled():
+                p_val = s_place if isinstance(s_place, int) else s_place.item()
+                s_manner = vocal_tract.get_manner_for_place(p_val)
+            else:
+                s_manner, lp = self._sample_param(ml, allowed_manner)
+                log_prob = log_prob + lp
+
             s_voicing, lp = self._sample_param(vl, allowed_voicing)
             log_prob = log_prob + lp
             s_vowel, lp = self._sample_param(vol, allowed_vowel)
