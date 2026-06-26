@@ -8,7 +8,7 @@
 import os
 import torch
 import yaml
-from taro.brain import Vocabulary, TaroBrain, Cerebellum, SpeechPlanner, TaroLearner
+from taro.brain import Vocabulary, TaroBrain, Cerebellum, BrocasArea, TaroLearner
 from taro.body import VocalTract, Stamina
 from taro.brain.instincts import (compute_imitation_reward, compute_prediction_reward,
                                    Dopamine, Habituation, LocusCoeruleus,
@@ -75,7 +75,7 @@ class TaroEnvironment:
         self.habituation = Habituation(history_size=20, decay_rate=0.05)
         self.locus_coeruleus = LocusCoeruleus()
         self.cerebellum = Cerebellum()
-        self.speech_planner = SpeechPlanner()
+        self.brocas_area = BrocasArea()
 
         succ = self.cfg.get("success", {})
         self.partial_threshold = succ.get("partial_threshold", 0.8)
@@ -96,7 +96,7 @@ class TaroEnvironment:
         with torch.no_grad():
             _, h = self.brain.forward_hidden(listen_input)
         # A2-11：発話計画を立てる（GODIVAモデル）
-        self.speech_planner.plan(parent_text, self.cerebellum, self.vocal_tract)
+        self.brocas_area.plan(parent_text, self.cerebellum, self.vocal_tract)
 
         ne_level = self.locus_coeruleus.get_ne_level()
         generated, log_probs, _ = self.brain.generate(
@@ -107,7 +107,7 @@ class TaroEnvironment:
             vocal_tract=self.vocal_tract,
             ne_level=ne_level,
             cerebellum=self.cerebellum,
-            speech_plan=self.speech_planner,
+            speech_plan=self.brocas_area,
         )
         taro_text = self.vocab.decode(generated)
 
