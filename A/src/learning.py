@@ -45,7 +45,7 @@ class TaroLearner:
         x = torch.tensor([input_tokens[:-1]], device=device)
         target = torch.tensor([input_tokens[1:]], device=device)
 
-        logits, _ = self.brain(x)
+        logits, _ = self.brain.forward_perception(x)
         loss = F.cross_entropy(logits[0], target[0])
 
         probs_list = []
