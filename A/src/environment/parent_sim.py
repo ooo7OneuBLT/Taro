@@ -14,26 +14,53 @@ from environment.core import TaroEnvironment
 
 
 class ParentSmile:
-    """親の笑顔の自動ロジック【人間模倣】"""
+    """
+    親の笑顔の自動ロジック【人間模倣】
+
+    A2-7：Goldstein & Schwade (2008) に基づく即時フィードバック。
+    - 太郎が新しい音を出した → 親が強く反応（「すごい！」）
+    - 同じ音を繰り返した → 親の反応が薄くなる（飽きる）
+    - 親の模倣に近づいた → 親が喜ぶ（類似度ベース）
+
+    親の飽きは太郎の馴化（内的）とは別。環境側の反応パターン。
+    """
 
     def __init__(self, history_size=10):
-        self.history = []
+        self.output_history = []
         self.history_size = history_size
         self.best_r_imit = 0.0
 
-    def compute_smile(self, r_imit):
-        avg = sum(self.history) / len(self.history) if self.history else 0.0
-        smile = 0.0
+    def compute_smile(self, r_imit, taro_output):
+        """
+        太郎の出力の新しさ＋模倣の良さで笑顔を決める。
+
+        taro_output: 太郎が出した文字列
+        r_imit: 親の発話との類似度
+        """
+        # 新しさ：最近の出力と違うかどうか
+        if taro_output and self.output_history:
+            repeat_count = sum(1 for h in self.output_history if h == taro_output)
+            novelty = max(0.0, 1.0 - repeat_count * 0.2)
+        else:
+            novelty = 1.0  # 最初の発声は新しい
+
+        # 模倣の良さ：過去最高を超えたら特に喜ぶ
+        improvement = 0.0
         if r_imit > self.best_r_imit:
-            smile = min(1.0, 0.5 + (r_imit - self.best_r_imit))
+            improvement = 0.5
             self.best_r_imit = r_imit
-        elif r_imit > avg + 0.1:
-            smile = min(1.0, 0.3 + (r_imit - avg))
-        elif r_imit >= 0.8:
-            smile = max(0.1, 0.4 - len(self.history) * 0.02)
-        self.history.append(r_imit)
-        if len(self.history) > self.history_size:
-            self.history.pop(0)
+
+        # 合成：新しい音×模倣が近い → 最高の笑顔
+        smile = novelty * 0.4 + r_imit * 0.3 + improvement * 0.3
+
+        # 同じ出力の繰り返しは笑わない（親も飽きる）
+        if novelty < 0.2:
+            smile = 0.0
+
+        self.output_history.append(taro_output)
+        if len(self.output_history) > self.history_size:
+            self.output_history.pop(0)
+
         return max(0.0, min(1.0, smile))
 
 
@@ -130,15 +157,17 @@ def run_simulation(max_turns=3000, phrases=None, test_phrases=None,
         print()
 
     prev_r_imit = 0.0
+    prev_taro_output = ""
     partial_target = env.partial_streak_target
     best_partial = 0
 
     for turn_idx in range(max_turns):
         phrase = phrases[turn_idx % len(phrases)]
-        r_social = smile.compute_smile(prev_r_imit) if turn_idx > 0 else 0.0
+        r_social = smile.compute_smile(prev_r_imit, prev_taro_output) if turn_idx > 0 else 0.0
 
         result = env.step(phrase, r_social=r_social)
         prev_r_imit = result["r_imit"]
+        prev_taro_output = result["taro"]
 
         tracker.update(result["taro"], result["turn"])
         newly = tracker.check_all(result["turn"])
