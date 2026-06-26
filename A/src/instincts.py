@@ -26,15 +26,44 @@ def _edit_distance(a, b):
     return dp[m]
 
 
-def compute_imitation_reward(parent_tokens, taro_tokens):
+def _weighted_edit_distance(a_tokens, b_tokens, vocab, vocal_tract):
+    """
+    声道パラメータ空間での重み付きedit distance。
+    置換コストを「調音的な距離（0〜4のうち何個のパラメータが違うか）」で計算。
+    似た口の動きで出せる音同士は置換コストが小さくなる。
+
+    【人間模倣】赤ちゃんは自分の声と親の声の聴覚的類似度を感じ取っている。
+    """
+    idx2char = vocab.idx2char if hasattr(vocab, 'idx2char') else {}
+
+    def sub_cost(t1, t2):
+        if t1 == t2:
+            return 0.0
+        c1 = idx2char.get(t1, "")
+        c2 = idx2char.get(t2, "")
+        d = vocal_tract.param_distance(c1, c2)
+        return d / 4.0  # 正規化：0〜1
+
+    n, m = len(a_tokens), len(b_tokens)
+    dp = [float(j) for j in range(m + 1)]
+    for i in range(1, n + 1):
+        prev, dp[0] = dp[0], float(i)
+        for j in range(1, m + 1):
+            cost = sub_cost(a_tokens[i - 1], b_tokens[j - 1])
+            prev, dp[j] = dp[j], min(dp[j] + 1.0, dp[j - 1] + 1.0, prev + cost)
+    return dp[m]
+
+
+def compute_imitation_reward(parent_tokens, taro_tokens, vocab=None, vocal_tract=None):
     """
     模倣衝動：親の発話と太郎の出力の類似度 → 内的報酬 [0, 1]
 
     【人間模倣】乳児は親の発声に似せようとする衝動を生まれつき持つ。
     似ているほど心地よい（連続的な報酬）。
 
-    A2で変更：位置一致率 → 正規化edit distance（編集距離）ベースに。
-    「あまま」→「まま」のように1文字ずれても類似度が高くなる。
+    A2-3変更：声道パラメータ空間での重み付きedit distance。
+    「ま」と「ば」は口の動きが近いので置換コストが小さい＝類似度が高い。
+    赤ちゃんが自分の声と親の声の聴覚的類似度を感じ取ることの再現。
     """
     if len(parent_tokens) == 0 and len(taro_tokens) == 0:
         return 1.0
@@ -42,8 +71,13 @@ def compute_imitation_reward(parent_tokens, taro_tokens):
         return 0.0
 
     max_len = max(len(parent_tokens), len(taro_tokens))
-    dist = _edit_distance(parent_tokens, taro_tokens)
-    return 1.0 - dist / max_len
+
+    if vocab is not None and vocal_tract is not None:
+        dist = _weighted_edit_distance(parent_tokens, taro_tokens, vocab, vocal_tract)
+    else:
+        dist = _edit_distance(parent_tokens, taro_tokens)
+
+    return max(0.0, 1.0 - dist / max_len)
 
 
 def compute_prediction_reward(prediction_probs, actual_tokens):

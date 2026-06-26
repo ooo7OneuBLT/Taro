@@ -111,16 +111,46 @@ _CHAR_TO_PARAMS["っ"] = (2, 2, 0, 0)  # 促音＝歯茎破裂（「た」に近
 _CHAR_TO_PARAMS["ー"] = (0, 0, 1, 0)  # 長音＝母音の延長
 
 
+# --- 成熟ステージごとに使える値の定義 ---
+# Stage 0: 母音のみ（調音点=なし, 調音法=なし, 声帯=有声に固定）
+# Stage 1: +両唇、+鼻音・破裂音（「ばばば」「まままま」）
+# Stage 2: +歯茎・歯茎硬口蓋・硬口蓋（「だだだ」「ななな」）
+# Stage 3: +声帯の無声（「ぱ」と「ば」の使い分け）。全パラメータ解放
+
+STAGE_ALLOWED_PLACE = {
+    0: [0],              # なし（母音のみ）
+    1: [0, 1],           # +両唇
+    2: [0, 1, 2, 3, 4],  # +歯茎・歯茎硬口蓋・硬口蓋
+    3: list(range(NUM_PLACE)),  # 全解放
+}
+STAGE_ALLOWED_MANNER = {
+    0: [0],              # なし（母音のみ）
+    1: [0, 1, 2],        # +鼻音・破裂音
+    2: [0, 1, 2, 3, 4, 5, 6],  # +摩擦音・破擦音・弾き音・半母音
+    3: list(range(NUM_MANNER)),
+}
+STAGE_ALLOWED_VOICING = {
+    0: [1],              # 有声のみ（固定）
+    1: [1],              # まだ有声のみ
+    2: [1],              # まだ有声のみ
+    3: [0, 1],           # 無声も解放
+}
+# 母音は最初から全部使える（顎の開閉）
+STAGE_ALLOWED_VOWEL = {s: list(range(NUM_VOWEL)) for s in range(4)}
+
+
 class VocalTract:
     """
     太郎の口。4つのパラメータから文字を作る。
 
     赤ちゃんの口・舌・喉の物理的構造をテキスト世界で再現する。
+    A2-3：身体の成熟に応じてパラメータが段階的に解放される。
     """
 
     def __init__(self):
         self.params_to_char = dict(_ARTICULATION_TABLE)
         self.char_to_params = dict(_CHAR_TO_PARAMS)
+        self.stage = 0
 
     def speak(self, place, manner, voicing, vowel):
         """
@@ -172,6 +202,39 @@ class VocalTract:
                 best_dist = dist
                 best_char = char
         return best_char
+
+    def update_stage(self, sim_seconds, stage1_time, stage2_time, stage3_time):
+        """sim時間に応じて成熟ステージを更新する。"""
+        if sim_seconds >= stage3_time:
+            self.stage = 3
+        elif sim_seconds >= stage2_time:
+            self.stage = 2
+        elif sim_seconds >= stage1_time:
+            self.stage = 1
+        else:
+            self.stage = 0
+
+    def get_allowed(self):
+        """現在のステージで使えるパラメータ値を返す。"""
+        return (
+            STAGE_ALLOWED_PLACE[self.stage],
+            STAGE_ALLOWED_MANNER[self.stage],
+            STAGE_ALLOWED_VOICING[self.stage],
+            STAGE_ALLOWED_VOWEL[self.stage],
+        )
+
+    def clamp_to_stage(self, place, manner, voicing, vowel):
+        """ロックされたパラメータを許可値に制限する（身体的制約）。"""
+        allowed = self.get_allowed()
+        if place not in allowed[0]:
+            place = allowed[0][0]
+        if manner not in allowed[1]:
+            manner = allowed[1][0]
+        if voicing not in allowed[2]:
+            voicing = allowed[2][0]
+        if vowel not in allowed[3]:
+            vowel = allowed[3][0]
+        return place, manner, voicing, vowel
 
     @staticmethod
     def num_params():

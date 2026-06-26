@@ -116,13 +116,23 @@ class TaroEnvironment:
         )
         taro_text = self.vocab.decode(generated)
 
-        r_imit = compute_imitation_reward(parent_tokens, generated)
+        r_imit = compute_imitation_reward(parent_tokens, generated,
+                                          vocab=self.vocab, vocal_tract=self.vocal_tract)
         r_pred = compute_prediction_reward(pred_probs, parent_tokens)
         R = compute_total_reward(r_imit, r_pred, r_social, self.weights)
         delta = self.dopamine.compute_rpe(R)
 
         a_loss = self.learner.learn_action(log_probs, delta)
         pl, al = self.learner.update(p_loss, a_loss)
+
+        # A2-3：声道の成熟ステージをsim時間で更新【人間模倣・身体的制約】
+        vm = self.cfg.get("vocal_maturation", {})
+        self.vocal_tract.update_stage(
+            self.clock.total_seconds,
+            vm.get("stage1_time", 300),
+            vm.get("stage2_time", 900),
+            vm.get("stage3_time", 1500),
+        )
 
         # A2変更：τを成功体験に連動させる【人間模倣】
         self.cumulative_r_imit += r_imit
