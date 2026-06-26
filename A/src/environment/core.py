@@ -8,12 +8,11 @@
 import os
 import torch
 import yaml
-from taro.brain import Vocabulary, TaroBrain
+from taro.brain import Vocabulary, TaroBrain, Cerebellum, TaroLearner
 from taro.body import VocalTract, Stamina
 from taro.brain.instincts import (compute_imitation_reward, compute_prediction_reward,
                                    Dopamine, Habituation, LocusCoeruleus,
                                    compute_total_reward)
-from taro.brain.learning import TaroLearner
 from sim_clock import SimClock
 from archive import Archive
 from logger import Logger
@@ -75,6 +74,7 @@ class TaroEnvironment:
 
         self.habituation = Habituation(history_size=20, decay_rate=0.05)
         self.locus_coeruleus = LocusCoeruleus()
+        self.cerebellum = Cerebellum()
 
         succ = self.cfg.get("success", {})
         self.partial_threshold = succ.get("partial_threshold", 0.8)
@@ -102,6 +102,9 @@ class TaroEnvironment:
             stamina=self.stamina.get(),
             vocal_tract=self.vocal_tract,
             ne_level=ne_level,
+            cerebellum=self.cerebellum,
+            parent_tokens=parent_tokens,
+            vocab=self.vocab,
         )
         taro_text = self.vocab.decode(generated)
 

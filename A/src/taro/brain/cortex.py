@@ -1,8 +1,11 @@
 """
-太郎の脳（基本構造） — 予測する単一の再帰ネットワーク
+大脳皮質（Cortex） — 予測する単一の再帰ネットワーク
 
-【人間模倣】脳は「次に何が来るか」を絶えず予測する機械である（Friston）。
-脳 →（口の動かし方）→ 声道シミュレータ → 文字
+【人間模倣】大脳皮質は知覚・判断・運動指令の中枢。
+「次に何が来るか」を絶えず予測する（Friston）。
+口の動かし方の指令を出し、聞いた音を処理する。
+
+A2-10：旧core.pyから改名。人間の脳の部品名に合わせた。
 """
 
 import torch
@@ -88,14 +91,14 @@ class TaroBrain(nn.Module):
         )
 
     def generate(self, hidden, max_length, eos_idx, stamina=None,
-                 vocal_tract=None, ne_level=0.5):
+                 vocal_tract=None, ne_level=0.5, cerebellum=None,
+                 parent_tokens=None, vocab=None):
         """
         太郎の番に文字を産出する。
 
-        A2-9b変更：τによる全体ランダム化を廃止。
-        脳が選んだパラメータに、NEに比例した局所ノイズを加える。
-        【人間模倣】鳥のLMANが運動指令にノイズを注入するのと同じ原理。
-        NEが高い→少しずれる（探索）、NE低い→そのまま（搾取）。
+        A2-10：小脳（cerebellum）の逆モデルを使って、親の発話に近い
+        口の動きを探す。逆モデルにない音は大脳皮質が自力で選ぶ。
+        NEによる局所ノイズは引き続き適用。
         """
         import random
 
@@ -113,29 +116,45 @@ class TaroBrain(nn.Module):
 
         allowed_place, allowed_manner, allowed_voicing, allowed_vowel = vocal_tract.get_allowed()
 
+        # A2-10：小脳の逆モデルで親の発話に対応する口の動きを取得
+        target_motors = []
+        if cerebellum is not None and parent_tokens is not None and vocab is not None:
+            parent_text = vocab.decode(parent_tokens)
+            target_motors = cerebellum.lookup_motor_sequence(parent_text)
+
+        char_idx = 0
         for _ in range(effective_max):
             h_last = out[0, -1]
             pl, ml, vl, vol = self.forward_articulation(h_last)
 
             log_prob = torch.tensor(0.0, device=self._device())
 
-            # 脳が選んだパラメータ（意図）
-            s_place, lp = self._choose_param(pl, allowed_place)
-            log_prob = log_prob + lp
-
-            if vocal_tract.is_coupled():
-                s_manner = vocal_tract.get_manner_for_place(s_place)
+            # 小脳に逆モデルがある → そのパラメータを使う（学習済みの運動スキル）
+            # ない → 大脳皮質が自力で選ぶ（まだ覚えていない音）
+            if char_idx < len(target_motors):
+                t_place, t_manner, t_voicing, t_vowel = target_motors[char_idx]
+                s_place = t_place if t_place in allowed_place else allowed_place[0]
+                s_manner = t_manner
+                s_voicing = t_voicing if t_voicing in allowed_voicing else allowed_voicing[0]
+                s_vowel = t_vowel if t_vowel in allowed_vowel else allowed_vowel[0]
+                lp = self._log_prob_of(pl, s_place, allowed_place)
+                log_prob = log_prob + lp
             else:
-                s_manner, lp = self._choose_param(ml, allowed_manner)
+                s_place, lp = self._choose_param(pl, allowed_place)
                 log_prob = log_prob + lp
 
-            s_voicing, lp = self._choose_param(vl, allowed_voicing)
-            log_prob = log_prob + lp
-            s_vowel, lp = self._choose_param(vol, allowed_vowel)
-            log_prob = log_prob + lp
+                if vocal_tract.is_coupled():
+                    s_manner = vocal_tract.get_manner_for_place(s_place)
+                else:
+                    s_manner, lp = self._choose_param(ml, allowed_manner)
+                    log_prob = log_prob + lp
 
-            # NEによる局所ノイズ注入（アドレナリン受容体の応答）
-            # NEが高いほど「隣の値にずれる」確率が上がる
+                s_voicing, lp = self._choose_param(vl, allowed_voicing)
+                log_prob = log_prob + lp
+                s_vowel, lp = self._choose_param(vol, allowed_vowel)
+                log_prob = log_prob + lp
+
+            # NEによる局所ノイズ注入
             s_place = self._apply_ne_noise(s_place, ne_level, allowed_place)
             if not vocal_tract.is_coupled():
                 s_manner = self._apply_ne_noise(s_manner, ne_level, allowed_manner)
@@ -146,6 +165,10 @@ class TaroBrain(nn.Module):
 
             char = vocal_tract.speak(s_place, s_manner, s_voicing, s_vowel)
 
+            # 小脳に体験を記録（「この動きでこの音が出た」）
+            if cerebellum is not None:
+                cerebellum.learn_from_experience(s_place, s_manner, s_voicing, s_vowel, char)
+
             if char in self._vocab_char2idx:
                 token_idx = self._vocab_char2idx[char]
             else:
@@ -154,6 +177,8 @@ class TaroBrain(nn.Module):
             if token_idx == eos_idx:
                 break
 
+            char_idx += 1
+
             generated.append(token_idx)
             log_probs_all.append(log_prob)
 
@@ -161,6 +186,19 @@ class TaroBrain(nn.Module):
             out, hidden = self.forward_hidden(token_input, hidden)
 
         return generated, log_probs_all, hidden
+
+    def _log_prob_of(self, logits, value, allowed_indices):
+        """小脳の逆モデルが指定した値のlog確率を計算する。"""
+        if len(allowed_indices) == 1:
+            return torch.tensor(0.0, device=logits.device)
+        mask = torch.full_like(logits, float("-inf"))
+        for i in allowed_indices:
+            mask[i] = 0.0
+        masked_logits = logits + mask
+        probs = F.softmax(masked_logits, dim=-1)
+        if value < len(probs):
+            return torch.log(probs[value] + 1e-10)
+        return torch.tensor(0.0, device=logits.device)
 
     def _choose_param(self, logits, allowed_indices):
         """脳がパラメータを選ぶ（意図）。ノイズなし。"""
