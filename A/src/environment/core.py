@@ -8,11 +8,10 @@
 import os
 import torch
 import yaml
-from taro.brain import Vocabulary, TaroBrain, Cerebellum, BrocasArea, TaroLearner
+from taro.brain import (Vocabulary, TaroBrain, Cerebellum, BrocasArea, TaroLearner,
+                        compute_imitation_reward, compute_prediction_reward,
+                        Dopamine, Habituation, LocusCoeruleus, compute_total_reward)
 from taro.body import VocalTract, Stamina
-from taro.brain.instincts import (compute_imitation_reward, compute_prediction_reward,
-                                   Dopamine, Habituation, LocusCoeruleus,
-                                   compute_total_reward)
 from sim_clock import SimClock
 from archive import Archive
 from logger import Logger
