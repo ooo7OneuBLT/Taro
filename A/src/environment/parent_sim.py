@@ -17,51 +17,52 @@ class ParentSmile:
     """
     親の笑顔の自動ロジック【人間模倣】
 
-    A2-7：Goldstein & Schwade (2008) に基づく即時フィードバック。
-    - 太郎が新しい音を出した → 親が強く反応（「すごい！」）
-    - 同じ音を繰り返した → 親の反応が薄くなる（飽きる）
-    - 親の模倣に近づいた → 親が喜ぶ（類似度ベース）
+    A2-8：親の笑顔を2条件の掛け合わせで決定。
+    ① 親の発話に似ているか（r_imitが閾値以上か）
+    ② 繰り返しではないか（同じ出力は回数で減衰）
 
-    親の飽きは太郎の馴化（内的）とは別。環境側の反応パターン。
+    全然違う音（r_imit < 閾値）→ 笑わない（反応しない）
+    似ている音 → 笑う
+    同じ音の繰り返し → 回数ごとに笑顔が半減（親も飽きる）
     """
 
-    def __init__(self, history_size=10):
+    def __init__(self, min_r_imit=0.3, history_size=10):
+        self.min_r_imit = min_r_imit
         self.output_history = []
         self.history_size = history_size
         self.best_r_imit = 0.0
 
     def compute_smile(self, r_imit, taro_output):
         """
-        太郎の出力の新しさ＋模倣の良さで笑顔を決める。
-
-        taro_output: 太郎が出した文字列
         r_imit: 親の発話との類似度
+        taro_output: 太郎が出した文字列
         """
-        # 新しさ：最近の出力と違うかどうか
-        if taro_output and self.output_history:
-            repeat_count = sum(1 for h in self.output_history if h == taro_output)
-            novelty = max(0.0, 1.0 - repeat_count * 0.2)
-        else:
-            novelty = 1.0  # 最初の発声は新しい
+        # ① 類似度が閾値未満 → 反応しない
+        if r_imit < self.min_r_imit:
+            self._add(taro_output)
+            return 0.0
 
-        # 模倣の良さ：過去最高を超えたら特に喜ぶ
-        improvement = 0.0
+        # 基本笑顔：類似度に比例
+        base_smile = r_imit
+
+        # 過去最高を超えたらボーナス
         if r_imit > self.best_r_imit:
-            improvement = 0.5
+            base_smile = min(1.0, base_smile + 0.3)
             self.best_r_imit = r_imit
 
-        # 合成：新しい音×模倣が近い → 最高の笑顔
-        smile = novelty * 0.4 + r_imit * 0.3 + improvement * 0.3
+        # ② 繰り返しによる減衰：同じ出力の回数で半減
+        repeat_count = sum(1 for h in self.output_history if h == taro_output)
+        decay = 0.5 ** repeat_count  # 1回目=1.0, 2回目=0.5, 3回目=0.25...
 
-        # 同じ出力の繰り返しは笑わない（親も飽きる）
-        if novelty < 0.2:
-            smile = 0.0
+        smile = base_smile * decay
 
-        self.output_history.append(taro_output)
+        self._add(taro_output)
+        return max(0.0, min(1.0, smile))
+
+    def _add(self, output):
+        self.output_history.append(output)
         if len(self.output_history) > self.history_size:
             self.output_history.pop(0)
-
-        return max(0.0, min(1.0, smile))
 
 
 class StageTracker:
