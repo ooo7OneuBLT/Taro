@@ -124,36 +124,33 @@ class TaroBrain(nn.Module):
         if stamina is not None:
             effective_max = min(max_length, int(stamina))
 
+        # A2-3：ステージに応じて使えるパラメータを取得
+        allowed_place, allowed_manner, allowed_voicing, allowed_vowel = vocal_tract.get_allowed()
+
         for _ in range(effective_max):
             h_last = out[0, -1]
             pl, ml, vl, vol = self.forward_articulation(h_last)
 
-            # 各パラメータを温度τでサンプリング（喃語＝ランダムな口の動き）
-            p_place = F.softmax(pl / max(self.temperature, 1e-8), dim=-1)
-            p_manner = F.softmax(ml / max(self.temperature, 1e-8), dim=-1)
-            p_voicing = F.softmax(vl / max(self.temperature, 1e-8), dim=-1)
-            p_vowel = F.softmax(vol / max(self.temperature, 1e-8), dim=-1)
+            # ロックされたパラメータ：選択肢が1つならサンプリングせず固定
+            # 解放されたパラメータ：許可された選択肢のみでサンプリング
+            # 【人間模倣・身体的制約】赤ちゃんの口は最初母音しか出せない
+            log_prob = torch.tensor(0.0, device=self._device())
 
-            d_place = torch.distributions.Categorical(p_place)
-            d_manner = torch.distributions.Categorical(p_manner)
-            d_voicing = torch.distributions.Categorical(p_voicing)
-            d_vowel = torch.distributions.Categorical(p_vowel)
-
-            s_place = d_place.sample()
-            s_manner = d_manner.sample()
-            s_voicing = d_voicing.sample()
-            s_vowel = d_vowel.sample()
-
-            log_prob = (d_place.log_prob(s_place)
-                        + d_manner.log_prob(s_manner)
-                        + d_voicing.log_prob(s_voicing)
-                        + d_vowel.log_prob(s_vowel))
+            s_place, lp = self._sample_param(pl, allowed_place)
+            log_prob = log_prob + lp
+            s_manner, lp = self._sample_param(ml, allowed_manner)
+            log_prob = log_prob + lp
+            s_voicing, lp = self._sample_param(vl, allowed_voicing)
+            log_prob = log_prob + lp
+            s_vowel, lp = self._sample_param(vol, allowed_vowel)
+            log_prob = log_prob + lp
 
             # 声道シミュレータが口のパラメータを文字に変換
-            char = vocal_tract.speak(
-                s_place.item(), s_manner.item(),
-                s_voicing.item(), s_vowel.item()
-            )
+            p = s_place if isinstance(s_place, int) else s_place.item()
+            m = s_manner if isinstance(s_manner, int) else s_manner.item()
+            v = s_voicing if isinstance(s_voicing, int) else s_voicing.item()
+            w = s_vowel if isinstance(s_vowel, int) else s_vowel.item()
+            char = vocal_tract.speak(p, m, v, w)
 
             # 出た文字を語彙で引いてトークンにする（自己聴取の準備）
             # 未知文字の場合はEOSとして扱う
@@ -173,6 +170,24 @@ class TaroBrain(nn.Module):
             out, hidden = self.forward_hidden(token_input, hidden)
 
         return generated, log_probs_all, hidden
+
+    def _sample_param(self, logits, allowed_indices):
+        """
+        許可されたインデックスのみからサンプリングする。
+        選択肢が1つならサンプリングせず固定（ロック状態）。
+        """
+        if len(allowed_indices) == 1:
+            idx = allowed_indices[0]
+            return idx, torch.tensor(0.0, device=logits.device)
+
+        mask = torch.full_like(logits, float("-inf"))
+        for i in allowed_indices:
+            mask[i] = 0.0
+        masked_logits = logits + mask
+        probs = F.softmax(masked_logits / max(self.temperature, 1e-8), dim=-1)
+        dist = torch.distributions.Categorical(probs)
+        sample = dist.sample()
+        return sample.item(), dist.log_prob(sample)
 
     def set_vocab_mapping(self, char2idx):
         """語彙マッピングを設定する（声道出力→トークン変換に使用）。"""
