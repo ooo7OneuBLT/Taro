@@ -11,7 +11,7 @@ import yaml
 from brain import Vocabulary, TaroBrain
 from vocal_tract import VocalTract
 from instincts import (compute_imitation_reward, compute_prediction_reward,
-                        Dopamine, compute_total_reward)
+                        Dopamine, Habituation, compute_total_reward)
 from learning import TaroLearner
 from sim_clock import SimClock
 from archive import Archive
@@ -75,6 +75,9 @@ class TaroEnvironment:
         self.brain.to(self.device)
         self.brain.set_vocab_mapping(self.vocab.char2idx)
 
+        # A2-4追加：馴化（飽き）の本能
+        self.habituation = Habituation(history_size=20, decay_rate=0.05)
+
         # A2追加：τの適応的減衰用の累積模倣報酬
         self.cumulative_r_imit = 0.0
 
@@ -119,7 +122,8 @@ class TaroEnvironment:
         r_imit = compute_imitation_reward(parent_tokens, generated,
                                           vocab=self.vocab, vocal_tract=self.vocal_tract)
         r_pred = compute_prediction_reward(pred_probs, parent_tokens)
-        R = compute_total_reward(r_imit, r_pred, r_social, self.weights)
+        r_habit = self.habituation.compute_penalty(taro_text)
+        R = compute_total_reward(r_imit, r_pred, r_social, r_habit, self.weights)
         delta = self.dopamine.compute_rpe(R)
 
         a_loss = self.learner.learn_action(log_probs, delta)
