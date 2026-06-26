@@ -36,6 +36,11 @@ class Logger:
                     "p_loss", "a_loss", "temperature",
                 ])
 
+        self.history = {
+            "turns": [], "r_imit": [], "r_pred": [], "R": [],
+            "delta": [], "p_loss": [], "temperature": [],
+        }
+
     def save_run_info(self, description, config, phrases=None):
         """実験の説明・設定・経緯をメタデータとして保存する。"""
         info = {
@@ -49,11 +54,6 @@ class Logger:
         path = os.path.join(self.log_dir, "run_info.json")
         with open(path, "w", encoding="utf-8") as f:
             json.dump(info, f, ensure_ascii=False, indent=2)
-
-        self.history = {
-            "turns": [], "r_imit": [], "r_pred": [], "R": [],
-            "delta": [], "p_loss": [], "temperature": [],
-        }
 
     def log_turn(self, turn, sim_seconds, parent_text, taro_text,
                  r_imit, r_pred, r_social, R, delta,
