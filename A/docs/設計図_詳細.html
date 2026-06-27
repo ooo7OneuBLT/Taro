@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>太郎プロジェクト 詳細設計図</title>
+<style>
+:root {
+  --bg: #fafaf8;
+  --card: #fff;
+  --text: #1a1a1a;
+  --text2: #555;
+  --text3: #888;
+  --border: #ddd;
+  --purple: #EEEDFE; --purple-s: #534AB7; --purple-t: #3C3489; --purple-l: #f8f7ff;
+  --teal: #E1F5EE; --teal-s: #0F6E56; --teal-t: #085041;
+  --coral: #FAECE7; --coral-s: #993C1D; --coral-t: #712B13;
+  --gray: #F1EFE8; --gray-s: #5F5E5A; --gray-t: #444441;
+  --red-bg: #fde8e8; --red: #d03b3b;
+  --green-bg: #e6f7ee; --green: #1baf7a;
+  --blue: #2a78d6; --blue-bg: #e6f1fb;
+  --amber: #eda100; --amber-bg: #fef6e0;
+}
+@media (prefers-color-scheme:dark) {
+  :root {
+    --bg:#141413; --card:#1e1e1c; --text:#f0f0ea; --text2:#b0b0a8; --text3:#787870; --border:#333;
+    --purple:#2a2640; --purple-s:#7F77DD; --purple-t:#AFA9EC; --purple-l:#1e1c30;
+    --teal:#0f2a1c; --teal-s:#5DCAA5; --teal-t:#9FE1CB;
+    --coral:#2a1810; --coral-s:#F0997B; --coral-t:#F5C4B3;
+    --gray:#222; --gray-s:#B4B2A9; --gray-t:#D3D1C7;
+    --red-bg:#3a1a1a; --red:#e66; --green-bg:#0f2a1c; --green:#5DCAA5;
+    --blue:#85B7EB; --blue-bg:#102840; --amber:#FAC775; --amber-bg:#2a2010;
+  }
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Hiragino Sans","Noto Sans JP",sans-serif;background:var(--bg);color:var(--text);padding:2rem 1rem;line-height:1.6;}
+.page{max-width:960px;margin:0 auto;page-break-after:always;}
+h1{font-size:1.6rem;font-weight:700;margin-bottom:0.3rem;}
+h2{font-size:1.2rem;font-weight:600;margin:2rem 0 0.8rem;padding-bottom:0.3rem;border-bottom:2px solid var(--border);}
+h3{font-size:1rem;font-weight:600;margin:1.2rem 0 0.5rem;}
+.sub{color:var(--text2);font-size:0.85rem;margin-bottom:1.5rem;}
+p{font-size:0.9rem;color:var(--text2);margin-bottom:0.5rem;}
+
+.box{border-radius:10px;padding:1rem 1.1rem;margin-bottom:0.8rem;border:1px solid;}
+.box-purple{background:var(--purple);border-color:var(--purple-s);}
+.box-teal{background:var(--teal);border-color:var(--teal-s);}
+.box-coral{background:var(--coral);border-color:var(--coral-s);}
+.box-gray{background:var(--gray);border-color:var(--gray-s);}
+
+.fname{font-size:0.82rem;font-weight:600;font-family:"Cascadia Code","Fira Code",monospace;padding:2px 6px;border-radius:4px;background:rgba(0,0,0,0.06);}
+.var{font-family:"Cascadia Code","Fira Code",monospace;font-size:0.8rem;color:var(--blue);font-weight:500;}
+.arrow{color:var(--text3);font-size:0.85rem;}
+.note{font-size:0.78rem;color:var(--text3);font-style:italic;}
+
+.flow-step{display:flex;gap:12px;margin-bottom:1rem;align-items:flex-start;}
+.step-num{min-width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:0.9rem;flex-shrink:0;margin-top:2px;}
+.step-body{flex:1;border:1px solid var(--border);border-radius:8px;padding:0.8rem 1rem;background:var(--card);}
+.step-title{font-weight:600;font-size:0.95rem;margin-bottom:0.3rem;}
+.step-detail{font-size:0.82rem;color:var(--text2);line-height:1.7;}
+.step-detail code{background:rgba(0,0,0,0.05);padding:1px 5px;border-radius:3px;font-family:"Cascadia Code","Fira Code",monospace;font-size:0.78rem;}
+
+.data-flow{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:0.7rem 1rem;margin:0.5rem 0;font-size:0.82rem;}
+.data-flow .label{font-weight:600;color:var(--text);margin-bottom:0.2rem;}
+
+.connector{text-align:center;font-size:1.2rem;color:var(--text3);margin:0.3rem 0;letter-spacing:2px;}
+
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+@media(max-width:640px){.grid2{grid-template-columns:1fr;}}
+
+.tag{display:inline-block;font-size:0.7rem;padding:1px 6px;border-radius:4px;font-weight:600;margin-left:4px;}
+.tag-critical{background:var(--red-bg);color:var(--red);}
+.tag-ok{background:var(--green-bg);color:var(--green);}
+.tag-info{background:var(--blue-bg);color:var(--blue);}
+.tag-warn{background:var(--amber-bg);color:var(--amber);}
+</style>
+</head>
+<body>
+
+<!-- ============ PAGE 1: 全体構成 ============ -->
+<div class="page">
+<h1>太郎プロジェクト 詳細設計図</h1>
+<p class="sub">各.pyファイルの中身・変数の流れ・関数の呼び出し関係 / 2026-06-27</p>
+
+<h2>1. ファイル構成と各ファイルの役割</h2>
+
+<h3 style="color:var(--teal-s);">環境（外の世界）— environment/</h3>
+
+<div class="box box-teal">
+<p><span class="fname">core.py</span> — <strong>TaroEnvironment</strong>クラス<span class="tag tag-critical">司令塔</span></p>
+<p class="step-detail">
+全部品をまとめて「1ターンのループ」を提供する。<br>
+<strong>持っているもの：</strong><code>brain</code>(大脳皮質), <code>cerebellum</code>(小脳), <code>brocas_area</code>(ブローカ野), <code>learner</code>(大脳基底核), <code>dopamine</code>, <code>habituation</code>, <code>locus_coeruleus</code>, <code>vocal_tract</code>(声道), <code>stamina</code>(体力), <code>vocab</code>(語彙)<br>
+<strong>メイン関数：</strong><code>step(parent_text, r_social)</code> → 1ターン実行して結果を返す
+</p>
+</div>
+
+<div class="grid2">
+<div class="box box-teal">
+<p><span class="fname">parent_sim.py</span> — 親シミュレータ</p>
+<p class="step-detail">
+<strong>ParentSmile</strong>: <code>compute_smile(r_imit, taro_output)</code> → <code>r_social</code>(笑顔の度合い 0〜1)<br>
+<strong>StageTracker</strong>: <code>check_all(turn)</code> → 発達段階の達成判定<br>
+<strong>run_simulation()</strong>: 全体の実験ループ（何千ターンも回す）
+</p>
+</div>
+<div class="box box-teal">
+<p><span class="fname">ablation.py</span> — アブレーション解析</p>
+<p class="step-detail">
+各部品を1つずつ無効化して比較実験を行う。<br>
+<code>TaroEnvironment(ablation={"部品名": True})</code> で部品を無効化
+</p>
+</div>
+</div>
+
+<h3 style="color:var(--purple-s);">太郎の脳 — taro/brain/</h3>
+
+<div class="box box-purple">
+<p><span class="fname">cortex.py</span> — <strong>TaroBrain</strong>クラス（大脳皮質）<span class="tag tag-critical">中核</span></p>
+<p class="step-detail">
+<strong>聞く：</strong><code>forward_hidden(x, hidden)</code> → 入力を処理して隠れ状態<code>h</code>を更新<br>
+<strong>予測する：</strong><code>forward_perception(x, hidden)</code> → 次の文字の確率<code>logits</code>を出力<br>
+<strong>口の指令：</strong><code>forward_articulation(h)</code> → 4つのヘッドから口パラメータ<code>(pl, ml, vl, vol)</code>を出力<br>
+<strong>話す：</strong><code>generate(hidden, ..., speech_plan, ne_level, cerebellum)</code><br>
+&nbsp;&nbsp;→ 発話計画に沿って文字列を生成。戻り値は<code>(generated, log_probs, hidden)</code><br>
+<strong>内部処理：</strong><br>
+&nbsp;&nbsp;<code>_choose_param(logits, allowed)</code> — 脳の意図（ノイズなし）<br>
+&nbsp;&nbsp;<code>_apply_ne_noise(value, ne_level, allowed)</code> — NEで1つ隣にずらす<br>
+&nbsp;&nbsp;<code>_log_prob_of(logits, value, allowed)</code> — 小脳指定の値のlog確率
+</p>
+</div>
+
+<div class="grid2">
+<div class="box box-purple">
+<p><span class="fname">left_frontal_lobe/brocas_area.py</span><br><strong>BrocasArea</strong>（ブローカ野）<span class="tag tag-critical">必須</span></p>
+<p class="step-detail">
+<code>plan(parent_text, cerebellum, vocal_tract)</code><br>
+→ 親の発話を1文字ずつ分解<br>
+→ 小脳に<code>lookup_motor(char)</code>で口の動きを問合せ<br>
+→ <code>motor_buffer</code>にリスト格納<br>
+<code>has_next()</code> / <code>next_motor()</code><br>
+→ バッファから1つずつ取り出す<br>
+バッファが空 → 発話終了
+</p>
+</div>
+<div class="box box-purple">
+<p><span class="fname">cerebellum.py</span><br><strong>Cerebellum</strong>（小脳）</p>
+<p class="step-detail">
+<code>learn_from_experience(place, manner, voicing, vowel, char)</code><br>
+→ <code>forward_map[(p,m,v,vw)] = char</code><br>
+→ <code>inverse_map[char] = (p,m,v,vw)</code><br>
+<code>lookup_motor(char)</code> → 逆引き<br>
+<code>predict_sound(p,m,v,vw)</code> → 順引き<br>
+<code>experience_count</code>で確信度を蓄積
+</p>
+</div>
+</div>
+
+<div class="grid2">
+<div class="box box-purple">
+<p><span class="fname">basal_ganglia.py</span><br><strong>TaroLearner</strong>（大脳基底核）</p>
+<p class="step-detail">
+<code>learn_perception(input_tokens)</code><br>
+→ 次トークン予測の誤差<code>p_loss</code>と予測確率<code>pred_probs</code>を返す<br>
+<code>learn_action(log_probs, delta)</code><br>
+→ <code>a_loss = -delta * Σlog_prob</code>（REINFORCE）<br>
+<code>update(p_loss, a_loss)</code><br>
+→ 合算してbackpropで重み更新 ⚠️逸脱
+</p>
+</div>
+<div class="box box-purple" style="border-style:dashed;">
+<p><span class="fname">hippocampus.py</span><br><strong>Hippocampus</strong>（海馬）<span class="tag tag-warn">未実装</span></p>
+<p class="step-detail">
+将来の睡眠リプレイ・記憶定着用。<br>
+現在は空のクラスのみ。
+</p>
+</div>
+</div>
+
+<h3 style="color:var(--purple-s);">本能 — taro/brain/instincts/</h3>
+<div class="grid2">
+<div class="box box-purple">
+<p><span class="fname">imitation.py</span> — 模倣衝動</p>
+<p class="step-detail">
+<code>compute_imitation_reward(parent_tokens, taro_tokens, vocab, vocal_tract)</code><br>
+→ 重み付き編集距離で類似度を計算<br>
+→ <code>r_imit</code> (0〜1) を返す<br>
+声道の<code>param_distance()</code>で「口が近い音」のコスト小
+</p>
+</div>
+<div class="box box-purple">
+<p><span class="fname">prediction.py</span> — 予測</p>
+<p class="step-detail">
+<code>compute_prediction_reward(pred_probs, actual_tokens)</code><br>
+→ 各トークンの予測確率の平均<br>
+→ <code>r_pred</code> (0〜1) を返す
+</p>
+</div>
+<div class="box box-purple">
+<p><span class="fname">dopamine.py</span> — ドーパミン</p>
+<p class="step-detail">
+<code>compute_rpe(reward)</code><br>
+→ <code>delta = reward - baseline</code><br>
+→ <code>baseline</code>を更新（移動平均 0.95）<br>
+→ <code>delta</code>（報酬予測誤差）を返す
+</p>
+</div>
+<div class="box box-purple">
+<p><span class="fname">reward.py</span> — 報酬合算</p>
+<p class="step-detail">
+<code>compute_total_reward(r_imit, r_pred, r_social, r_habit, weights)</code><br>
+→ <code>R = 0.5*r_imit + 0.3*r_pred + 0.2*r_social + r_habit</code><br>
+→ <code>max(0, R)</code> を返す
+</p>
+</div>
+<div class="box box-purple">
+<p><span class="fname">habituation.py</span> — 馴化（飽き）</p>
+<p class="step-detail">
+<code>compute_penalty(taro_text)</code><br>
+→ 同じ出力の繰り返し回数を見る<br>
+→ <code>r_habit</code> (0〜-1) を返す
+</p>
+</div>
+<div class="box box-purple">
+<p><span class="fname">locus_coeruleus.py</span> — 青斑核<span class="tag tag-critical">必須</span></p>
+<p class="step-detail">
+<code>observe_reward(R)</code> → 報酬を記録（直近20ターン）<br>
+<code>release_ne()</code> → NEレベルを調整<br>
+&nbsp;&nbsp;報酬低い(<0.1) → NE↑ / 高い(>0.3) → NE↓<br>
+<code>get_ne_level()</code> → <code>ne_level</code> (0.1〜1.0)
+</p>
+</div>
+</div>
+
+<h3 style="color:var(--coral-s);">太郎の身体 — taro/body/</h3>
+<div class="grid2">
+<div class="box box-coral">
+<p><span class="fname">vocal_tract.py</span> — <strong>VocalTract</strong>（声道）</p>
+<p class="step-detail">
+<code>speak(place, manner, voicing, vowel)</code><br>
+→ 4パラメータから文字に変換（例：1,1,1,0 →「ま」）<br>
+<code>hear(char)</code> → 文字からパラメータに逆変換<br>
+<code>get_allowed()</code> → 現在のStageで使える値<br>
+<code>is_coupled()</code> → 連動モード？<br>
+<code>update_stage(sim_seconds, ...)</code> → 時間で成熟<br>
+<code>param_distance(a, b)</code> → 2文字の口の距離(0〜4)
+</p>
+</div>
+<div class="box box-coral">
+<p><span class="fname">stamina.py</span> — <strong>Stamina</strong>（体力）</p>
+<p class="step-detail">
+<code>get()</code> → 現在の体力値（最大何文字出せるか）<br>
+<code>grow()</code> → 毎ターン+0.001ずつ成長<br>
+初期値3 → 最大15
+</p>
+</div>
+</div>
+
+<h3 style="color:var(--gray-s);">補助ツール — src/</h3>
+<div class="grid2">
+<div class="box box-gray" style="padding:0.6rem 1rem;">
+<p><span class="fname">sim_clock.py</span> — シミュレーション内時計。1ターン=5秒</p>
+</div>
+<div class="box box-gray" style="padding:0.6rem 1rem;">
+<p><span class="fname">archive.py</span> — 脳の状態をファイルに保存/読込</p>
+</div>
+<div class="box box-gray" style="padding:0.6rem 1rem;">
+<p><span class="fname">logger.py</span> — 毎ターンのデータをJSONLに記録＋グラフ描画</p>
+</div>
+<div class="box box-gray" style="padding:0.6rem 1rem;">
+<p><span class="fname">config/config.yaml</span> — 設定値（脳の大きさ、報酬の重みなど）</p>
+</div>
+</div>
+</div>
+
+<!-- ============ PAGE 2: 1ターンの詳細フロー ============ -->
+<div class="page">
+<h2>2. 1ターンの詳細フロー（変数の流れ）</h2>
+<p>以下は <code>TaroEnvironment.step("まま", r_social=0.5)</code> が呼ばれたときの処理を順に追ったもの。</p>
+
+<!-- Step 1 -->
+<div class="flow-step">
+<div class="step-num" style="background:var(--teal);color:var(--teal-t);">1</div>
+<div class="step-body">
+<div class="step-title" style="color:var(--teal-t);">入力を受け取る</div>
+<div class="step-detail">
+<code>parent_text = "まま"</code> を受け取る<br>
+<code>vocab.encode("まま")</code> → <code>parent_tokens = [5, 5]</code>（「ま」のID=5だとすると）<br>
+BOS(=1)とEOS(=2)をつけて <code>full_tokens = [1, 5, 5, 2]</code>
+</div>
+</div>
+</div>
+
+<div class="connector">▼</div>
+
+<!-- Step 2 -->
+<div class="flow-step">
+<div class="step-num" style="background:var(--purple);color:var(--purple-t);">2</div>
+<div class="step-body">
+<div class="step-title" style="color:var(--purple-t);">知覚学習（大脳基底核 → 大脳皮質）</div>
+<div class="step-detail">
+<code>learner.learn_perception(full_tokens)</code> が呼ばれる<br>
+内部：<code>brain.forward_perception([1, 5, 5])</code> で次のトークンを予測<br>
+正解 <code>[5, 5, 2]</code> と比較して予測誤差 <code>p_loss</code> を計算<br>
+各位置での予測確率 <code>pred_probs = [tensor(...), tensor(...), ...]</code> も返す
+</div>
+<div class="data-flow">
+<div class="label">出力される変数：</div>
+<code>p_loss</code> = 予測誤差（数値）<br>
+<code>pred_probs</code> = 各位置の予測確率のリスト
+</div>
+</div>
+</div>
+
+<div class="connector">▼</div>
+
+<!-- Step 3 -->
+<div class="flow-step">
+<div class="step-num" style="background:var(--purple);color:var(--purple-t);">3</div>
+<div class="step-body">
+<div class="step-title" style="color:var(--purple-t);">聞く（大脳皮質）</div>
+<div class="step-detail">
+<code>brain.forward_hidden(listen_input)</code><br>
+「まま」全体を聞いて、脳の状態 <code>h</code>（隠れ状態）を更新する<br>
+この <code>h</code> が「何を聞いたか」の短期記憶になる
+</div>
+<div class="data-flow">
+<div class="label">出力される変数：</div>
+<code>h</code> = 隠れ状態（128次元のベクトル = 脳の状態）
+</div>
+</div>
+</div>
+
+<div class="connector">▼</div>
+
+<!-- Step 4 -->
+<div class="flow-step">
+<div class="step-num" style="background:var(--purple);color:var(--purple-t);">4</div>
+<div class="step-body">
+<div class="step-title" style="color:var(--purple-t);">発話計画を立てる（ブローカ野 ← 小脳）</div>
+<div class="step-detail">
+<code>brocas_area.plan("まま", cerebellum, vocal_tract)</code><br>
+1文字ずつ処理：<br>
+&nbsp;&nbsp;「ま」→ <code>cerebellum.lookup_motor("ま")</code> → <code>(1,1,1,0)</code>（唇・鼻音・有声・あ）<br>
+&nbsp;&nbsp;「ま」→ <code>cerebellum.lookup_motor("ま")</code> → <code>(1,1,1,0)</code><br>
+結果：<code>motor_buffer = [{motor:(1,1,1,0), known:True}, {motor:(1,1,1,0), known:True}]</code><br>
+<code>structure = 2</code>（2モーラ分の計画）
+</div>
+<div class="data-flow">
+<div class="label">出力される変数：</div>
+<code>motor_buffer</code> = 口の動きのリスト（計画）<br>
+<code>structure</code> = 計画の長さ（＝親の発話のモーラ数）
+</div>
+</div>
+</div>
+
+<div class="connector">▼</div>
+
+<!-- Step 5 -->
+<div class="flow-step">
+<div class="step-num" style="background:var(--coral);color:var(--coral-t);">5</div>
+<div class="step-body">
+<div class="step-title" style="color:var(--coral-t);">発声する（大脳皮質 → 声道）</div>
+<div class="step-detail">
+<code>brain.generate(hidden=h, ..., speech_plan=brocas_area, ne_level=0.5, cerebellum=cerebellum)</code><br><br>
+<strong>ループ（2回 = 計画が2モーラだから）：</strong><br>
+&nbsp;&nbsp;① <code>brocas_area.next_motor()</code> → <code>{motor:(1,1,1,0)}</code><br>
+&nbsp;&nbsp;② 脳の意図を計算：<code>forward_articulation(h)</code> → ヘッドから確率分布<br>
+&nbsp;&nbsp;③ 小脳の指示の log 確率を記録：<code>_log_prob_of(pl, 1, allowed_place)</code> → <code>log_prob</code><br>
+&nbsp;&nbsp;④ NEノイズ注入：<code>_apply_ne_noise(1, 0.5, [0,1])</code><br>
+&nbsp;&nbsp;&nbsp;&nbsp;→ 確率35%（0.5×0.7）で隣にずれる → 例えば <code>s_place=1</code>のまま or <code>s_place=0</code>に<br>
+&nbsp;&nbsp;⑤ 声道で発声：<code>vocal_tract.speak(1, 1, 1, 0)</code> → <code>"ま"</code><br>
+&nbsp;&nbsp;⑥ 小脳に記録：<code>cerebellum.learn_from_experience(1, 1, 1, 0, "ま")</code><br>
+&nbsp;&nbsp;⑦ 自分の声を聞く：<code>forward_hidden(token("ま"), h)</code> → <code>h</code>を更新<br>
+&nbsp;&nbsp;→ 2回目も同様<br><br>
+バッファが空 → ループ終了
+</div>
+<div class="data-flow">
+<div class="label">出力される変数：</div>
+<code>generated = [5, 5]</code>（「ま」「ま」のトークンID）<br>
+<code>log_probs = [tensor(-0.3), tensor(-0.2)]</code>（各文字の選択確率のlog）<br>
+<code>taro_text = "まま"</code>（vocabでデコード）
+</div>
+</div>
+</div>
+
+<div class="connector">▼</div>
+
+<!-- Step 6 -->
+<div class="flow-step">
+<div class="step-num" style="background:var(--teal);color:var(--teal-t);">6</div>
+<div class="step-body">
+<div class="step-title" style="color:var(--teal-t);">報酬を計算する（本能たち）</div>
+<div class="step-detail">
+<strong>4つの報酬を並列に計算：</strong><br>
+① <code>compute_imitation_reward(parent_tokens=[5,5], generated=[5,5], vocab, vocal_tract)</code><br>
+&nbsp;&nbsp;→ 完全一致なので <code>r_imit = 1.0</code><br>
+② <code>compute_prediction_reward(pred_probs, parent_tokens)</code><br>
+&nbsp;&nbsp;→ 予測がどれだけ当たったか <code>r_pred = 0.6</code>（例）<br>
+③ <code>r_social = 0.5</code>（親から受け取った笑顔の度合い）<br>
+④ <code>habituation.compute_penalty("まま")</code><br>
+&nbsp;&nbsp;→ 初回なので <code>r_habit = 0.0</code>（飽きなし）<br><br>
+<strong>合算：</strong><br>
+<code>compute_total_reward(1.0, 0.6, 0.5, 0.0, weights)</code><br>
+→ <code>R = 0.5×1.0 + 0.3×0.6 + 0.2×0.5 + 0.0 = 0.78</code>
+</div>
+<div class="data-flow">
+<div class="label">出力される変数：</div>
+<code>r_imit = 1.0</code>, <code>r_pred = 0.6</code>, <code>r_social = 0.5</code>, <code>r_habit = 0.0</code><br>
+<code>R = 0.78</code>（合計報酬）
+</div>
+</div>
+</div>
+
+<div class="connector">▼</div>
+
+<!-- Step 7 -->
+<div class="flow-step">
+<div class="step-num" style="background:var(--purple);color:var(--purple-t);">7</div>
+<div class="step-body">
+<div class="step-title" style="color:var(--purple-t);">学習する（ドーパミン → 大脳基底核）</div>
+<div class="step-detail">
+<strong>ドーパミン（報酬予測誤差）：</strong><br>
+<code>dopamine.compute_rpe(R=0.78)</code><br>
+→ <code>delta = 0.78 - baseline</code>（例：baseline=0.5 → <code>delta = 0.28</code>）<br>
+→ 「思ったより良かった！」= 正のδ<br>
+→ baselineを更新：<code>0.95×0.5 + 0.05×0.78 = 0.514</code><br><br>
+<strong>行動学習（REINFORCE）：</strong><br>
+<code>learner.learn_action(log_probs, delta=0.28)</code><br>
+→ <code>a_loss = -(0.28) × (log_prob₁ + log_prob₂)</code><br>
+→ delta > 0 なので「この発話を出しやすくする」方向に重みを調整<br><br>
+<strong>重み更新：</strong><br>
+<code>learner.update(p_loss, a_loss)</code><br>
+→ <code>total_loss = p_loss + a_loss</code> → backpropで脳の重みを更新
+</div>
+<div class="data-flow">
+<div class="label">出力される変数：</div>
+<code>delta = 0.28</code>（ドーパミン = 報酬予測誤差）<br>
+<code>pl, al</code>（知覚損失、行動損失の数値）
+</div>
+</div>
+</div>
+
+<div class="connector">▼</div>
+
+<!-- Step 8 -->
+<div class="flow-step">
+<div class="step-num" style="background:var(--gray);color:var(--gray-t);">8</div>
+<div class="step-body">
+<div class="step-title" style="color:var(--gray-t);">次のターンの準備</div>
+<div class="step-detail">
+<strong>声道の成熟：</strong><br>
+<code>vocal_tract.update_stage(sim_seconds, 300, 900, 1500, 1200)</code><br>
+→ 5分経過でStage 1, 15分でStage 2, ...（時間で自動進行）<br><br>
+<strong>青斑核のNE調整：</strong><br>
+<code>locus_coeruleus.observe_reward(R=0.78)</code> → 報酬を記録<br>
+<code>locus_coeruleus.release_ne()</code><br>
+→ 直近20ターンの平均が0.3以上なので NE↓（探索を減らす）<br>
+<code>brain.receive_ne(ne_level)</code> → 次のターンで使うNEを脳に渡す<br><br>
+<strong>体力成長：</strong> <code>stamina.grow()</code> → +0.001<br>
+<strong>時計：</strong> <code>clock.tick()</code> → +5秒
+</div>
+</div>
+</div>
+
+<div class="connector">🔄 次のターンへ（Step 1に戻る）</div>
+
+<h2>3. 変数の受け渡しまとめ</h2>
+<div class="data-flow" style="font-size:0.85rem;line-height:2;">
+<code>parent_text</code> <span class="arrow">→ vocab →</span> <code>parent_tokens</code> <span class="arrow">→ cortex →</span> <code>h</code>(隠れ状態)<br>
+<code>parent_text</code> <span class="arrow">→ brocas_area.plan() ← cerebellum →</span> <code>motor_buffer</code>(発話計画)<br>
+<code>h</code> + <code>motor_buffer</code> + <code>ne_level</code> <span class="arrow">→ cortex.generate() → vocal_tract.speak() →</span> <code>taro_text</code><br>
+<code>parent_tokens</code> + <code>generated</code> <span class="arrow">→ imitation →</span> <code>r_imit</code><br>
+<code>pred_probs</code> + <code>parent_tokens</code> <span class="arrow">→ prediction →</span> <code>r_pred</code><br>
+<code>taro_text</code> <span class="arrow">→ habituation →</span> <code>r_habit</code><br>
+<code>r_imit</code> + <code>r_pred</code> + <code>r_social</code> + <code>r_habit</code> <span class="arrow">→ reward →</span> <code>R</code><br>
+<code>R</code> <span class="arrow">→ dopamine →</span> <code>delta</code><br>
+<code>delta</code> + <code>log_probs</code> <span class="arrow">→ basal_ganglia →</span> 脳の重みを更新<br>
+<code>R</code> <span class="arrow">→ locus_coeruleus →</span> <code>ne_level</code>（次ターンで使う）
+</div>
+
+<div class="note" style="margin-top:1rem;">
+太郎プロジェクト 詳細設計図 / 2026-06-27 / 全.pyファイルの関数・変数・データの流れ
+</div>
+</div>
+
+</body>
+</html>
