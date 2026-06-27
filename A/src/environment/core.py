@@ -24,7 +24,17 @@ def _project_root():
 class TaroEnvironment:
     """太郎の全コンポーネントを束ねて1ターンのループを提供する。"""
 
-    def __init__(self, config_path=None, run_name=None):
+    def __init__(self, config_path=None, run_name=None, ablation=None):
+        """
+        ablation: 無効化する部品の辞書。例：
+            {"brocas_area": True}  → ブローカ野を無効化
+            {"cerebellum": True}   → 小脳を無効化
+            {"locus_coeruleus": True} → 青斑核を無効化
+            {"habituation": True}  → 馴化を無効化
+            {"social_reward": True} → 社会的報酬を無効化
+            {"coupling": True}     → 連動制御を無効化（最初から独立）
+        """
+        self.ablation = ablation or {}
         if config_path is None:
             config_path = os.path.join(_project_root(), "config", "config.yaml")
         with open(config_path, "r", encoding="utf-8") as f:
@@ -76,6 +86,9 @@ class TaroEnvironment:
         self.cerebellum = Cerebellum()
         self.brocas_area = BrocasArea()
 
+        if self.ablation.get("coupling"):
+            self.vocal_tract.force_decouple()
+
         succ = self.cfg.get("success", {})
         self.partial_threshold = succ.get("partial_threshold", 0.8)
         self.partial_streak_target = succ.get("partial_streak", 10)
@@ -95,9 +108,13 @@ class TaroEnvironment:
         with torch.no_grad():
             _, h = self.brain.forward_hidden(listen_input)
         # A2-11：発話計画を立てる（GODIVAモデル）
-        self.brocas_area.plan(parent_text, self.cerebellum, self.vocal_tract)
+        speech_plan = None
+        if not self.ablation.get("brocas_area"):
+            self.brocas_area.plan(parent_text, self.cerebellum, self.vocal_tract)
+            speech_plan = self.brocas_area
 
-        ne_level = self.locus_coeruleus.get_ne_level()
+        ne_level = self.locus_coeruleus.get_ne_level() if not self.ablation.get("locus_coeruleus") else 0.5
+        cerebellum_arg = self.cerebellum if not self.ablation.get("cerebellum") else None
         generated, log_probs, _ = self.brain.generate(
             hidden=h,
             max_length=self.max_output_length,
@@ -105,15 +122,17 @@ class TaroEnvironment:
             stamina=self.stamina.get(),
             vocal_tract=self.vocal_tract,
             ne_level=ne_level,
-            cerebellum=self.cerebellum,
-            speech_plan=self.brocas_area,
+            cerebellum=cerebellum_arg,
+            speech_plan=speech_plan,
         )
         taro_text = self.vocab.decode(generated)
 
+        if self.ablation.get("social_reward"):
+            r_social = 0.0
         r_imit = compute_imitation_reward(parent_tokens, generated,
                                           vocab=self.vocab, vocal_tract=self.vocal_tract)
         r_pred = compute_prediction_reward(pred_probs, parent_tokens)
-        r_habit = self.habituation.compute_penalty(taro_text)
+        r_habit = self.habituation.compute_penalty(taro_text) if not self.ablation.get("habituation") else 0.0
         R = compute_total_reward(r_imit, r_pred, r_social, r_habit, self.weights)
         delta = self.dopamine.compute_rpe(R)
 
@@ -130,9 +149,10 @@ class TaroEnvironment:
         )
 
         # A2-9：青斑核がNEを放出 → 次ターンの生成時に局所ノイズとして反映
-        self.locus_coeruleus.observe_reward(R)
-        self.locus_coeruleus.release_ne()
-        self.brain.receive_ne(self.locus_coeruleus.get_ne_level())
+        if not self.ablation.get("locus_coeruleus"):
+            self.locus_coeruleus.observe_reward(R)
+            self.locus_coeruleus.release_ne()
+            self.brain.receive_ne(self.locus_coeruleus.get_ne_level())
 
         self.stamina.grow()
         self.clock.tick(tokens_heard=len(parent_tokens))

@@ -261,6 +261,10 @@ class VocalTract:
         """
         return COUPLED_PLACE_TO_MANNER.get(place, 0)
 
+    def force_decouple(self):
+        """アブレーション用：最初から独立制御にする。"""
+        self.coupled = False
+
     def is_coupled(self):
         return self.coupled
 
