@@ -64,11 +64,12 @@ learning:
   max_output_length: 50       # 太郎が1回に産出できる最大文字数（体力が優先）
   grad_clip: 1.0              # 勾配の上限（学習の暴走防止）
 
-# --- 成功条件（A2変更）---
+# --- 成功条件（B-3変更：N/M方式）---
 success:
-  partial_threshold: 0.8      # 基本達成：edit distance類似度がこの値以上
-  partial_streak: 10          # 基本達成：何回連続で閾値を超えるか
-  exact_streak: 10            # 完全達成：完全一致の連続回数（参考記録）
+  partial_threshold: 0.8   # 基本達成：類似度がこの値以上を「成功」とみなす
+  partial_window: 10        # 直近N回を記録する
+  partial_success: 8        # N回中M回以上成功で目標達成（10連続より現実的）
+  exact_streak: 10          # 完全一致の連続回数（参考記録）
 
 # --- シミュレーション内時間 ---
 sim_clock:
