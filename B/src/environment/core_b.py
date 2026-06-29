@@ -16,7 +16,7 @@ from taro.brain import (Vocabulary, TaroBrain, Cerebellum, BrocasArea, TaroLearn
                         compute_imitation_reward, compute_prediction_reward,
                         Dopamine, Habituation, LocusCoeruleus, compute_total_reward,
                         Homeostasis)
-from taro.body import VocalTract, Stomach, Lungs, InternalState
+from taro.body import VocalTract, Stomach, Lungs, InternalState, BloodVessel
 from sim_clock import SimClock
 from archive import Archive
 from logger import Logger
@@ -82,6 +82,12 @@ class TaroEnvironmentB:
             growth_rate=float(lnc.get("growth_rate", 0.0001)),
             max_capacity=float(lnc.get("max_capacity", 15.0)),
         )
+        bv = self.cfg.get("blood_vessel", {})
+        self.blood_vessel = BloodVessel(
+            initial_glucose=float(bv.get("initial_glucose", 0.5)),
+            consumption_rate=float(bv.get("consumption_rate", 0.0001)),
+        )
+        self._glucose_efficiency = float(bv.get("glucose_efficiency", 3.0))
         self.internal_state = InternalState()
         self.vocal_tract = VocalTract()
 
@@ -117,11 +123,16 @@ class TaroEnvironmentB:
         """
         身体シミュレーションを進める。親がいなくても毎tick呼ばれる。
         軽い計算のみ。
+
+        胃の消化量 → 血管（血糖値）→ 空腹感 の順に更新。
         """
         for _ in range(elapsed_seconds):
             self.stomach.tick()
+            self.blood_vessel.receive_glucose(
+                self.stomach.get_last_absorption() * self._glucose_efficiency)
+            self.blood_vessel.tick()
             self.lungs.tick()
-            self.internal_state.update_from_body(self.stomach, self.lungs)
+            self.internal_state.update_from_body(self.stomach, self.blood_vessel, self.lungs)
             self.internal_state.tick()
         self.stomach.grow()
         self.lungs.grow()
@@ -191,7 +202,7 @@ class TaroEnvironmentB:
         r_habit = self.habituation.compute_penalty(taro_text)
 
         # 身体更新（世話の効果を反映してからarousalを取る）
-        self.internal_state.update_from_body(self.stomach)
+        self.internal_state.update_from_body(self.stomach, self.blood_vessel)
         current_arousal = self.internal_state.get_arousal()
         r_home = self.homeostasis.compute_reward(current_arousal)
 
@@ -255,6 +266,73 @@ class TaroEnvironmentB:
             "exact_streak": self.exact_streak,
             "exact_match": exact_match,
             "partial_match": partial_match,
+        }
+
+    def self_babble(self):
+        """
+        太郎が一人で喃語を出す。脳の現在の分布からサンプリング。
+
+        【人間模倣】
+        0〜6か月の乳児は穏やかな時間に発話計画なしで自発的に声を出す。
+        脳が「今出しやすい音」を自由に試す → 自分の声を聞く → 強化される。
+        発話計画（ブローカ野）なし = 喃語期のパス（cortex.pyのgenerate）。
+        """
+        body_state = self._body_state_tensor()
+
+        # 発声（喃語）：speech_plan=None で喃語期のパスを使う
+        ne_level = self.locus_coeruleus.get_ne_level()
+        generated, log_probs, _ = self.brain.generate(
+            hidden=self._hidden,
+            max_length=self.max_output_length,
+            eos_idx=2,
+            stamina=self.lungs.get(),
+            vocal_tract=self.vocal_tract,
+            ne_level=ne_level,
+            cerebellum=self.cerebellum,
+            speech_plan=None,
+        )
+
+        babble_text = self.vocab.decode(generated)
+        self.lungs.consume(len(generated))
+
+        if not generated:
+            return {"taro": "", "R": 0.0, "r_pred": 0.0, "r_home": 0.0}
+
+        # 自分の声を聞く → 知覚学習（自己強化）
+        full_tokens = [1] + generated + [2]
+        p_loss, pred_probs = self.learner.learn_perception(full_tokens, body_state=body_state)
+
+        listen_input = torch.tensor([full_tokens], device=self.device)
+        with torch.no_grad():
+            _, h = self.brain.forward_hidden(listen_input, body_state=body_state)
+        self._hidden = h
+
+        # 報酬（喃語 → 模倣・社会報酬なし。予測と恒常性のみ）
+        r_pred = compute_prediction_reward(pred_probs, generated)
+        r_habit = self.habituation.compute_penalty(babble_text)
+
+        self.internal_state.update_from_body(self.stomach, self.blood_vessel)
+        current_arousal = self.internal_state.get_arousal()
+        r_home = self.homeostasis.compute_reward(current_arousal)
+
+        R = compute_total_reward(0.0, r_pred, 0.0, r_habit, self.weights)
+        R = max(0.0, R + self.weights.get("w_home", 0.3) * r_home)
+        delta = self.dopamine.compute_rpe(R)
+
+        a_loss = self.learner.learn_action(log_probs, delta)
+        self.learner.update(p_loss, a_loss)
+
+        self.locus_coeruleus.observe_reward(R)
+        self.locus_coeruleus.release_ne()
+        self.brain.receive_ne(self.locus_coeruleus.get_ne_level())
+
+        self.clock.tick(tokens_heard=0)
+
+        return {
+            "taro": babble_text,
+            "r_pred": r_pred,
+            "r_home": r_home,
+            "R": R,
         }
 
     def save(self, tag="manual"):

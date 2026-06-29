@@ -42,14 +42,17 @@ class InternalState:
         self._cry_remaining = 0      # 残りの泣き時間（秒）
         self.cry_intensity = 0.0     # 泣きの強さ（0〜1）
 
-    def update_from_body(self, stomach, lungs=None):
-        """胃などの臓器から状態を受け取る。"""
-        self.hunger = stomach.get_hunger()
+    def update_from_body(self, stomach, blood_vessel=None, lungs=None):
+        """臓器から状態を受け取る。blood_vessel があれば血糖値から空腹を計算。"""
+        if blood_vessel is not None:
+            self.hunger = blood_vessel.get_hunger()
+        else:
+            self.hunger = stomach.get_hunger()
 
         # 胃→眠さの接続：消化吸収されると眠くなる
         absorption = stomach.get_last_absorption()
-        if absorption > 0.01:
-            self.sleepiness = min(1.0, self.sleepiness + absorption * 2.0)
+        if absorption > 0.001:
+            self.sleepiness = min(1.0, self.sleepiness + absorption * 0.5)
 
     def get_arousal(self):
         """
@@ -135,6 +138,15 @@ class InternalState:
                 self.crying = True
                 self._cry_remaining = random.randint(60, 600)
                 self.cry_intensity = min(1.0, arousal * 1.2)
+
+    def can_babble(self):
+        """
+        喃語が出せる状態かどうか。
+        起きていて泣いていなければよい。人間の乳児は空腹でも軽く声を出す。
+        """
+        if self.sleeping or self.drowsy:
+            return False
+        return not self.crying
 
     def is_sleeping(self):
         return self.sleeping

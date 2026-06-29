@@ -45,8 +45,11 @@ class ParentSchedule:
         self.respond_delay_max_absent = r.get("delay_max_absent", 90)
 
         fd = cfg.get("feeding", {})
-        self.feed_interval = fd.get("interval", 600)
         self.feed_amount = fd.get("amount", 0.6)
+
+        bb = cfg.get("babble", {})
+        self.babble_interval = bb.get("interval", 45)
+        self.babble_arousal_threshold = bb.get("arousal_threshold", 0.3)
 
         sp = cfg.get("speech", {})
         self.speak_with_care = sp.get("enabled", True)
@@ -63,9 +66,6 @@ class ParentSchedule:
     def update_presence(self, sim_seconds):
         if sim_seconds % self.check_interval == 0:
             self.present = random.random() < self.presence_prob
-
-    def should_feed(self, sim_seconds):
-        return sim_seconds - self.last_feed_time >= self.feed_interval
 
     def on_cry(self, sim_seconds):
         if not self.present:
@@ -107,13 +107,16 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
     cry_count = 0
     feed_count = 0
     speak_count = 0
+    babble_count = 0
     sim_seconds = 0
+    last_babble_time = -schedule.babble_interval
 
     if verbose:
         print(f"=== 目標B シミュレーション開始 ===")
         print(f"最大: {max_sim_seconds}秒 ({max_sim_seconds//60}分)")
         print(f"親在確率: {schedule.presence_prob} 反応確率: {schedule.respond_prob}")
-        print(f"食事間隔: {schedule.feed_interval}秒 食事量: {schedule.feed_amount}")
+        print(f"食事量: {schedule.feed_amount}（泣いて空腹のときのみ授乳）")
+        print(f"喃語間隔: {schedule.babble_interval}秒 つらさ閾値: {schedule.babble_arousal_threshold}")
         print()
 
     sleep_count = 0
@@ -172,7 +175,6 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
             care_type = "feed" if env.internal_state.hunger > 0.5 else "comfort"
             if care_type == "feed":
                 env.feed(schedule.feed_amount)
-                schedule.last_feed_time = sim_seconds
                 feed_count += 1
             env.comfort(care_type)
 
@@ -185,42 +187,41 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
                           f"親「{word}」→ 太郎「{result['taro']}」| "
                           f"模倣={result['r_imit']:.2f} hunger={result['hunger']:.2f}")
 
-        # 定期的な授乳（泣かなくても）。授乳中でなければ開始
-        if (schedule.present and schedule.should_feed(sim_seconds)
-                and not env.stomach.is_feeding()):
-            env.feed(schedule.feed_amount)
-            schedule.last_feed_time = sim_seconds
-            feed_count += 1
-            word = schedule.choose_word("feed")
-            if word:
-                result = env.step(word, r_social=0.3)
-                speak_count += 1
-                if verbose:
-                    print(f"  t={sim_seconds:5d}s ({fmt_time(sim_seconds)}) | "
-                          f"授乳開始「{word}」→ 太郎「{result['taro']}」| "
-                          f"hunger={result['hunger']:.2f}")
+        # 自発的な喃語（穏やかな時間の練習）
+        if (sim_seconds - last_babble_time >= schedule.babble_interval
+                and env.internal_state.can_babble()):
+            result = env.self_babble()
+            babble_count += 1
+            last_babble_time = sim_seconds
+            if verbose and babble_count <= 5:
+                print(f"  t={sim_seconds:5d}s ({fmt_time(sim_seconds)}) | "
+                      f"喃語「{result['taro']}」| "
+                      f"arousal={env.internal_state.get_arousal():.2f}")
 
         if verbose and sim_seconds % schedule.log_interval == 0:
             state = "寝" if env.internal_state.is_sleeping() else \
                     "うとうと" if env.internal_state.is_drowsy() else \
                     "泣き" if env.internal_state.is_crying() else "起きてる"
             feeding = " 授乳中" if env.stomach.is_feeding() else ""
+            bg = env.blood_vessel.get_blood_glucose()
             print(f"  --- {fmt_time(sim_seconds)} | "
-                  f"泣き{cry_count} 食事{feed_count} 発話{speak_count} 睡眠{sleep_count} | "
-                  f"hunger={env.internal_state.hunger:.2f} "
+                  f"泣き{cry_count} 食事{feed_count} 発話{speak_count} 喃語{babble_count} 睡眠{sleep_count} | "
+                  f"hunger={env.internal_state.hunger:.2f} 血糖={bg:.2f} "
                   f"つらさ={env.internal_state.get_arousal():.2f} | "
                   f"{state}{feeding}")
 
     if verbose:
         print(f"\n=== シミュレーション完了 ===")
         print(f"時間: {sim_seconds}秒 ({sim_seconds//60}分 = {sim_seconds/3600:.1f}時間)")
-        print(f"泣き: {cry_count}回  食事: {feed_count}回  発話: {speak_count}回  睡眠: {sleep_count}回")
+        print(f"泣き: {cry_count}回  食事: {feed_count}回  発話: {speak_count}回  "
+              f"喃語: {babble_count}回  睡眠: {sleep_count}回")
 
     return {
         "sim_seconds": sim_seconds,
         "cry_count": cry_count,
         "feed_count": feed_count,
         "speak_count": speak_count,
+        "babble_count": babble_count,
         "sleep_count": sleep_count,
         "env": env,
     }

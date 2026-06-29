@@ -5,3 +5,4 @@ from taro.body.stamina import Stamina
 from taro.body.stomach import Stomach
 from taro.body.lungs import Lungs
 from taro.body.internal_state import InternalState
+from taro.body.blood_vessel import BloodVessel
