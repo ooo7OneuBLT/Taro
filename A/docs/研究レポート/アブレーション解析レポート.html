@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>太郎プロジェクト — アブレーション解析レポート</title>
+<style>
+:root {
+  --bg: #fafaf8;
+  --card: #ffffff;
+  --text: #1a1a1a;
+  --text2: #555;
+  --text3: #888;
+  --border: #e0e0d8;
+  --accent: #2a78d6;
+  --green: #1baf7a;
+  --amber: #eda100;
+  --red: #d03b3b;
+  --red-bg: #fde8e8;
+  --green-bg: #e6f7ee;
+  --blue-bg: #e6f1fb;
+  --amber-bg: #fef6e0;
+  --purple: #6c5ce7;
+  --purple-bg: #eeedfe;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #141413;
+    --card: #1e1e1c;
+    --text: #f0f0ea;
+    --text2: #b0b0a8;
+    --text3: #787870;
+    --border: #333330;
+    --red-bg: #3a1a1a;
+    --green-bg: #0f2a1c;
+    --blue-bg: #102840;
+    --amber-bg: #2a2010;
+    --purple-bg: #201e3a;
+  }
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.7;
+  padding: 0 1rem;
+}
+.container {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 2rem 0 4rem;
+}
+h1 {
+  font-size: clamp(1.4rem, 4vw, 1.8rem);
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+.subtitle {
+  color: var(--text2);
+  font-size: 0.9rem;
+  margin-bottom: 2rem;
+}
+h2 {
+  font-size: 1.2rem;
+  font-weight: 600;
+  margin: 2.5rem 0 1rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 2px solid var(--border);
+}
+h3 {
+  font-size: 1.05rem;
+  font-weight: 600;
+  margin: 1.5rem 0 0.5rem;
+}
+p, li { font-size: 0.95rem; color: var(--text2); }
+ul { padding-left: 1.2rem; }
+li { margin-bottom: 0.3rem; }
+
+.kpi-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  margin-bottom: 1.5rem;
+}
+.kpi {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem;
+}
+.kpi-label { font-size: 0.75rem; color: var(--text3); text-transform: uppercase; letter-spacing: 0.04em; }
+.kpi-value { font-size: 1.6rem; font-weight: 600; margin-top: 2px; }
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.25rem;
+  margin-bottom: 1rem;
+}
+
+/* 比較テーブル */
+.table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin: 1rem 0;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  min-width: 600px;
+}
+th, td {
+  padding: 0.6rem 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+th {
+  font-weight: 600;
+  font-size: 0.78rem;
+  color: var(--text3);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+td { color: var(--text2); }
+tr:last-child td { border-bottom: none; }
+.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* バッジ */
+.badge {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 6px;
+}
+.badge-ok { background: var(--green-bg); color: var(--green); }
+.badge-ng { background: var(--red-bg); color: var(--red); }
+.badge-info { background: var(--blue-bg); color: var(--accent); }
+.badge-warn { background: var(--amber-bg); color: #b07800; }
+
+/* 影響度バー */
+.impact-bar-wrap { width: 100%; max-width: 120px; }
+.impact-bar-bg {
+  width: 100%;
+  height: 8px;
+  background: var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.impact-bar {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.5s;
+}
+
+/* チャートコンテナ */
+.chart-container {
+  position: relative;
+  width: 100%;
+  margin: 1rem 0;
+}
+.chart-container canvas {
+  width: 100% !important;
+}
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  font-size: 0.78rem;
+  color: var(--text3);
+  margin-bottom: 0.5rem;
+}
+.chart-legend span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.chart-legend i {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  display: inline-block;
+}
+
+/* 結論カード */
+.conclusion-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin: 1rem 0;
+}
+@media (max-width: 600px) {
+  .conclusion-grid { grid-template-columns: 1fr; }
+}
+.conclusion-card {
+  border-radius: 10px;
+  padding: 1rem 1.1rem;
+  border-left: 4px solid;
+}
+.conclusion-card.critical {
+  background: var(--red-bg);
+  border-color: var(--red);
+}
+.conclusion-card.safe {
+  background: var(--green-bg);
+  border-color: var(--green);
+}
+.conclusion-card.neutral {
+  background: var(--blue-bg);
+  border-color: var(--accent);
+}
+.conclusion-card h4 {
+  font-size: 0.9rem;
+  font-weight: 600;
+  margin-bottom: 0.3rem;
+}
+.conclusion-card p {
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+/* フッタ */
+.footer {
+  margin-top: 3rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.78rem;
+  color: var(--text3);
+}
+
+/* Stage達成タイムライン */
+.timeline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0.5rem 0;
+}
+.timeline-item {
+  border-radius: 8px;
+  padding: 0.5rem 0.8rem;
+  font-size: 0.8rem;
+  min-width: 100px;
+  text-align: center;
+}
+.timeline-item .t-label { font-weight: 600; font-size: 0.78rem; }
+.timeline-item .t-value { font-size: 0.85rem; margin-top: 2px; }
+
+/* 転移テスト詳細 */
+.transfer-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 10px;
+  margin: 1rem 0;
+}
+.transfer-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.8rem 1rem;
+  font-size: 0.85rem;
+}
+.transfer-card .phrase {
+  font-weight: 600;
+  font-size: 0.95rem;
+  margin-bottom: 0.3rem;
+}
+.transfer-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 2px 0;
+  color: var(--text2);
+  font-size: 0.8rem;
+}
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>アブレーション解析レポート</h1>
+<p class="subtitle">太郎プロジェクト A2-12 — 各脳部品の貢献度を損傷実験で検証 / 2026-06-27</p>
+
+<!-- KPI -->
+<div class="kpi-row">
+  <div class="kpi">
+    <div class="kpi-label">実験条件数</div>
+    <div class="kpi-value">7</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">各条件ターン数</div>
+    <div class="kpi-value">2,000</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">Stage4 達成</div>
+    <div class="kpi-value">5 / 7</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">総実行時間</div>
+    <div class="kpi-value">238秒</div>
+  </div>
+</div>
+
+<!-- ===== 実験概要 ===== -->
+<h2>1. 実験概要</h2>
+<div class="card">
+  <h3>手法：アブレーション（損傷実験）</h3>
+  <p>神経科学では、脳の一部を損傷させて「何ができなくなるか」を観察することで、その部品の機能を明らかにする。太郎でも同じ手法を適用し、6つの部品を1つずつ無効化して、ベースライン（全部品あり）との差を測定した。</p>
+  <h3 style="margin-top:1rem;">条件</h3>
+  <ul>
+    <li><strong>full</strong> — 全部品あり（ベースライン）</li>
+    <li><strong>no_brocas</strong> — ブローカ野なし：発話計画をせず1文字ずつ生成（≒ブローカ失語）</li>
+    <li><strong>no_cerebellum</strong> — 小脳なし：運動記憶（順モデル・逆モデル）なし（≒運動失調）</li>
+    <li><strong>no_lc</strong> — 青斑核なし：NE固定（0.5）、探索/搾取の自動調整なし（≒覚醒障害）</li>
+    <li><strong>no_habit</strong> — 馴化なし：飽きのペナルティなし（≒馴化障害）</li>
+    <li><strong>no_social</strong> — 社会的報酬なし：親が笑わない（≒ネグレクト環境）</li>
+    <li><strong>no_coupling</strong> — 連動制御なし：最初から全パラメータ独立（≒早熟な発達）</li>
+  </ul>
+  <h3 style="margin-top:1rem;">共通設定</h3>
+  <ul>
+    <li>訓練フレーズ：まま, ばば, ないない, まんま, ねんね</li>
+    <li>転移テストフレーズ：ぱぱ, だだ, いやいや, ぶぶ, にに</li>
+    <li>最大ターン数：2,000</li>
+    <li>Stage 4達成条件：模倣スコア≥0.8が10回連続</li>
+  </ul>
+</div>
+
+<!-- ===== 結果一覧 ===== -->
+<h2>2. 結果一覧</h2>
+
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr>
+      <th>条件</th>
+      <th>Stage 4</th>
+      <th class="num">模倣スコア<br><small>(最終100t平均)</small></th>
+      <th class="num">完全一致率<br><small>(最終100t)</small></th>
+      <th class="num">転移テスト<br><small>(平均模倣)</small></th>
+      <th>影響度</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>full（基準）</strong></td>
+      <td><span class="badge badge-ok">t1012</span></td>
+      <td class="num">0.939</td>
+      <td class="num">58.0%</td>
+      <td class="num">0.940</td>
+      <td><div class="impact-bar-wrap"><div class="impact-bar-bg"><div class="impact-bar" style="width:0%;background:var(--text3);"></div></div></div></td>
+    </tr>
+    <tr style="background:var(--red-bg);">
+      <td><strong>no_brocas</strong></td>
+      <td><span class="badge badge-ng">未達成</span></td>
+      <td class="num">0.264</td>
+      <td class="num">0.0%</td>
+      <td class="num">0.234</td>
+      <td><div class="impact-bar-wrap"><div class="impact-bar-bg"><div class="impact-bar" style="width:100%;background:var(--red);"></div></div></div></td>
+    </tr>
+    <tr>
+      <td><strong>no_cerebellum</strong></td>
+      <td><span class="badge badge-ok">t1008</span></td>
+      <td class="num">0.958</td>
+      <td class="num">67.0%</td>
+      <td class="num">0.953</td>
+      <td><div class="impact-bar-wrap"><div class="impact-bar-bg"><div class="impact-bar" style="width:5%;background:var(--green);"></div></div></div></td>
+    </tr>
+    <tr style="background:var(--red-bg);">
+      <td><strong>no_lc</strong></td>
+      <td><span class="badge badge-ng">未達成</span></td>
+      <td class="num">0.708</td>
+      <td class="num">7.0%</td>
+      <td class="num">0.723</td>
+      <td><div class="impact-bar-wrap"><div class="impact-bar-bg"><div class="impact-bar" style="width:70%;background:var(--red);"></div></div></div></td>
+    </tr>
+    <tr>
+      <td><strong>no_habit</strong></td>
+      <td><span class="badge badge-ok">t1022</span></td>
+      <td class="num">0.934</td>
+      <td class="num">60.0%</td>
+      <td class="num">0.907</td>
+      <td><div class="impact-bar-wrap"><div class="impact-bar-bg"><div class="impact-bar" style="width:8%;background:#eda100;"></div></div></div></td>
+    </tr>
+    <tr>
+      <td><strong>no_social</strong></td>
+      <td><span class="badge badge-ok">t1009</span></td>
+      <td class="num">0.948</td>
+      <td class="num">67.0%</td>
+      <td class="num">0.940</td>
+      <td><div class="impact-bar-wrap"><div class="impact-bar-bg"><div class="impact-bar" style="width:3%;background:var(--green);"></div></div></div></td>
+    </tr>
+    <tr>
+      <td><strong>no_coupling</strong></td>
+      <td><span class="badge badge-ok">t1027</span></td>
+      <td class="num">0.937</td>
+      <td class="num">62.0%</td>
+      <td class="num">0.938</td>
+      <td><div class="impact-bar-wrap"><div class="impact-bar-bg"><div class="impact-bar" style="width:5%;background:#eda100;"></div></div></div></td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<!-- ===== チャート ===== -->
+<h2>3. 指標比較グラフ</h2>
+
+<div class="chart-legend">
+  <span><i style="background:#2a78d6;"></i>模倣スコア</span>
+  <span><i style="background:#1baf7a;"></i>完全一致率</span>
+  <span><i style="background:#eda100;"></i>転移テスト</span>
+</div>
+<div class="chart-container" style="height:300px;">
+  <canvas id="barChart"></canvas>
+</div>
+
+<h3>学習曲線の推移（模倣スコア 100ターン区間平均）</h3>
+<div class="chart-legend">
+  <span><i style="background:#2a78d6;"></i>full</span>
+  <span><i style="background:#d03b3b;"></i>no_brocas</span>
+  <span><i style="background:#6c5ce7;"></i>no_lc</span>
+  <span><i style="background:#1baf7a;"></i>no_cerebellum</span>
+  <span><i style="background:#888;"></i>その他</span>
+</div>
+<div class="chart-container" style="height:300px;">
+  <canvas id="lineChart"></canvas>
+</div>
+
+<!-- ===== Stage達成 ===== -->
+<h2>4. 発達段階の達成タイミング</h2>
+<p>Stage 1〜3は全条件で達成。Stage 4（オウム返し）の達成有無が決定的な差。</p>
+
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr>
+      <th>条件</th>
+      <th class="num">Stage 1<br><small>クーイング</small></th>
+      <th class="num">Stage 2<br><small>声の探索</small></th>
+      <th class="num">Stage 3<br><small>規準喃語</small></th>
+      <th class="num">Stage 4<br><small>オウム返し</small></th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td>full</td><td class="num">t20</td><td class="num">t62</td><td class="num">t159</td><td class="num"><span class="badge badge-ok">t1012</span></td></tr>
+    <tr><td>no_brocas</td><td class="num">t20</td><td class="num">t182</td><td class="num">t80</td><td class="num"><span class="badge badge-ng">---</span></td></tr>
+    <tr><td>no_cerebellum</td><td class="num">t20</td><td class="num">t62</td><td class="num">t127</td><td class="num"><span class="badge badge-ok">t1008</span></td></tr>
+    <tr><td>no_lc</td><td class="num">t20</td><td class="num">t62</td><td class="num">t90</td><td class="num"><span class="badge badge-ng">---</span></td></tr>
+    <tr><td>no_habit</td><td class="num">t20</td><td class="num">t62</td><td class="num">t193</td><td class="num"><span class="badge badge-ok">t1022</span></td></tr>
+    <tr><td>no_social</td><td class="num">t20</td><td class="num">t62</td><td class="num">t83</td><td class="num"><span class="badge badge-ok">t1009</span></td></tr>
+    <tr><td>no_coupling</td><td class="num">t20</td><td class="num">t62</td><td class="num">t188</td><td class="num"><span class="badge badge-ok">t1027</span></td></tr>
+  </tbody>
+</table>
+</div>
+
+<!-- ===== 転移テスト ===== -->
+<h2>5. 転移テスト詳細</h2>
+<p>未見フレーズ5種に対する模倣スコアと完全一致率（各5回試行）。</p>
+
+<div class="transfer-grid">
+  <!-- ぱぱ -->
+  <div class="transfer-card">
+    <div class="phrase">「ぱぱ」</div>
+    <div class="transfer-row"><span>full</span><span>模倣 0.85 / 一致 40%</span></div>
+    <div class="transfer-row"><span>no_brocas</span><span>模倣 0.20 / 一致 0%</span></div>
+    <div class="transfer-row"><span>no_cerebellum</span><span>模倣 0.95 / 一致 80%</span></div>
+    <div class="transfer-row"><span>no_lc</span><span>模倣 0.60 / 一致 40%</span></div>
+    <div class="transfer-row"><span>no_habit</span><span>模倣 0.88 / 一致 60%</span></div>
+    <div class="transfer-row"><span>no_social</span><span>模倣 1.00 / 一致 100%</span></div>
+    <div class="transfer-row"><span>no_coupling</span><span>模倣 0.95 / 一致 80%</span></div>
+  </div>
+  <!-- だだ -->
+  <div class="transfer-card">
+    <div class="phrase">「だだ」</div>
+    <div class="transfer-row"><span>full</span><span>模倣 0.95 / 一致 60%</span></div>
+    <div class="transfer-row"><span>no_brocas</span><span>模倣 0.20 / 一致 0%</span></div>
+    <div class="transfer-row"><span>no_cerebellum</span><span>模倣 0.95 / 一致 80%</span></div>
+    <div class="transfer-row"><span>no_lc</span><span>模倣 0.75 / 一致 0%</span></div>
+    <div class="transfer-row"><span>no_habit</span><span>模倣 0.93 / 一致 60%</span></div>
+    <div class="transfer-row"><span>no_social</span><span>模倣 0.83 / 一致 20%</span></div>
+    <div class="transfer-row"><span>no_coupling</span><span>模倣 0.90 / 一致 40%</span></div>
+  </div>
+  <!-- いやいや -->
+  <div class="transfer-card">
+    <div class="phrase">「いやいや」</div>
+    <div class="transfer-row"><span>full</span><span>模倣 0.98 / 一致 80%</span></div>
+    <div class="transfer-row"><span>no_brocas</span><span>模倣 0.33 / 一致 0%</span></div>
+    <div class="transfer-row"><span>no_cerebellum</span><span>模倣 0.96 / 一致 60%</span></div>
+    <div class="transfer-row"><span>no_lc</span><span>模倣 0.84 / 一致 20%</span></div>
+    <div class="transfer-row"><span>no_habit</span><span>模倣 0.89 / 一致 40%</span></div>
+    <div class="transfer-row"><span>no_social</span><span>模倣 0.98 / 一致 80%</span></div>
+    <div class="transfer-row"><span>no_coupling</span><span>模倣 0.94 / 一致 60%</span></div>
+  </div>
+  <!-- ぶぶ -->
+  <div class="transfer-card">
+    <div class="phrase">「ぶぶ」</div>
+    <div class="transfer-row"><span>full</span><span>模倣 0.98 / 一致 80%</span></div>
+    <div class="transfer-row"><span>no_brocas</span><span>模倣 0.31 / 一致 0%</span></div>
+    <div class="transfer-row"><span>no_cerebellum</span><span>模倣 0.95 / 一致 80%</span></div>
+    <div class="transfer-row"><span>no_lc</span><span>模倣 0.70 / 一致 0%</span></div>
+    <div class="transfer-row"><span>no_habit</span><span>模倣 0.90 / 一致 20%</span></div>
+    <div class="transfer-row"><span>no_social</span><span>模倣 0.98 / 一致 80%</span></div>
+    <div class="transfer-row"><span>no_coupling</span><span>模倣 0.95 / 一致 80%</span></div>
+  </div>
+  <!-- にに -->
+  <div class="transfer-card">
+    <div class="phrase">「にに」</div>
+    <div class="transfer-row"><span>full</span><span>模倣 0.95 / 一致 80%</span></div>
+    <div class="transfer-row"><span>no_brocas</span><span>模倣 0.13 / 一致 0%</span></div>
+    <div class="transfer-row"><span>no_cerebellum</span><span>模倣 0.95 / 一致 80%</span></div>
+    <div class="transfer-row"><span>no_lc</span><span>模倣 0.73 / 一致 20%</span></div>
+    <div class="transfer-row"><span>no_habit</span><span>模倣 0.95 / 一致 80%</span></div>
+    <div class="transfer-row"><span>no_social</span><span>模倣 0.93 / 一致 80%</span></div>
+    <div class="transfer-row"><span>no_coupling</span><span>模倣 0.95 / 一致 80%</span></div>
+  </div>
+</div>
+
+<!-- ===== 考察 ===== -->
+<h2>6. 考察</h2>
+
+<h3>致命的な部品（なくすとStage 4に到達できない）</h3>
+<div class="conclusion-grid">
+  <div class="conclusion-card critical">
+    <h4>ブローカ野（発話計画）</h4>
+    <p>模倣スコア 0.939→0.264（-72%）。完全一致率は0%に壊滅。発話計画なしの1文字ずつ生成では、フレーズ長の制御も音の順序制御もできない。人間のブローカ失語（理解はできるが流暢に話せない）と一致する症状。<strong>太郎の最重要部品。</strong></p>
+  </div>
+  <div class="conclusion-card critical">
+    <h4>青斑核（NE探索制御）</h4>
+    <p>模倣スコア 0.939→0.708（-25%）。完全一致率は58%→7%。NE固定（0.5）では報酬が低下しても探索レベルが上がらず、固着から回復できない。人間の覚醒障害・注意障害と類似のパターン。<strong>学習の安定性に必須。</strong></p>
+  </div>
+</div>
+
+<h3>冗長な部品（なくても現時点では影響が小さい）</h3>
+<div class="conclusion-grid">
+  <div class="conclusion-card safe">
+    <h4>小脳（運動記憶）</h4>
+    <p>むしろ微妙に性能向上（完全一致58→67%）。発達途中の逆モデルが不正確な運動指令を出し、かえって足を引っ張っている可能性がある。ただしフレーズが複雑化する将来のStageでは重要になる可能性が高い。</p>
+  </div>
+  <div class="conclusion-card safe">
+    <h4>馴化（飽き）</h4>
+    <p>ほぼ同等の性能。青斑核が「報酬が低いと探索を増やす」機能で、馴化の「同じ出力に飽きる」機能を代替していると考えられる。機能的冗長性（ロバストネス）を提供している。</p>
+  </div>
+  <div class="conclusion-card safe">
+    <h4>社会的報酬（親の笑顔）</h4>
+    <p>ほぼ同等。模倣報酬（w=0.5）と予測報酬（w=0.3）だけで十分学習できている。社会的報酬の重み（w=0.2）が小さいことが一因。ただしこれは「ネグレクトでも学べる」ことを意味するわけではなく、現在のタスク（オウム返し）が単純すぎる可能性がある。</p>
+  </div>
+  <div class="conclusion-card neutral">
+    <h4>連動制御（Frame-Content）</h4>
+    <p>ほぼ同等。2,000ターンの時点では差が出にくい。連動制御の主な効果は初期の探索空間削減であり、Stage 0-1の学習速度に影響するが、長期的な到達点には影響しない可能性がある。</p>
+  </div>
+</div>
+
+<h3>全体的な知見</h3>
+<div class="card">
+  <ul>
+    <li><strong>「計画して話す」が最も重要</strong> — 1文字ずつの逐次生成ではオウム返しは不可能。フレーズ全体を先に計画し、バッファから順次実行する仕組み（ブローカ野/GODIVAモデル）が決定的。</li>
+    <li><strong>「困ったら探索を増やす」が2番目に重要</strong> — 固定の探索率では局所解に陥る。報酬の変動に応じて探索/搾取を動的に切り替える仕組み（青斑核/NE系）が安定学習に不可欠。</li>
+    <li><strong>冗長な部品にも意義がある</strong> — 馴化と青斑核は機能的に重複しており、一方が壊れてももう一方が補償する。この冗長性は人間の脳の設計原則と一致する。</li>
+    <li><strong>タスクの複雑さに依存</strong> — 現在のタスク（2〜4モーラのオウム返し）は単純であり、小脳・社会的報酬・連動制御の貢献が見えにくい。より長いフレーズ、より多様な音韻構造、意味理解を求めるタスクでは結果が変わる可能性がある。</li>
+  </ul>
+</div>
+
+<!-- ===== 手法 ===== -->
+<h2>7. 実験手法</h2>
+<div class="card">
+  <p>各条件は独立したTaroEnvironmentインスタンスで実行。同じ乱数シード制御は行っていない（確率的な変動あり）。</p>
+  <ul>
+    <li>ベースライン：A2-11の全部品有効構成</li>
+    <li>無効化方法：<code>TaroEnvironment(ablation={"部品名": True})</code></li>
+    <li>各条件で同一のフレーズセット・同一のターン数を使用</li>
+    <li>転移テスト：訓練後に未見フレーズを各5回試行</li>
+    <li>実行環境：RTX 3060 Ti, Python 3.12, PyTorch 2.11</li>
+  </ul>
+  <p style="margin-top:0.5rem;">実験スクリプト：<code>src/environment/ablation.py</code></p>
+  <p>詳細データ：<code>logs/ablation_results.json</code></p>
+</div>
+
+<!-- ===== 次のステップ ===== -->
+<h2>8. 次のステップ</h2>
+<div class="card">
+  <ul>
+    <li><strong>複数回試行の平均</strong> — 乱数による変動を排除するため、各条件を3〜5回繰り返して平均・標準偏差を取る</li>
+    <li><strong>より長いターン数</strong> — 5,000〜10,000ターンで小脳や社会的報酬の長期的効果を検証</li>
+    <li><strong>複合アブレーション</strong> — 2つ以上の部品を同時に無効化して相互作用を調べる（例：馴化＋青斑核を同時に除去）</li>
+    <li><strong>段階的な難易度</strong> — より長いフレーズ、より多様な音韻で小脳・連動制御の貢献を引き出す</li>
+  </ul>
+</div>
+
+<div class="footer">
+  太郎プロジェクト — アブレーション解析レポート（A2-12）<br>
+  生成日：2026年6月27日 / 実験スクリプト：ablation.py / データ：ablation_results.json
+</div>
+
+</div><!-- /container -->
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script>
+const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+const gridC = isDark ? '#333330' : '#e1e0d9';
+const tickC = isDark ? '#888' : '#888';
+
+// --- 棒グラフ ---
+new Chart(document.getElementById('barChart'), {
+  type: 'bar',
+  data: {
+    labels: ['full\n(基準)', 'no_brocas\n(ブローカ野)', 'no_cerebellum\n(小脳)', 'no_lc\n(青斑核)', 'no_habit\n(馴化)', 'no_social\n(社会的報酬)', 'no_coupling\n(連動制御)'],
+    datasets: [
+      { label: '模倣スコア', data: [0.939,0.264,0.958,0.708,0.934,0.948,0.937], backgroundColor: '#2a78d6', borderRadius: 4, barPercentage: 0.75, categoryPercentage: 0.7 },
+      { label: '完全一致率', data: [0.58,0.0,0.67,0.07,0.60,0.67,0.62], backgroundColor: '#1baf7a', borderRadius: 4, barPercentage: 0.75, categoryPercentage: 0.7 },
+      { label: '転移テスト', data: [0.940,0.234,0.953,0.723,0.907,0.940,0.938], backgroundColor: '#eda100', borderRadius: 4, barPercentage: 0.75, categoryPercentage: 0.7 },
+    ]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+    scales: {
+      x: { grid: { display: false }, ticks: { color: tickC, font: { size: 10 }, maxRotation: 0 } },
+      y: { min: 0, max: 1, grid: { color: gridC }, ticks: { color: tickC, callback: v => Math.round(v*100)+'%' }, border: { display: false } }
+    }
+  }
+});
+
+// --- 折れ線グラフ ---
+const turns = Array.from({length:20}, (_,i) => (i+1)*100);
+const full_r = [0.555,0.694,0.784,0.893,0.902,0.897,0.885,0.889,0.895,0.894,0.911,0.935,0.949,0.934,0.958,0.927,0.921,0.938,0.939,0.939];
+const brocas_r = [0.31,0.426,0.334,0.296,0.228,0.247,0.226,0.234,0.229,0.212,0.215,0.199,0.198,0.219,0.211,0.266,0.271,0.281,0.288,0.264];
+const lc_r = [0.549,0.655,0.666,0.655,0.641,0.634,0.624,0.616,0.646,0.682,0.681,0.681,0.697,0.69,0.648,0.69,0.699,0.698,0.68,0.708];
+const cereb_r = [0.551,0.702,0.794,0.876,0.9,0.875,0.9,0.884,0.889,0.888,0.941,0.95,0.934,0.945,0.92,0.928,0.944,0.938,0.923,0.958];
+const habit_r = [0.574,0.726,0.813,0.896,0.895,0.889,0.904,0.883,0.887,0.897,0.938,0.938,0.942,0.946,0.935,0.939,0.937,0.934,0.931,0.934];
+const social_r = [0.537,0.673,0.75,0.843,0.883,0.877,0.899,0.874,0.877,0.886,0.928,0.929,0.945,0.933,0.94,0.944,0.922,0.947,0.94,0.948];
+const coupling_r = [0.574,0.759,0.86,0.891,0.895,0.877,0.896,0.875,0.868,0.887,0.938,0.938,0.94,0.934,0.928,0.936,0.947,0.932,0.941,0.937];
+
+new Chart(document.getElementById('lineChart'), {
+  type: 'line',
+  data: {
+    labels: turns,
+    datasets: [
+      { label: 'full', data: full_r, borderColor: '#2a78d6', backgroundColor: 'rgba(42,120,214,0.08)', borderWidth: 2.5, pointRadius: 0, fill: true },
+      { label: 'no_brocas', data: brocas_r, borderColor: '#d03b3b', borderWidth: 2, pointRadius: 0, borderDash: [6,3] },
+      { label: 'no_lc', data: lc_r, borderColor: '#6c5ce7', borderWidth: 2, pointRadius: 0, borderDash: [6,3] },
+      { label: 'no_cerebellum', data: cereb_r, borderColor: '#1baf7a', borderWidth: 1.5, pointRadius: 0 },
+      { label: 'no_habit', data: habit_r, borderColor: '#aaa', borderWidth: 1, pointRadius: 0 },
+      { label: 'no_social', data: social_r, borderColor: '#bbb', borderWidth: 1, pointRadius: 0 },
+      { label: 'no_coupling', data: coupling_r, borderColor: '#ccc', borderWidth: 1, pointRadius: 0 },
+    ]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+    scales: {
+      x: { title: { display: true, text: 'ターン', color: tickC, font: { size: 11 } }, grid: { display: false }, ticks: { color: tickC, font: { size: 10 }, maxTicksLimit: 10 } },
+      y: { min: 0, max: 1, title: { display: true, text: '模倣スコア', color: tickC, font: { size: 11 } }, grid: { color: gridC }, ticks: { color: tickC, callback: v => v.toFixed(1) }, border: { display: false } }
+    },
+    interaction: { mode: 'index', intersect: false }
+  }
+});
+</script>
+</body>
+</html>
