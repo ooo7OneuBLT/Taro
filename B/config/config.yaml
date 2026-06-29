@@ -1,0 +1,78 @@
+# ============================================================
+# 太郎 A2 設定ファイル
+# ============================================================
+
+# --- 太郎の脳 ---
+brain:
+  type: gru                # 再帰ネットの種類（gru / lstm）
+  embedding_dim: 64        # 文字埋め込みの次元数
+  hidden_dim: 128          # 隠れ状態の次元数
+  num_layers: 1            # 再帰層の数
+  initial_temperature: 2.0 # 出力のゆらぎ（τ）。高い＝喃語、低い＝安定
+  min_temperature: 0.3     # τの下限（完全に0にはしない＝探索を残す）
+  temperature_alpha: 0.02  # τの適応減衰係数（A2変更：成功体験に連動）
+  device: auto             # auto=CUDA使えればCUDA、なければCPU
+
+# --- 発声体力（A2追加）【人間模倣・身体的制約】---
+stamina:
+  initial: 3               # 初期体力（最大何文字出せるか）
+  growth_rate: 0.001        # 1ターンごとの体力上限の成長量（ゆっくり成長）
+  max_stamina: 15           # 体力の上限（成長しきった大人）
+
+# --- 声道の成熟スケジュール（A2-3追加）【人間模倣・身体的制約】---
+# sim時間（秒）でロックが外れる。学習とは無関係（身体の成熟）。
+vocal_maturation:
+  stage1_time: 300    # 5分：唇＋鼻音・破裂音が使える（規準喃語）
+  stage2_time: 900    # 15分：舌（歯茎以降）も使える
+  stage3_time: 1500   # 25分：声帯の有声/無声制御
+  decouple_time: 1200 # 20分：調音点と調音法が独立制御可能になる（A2-6）
+
+# --- 報酬の重み ---
+reward:
+  w_imit: 0.5    # 模倣衝動の重み
+  w_pred: 0.3    # 予測成功の重み
+  w_social: 0.2  # 社会的報酬（親の笑顔）の重み
+  w_home: 0.3    # 恒常性報酬の重み（B追加）
+
+# --- 身体シミュレーション（B追加）---
+stomach:
+  capacity: 1.0           # 胃の容量
+  digestion_rate: 0.0003  # 1tickの消化率（中身に比例）。約2-3時間で空腹に
+  initial_contents: 0.7   # 生まれた時の胃の中身
+  growth_rate: 0.0001     # 胃の容量の成長速度
+
+lungs:
+  capacity: 3.0          # 肺活量（モーラ数相当）
+  air_per_mora: 1.0      # 1モーラに必要な空気量
+  recovery_rate: 0.5     # 1tickの空気回復量
+  growth_rate: 0.0001    # 肺活量の成長速度
+  max_capacity: 15.0     # 肺活量の上限
+
+# --- 学習 ---
+learning:
+  lr: 0.01                    # 学習率（A2-2で引き上げ：声道の探索空間が広いため）
+  baseline_momentum: 0.95     # baseline（報酬予測）の移動平均の慣性
+  max_output_length: 50       # 太郎が1回に産出できる最大文字数（体力が優先）
+  grad_clip: 1.0              # 勾配の上限（学習の暴走防止）
+
+# --- 成功条件（A2変更）---
+success:
+  partial_threshold: 0.8      # 基本達成：edit distance類似度がこの値以上
+  partial_streak: 10          # 基本達成：何回連続で閾値を超えるか
+  exact_streak: 10            # 完全達成：完全一致の連続回数（参考記録）
+
+# --- シミュレーション内時間 ---
+sim_clock:
+  seconds_per_turn: 5.0       # 1回のやり取り＝sim時間で何秒
+  log_interval_turns: 10      # 何ターンごとにログ出力するか
+
+# --- 成長アーカイブ ---
+archive:
+  snapshot_interval_turns: 100  # 何ターンごとに自動スナップショット
+  archive_dir: archive          # 保存先ディレクトリ
+
+# --- ログ ---
+logging:
+  log_dir: logs
+  log_every_turn: true         # 毎ターンのJSONLログ
+  plot_interval_turns: 50      # 何ターンごとに学習曲線PNGを更新
