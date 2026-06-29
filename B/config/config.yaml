@@ -37,8 +37,8 @@ reward:
 # --- 身体シミュレーション（B追加）---
 stomach:
   capacity: 1.0           # 胃の容量
-  digestion_rate: 0.0003  # 1tickの消化率（中身に比例）。約2-3時間で空腹に
-  initial_contents: 0.7   # 生まれた時の胃の中身
+  digestion_rate: 0.001   # 1tickの消化率（中身に比例）。約50分で空になる（B-3調整）
+  initial_contents: 0.5   # 生まれた時の胃の中身（やや空腹で誕生）
   growth_rate: 0.0001     # 胃の容量の成長速度
 
 lungs:
@@ -47,6 +47,15 @@ lungs:
   recovery_rate: 0.5     # 1tickの空気回復量
   growth_rate: 0.0001    # 肺活量の成長速度
   max_capacity: 15.0     # 肺活量の上限
+
+# --- 血管（B-3追加）【人間模倣・身体シミュレーション】---
+# 胃の消化 → 血糖値（上昇） → 体の細胞が消費（下降） → hunger
+# 「胃が空 = 空腹MAX」を解消するバッファ。血管の詳細は将来。
+blood_vessel:
+  initial_glucose: 0.5       # 生まれた時の血糖値（0〜1）。やや空腹で誕生
+  consumption_rate: 0.0001   # 1秒あたりの消費量。血糖値1.0→0.5まで約83分
+  glucose_efficiency: 3.0    # 胃の吸収量→血糖値への変換効率。消化した栄養素の
+                             # 血中濃度の比率。3.0=1単位の消化が血糖3単位相当に
 
 # --- 学習 ---
 learning:
