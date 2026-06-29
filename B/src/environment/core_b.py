@@ -12,6 +12,7 @@
 import os
 import torch
 import yaml
+from collections import deque
 from taro.brain import (Vocabulary, TaroBrain, Cerebellum, BrocasArea, TaroLearner,
                         compute_imitation_reward, compute_prediction_reward,
                         Dopamine, Habituation, LocusCoeruleus, compute_total_reward,
@@ -104,11 +105,12 @@ class TaroEnvironmentB:
         self.brocas_area = BrocasArea()
         self.homeostasis = Homeostasis()
 
-        # 成功判定
+        # 成功判定（N回中M回方式）
         succ = self.cfg.get("success", {})
         self.partial_threshold = succ.get("partial_threshold", 0.8)
-        self.partial_streak_target = succ.get("partial_streak", 10)
-        self.partial_streak = 0
+        _window = succ.get("partial_window", 10)   # 直近N回を見る
+        self.partial_success_target = succ.get("partial_success", 8)  # N回中M回で成功
+        self.partial_window = deque(maxlen=_window)
         self.exact_streak = 0
 
         # 隠れ状態の保持（イベント間で維持）
@@ -231,13 +233,13 @@ class TaroEnvironmentB:
 
         self.clock.tick(tokens_heard=len(parent_tokens))
 
-        # 成功判定
+        # 成功判定（N/M方式）
         exact_match = taro_text == parent_text
         partial_match = r_imit >= self.partial_threshold
-        if partial_match:
-            self.partial_streak += 1
-        else:
-            self.partial_streak = 0
+        self.partial_window.append(1 if partial_match else 0)
+        partial_score = sum(self.partial_window)
+        partial_goal = (len(self.partial_window) == self.partial_window.maxlen
+                        and partial_score >= self.partial_success_target)
         if exact_match:
             self.exact_streak += 1
         else:
@@ -262,7 +264,8 @@ class TaroEnvironmentB:
             "arousal": self.internal_state.get_arousal(),
             "sleepiness": self.internal_state.sleepiness,
             "stamina": self.lungs.get(),
-            "partial_streak": self.partial_streak,
+            "partial_score": partial_score,
+            "partial_goal": partial_goal,
             "exact_streak": self.exact_streak,
             "exact_match": exact_match,
             "partial_match": partial_match,
