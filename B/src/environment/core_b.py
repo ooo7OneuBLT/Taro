@@ -17,7 +17,7 @@ from taro.brain import (Vocabulary, TaroBrain, Cerebellum, BrocasArea, TaroLearn
                         compute_imitation_reward, compute_prediction_reward,
                         Dopamine, Habituation, LocusCoeruleus, compute_total_reward,
                         Homeostasis)
-from taro.body import VocalTract, Stomach, Lungs, InternalState, BloodVessel
+from taro.body import VocalTract, Stomach, Lungs, InternalState, BloodVessel, Adenosine
 from sim_clock import SimClock
 from archive import Archive
 from logger import Logger
@@ -89,6 +89,11 @@ class TaroEnvironmentB:
             consumption_rate=float(bv.get("consumption_rate", 0.0001)),
         )
         self._glucose_efficiency = float(bv.get("glucose_efficiency", 3.0))
+        ad = self.cfg.get("adenosine", {})
+        self.adenosine = Adenosine(
+            production_rate=float(ad.get("production_rate", 0.0001)),
+            clearance_rate=float(ad.get("clearance_rate", 0.0003)),
+        )
         self.internal_state = InternalState()
         self.vocal_tract = VocalTract()
 
@@ -135,7 +140,7 @@ class TaroEnvironmentB:
             self.blood_vessel.tick()
             self.lungs.tick()
             self.internal_state.update_from_body(self.stomach, self.blood_vessel, self.lungs)
-            self.internal_state.tick()
+            self.internal_state.tick(adenosine=self.adenosine)
         self.stomach.grow()
         self.lungs.grow()
 

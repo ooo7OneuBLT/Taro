@@ -49,10 +49,7 @@ class InternalState:
         else:
             self.hunger = stomach.get_hunger()
 
-        # 胃→眠さの接続：消化吸収されると眠くなる
-        absorption = stomach.get_last_absorption()
-        if absorption > 0.001:
-            self.sleepiness = min(1.0, self.sleepiness + absorption * 0.5)
+        # 食後の眠気（副交感神経系）はB-4以降で adenosine.py に接続予定
 
     def get_arousal(self):
         """
@@ -74,7 +71,6 @@ class InternalState:
             self.discomfort = max(0.0, self.discomfort - 0.5)
         elif care_type == "hold":
             self.discomfort = max(0.0, self.discomfort - 0.3)
-            self.sleepiness = max(0.0, self.sleepiness - 0.1)
 
         # 世話されたら泣き止む（すぐにではなく、強さが徐々に下がる）
         if self.crying:
@@ -83,21 +79,24 @@ class InternalState:
                 self.crying = False
                 self._cry_remaining = 0
 
-    def tick(self, elapsed_seconds=1):
+    def tick(self, adenosine=None, elapsed_seconds=1):
         """
         1秒分の時間経過。
 
-        睡眠中 → 残り時間を減らす。何も起きない
-        うとうと中 → 残り時間を減らす。時間が来たら寝る
-        起きている → 眠さ・不快が上がる。泣きの判定・継続
+        睡眠中    → アデノシンを除去。残り時間を減らす。
+        うとうと中 → アデノシン基礎産生のみ（覚醒はしているが脳活動は最低限）
+        起きている → arousal に比例してアデノシン産生。不快が蓄積。泣きの管理。
         """
         # --- 寝ている ---
         if self.sleeping:
             self._sleep_remaining -= elapsed_seconds
             if self._sleep_remaining <= 0:
                 self.sleeping = False
-                self.sleepiness = 0.0
+                # sleepiness はアデノシンが管理するためここでリセットしない
                 self.discomfort = max(0.0, self.discomfort - 0.3)
+            if adenosine:
+                adenosine.tick_sleep()
+                self.sleepiness = adenosine.get()
             return
 
         # --- うとうと中（寝入りかけ） ---
@@ -108,11 +107,18 @@ class InternalState:
                 self.drowsy = False
                 self.sleeping = True
                 self._sleep_remaining = random.randint(7200, 14400)
+            if adenosine:
+                adenosine.tick_awake(arousal=0.0)  # うとうと中は基礎産生のみ
+                self.sleepiness = adenosine.get()
             return
 
         # --- 起きている ---
-        # 眠さが上がる（約1時間で0→0.9）
-        self.sleepiness = min(1.0, self.sleepiness + 0.00025 * elapsed_seconds)
+        if adenosine:
+            adenosine.tick_awake(self.get_arousal())
+            self.sleepiness = adenosine.get()
+        else:
+            # adenosine なしで呼ばれた場合のフォールバック
+            self.sleepiness = min(1.0, self.sleepiness + 0.00025 * elapsed_seconds)
         # 不快が上がる（ゆっくり。おむつ濡れなどの蓄積）
         self.discomfort = min(1.0, self.discomfort + 0.00005 * elapsed_seconds)
 
