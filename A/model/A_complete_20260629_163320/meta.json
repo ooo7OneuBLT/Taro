@@ -1,0 +1,64 @@
+{
+  "tag": "A_complete",
+  "timestamp": "20260629_163320",
+  "sim_clock": {
+    "seconds_per_turn": 5.0,
+    "total_seconds": 5300.0,
+    "total_turns": 1060,
+    "total_tokens_heard": 2958
+  },
+  "dopamine_baseline": 0.42054784553927627,
+  "temperature": 2.0,
+  "config": {
+    "brain": {
+      "type": "gru",
+      "embedding_dim": 64,
+      "hidden_dim": 128,
+      "num_layers": 1,
+      "initial_temperature": 2.0,
+      "min_temperature": 0.3,
+      "temperature_alpha": 0.02,
+      "device": "auto"
+    },
+    "stamina": {
+      "initial": 3,
+      "growth_rate": 0.001,
+      "max_stamina": 15
+    },
+    "vocal_maturation": {
+      "stage1_time": 300,
+      "stage2_time": 900,
+      "stage3_time": 1500,
+      "decouple_time": 1200
+    },
+    "reward": {
+      "w_imit": 0.5,
+      "w_pred": 0.3,
+      "w_social": 0.2
+    },
+    "learning": {
+      "lr": 0.01,
+      "baseline_momentum": 0.95,
+      "max_output_length": 50,
+      "grad_clip": 1.0
+    },
+    "success": {
+      "partial_threshold": 0.8,
+      "partial_streak": 10,
+      "exact_streak": 10
+    },
+    "sim_clock": {
+      "seconds_per_turn": 5.0,
+      "log_interval_turns": 10
+    },
+    "archive": {
+      "snapshot_interval_turns": 100,
+      "archive_dir": "archive"
+    },
+    "logging": {
+      "log_dir": "logs",
+      "log_every_turn": true,
+      "plot_interval_turns": 50
+    }
+  }
+}
