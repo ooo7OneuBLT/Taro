@@ -64,6 +64,14 @@ learning:
   max_output_length: 50       # 太郎が1回に産出できる最大文字数（体力が優先）
   grad_clip: 1.0              # 勾配の上限（学習の暴走防止）
 
+# --- アデノシン（B-4追加）【人間模倣・睡眠圧のメカニズム】---
+# 覚醒中に脳活動→アデノシン産生→蓄積→眠さ。睡眠中に除去（Borbély, 1982）。
+# sleepiness = adenosine.level（係数で直接いじらず、このノードを通す）
+adenosine:
+  production_rate: 0.0001   # 覚醒中の基礎産生量（/秒）。arousal=0のとき
+                             # arousal=0.5なら実効 0.00015/s → 約1.7時間で閾値到達
+  clearance_rate: 0.0003    # 睡眠中の除去率（/秒）。4時間睡眠で level≒0.01 まで低下
+
 # --- 成功条件（B-3変更：N/M方式）---
 success:
   partial_threshold: 0.8   # 基本達成：類似度がこの値以上を「成功」とみなす
