@@ -126,12 +126,13 @@ class TaroEnvironmentB:
         vec = self.internal_state.get_state_vector()
         return torch.tensor(vec, dtype=torch.float32, device=self.device)
 
-    def tick_body(self, elapsed_seconds=1):
+    def tick_body(self, elapsed_seconds=1, sim_seconds=0):
         """
         身体シミュレーションを進める。親がいなくても毎tick呼ばれる。
         軽い計算のみ。
 
         胃の消化量 → 血管（血糖値）→ 空腹感 の順に更新。
+        声道の成熟もここで進める（時間が経てば成熟する。親との会話は無関係）。
         """
         for _ in range(elapsed_seconds):
             self.stomach.tick()
@@ -143,6 +144,14 @@ class TaroEnvironmentB:
             self.internal_state.tick(adenosine=self.adenosine)
         self.stomach.grow()
         self.lungs.grow()
+        vm = self.cfg.get("vocal_maturation", {})
+        self.vocal_tract.update_stage(
+            sim_seconds,
+            vm.get("stage1_time", 300),
+            vm.get("stage2_time", 900),
+            vm.get("stage3_time", 1500),
+            decouple_time=vm.get("decouple_time", 1200),
+        )
 
     def check_cry(self):
         """
@@ -220,16 +229,6 @@ class TaroEnvironmentB:
         # 学習
         a_loss = self.learner.learn_action(log_probs, delta)
         pl, al = self.learner.update(p_loss, a_loss)
-
-        # 声道の成熟
-        vm = self.cfg.get("vocal_maturation", {})
-        self.vocal_tract.update_stage(
-            self.clock.total_seconds,
-            vm.get("stage1_time", 300),
-            vm.get("stage2_time", 900),
-            vm.get("stage3_time", 1500),
-            decouple_time=vm.get("decouple_time", 1200),
-        )
 
         # 青斑核
         self.locus_coeruleus.observe_reward(R)

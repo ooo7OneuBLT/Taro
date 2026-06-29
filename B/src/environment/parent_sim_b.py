@@ -134,7 +134,7 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
         # 寝ている間は時間を飛ばす
         if env.internal_state.is_sleeping():
             skip = env.internal_state._sleep_remaining
-            env.tick_body(elapsed_seconds=skip)
+            env.tick_body(elapsed_seconds=skip, sim_seconds=sim_seconds + skip)
             sim_seconds += skip
             sleep_count += 1
             if verbose:
@@ -149,12 +149,12 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
                 print(f"  t={sim_seconds:5d}s ({fmt_time(sim_seconds)}) | うとうと...")
             was_drowsy = True
             skip = env.internal_state._drowsy_remaining
-            env.tick_body(elapsed_seconds=skip)
+            env.tick_body(elapsed_seconds=skip, sim_seconds=sim_seconds + skip)
             sim_seconds += skip
             was_drowsy = False
             continue
 
-        env.tick_body(elapsed_seconds=1)
+        env.tick_body(elapsed_seconds=1, sim_seconds=sim_seconds + 1)
         sim_seconds += 1
         schedule.update_presence(sim_seconds)
 
@@ -182,6 +182,13 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
             if word:
                 result = env.step(word, r_social=0.5)
                 speak_count += 1
+                env.logger.log_turn(
+                    result["turn"], sim_seconds, word, result["taro"],
+                    result["r_imit"], result["r_pred"], result["r_social"],
+                    result["R"], result["delta"], result["p_loss"], result["a_loss"],
+                    env.brain.temperature,
+                    context=care_type, hunger=result["hunger"],
+                )
                 if verbose and (speak_count <= 30 or speak_count % 50 == 0):
                     print(f"  t={sim_seconds:5d}s ({fmt_time(sim_seconds)}) | "
                           f"親「{word}」→ 太郎「{result['taro']}」| "
@@ -193,6 +200,15 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
             result = env.self_babble()
             babble_count += 1
             last_babble_time = sim_seconds
+            env.logger.log_babble(
+                sim_seconds,
+                result["taro"],
+                env.internal_state.hunger,
+                env.internal_state.get_arousal(),
+                result["R"],
+                result["r_pred"],
+                result["r_home"],
+            )
             if verbose and babble_count <= 5:
                 print(f"  t={sim_seconds:5d}s ({fmt_time(sim_seconds)}) | "
                       f"喃語「{result['taro']}」| "
