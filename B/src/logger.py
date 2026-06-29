@@ -34,6 +34,7 @@ class Logger:
                     "turn", "sim_seconds", "parent", "taro",
                     "r_imit", "r_pred", "r_social", "R", "delta",
                     "p_loss", "a_loss", "temperature",
+                    "context", "hunger",
                 ])
 
         self.history = {
@@ -57,8 +58,9 @@ class Logger:
 
     def log_turn(self, turn, sim_seconds, parent_text, taro_text,
                  r_imit, r_pred, r_social, R, delta,
-                 p_loss, a_loss, temperature):
-        """1ターン分のデータを記録する。"""
+                 p_loss, a_loss, temperature,
+                 context="", hunger=0.0):
+        """1ターン分のデータを記録する。context は care_type（feed/comfort/hold）。"""
         record = {
             "turn": turn,
             "sim_seconds": sim_seconds,
@@ -73,6 +75,8 @@ class Logger:
             "p_loss": round(p_loss, 4),
             "a_loss": round(a_loss, 4),
             "temperature": round(temperature, 4),
+            "context": context,
+            "hunger": round(hunger, 4),
         }
 
         with open(self.jsonl_path, "a", encoding="utf-8") as f:
@@ -85,6 +89,7 @@ class Logger:
                 record["r_imit"], record["r_pred"], record["r_social"],
                 record["R"], record["delta"],
                 record["p_loss"], record["a_loss"], record["temperature"],
+                context, record["hunger"],
             ])
 
         self.history["turns"].append(turn)
@@ -94,6 +99,21 @@ class Logger:
         self.history["delta"].append(delta)
         self.history["p_loss"].append(p_loss)
         self.history["temperature"].append(temperature)
+
+    def log_babble(self, sim_seconds, taro_text, hunger, arousal, R, r_pred, r_home):
+        """喃語1回分を babble.jsonl に記録する。"""
+        record = {
+            "sim_seconds": sim_seconds,
+            "taro": taro_text,
+            "hunger": round(hunger, 4),
+            "arousal": round(arousal, 4),
+            "R": round(R, 4),
+            "r_pred": round(r_pred, 4),
+            "r_home": round(r_home, 4),
+        }
+        path = os.path.join(self.log_dir, "babble.jsonl")
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
     def plot_learning_curve(self):
         """学習曲線をPNGで出力する。"""
