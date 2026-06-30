@@ -207,6 +207,7 @@ class TaroEnvironmentB:
             ne_level=ne_level,
             cerebellum=self.cerebellum,
             speech_plan=self.brocas_area,
+            body_state=body_state,
         )
         taro_text = self.vocab.decode(generated)
 
@@ -302,6 +303,7 @@ class TaroEnvironmentB:
             ne_level=ne_level,
             cerebellum=self.cerebellum,
             speech_plan=None,
+            body_state=body_state,
         )
 
         babble_text = self.vocab.decode(generated)

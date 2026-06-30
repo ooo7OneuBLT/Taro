@@ -117,7 +117,7 @@ class TaroBrain(nn.Module):
 
     def generate(self, hidden, max_length, eos_idx, stamina=None,
                  vocal_tract=None, ne_level=0.5, cerebellum=None,
-                 speech_plan=None):
+                 speech_plan=None, body_state=None):
         """
         太郎の番に文字を産出する。
 
@@ -134,16 +134,16 @@ class TaroBrain(nn.Module):
         generated = []
         log_probs_all = []
         bos = torch.tensor([[1]], device=self._device())
-        out, hidden = self.forward_hidden(bos, hidden)
+        out, hidden = self.forward_hidden(bos, hidden, body_state=body_state)
 
         allowed_place, allowed_manner, allowed_voicing, allowed_vowel = vocal_tract.get_allowed()
 
         # 発話計画がある場合：計画に沿って実行（計画が終わったら止まる）
         # 発話計画がない場合：体力分だけ探索的に発声（喃語）
         if speech_plan is not None and speech_plan.has_next():
-            max_chars = min(speech_plan.get_plan_length(), int(stamina) if stamina else max_length)
+            max_chars = min(speech_plan.get_plan_length(), int(stamina) if stamina is not None else max_length)
         else:
-            max_chars = min(max_length, int(stamina) if stamina else max_length)
+            max_chars = min(max_length, int(stamina) if stamina is not None else max_length)
             speech_plan = None
 
         for _ in range(max_chars):
@@ -216,7 +216,7 @@ class TaroBrain(nn.Module):
 
             # 自己聴取
             token_input = torch.tensor([[token_idx]], device=self._device())
-            out, hidden = self.forward_hidden(token_input, hidden)
+            out, hidden = self.forward_hidden(token_input, hidden, body_state=body_state)
 
         return generated, log_probs_all, hidden
 
