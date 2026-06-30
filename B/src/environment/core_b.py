@@ -16,7 +16,7 @@ from collections import deque
 from taro.brain import (Vocabulary, TaroBrain, Cerebellum, BrocasArea, TaroLearner,
                         compute_imitation_reward, compute_prediction_reward,
                         Dopamine, Habituation, LocusCoeruleus, compute_total_reward,
-                        Homeostasis)
+                        Homeostasis, Hippocampus)
 from taro.body import VocalTract, Stomach, Lungs, InternalState, BloodVessel, Adenosine
 from sim_clock import SimClock
 from archive import Archive
@@ -109,6 +109,8 @@ class TaroEnvironmentB:
         self.cerebellum = Cerebellum()
         self.brocas_area = BrocasArea()
         self.homeostasis = Homeostasis()
+        hc = self.cfg.get("hippocampus", {})
+        self.hippocampus = Hippocampus(max_capacity=hc.get("max_capacity", 500))
 
         # 成功判定（N回中M回方式）
         succ = self.cfg.get("success", {})
@@ -281,14 +283,17 @@ class TaroEnvironmentB:
 
         【人間模倣】
         0〜6か月の乳児は穏やかな時間に発話計画なしで自発的に声を出す。
-        脳が「今出しやすい音」を自由に試す → 自分の声を聞く → 強化される。
+        脳が「今出しやすい音」を自由に試す → 海馬に記録 → 睡眠時に皮質へ定着。
         発話計画（ブローカ野）なし = 喃語期のパス（cortex.pyのgenerate）。
+
+        B-5変更：喃語のたびに学習しない。経験を海馬に蓄積し、
+        睡眠移行時に consolidate() でまとめて大脳皮質を更新する。
         """
         body_state = self._body_state_tensor()
 
         # 発声（喃語）：speech_plan=None で喃語期のパスを使う
         ne_level = self.locus_coeruleus.get_ne_level()
-        generated, log_probs, _ = self.brain.generate(
+        generated, _log_probs, _ = self.brain.generate(
             hidden=self._hidden,
             max_length=self.max_output_length,
             eos_idx=2,
@@ -305,31 +310,23 @@ class TaroEnvironmentB:
         if not generated:
             return {"taro": "", "R": 0.0, "r_pred": 0.0, "r_home": 0.0}
 
-        # 自分の声を聞く → 知覚学習（自己強化）
+        # 自分の声を聞く（hidden state更新）。学習はしない。
         full_tokens = [1] + generated + [2]
-        p_loss, pred_probs = self.learner.learn_perception(full_tokens, body_state=body_state)
-
         listen_input = torch.tensor([full_tokens], device=self.device)
         with torch.no_grad():
             _, h = self.brain.forward_hidden(listen_input, body_state=body_state)
         self._hidden = h
 
-        # 報酬（喃語 → 模倣・社会報酬なし。予測と恒常性のみ）
-        r_pred = compute_prediction_reward(pred_probs, generated)
-        r_habit = self.habituation.compute_penalty(babble_text)
+        # 海馬に経験を記録（睡眠移行時にまとめて定着）
+        self.hippocampus.record_episode(full_tokens, body_state)
 
+        # 恒常性報酬の参照値のみ計算（ログ用）
         self.internal_state.update_from_body(self.stomach, self.blood_vessel)
         current_arousal = self.internal_state.get_arousal()
         r_home = self.homeostasis.compute_reward(current_arousal)
+        R = max(0.0, self.weights.get("w_home", 0.3) * r_home)
 
-        R = compute_total_reward(0.0, r_pred, 0.0, r_habit, self.weights)
-        R = max(0.0, R + self.weights.get("w_home", 0.3) * r_home)
-        delta = self.dopamine.compute_rpe(R)
-
-        a_loss = self.learner.learn_action(log_probs, delta)
-        self.learner.update(p_loss, a_loss)
-
-        self.locus_coeruleus.observe_reward(R)
+        self.locus_coeruleus.observe_reward(0.0)
         self.locus_coeruleus.release_ne()
         self.brain.receive_ne(self.locus_coeruleus.get_ne_level())
 
@@ -337,10 +334,37 @@ class TaroEnvironmentB:
 
         return {
             "taro": babble_text,
-            "r_pred": r_pred,
+            "r_pred": 0.0,  # 睡眠時に計算するため未算出
             "r_home": r_home,
             "R": R,
         }
+
+    def consolidate(self):
+        """
+        睡眠移行時に海馬の経験を大脳皮質（GRU）に定着させる。
+
+        【人間模倣】NREM睡眠中のシャープ波リプル（海馬→皮質の一方向転送）を模倣。
+        覚醒中に蓄積した喃語経験を順に再生し、予測モデルを強化する。
+        行動学習（政策勾配）はここでは行わない（知覚定着のみ）。
+        """
+        experiences = self.hippocampus.replay()
+        if not experiences:
+            self.hippocampus.clear()
+            return {"consolidated": 0, "p_loss": 0.0}
+
+        total_p_loss = None
+        for full_tokens, body_state in experiences:
+            p_loss, _ = self.learner.learn_perception(full_tokens, body_state=body_state)
+            if isinstance(p_loss, torch.Tensor):
+                total_p_loss = p_loss if total_p_loss is None else total_p_loss + p_loss
+
+        if total_p_loss is not None:
+            pl, _ = self.learner.update(total_p_loss / len(experiences), 0.0)
+        else:
+            pl = 0.0
+
+        self.hippocampus.clear()
+        return {"consolidated": len(experiences), "p_loss": pl}
 
     def save(self, tag="manual"):
         return self.archive.save_snapshot(

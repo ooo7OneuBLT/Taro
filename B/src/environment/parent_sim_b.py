@@ -108,8 +108,10 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
     feed_count = 0
     speak_count = 0
     babble_count = 0
+    consolidate_count = 0
     sim_seconds = 0
     last_babble_time = -schedule.babble_interval
+    prev_sleeping = False
 
     if verbose:
         print(f"=== 目標B シミュレーション開始 ===")
@@ -131,8 +133,21 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
         return f"{h:02d}:{m:02d}:{sec:02d}"
 
     while sim_seconds < max_sim_seconds:
+        currently_sleeping = env.internal_state.is_sleeping()
+
+        # 睡眠移行：海馬リプレイ → 大脳皮質へ定着
+        if currently_sleeping and not prev_sleeping:
+            consol = env.consolidate()
+            consolidate_count += consol["consolidated"]
+            if verbose and consol["consolidated"] > 0:
+                print(f"  t={sim_seconds:5d}s ({fmt_time(sim_seconds)}) | "
+                      f"海馬→皮質: {consol['consolidated']}件定着 "
+                      f"loss={consol['p_loss']:.4f}")
+
+        prev_sleeping = currently_sleeping
+
         # 寝ている間は時間を飛ばす
-        if env.internal_state.is_sleeping():
+        if currently_sleeping:
             skip = env.internal_state._sleep_remaining
             env.tick_body(elapsed_seconds=skip, sim_seconds=sim_seconds + skip)
             sim_seconds += skip
@@ -230,7 +245,7 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
         print(f"\n=== シミュレーション完了 ===")
         print(f"時間: {sim_seconds}秒 ({sim_seconds//60}分 = {sim_seconds/3600:.1f}時間)")
         print(f"泣き: {cry_count}回  食事: {feed_count}回  発話: {speak_count}回  "
-              f"喃語: {babble_count}回  睡眠: {sleep_count}回")
+              f"喃語: {babble_count}回  睡眠: {sleep_count}回  定着: {consolidate_count}件")
 
     return {
         "sim_seconds": sim_seconds,
@@ -239,6 +254,7 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
         "speak_count": speak_count,
         "babble_count": babble_count,
         "sleep_count": sleep_count,
+        "consolidate_count": consolidate_count,
         "env": env,
     }
 
