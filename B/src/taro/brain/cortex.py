@@ -166,7 +166,6 @@ class TaroBrain(nn.Module):
         for t in range(max_chars):
             h_last = out[0, -1]
             pl, ml, vl, vol = self.forward_articulation(h_last)
-            log_prob = torch.tensor(0.0, device=self._device())
 
             if is_babble and t > 0 and max_chars > 0:
                 breath_pressure = t / max_chars
@@ -185,34 +184,24 @@ class TaroBrain(nn.Module):
                     s_place = s_place if s_place in allowed_place else allowed_place[0]
                     s_voicing = s_voicing if s_voicing in allowed_voicing else allowed_voicing[0]
                     s_vowel = s_vowel if s_vowel in allowed_vowel else allowed_vowel[0]
-                    lp = self._log_prob_of(pl, s_place, allowed_place)
-                    log_prob = log_prob + lp
                 else:
                     # 計画にあるが口の動きが不明 → 大脳皮質が自力で選ぶ
-                    s_place, lp = self._choose_param(pl, allowed_place)
-                    log_prob = log_prob + lp
+                    s_place, _ = self._choose_param(pl, allowed_place)
                     if vocal_tract.is_coupled():
                         s_manner = vocal_tract.get_manner_for_place(s_place)
                     else:
-                        s_manner, lp = self._choose_param(ml, allowed_manner)
-                        log_prob = log_prob + lp
-                    s_voicing, lp = self._choose_param(vl, allowed_voicing)
-                    log_prob = log_prob + lp
-                    s_vowel, lp = self._choose_param(vol, allowed_vowel)
-                    log_prob = log_prob + lp
+                        s_manner, _ = self._choose_param(ml, allowed_manner)
+                    s_voicing, _ = self._choose_param(vl, allowed_voicing)
+                    s_vowel, _ = self._choose_param(vol, allowed_vowel)
             else:
                 # 発話計画なし（喃語期）→ 大脳皮質が自力で選ぶ
-                s_place, lp = self._choose_param(pl, allowed_place)
-                log_prob = log_prob + lp
+                s_place, _ = self._choose_param(pl, allowed_place)
                 if vocal_tract.is_coupled():
                     s_manner = vocal_tract.get_manner_for_place(s_place)
                 else:
-                    s_manner, lp = self._choose_param(ml, allowed_manner)
-                    log_prob = log_prob + lp
-                s_voicing, lp = self._choose_param(vl, allowed_voicing)
-                log_prob = log_prob + lp
-                s_vowel, lp = self._choose_param(vol, allowed_vowel)
-                log_prob = log_prob + lp
+                    s_manner, _ = self._choose_param(ml, allowed_manner)
+                s_voicing, _ = self._choose_param(vl, allowed_voicing)
+                s_vowel, _ = self._choose_param(vol, allowed_vowel)
 
             # NEによる局所ノイズ注入（計画があっても少しずれる＝人間的な誤差）
             s_place = self._apply_ne_noise(s_place, ne_level, allowed_place)
@@ -222,6 +211,17 @@ class TaroBrain(nn.Module):
                 s_manner = vocal_tract.get_manner_for_place(s_place)
             s_voicing = self._apply_ne_noise(s_voicing, ne_level, allowed_voicing)
             s_vowel = self._apply_ne_noise(s_vowel, ne_level, allowed_vowel)
+
+            # B2-6修正：log_probは実際に発声される（ノイズ適用後の）値から
+            # 計算する。従来はノイズ適用前の意図した値のlog_probを学習対象に
+            # していたため、太郎が「ま」を選んでも直後のNEノイズで「み」に
+            # ずれた場合、その「み」への報酬・信用割り当てが「ま」の
+            # log_probに誤って結びついていた（学習とその評価対象がズレていた）。
+            log_prob = self._log_prob_of(pl, s_place, allowed_place)
+            if not vocal_tract.is_coupled():
+                log_prob = log_prob + self._log_prob_of(ml, s_manner, allowed_manner)
+            log_prob = log_prob + self._log_prob_of(vl, s_voicing, allowed_voicing)
+            log_prob = log_prob + self._log_prob_of(vol, s_vowel, allowed_vowel)
 
             char = vocal_tract.speak(s_place, s_manner, s_voicing, s_vowel)
 
