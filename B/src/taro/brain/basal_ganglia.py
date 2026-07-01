@@ -70,7 +70,7 @@ class TaroLearner:
         target = torch.tensor(reward, device=value_pred.device, dtype=value_pred.dtype)
         return F.mse_loss(value_pred, target)
 
-    def learn_action(self, log_probs, delta):
+    def learn_action(self, log_probs, delta, credits=None):
         """
         行動の学習：方策勾配（REINFORCE）。
 
@@ -78,17 +78,29 @@ class TaroLearner:
         「高報酬（δ>0）だった発話を出やすくする」更新。
         δはドーパミン（報酬予測誤差）。
 
-        loss = -(δ) * Σ log_prob(生成した各トークン)
+        B2-2：従来は発話全体に単一のδしか与えず、系列内のどの文字が
+        良かったかを区別できなかった（クレジット割り当て問題）。
+        creditsを渡すと、文字ごとの一致度（compute_alignment_credit）で
+        δを重み付けし、良かった文字はより強く強化し、目標語にない
+        余分な文字は抑制する。
+
+        loss = -Σ (δ * credit_i) * log_prob(生成したi番目のトークン)
 
         log_probs: list of scalar tensors（生成時の各トークンのlog確率）
         delta: float（ドーパミン＝報酬予測誤差）
+        credits: log_probsと同じ長さのlist（各文字の目標語との一致度、[-1,1]程度）。
+            Noneなら従来通り全文字に同じδを適用する
         戻り値: policy_loss (float)
         """
         if len(log_probs) == 0:
             return 0.0
 
-        log_prob_sum = torch.stack(log_probs).sum()
-        policy_loss = -delta * log_prob_sum
+        if credits is not None and len(credits) == len(log_probs):
+            weighted = torch.stack([lp * c for lp, c in zip(log_probs, credits)]).sum()
+            policy_loss = -delta * weighted
+        else:
+            log_prob_sum = torch.stack(log_probs).sum()
+            policy_loss = -delta * log_prob_sum
 
         return policy_loss
 
