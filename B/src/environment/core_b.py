@@ -379,6 +379,44 @@ class TaroEnvironmentB:
         return compute_imitation_reward(word_tokens, generated_tokens,
                                         vocab=self.vocab, vocal_tract=self.vocal_tract)
 
+    def diagnostic_babble_at_hunger(self, hunger_value, target_word="まんま", n_samples=200):
+        """
+        診断専用：hungerを強制的に固定した状態で喃語をn_samples回生成し、
+        target_wordとの平均類似度を返す。実際のinternal_stateは変更しない。
+
+        自然に変動するhungerとの相関は、ノイズが大きく「学習されているが
+        弱すぎて埋もれている」のか「そもそも学習されていない」のかを
+        区別できない。ここでは空腹度だけを人工的に0または1に固定し、
+        それ以外の内的状態は現在の値のまま揃えることで、hungerという
+        1変数の影響だけを取り出して測定する（他の要因による交絡を排除）。
+
+        戻り値: 類似度のリスト（空でない喃語のみ）
+        """
+        current_state = self.internal_state.get_state_vector()
+        sleepiness, discomfort = current_state[1], current_state[2]
+        arousal = max(hunger_value, sleepiness, discomfort)
+        fake_state = [hunger_value, sleepiness, discomfort, arousal]
+        body_state = torch.tensor(fake_state, dtype=torch.float32, device=self.device)
+
+        ne_level = self.locus_coeruleus.get_ne_level()
+        sims = []
+        for _ in range(n_samples):
+            generated, _, _ = self.brain.generate(
+                hidden=self._hidden,
+                max_length=self.max_output_length,
+                eos_idx=2,
+                stamina=self.lungs.get(),
+                vocal_tract=self.vocal_tract,
+                ne_level=ne_level,
+                cerebellum=None,
+                speech_plan=None,
+                body_state=body_state,
+            )
+            if generated:
+                sims.append(self.word_similarity(generated, target_word))
+
+        return sims
+
     def respond_to_babble(self, generated_tokens, log_probs, candidate_words, r_habit=0.0):
         """
         親が自発喃語に気づいて反応する（随伴的社会的フィードバック）。
