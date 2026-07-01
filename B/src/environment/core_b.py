@@ -16,7 +16,7 @@ from collections import deque
 from taro.brain import (Vocabulary, TaroBrain, Cerebellum, BrocasArea, TaroLearner,
                         compute_imitation_reward, compute_prediction_reward,
                         Dopamine, Habituation, LocusCoeruleus, compute_total_reward,
-                        Homeostasis, Hippocampus)
+                        Homeostasis, Hippocampus, compute_alignment_credit)
 from taro.body import VocalTract, Stomach, Lungs, InternalState, BloodVessel, Adenosine
 from sim_clock import SimClock
 from archive import Archive
@@ -233,8 +233,10 @@ class TaroEnvironmentB:
         delta = R - value.item()
         self.dopamine.compute_rpe(R)  # アーカイブ保存互換のため基準値のみ更新（学習には未使用）
 
-        # 学習
-        a_loss = self.learner.learn_action(log_probs, delta)
+        # 学習（B2-2：親の発話とのアライメントで文字ごとに信用割り当て）
+        credits = compute_alignment_credit(parent_tokens, generated,
+                                           vocab=self.vocab, vocal_tract=self.vocal_tract)
+        a_loss = self.learner.learn_action(log_probs, delta, credits=credits)
         value_loss = self.learner.compute_value_loss(value, R)
         pl, al = self.learner.update(p_loss, a_loss, value_loss)
 
@@ -430,7 +432,11 @@ class TaroEnvironmentB:
         delta = R - value.item()
         self.dopamine.compute_rpe(R)  # アーカイブ保存互換のため基準値のみ更新（学習には未使用）
 
-        a_loss = self.learner.learn_action(log_probs, delta)
+        # B2-2：最も近かった候補語とのアライメントで文字ごとに信用割り当て
+        best_word_tokens = self.vocab.encode(best_word)
+        credits = compute_alignment_credit(best_word_tokens, generated_tokens,
+                                           vocab=self.vocab, vocal_tract=self.vocal_tract)
+        a_loss = self.learner.learn_action(log_probs, delta, credits=credits)
         value_loss = self.learner.compute_value_loss(value, R)
         zero_p_loss = torch.tensor(0.0, device=self.device)
         _, al = self.learner.update(zero_p_loss, a_loss, value_loss)
