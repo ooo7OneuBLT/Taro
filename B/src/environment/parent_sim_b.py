@@ -317,6 +317,8 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
         print(f"泣き: {cry_count}回  食事: {feed_count}回  発話: {speak_count}回  "
               f"喃語: {babble_count}回  要求語: {request_count}回  睡眠: {sleep_count}回  定着: {consolidate_count}件")
 
+    env.logger.close()
+
     return {
         "sim_seconds": sim_seconds,
         "cry_count": cry_count,

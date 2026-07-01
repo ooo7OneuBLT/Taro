@@ -26,21 +26,38 @@ class Logger:
 
         self.jsonl_path = os.path.join(self.log_dir, "turns.jsonl")
         self.csv_path = os.path.join(self.log_dir, "metrics.csv")
+        self.events_path = os.path.join(self.log_dir, "events.jsonl")
+        self.babble_path = os.path.join(self.log_dir, "babble.jsonl")
 
-        if not os.path.exists(self.csv_path):
-            with open(self.csv_path, "w", newline="", encoding="utf-8") as f:
-                writer = csv.writer(f)
-                writer.writerow([
-                    "turn", "sim_seconds", "parent", "taro",
-                    "r_imit", "r_pred", "r_social", "R", "delta",
-                    "p_loss", "a_loss", "temperature",
-                    "context", "hunger",
-                ])
+        # 性能改善：呼ばれるたびにopen/closeしていたのを、実行中は
+        # ファイルハンドルを開いたままにする方式に変更（B2-4）。
+        # 1年のシミュレーションでログ書き込みが数十万回発生するため、
+        # open/close自体のオーバーヘッドが無視できなかった。
+        csv_is_new = not os.path.exists(self.csv_path)
+        self._jsonl_f = open(self.jsonl_path, "a", encoding="utf-8")
+        self._csv_f = open(self.csv_path, "a", newline="", encoding="utf-8")
+        self._csv_writer = csv.writer(self._csv_f)
+        self._events_f = open(self.events_path, "a", encoding="utf-8")
+        self._babble_f = open(self.babble_path, "a", encoding="utf-8")
+
+        if csv_is_new:
+            self._csv_writer.writerow([
+                "turn", "sim_seconds", "parent", "taro",
+                "r_imit", "r_pred", "r_social", "R", "delta",
+                "p_loss", "a_loss", "temperature",
+                "context", "hunger",
+            ])
 
         self.history = {
             "turns": [], "r_imit": [], "r_pred": [], "R": [],
             "delta": [], "p_loss": [], "temperature": [],
         }
+
+    def close(self):
+        """全てのログファイルを閉じる（シミュレーション終了時に呼ぶ）。"""
+        for f in (self._jsonl_f, self._csv_f, self._events_f, self._babble_f):
+            if f and not f.closed:
+                f.close()
 
     def save_run_info(self, description, config, phrases=None):
         """実験の説明・設定・経緯をメタデータとして保存する。"""
@@ -79,18 +96,15 @@ class Logger:
             "hunger": round(hunger, 4),
         }
 
-        with open(self.jsonl_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        self._jsonl_f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
-        with open(self.csv_path, "a", newline="", encoding="utf-8") as f:
-            writer = csv.writer(f)
-            writer.writerow([
-                turn, sim_seconds, parent_text, taro_text,
-                record["r_imit"], record["r_pred"], record["r_social"],
-                record["R"], record["delta"],
-                record["p_loss"], record["a_loss"], record["temperature"],
-                context, record["hunger"],
-            ])
+        self._csv_writer.writerow([
+            turn, sim_seconds, parent_text, taro_text,
+            record["r_imit"], record["r_pred"], record["r_social"],
+            record["R"], record["delta"],
+            record["p_loss"], record["a_loss"], record["temperature"],
+            context, record["hunger"],
+        ])
 
         self.history["turns"].append(turn)
         self.history["r_imit"].append(r_imit)
@@ -108,9 +122,7 @@ class Logger:
         泣き・睡眠・授乳などの生活イベントが追えなかったため追加。
         """
         record = {"sim_seconds": sim_seconds, "event": event_type, **fields}
-        path = os.path.join(self.log_dir, "events.jsonl")
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        self._events_f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
     def log_babble(self, sim_seconds, taro_text, hunger, arousal, R, r_pred, r_home):
         """喃語1回分を babble.jsonl に記録する。"""
@@ -123,9 +135,7 @@ class Logger:
             "r_pred": round(r_pred, 4),
             "r_home": round(r_home, 4),
         }
-        path = os.path.join(self.log_dir, "babble.jsonl")
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        self._babble_f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
     def plot_learning_curve(self):
         """学習曲線をPNGで出力する。"""
