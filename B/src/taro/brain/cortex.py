@@ -148,22 +148,34 @@ class TaroBrain(nn.Module):
             max_chars = min(max_length, int(stamina) if stamina is not None else max_length)
             speech_plan = None
 
-        # 喃語期（発話計画なし）だけに適用する身体的な発声停止。
+        # 喃語期（発話計画なし）だけに適用する発声停止。
         # B-7では学習可能な停止headを試みたが、知覚時と生成時で隠れ状態が
-        # 異なり誤発火した（撤去済み）。代わりに息切れという身体的制約で
-        # 確率的に止まる：残り呼気が少ないほど続ける確率が下がる。
-        # B2-4：これが無いと肺活量の上限まで毎回とにかく出し続けてしまい
-        # （肺活量が早期に上限化した後は常に固定長の喃語になる）、人間の
-        # 「毎回長さが変わる」喃語と乖離していた。
+        # 異なり誤発火した（撤去済み）。
+        #
+        # B2-4→B2-5で修正：単純な「息切れ（残り呼気が少ないほど止まりやすい）」
+        # だけでは不十分と判明。文献調査の結果、乳児の喃語がいつ止まるかは
+        # 呼吸容量が上限を作るだけでなく、新奇性追求（まだ習得していない・
+        # 面白い音を出し続けたい動機）と養育者の反応が主な決定要因だと
+        # 判明した（呼吸容量は「絶対に超えない上限」であって「止まる理由」
+        # そのものではない）。ここでは新奇性を「GRUの出力分布のエントロピー
+        # （まだどの音を選ぶか定まっていない度合い）」として近似し、
+        # 興味が高いほど息切れの影響を弱める。決め打ちパラメータは増やさず、
+        # 既存のサンプリング分布を再利用するだけ。
         is_babble = speech_plan is None
 
         for t in range(max_chars):
-            if is_babble and t > 0 and max_chars > 0 and random.random() < t / max_chars:
-                break
-
             h_last = out[0, -1]
             pl, ml, vl, vol = self.forward_articulation(h_last)
             log_prob = torch.tensor(0.0, device=self._device())
+
+            if is_babble and t > 0 and max_chars > 0:
+                breath_pressure = t / max_chars
+                interest = (self._normalized_entropy(pl, allowed_place)
+                           + self._normalized_entropy(vl, allowed_voicing)
+                           + self._normalized_entropy(vol, allowed_vowel)) / 3.0
+                stop_prob = breath_pressure * (1.0 - interest)
+                if random.random() < stop_prob:
+                    break
 
             if speech_plan is not None and speech_plan.has_next():
                 # 発話計画からモーラを取り出す
@@ -246,6 +258,28 @@ class TaroBrain(nn.Module):
         if value < len(probs):
             return torch.log(probs[value] + 1e-10)
         return torch.tensor(0.0, device=logits.device)
+
+    def _normalized_entropy(self, logits, allowed_indices):
+        """
+        許可された選択肢内でのカテゴリカル分布のエントロピーを0〜1に正規化する。
+
+        【人間模倣＝既存AI研究】Oudeyer & Kaplanらの内発的動機付けロボティクス
+        （novelty-seeking）：まだ結果が予測しにくい行動ほど「面白い」。
+        1に近いほど「まだどれを選ぶか定まっていない＝興味深い」、
+        0に近いほど「ほぼ決まっている＝予測可能で退屈」。
+        """
+        if len(allowed_indices) <= 1:
+            return 0.0
+        mask = torch.full_like(logits, float("-inf"))
+        for i in allowed_indices:
+            mask[i] = 0.0
+        masked_logits = logits + mask
+        probs = F.softmax(masked_logits, dim=-1)
+        idx = torch.tensor(allowed_indices, device=logits.device)
+        p = probs.index_select(0, idx).clamp(min=1e-10)
+        entropy = -(p * torch.log(p)).sum()
+        max_entropy = torch.log(torch.tensor(float(len(allowed_indices)), device=logits.device))
+        return (entropy / max_entropy).item() if max_entropy > 0 else 0.0
 
     def _choose_param(self, logits, allowed_indices):
         """脳がパラメータを選ぶ（意図）。ノイズなし。"""
