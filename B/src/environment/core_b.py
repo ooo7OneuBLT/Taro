@@ -355,6 +355,27 @@ class TaroEnvironmentB:
             "log_probs": log_probs,
         }
 
+    def sounds_like(self, generated_tokens, word, threshold=0.4):
+        """
+        太郎の発声が指定した語にどれだけ似ているかを判定する。
+
+        【人間模倣】Skinner (1957) の言語行動理論における「mand（要求）」：
+        要求語は特定の欠乏状態（例：空腹）でのみ、その状態を解消する結果
+        （例：食べ物）と結びつく。「まんま」が食べ物の要求として機能する
+        条件は、(1) 実際に空腹であること、(2) 発声がその語に十分似ている
+        ことの両方。ここでは(2)だけを判定する（(1)は呼び出し側でhungerを見る）。
+
+        B2-1：親の授乳判断（feed()を呼ぶかどうか）に太郎の発声内容を
+        初めて結びつける。従来は太郎が何を言おうと授乳のタイミングは
+        一切変わらなかった（泣き＋空腹のみで発動）。
+        """
+        if not generated_tokens:
+            return False
+        word_tokens = self.vocab.encode(word)
+        r = compute_imitation_reward(word_tokens, generated_tokens,
+                                     vocab=self.vocab, vocal_tract=self.vocal_tract)
+        return r >= threshold
+
     def respond_to_babble(self, generated_tokens, log_probs, candidate_words,
                           similarity_threshold=0.4, r_habit=0.0):
         """

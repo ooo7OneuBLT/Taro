@@ -70,7 +70,15 @@ class ParentSchedule:
         if sim_seconds % self.check_interval == 0:
             self.present = random.random() < self.presence_prob
 
-    def on_cry(self, sim_seconds):
+    def _schedule_response(self, sim_seconds):
+        """
+        親が何らかの合図（泣き・要求語）に気づいて反応するかを判定する。
+
+        B2-1：泣きだけでなく「空腹時にまんまに近い発声をした」場合にも
+        同じ経路で親に気づかせる（Skinnerのmand理論：欠乏状態でのみ
+        要求語が結果と結びつく。合図の種類が泣きか発声かは親の気づき方
+        としては同じ確率過程でよい）。
+        """
         if not self.present:
             if random.random() < self.respond_prob_absent:
                 delay = random.randint(self.respond_delay_max, self.respond_delay_max_absent)
@@ -83,6 +91,12 @@ class ParentSchedule:
             self._pending_respond = sim_seconds + delay
             return True
         return False
+
+    def on_cry(self, sim_seconds):
+        return self._schedule_response(sim_seconds)
+
+    def on_word_request(self, sim_seconds):
+        return self._schedule_response(sim_seconds)
 
     def should_respond_now(self, sim_seconds):
         if self._pending_respond is not None and sim_seconds >= self._pending_respond:
@@ -111,6 +125,7 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
     feed_count = 0
     speak_count = 0
     babble_count = 0
+    request_count = 0
     consolidate_count = 0
     sim_seconds = 0
     last_babble_time = -schedule.babble_interval
@@ -267,6 +282,16 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
                         hunger=round(env.internal_state.hunger, 4),
                     )
 
+            # B2-1：空腹時に「まんま」に近い発声をしたら、泣いた時と同じ経路で
+            # 親に気づかせる（要求語として機能させる）。太郎の発話内容が
+            # 初めて実際の授乳タイミングに影響する
+            if env.internal_state.hunger > 0.5 and env.sounds_like(result["tokens"], "まんま"):
+                request_count += 1
+                env.logger.log_event(sim_seconds, "word_request",
+                                      taro=result["taro"],
+                                      hunger=round(env.internal_state.hunger, 4))
+                schedule.on_word_request(sim_seconds)
+
         if verbose and sim_seconds % schedule.log_interval == 0:
             state = "寝" if env.internal_state.is_sleeping() else \
                     "うとうと" if env.internal_state.is_drowsy() else \
@@ -283,7 +308,7 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
         print(f"\n=== シミュレーション完了 ===")
         print(f"時間: {sim_seconds}秒 ({sim_seconds//60}分 = {sim_seconds/3600:.1f}時間)")
         print(f"泣き: {cry_count}回  食事: {feed_count}回  発話: {speak_count}回  "
-              f"喃語: {babble_count}回  睡眠: {sleep_count}回  定着: {consolidate_count}件")
+              f"喃語: {babble_count}回  要求語: {request_count}回  睡眠: {sleep_count}回  定着: {consolidate_count}件")
 
     return {
         "sim_seconds": sim_seconds,
@@ -291,6 +316,7 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
         "feed_count": feed_count,
         "speak_count": speak_count,
         "babble_count": babble_count,
+        "request_count": request_count,
         "sleep_count": sleep_count,
         "consolidate_count": consolidate_count,
         "env": env,
