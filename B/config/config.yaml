@@ -11,7 +11,7 @@ brain:
   initial_temperature: 2.0 # 出力のゆらぎ（τ）。高い＝喃語、低い＝安定
   min_temperature: 0.3     # τの下限（完全に0にはしない＝探索を残す）
   temperature_alpha: 0.02  # τの適応減衰係数（A2変更：成功体験に連動）
-  device: auto             # auto=CUDA使えればCUDA、なければCPU
+  device: cpu              # 実測でCPUがGPUより約1.6倍速い（バッチ1・極小モデルのため）
 
 # --- 発声体力（A2追加）【人間模倣・身体的制約】---
 stamina:
@@ -46,8 +46,8 @@ lungs:
   capacity: 3.0          # 肺活量（モーラ数相当）
   air_per_mora: 1.0      # 1モーラに必要な空気量
   recovery_rate: 0.5     # 1tickの空気回復量
-  growth_rate: 0.0001    # 肺活量の成長速度
-  max_capacity: 15.0     # 肺活量の上限
+  growth_rate: 0.000001  # 肺活量の成長速度（B-6調整：~90日で上限到達）
+  max_capacity: 8.0      # 肺活量の上限（B-6調整：9ヶ月児の現実 3〜8モーラ）
 
 # --- 血管（B-3追加）【人間模倣・身体シミュレーション】---
 # 胃の消化 → 血糖値（上昇） → 体の細胞が消費（下降） → hunger

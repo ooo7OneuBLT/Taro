@@ -1,8 +1,12 @@
 """
-9ヶ月シミュレーション — スタンドアロン実行スクリプト
+12ヶ月（1年）シミュレーション — スタンドアロン実行スクリプト
 
 Claude Codeのセッションとは独立して動く。
 完了・進捗はログファイルに書き込む。
+
+人間の初語出現の平均は生後12ヶ月（MacArthur-Bates CDI）。
+9ヶ月（旧run_9months.py）は声道stage2の解禁時期を流用しただけで
+初語の判定時期としては早すぎたため、12ヶ月に変更した。
 """
 import sys
 import os
@@ -28,14 +32,16 @@ with open(log_path, "w", encoding="utf-8") as logf:
         start = time.time()
 
         r = run_simulation_b(
-            max_sim_seconds=23328000,  # 9ヶ月
+            max_sim_seconds=31536000,  # 12ヶ月（365日）
             verbose=False,
-            run_name="B9_9months",
+            run_name="B10_12months",
         )
 
         elapsed = time.time() - start
         log(f"[完了] {time.strftime('%Y-%m-%d %H:%M:%S')}")
         log(f"所要時間: {elapsed:.1f}秒 ({elapsed/60:.1f}分)")
+        log(f"泣き: {r['cry_count']}回")
+        log(f"食事: {r['feed_count']}回")
         log(f"喃語: {r['babble_count']}回")
         log(f"睡眠: {r['sleep_count']}回")
         log(f"定着: {r['consolidate_count']}件")

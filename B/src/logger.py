@@ -100,6 +100,18 @@ class Logger:
         self.history["p_loss"].append(p_loss)
         self.history["temperature"].append(temperature)
 
+    def log_event(self, sim_seconds, event_type, **fields):
+        """
+        汎用イベントログ（泣き・授乳・睡眠・喃語への反応など）を events.jsonl に記録する。
+
+        B-10：turns.jsonl（親との会話）・babble.jsonl（喃語）だけでは
+        泣き・睡眠・授乳などの生活イベントが追えなかったため追加。
+        """
+        record = {"sim_seconds": sim_seconds, "event": event_type, **fields}
+        path = os.path.join(self.log_dir, "events.jsonl")
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
     def log_babble(self, sim_seconds, taro_text, hunger, arousal, R, r_pred, r_home):
         """喃語1回分を babble.jsonl に記録する。"""
         record = {
