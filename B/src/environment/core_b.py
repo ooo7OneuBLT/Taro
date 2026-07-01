@@ -144,8 +144,8 @@ class TaroEnvironmentB:
             self.lungs.tick()
             self.internal_state.update_from_body(self.stomach, self.blood_vessel, self.lungs)
             self.internal_state.tick(adenosine=self.adenosine)
-        self.stomach.grow()
-        self.lungs.grow()
+            self.stomach.grow()
+            self.lungs.grow()
         vm = self.cfg.get("vocal_maturation", {})
         self.vocal_tract.update_stage(
             sim_seconds,
@@ -181,7 +181,6 @@ class TaroEnvironmentB:
         self.brain.to(self.device)
 
         body_state = self._body_state_tensor()
-        prev_arousal = self.internal_state.get_arousal()
 
         # 知覚学習
         full_tokens = [1] + parent_tokens + [2]
@@ -227,11 +226,17 @@ class TaroEnvironmentB:
 
         R = compute_total_reward(r_imit, r_pred, r_social, r_habit, self.weights)
         R = max(0.0, R + self.weights.get("w_home", 0.3) * r_home)
-        delta = self.dopamine.compute_rpe(R)
+
+        # B-11：状態依存クリティックでbaselineを取る（Dopamineのスカラー
+        # 移動平均は空腹時と機嫌がいい時を区別できなかったため）
+        value = self.brain.critic(body_state)
+        delta = R - value.item()
+        self.dopamine.compute_rpe(R)  # アーカイブ保存互換のため基準値のみ更新（学習には未使用）
 
         # 学習
         a_loss = self.learner.learn_action(log_probs, delta)
-        pl, al = self.learner.update(p_loss, a_loss)
+        value_loss = self.learner.compute_value_loss(value, R)
+        pl, al = self.learner.update(p_loss, a_loss, value_loss)
 
         # 青斑核
         self.locus_coeruleus.observe_reward(R)
@@ -310,7 +315,7 @@ class TaroEnvironmentB:
         self.lungs.consume(len(generated))
 
         if not generated:
-            return {"taro": "", "R": 0.0, "r_pred": 0.0, "r_home": 0.0,
+            return {"taro": "", "R": 0.0, "r_pred": 0.0, "r_home": 0.0, "r_habit": 0.0,
                     "tokens": [], "log_probs": []}
 
         # 自分の声を聞く（hidden state更新）。学習はしない。
@@ -323,11 +328,16 @@ class TaroEnvironmentB:
         # 海馬に経験を記録（睡眠移行時にまとめて定着）
         self.hippocampus.record_episode(full_tokens, body_state)
 
+        # 馴化（飽き）：親との会話だけでなく自発喃語にも適用する
+        # B-11修正：従来はstep()にしか適用されておらず、1日240〜380回起きる
+        # 自発喃語には同じ音の繰り返しにペナルティが一切働いていなかった
+        r_habit = self.habituation.compute_penalty(babble_text)
+
         # 恒常性報酬の参照値のみ計算（ログ用）
         self.internal_state.update_from_body(self.stomach, self.blood_vessel)
         current_arousal = self.internal_state.get_arousal()
         r_home = self.homeostasis.compute_reward(current_arousal)
-        R = max(0.0, self.weights.get("w_home", 0.3) * r_home)
+        R = max(0.0, self.weights.get("w_home", 0.3) * r_home + r_habit)
 
         self.locus_coeruleus.observe_reward(0.0)
         self.locus_coeruleus.release_ne()
@@ -339,17 +349,19 @@ class TaroEnvironmentB:
             "taro": babble_text,
             "r_pred": 0.0,  # 睡眠時に計算するため未算出
             "r_home": r_home,
+            "r_habit": r_habit,
             "R": R,
             "tokens": generated,
             "log_probs": log_probs,
         }
 
-    def respond_to_babble(self, generated_tokens, log_probs, target_word):
+    def respond_to_babble(self, generated_tokens, log_probs, candidate_words,
+                          similarity_threshold=0.4, r_habit=0.0):
         """
         親が自発喃語に気づいて反応する（随伴的社会的フィードバック）。
 
         【人間模倣】Goldstein & Schwade (2008)：養育者は乳児の自発発声の
-        約30〜50%に気づいて反応し、言葉らしい発声ほど反応をもらいやすい。
+        約30〜50%に気づいて反応し、**言葉らしい発声ほど**反応をもらいやすい。
         反応をもらった発声パターンは乳児が再び自発的に発しやすくなる。
 
         B-9まで自発喃語（self_babble）は知覚学習（consolidate）のみで、
@@ -357,25 +369,53 @@ class TaroEnvironmentB:
         親との会話（step）と同じ経路（learn_action）をここでも使うことで、
         模倣と自発発話が同じ強化学習の仕組みを共有するようにする。
 
-        target_word: 現在の内的状態に対応する言葉（例：空腹なら「まんま」）。
-        親が実際に発した言葉ではなく、状況に応じて自然に使われる言葉を想定。
+        B-11修正：B-10では「内的状態から先に正解ラベルを決め打ち」していた
+        （空腹なら常に「まんま」が正解、という教師あり学習に近い設計）。
+        これはGoldstein & Schwadeの趣旨（太郎の発声そのものが言葉らしいか
+        どうかに養育者が反応する）とズレていた。今回、太郎の発声を先に
+        全候補語と比較し、最も近い語との類似度が閾値を超えた時だけ
+        反応するよう変更。内的状態は反応の対象選びには使わず、
+        「太郎が実際に発した音」だけで判定する。
+
+        candidate_words: 反応しうる語の候補リスト（例：["まんま","よしよし","まま"]）
+        similarity_threshold: この類似度未満なら親は気づかない（反応しない）。
+            B-10の実測でランダムに近い喃語の類似度は平均0.276だったため、
+            それを上回る0.4を暫定の閾値とする（根拠ラベル：実測データに基づく
+            が閾値自体は経験的な判断）。
         """
-        if not generated_tokens or not log_probs:
+        if not generated_tokens or not log_probs or not candidate_words:
             return None
 
-        target_tokens = self.vocab.encode(target_word)
-        r_imit = compute_imitation_reward(target_tokens, generated_tokens,
-                                          vocab=self.vocab, vocal_tract=self.vocal_tract)
+        best_word = None
+        best_r_imit = -1.0
+        for word in candidate_words:
+            word_tokens = self.vocab.encode(word)
+            r = compute_imitation_reward(word_tokens, generated_tokens,
+                                         vocab=self.vocab, vocal_tract=self.vocal_tract)
+            if r > best_r_imit:
+                best_r_imit = r
+                best_word = word
+
+        if best_r_imit < similarity_threshold:
+            return None  # 言葉らしく聞こえなかった → 親は気づかない
+
+        r_imit = best_r_imit
         r_social = 0.5  # 親が気づいて反応してくれたこと自体の報酬
 
-        R = max(0.0, self.weights["w_imit"] * r_imit + self.weights["w_social"] * r_social)
-        delta = self.dopamine.compute_rpe(R)
+        R = max(0.0, self.weights["w_imit"] * r_imit + self.weights["w_social"] * r_social + r_habit)
+
+        body_state = self._body_state_tensor()
+        value = self.brain.critic(body_state)
+        delta = R - value.item()
+        self.dopamine.compute_rpe(R)  # アーカイブ保存互換のため基準値のみ更新（学習には未使用）
 
         a_loss = self.learner.learn_action(log_probs, delta)
+        value_loss = self.learner.compute_value_loss(value, R)
         zero_p_loss = torch.tensor(0.0, device=self.device)
-        _, al = self.learner.update(zero_p_loss, a_loss)
+        _, al = self.learner.update(zero_p_loss, a_loss, value_loss)
 
-        return {"r_imit": r_imit, "r_social": r_social, "R": R, "delta": delta, "a_loss": al}
+        return {"r_imit": r_imit, "r_social": r_social, "R": R, "delta": delta,
+                "a_loss": al, "recognized_word": best_word}
 
     def consolidate(self):
         """

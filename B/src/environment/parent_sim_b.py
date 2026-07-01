@@ -252,19 +252,20 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
                       f"arousal={env.internal_state.get_arousal():.2f}")
 
             # 親が喃語に気づいて反応する（B-10：随伴的社会的フィードバック）
-            if random.random() < schedule.babble_response_prob:
-                target_care = "feed" if env.internal_state.hunger > 0.5 else "comfort"
-                target_word = schedule.choose_word(target_care)
-                if target_word:
-                    resp = env.respond_to_babble(result["tokens"], result["log_probs"], target_word)
-                    if resp:
-                        env.logger.log_event(
-                            sim_seconds, "babble_response",
-                            taro=result["taro"], target=target_word,
-                            r_imit=round(resp["r_imit"], 4), R=round(resp["R"], 4),
-                            delta=round(resp["delta"], 4),
-                            hunger=round(env.internal_state.hunger, 4),
-                        )
+            # B-11修正：内的状態から正解を決め打ちせず、太郎が実際に発した音を
+            # 全候補語と比較し、最も近い語との類似度で判定する
+            if random.random() < schedule.babble_response_prob and schedule.words:
+                candidate_words = list(schedule.words.values())
+                resp = env.respond_to_babble(result["tokens"], result["log_probs"], candidate_words,
+                                             r_habit=result["r_habit"])
+                if resp:
+                    env.logger.log_event(
+                        sim_seconds, "babble_response",
+                        taro=result["taro"], target=resp["recognized_word"],
+                        r_imit=round(resp["r_imit"], 4), R=round(resp["R"], 4),
+                        delta=round(resp["delta"], 4),
+                        hunger=round(env.internal_state.hunger, 4),
+                    )
 
         if verbose and sim_seconds % schedule.log_interval == 0:
             state = "寝" if env.internal_state.is_sleeping() else \
