@@ -39,7 +39,7 @@ with open(log_path, "w", encoding="utf-8") as logf:
         r = run_simulation_b(
             max_sim_seconds=31536000,  # 12ヶ月（365日）
             verbose=False,
-            run_name="B2-5_diagnostic_train",
+            run_name="B2-6_diagnostic_train",
         )
 
         elapsed = time.time() - start
