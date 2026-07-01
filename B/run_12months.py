@@ -34,7 +34,7 @@ with open(log_path, "w", encoding="utf-8") as logf:
         r = run_simulation_b(
             max_sim_seconds=31536000,  # 12ヶ月（365日）
             verbose=False,
-            run_name="B10_12months",
+            run_name="B2-1_12months",
         )
 
         elapsed = time.time() - start
@@ -42,6 +42,7 @@ with open(log_path, "w", encoding="utf-8") as logf:
         log(f"所要時間: {elapsed:.1f}秒 ({elapsed/60:.1f}分)")
         log(f"泣き: {r['cry_count']}回")
         log(f"食事: {r['feed_count']}回")
+        log(f"要求語: {r['request_count']}回")
         log(f"喃語: {r['babble_count']}回")
         log(f"睡眠: {r['sleep_count']}回")
         log(f"定着: {r['consolidate_count']}件")
