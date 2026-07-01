@@ -7,11 +7,23 @@ Claude Codeのセッションとは独立して動く。
 人間の初語出現の平均は生後12ヶ月（MacArthur-Bates CDI）。
 9ヶ月（旧run_9months.py）は声道stage2の解禁時期を流用しただけで
 初語の判定時期としては早すぎたため、12ヶ月に変更した。
+
+複数試行対応：引数でtrial IDを渡すと、run_nameとログファイル名に
+サフィックスを付ける。各プロセスは乱数シードが別々（OSのエントロピー
+由来）なので、同じスクリプトを複数プロセスで同時起動するだけで
+独立した複数試行になる（Pythonプロセスは起動時に自動でシードされる）。
+1試行=スレッド2つに制限しているため、複数同時実行してもPCへの
+負荷は緩やか。
+  例: python run_12months.py trial1
+      python run_12months.py trial2
 """
 import sys
 import os
 import time
 import io
+
+trial_id = sys.argv[1] if len(sys.argv) > 1 else ""
+suffix = f"_{trial_id}" if trial_id else ""
 
 # パスを通す
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
@@ -31,7 +43,7 @@ except ImportError:
     pass
 
 # ログをファイルに書き出す（Windows terminalのエンコード問題回避）
-log_path = os.path.join(os.path.dirname(__file__), "logs", "sim_progress.txt")
+log_path = os.path.join(os.path.dirname(__file__), "logs", f"sim_progress{suffix}.txt")
 os.makedirs(os.path.dirname(log_path), exist_ok=True)
 
 with open(log_path, "w", encoding="utf-8") as logf:
@@ -48,7 +60,7 @@ with open(log_path, "w", encoding="utf-8") as logf:
         r = run_simulation_b(
             max_sim_seconds=31536000,  # 12ヶ月（365日）
             verbose=False,
-            run_name="B2-6_12months",
+            run_name=f"B2-6_12months{suffix}",
         )
 
         elapsed = time.time() - start
