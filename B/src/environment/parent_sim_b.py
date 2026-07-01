@@ -285,12 +285,19 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
             # B2-1：空腹時に「まんま」に近い発声をしたら、泣いた時と同じ経路で
             # 親に気づかせる（要求語として機能させる）。太郎の発話内容が
             # 初めて実際の授乳タイミングに影響する
-            if env.internal_state.hunger > 0.5 and env.sounds_like(result["tokens"], "まんま"):
-                request_count += 1
-                env.logger.log_event(sim_seconds, "word_request",
-                                      taro=result["taro"],
-                                      hunger=round(env.internal_state.hunger, 4))
-                schedule.on_word_request(sim_seconds)
+            # B2-3修正：類似度による足切り（0.4未満なら無反応）をやめ、
+            # 類似度そのものを「親が気づく確率」として連続的に使う。
+            # 完璧に言えなくても近いほど気づかれやすい、という段階のない
+            # オールオアナッシングではない反応にした
+            if env.internal_state.hunger > 0.5:
+                similarity = env.word_similarity(result["tokens"], "まんま")
+                if random.random() < similarity:
+                    request_count += 1
+                    env.logger.log_event(sim_seconds, "word_request",
+                                          taro=result["taro"],
+                                          similarity=round(similarity, 4),
+                                          hunger=round(env.internal_state.hunger, 4))
+                    schedule.on_word_request(sim_seconds)
 
         if verbose and sim_seconds % schedule.log_interval == 0:
             state = "寝" if env.internal_state.is_sleeping() else \

@@ -357,29 +357,29 @@ class TaroEnvironmentB:
             "log_probs": log_probs,
         }
 
-    def sounds_like(self, generated_tokens, word, threshold=0.4):
+    def word_similarity(self, generated_tokens, word):
         """
-        太郎の発声が指定した語にどれだけ似ているかを判定する。
+        太郎の発声が指定した語にどれだけ似ているか（連続値、0〜1）を返す。
 
         【人間模倣】Skinner (1957) の言語行動理論における「mand（要求）」：
         要求語は特定の欠乏状態（例：空腹）でのみ、その状態を解消する結果
         （例：食べ物）と結びつく。「まんま」が食べ物の要求として機能する
-        条件は、(1) 実際に空腹であること、(2) 発声がその語に十分似ている
-        ことの両方。ここでは(2)だけを判定する（(1)は呼び出し側でhungerを見る）。
+        条件は、(1) 実際に空腹であること、(2) 発声がその語に似ていることの
+        両方。ここでは(2)の度合いだけを連続値で返す（(1)は呼び出し側で判定）。
 
-        B2-1：親の授乳判断（feed()を呼ぶかどうか）に太郎の発声内容を
-        初めて結びつける。従来は太郎が何を言おうと授乳のタイミングは
-        一切変わらなかった（泣き＋空腹のみで発動）。
+        B2-3：以前はここで閾値による足切り（0.4未満なら0扱い）をしていたが、
+        「似ているかどうか」を段階なしのオールオアナッシングで判定するのは
+        人間にない仕組み。親は完璧に言えなくても「近い音」には連続的に
+        反応の度合いを変える。足切りをやめ、呼び出し側で類似度そのものを
+        確率として使う（近いほど気づかれやすい）よう変更した。
         """
         if not generated_tokens:
-            return False
+            return 0.0
         word_tokens = self.vocab.encode(word)
-        r = compute_imitation_reward(word_tokens, generated_tokens,
-                                     vocab=self.vocab, vocal_tract=self.vocal_tract)
-        return r >= threshold
+        return compute_imitation_reward(word_tokens, generated_tokens,
+                                        vocab=self.vocab, vocal_tract=self.vocal_tract)
 
-    def respond_to_babble(self, generated_tokens, log_probs, candidate_words,
-                          similarity_threshold=0.4, r_habit=0.0):
+    def respond_to_babble(self, generated_tokens, log_probs, candidate_words, r_habit=0.0):
         """
         親が自発喃語に気づいて反応する（随伴的社会的フィードバック）。
 
@@ -395,16 +395,20 @@ class TaroEnvironmentB:
         B-11修正：B-10では「内的状態から先に正解ラベルを決め打ち」していた
         （空腹なら常に「まんま」が正解、という教師あり学習に近い設計）。
         これはGoldstein & Schwadeの趣旨（太郎の発声そのものが言葉らしいか
-        どうかに養育者が反応する）とズレていた。今回、太郎の発声を先に
-        全候補語と比較し、最も近い語との類似度が閾値を超えた時だけ
-        反応するよう変更。内的状態は反応の対象選びには使わず、
-        「太郎が実際に発した音」だけで判定する。
+        どうかに養育者が反応する）とズレていた。太郎の発声を先に
+        全候補語と比較し、最も近い語との類似度で判定するよう変更。
+        内的状態は反応の対象選びには使わず、「太郎が実際に発した音」
+        だけで判定する。
+
+        B2-3修正：類似度による足切り（閾値0.4未満なら反応しない）を撤廃。
+        6ヶ月で「ま」「ん」が解禁された後、類似度が平均0.32まで上がっても
+        一度も0.4を超えなかったことが判明し（B2-2の分析）、「まだ下手だが
+        惜しい」試みに一切報酬が発生しないため、改善の足がかり自体が
+        存在しないという鶏と卵の状態になっていた。閾値を撤廃し、
+        気づいた（呼び出し側の確率で決まる）以上は必ず、類似度に応じた
+        連続的な大きさの報酬を与えるようにした。
 
         candidate_words: 反応しうる語の候補リスト（例：["まんま","よしよし","まま"]）
-        similarity_threshold: この類似度未満なら親は気づかない（反応しない）。
-            B-10の実測でランダムに近い喃語の類似度は平均0.276だったため、
-            それを上回る0.4を暫定の閾値とする（根拠ラベル：実測データに基づく
-            が閾値自体は経験的な判断）。
         """
         if not generated_tokens or not log_probs or not candidate_words:
             return None
@@ -418,9 +422,6 @@ class TaroEnvironmentB:
             if r > best_r_imit:
                 best_r_imit = r
                 best_word = word
-
-        if best_r_imit < similarity_threshold:
-            return None  # 言葉らしく聞こえなかった → 親は気づかない
 
         r_imit = best_r_imit
         r_social = 0.5  # 親が気づいて反応してくれたこと自体の報酬
