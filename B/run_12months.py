@@ -16,6 +16,20 @@ import io
 # パスを通す
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 
+# CPU実行時、PyTorchがデフォルトで全論理コアを使おうとし、
+# ブラウザ等の他アプリと取り合いになっていた。この処理は極小テンソルの
+# 逐次演算が大半でスレッド数を増やしても速くならないため、スレッド数を
+# 絞って他アプリにCPUを譲る（体感の重さの軽減が目的、速度への影響は軽微）。
+import torch
+torch.set_num_threads(2)
+
+# プロセス優先度を下げ、他の操作（ブラウザ等）を優先させる
+try:
+    import psutil
+    psutil.Process(os.getpid()).nice(psutil.BELOW_NORMAL_PRIORITY_CLASS)
+except ImportError:
+    pass
+
 # ログをファイルに書き出す（Windows terminalのエンコード問題回避）
 log_path = os.path.join(os.path.dirname(__file__), "logs", "sim_progress.txt")
 os.makedirs(os.path.dirname(log_path), exist_ok=True)
