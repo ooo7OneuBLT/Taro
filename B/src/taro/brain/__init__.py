@@ -12,4 +12,4 @@ from taro.brain.hippocampus import Hippocampus
 from taro.brain.insula import Insula
 from taro.brain.instincts import (compute_imitation_reward, compute_prediction_reward,
                                    Dopamine, Habituation, LocusCoeruleus,
-                                   compute_total_reward, Homeostasis)
+                                   compute_total_reward, Homeostasis, Critic)

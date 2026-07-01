@@ -63,10 +63,13 @@ class TaroBrain(nn.Module):
         gru_input_dim = embedding_dim
         if body_state_dim > 0:
             from taro.brain.insula import Insula
+            from taro.brain.instincts.critic import Critic
             self.insula = Insula(state_dim=body_state_dim, embedding_dim=embedding_dim)
+            self.critic = Critic(state_dim=body_state_dim)
             gru_input_dim = embedding_dim + embedding_dim
         else:
             self.insula = None
+            self.critic = None
 
         self.gru = nn.GRU(gru_input_dim, hidden_dim, num_layers, batch_first=True)
 
@@ -81,8 +84,6 @@ class TaroBrain(nn.Module):
             self.head_voicing.bias.data[1] += 1.0
 
         self.perception_head = nn.Linear(hidden_dim, vocab_size)
-
-        self.cry_head = nn.Linear(hidden_dim, 1)
 
     def forward_hidden(self, x, hidden=None, body_state=None):
         """
@@ -295,24 +296,6 @@ class TaroBrain(nn.Module):
         new_out.bias.data[:old_size] = old_out_bias
         self.perception_head = new_out
         self.vocab_size = new_vocab_size
-
-    def should_cry(self, arousal, hidden=None):
-        """
-        泣くかどうかを段階的・確率的に判定する。
-
-        【人間模倣】泣きは閾値的ではなく、arousalに比例して
-        確率・強さが連続的に上がる。
-        - arousal低い → ほぼ泣かない
-        - arousal中間 → ぐずり始める（確率が上がる）
-        - arousal高い → 本格的に泣く（高確率）
-
-        戻り値: (cry: bool, intensity: float 0〜1)
-        """
-        import random
-        cry_prob = arousal ** 2
-        intensity = min(1.0, arousal * 1.2)
-        cry = random.random() < cry_prob
-        return cry, intensity
 
     def _device(self):
         return self.embedding.weight.device

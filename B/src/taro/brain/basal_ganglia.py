@@ -43,7 +43,9 @@ class TaroLearner:
         x = torch.tensor([input_tokens[:-1]], device=device)
         target = torch.tensor([input_tokens[1:]], device=device)
 
-        logits, _ = self.brain.forward_perception(x, body_state=body_state)
+        # GRUを1回だけ流して知覚損失を計算する
+        out, _ = self.brain.forward_hidden(x, body_state=body_state)
+        logits = self.brain.perception_head(out)
         loss = F.cross_entropy(logits[0], target[0])
 
         probs_list = []
@@ -53,6 +55,20 @@ class TaroLearner:
                 probs_list.append(probs_all[i])
 
         return loss, probs_list
+
+    def compute_value_loss(self, value_pred, reward):
+        """
+        クリティック（状態価値関数）の学習：TD誤差の二乗を最小化する。
+
+        【人間模倣＝既存AI研究】Actor-Critic法のcritic更新。
+        Dopamineの単純な移動平均baselineを、body_state依存の
+        価値予測に置き換えるための学習（B-11）。
+
+        value_pred: brain.critic(body_state) の出力（勾配あり）
+        reward: 実際に得られた報酬（スカラー）
+        """
+        target = torch.tensor(reward, device=value_pred.device, dtype=value_pred.dtype)
+        return F.mse_loss(value_pred, target)
 
     def learn_action(self, log_probs, delta):
         """
@@ -76,13 +92,15 @@ class TaroLearner:
 
         return policy_loss
 
-    def update(self, perception_loss, policy_loss):
+    def update(self, perception_loss, policy_loss, value_loss=None):
         """
-        知覚と行動の損失を合算し、重みを1回更新する。
+        知覚・行動・価値の損失を合算し、重みを1回更新する。
 
         ⚠️ ここで誤差逆伝播（backprop）を使う【⚠️逸脱】。
         """
         total_loss = perception_loss + policy_loss
+        if value_loss is not None:
+            total_loss = total_loss + value_loss
 
         self.optimizer.zero_grad()
         if isinstance(total_loss, torch.Tensor) and total_loss.requires_grad:

@@ -6,3 +6,4 @@ from taro.brain.instincts.habituation import Habituation
 from taro.brain.instincts.locus_coeruleus import LocusCoeruleus
 from taro.brain.instincts.reward import compute_total_reward
 from taro.brain.instincts.homeostasis import Homeostasis
+from taro.brain.instincts.critic import Critic
