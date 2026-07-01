@@ -8,6 +8,7 @@
 A2-10：旧core.pyから改名。人間の脳の部品名に合わせた。
 """
 
+import random
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -147,7 +148,19 @@ class TaroBrain(nn.Module):
             max_chars = min(max_length, int(stamina) if stamina is not None else max_length)
             speech_plan = None
 
-        for _ in range(max_chars):
+        # 喃語期（発話計画なし）だけに適用する身体的な発声停止。
+        # B-7では学習可能な停止headを試みたが、知覚時と生成時で隠れ状態が
+        # 異なり誤発火した（撤去済み）。代わりに息切れという身体的制約で
+        # 確率的に止まる：残り呼気が少ないほど続ける確率が下がる。
+        # B2-4：これが無いと肺活量の上限まで毎回とにかく出し続けてしまい
+        # （肺活量が早期に上限化した後は常に固定長の喃語になる）、人間の
+        # 「毎回長さが変わる」喃語と乖離していた。
+        is_babble = speech_plan is None
+
+        for t in range(max_chars):
+            if is_babble and t > 0 and max_chars > 0 and random.random() < t / max_chars:
+                break
+
             h_last = out[0, -1]
             pl, ml, vl, vol = self.forward_articulation(h_last)
             log_prob = torch.tensor(0.0, device=self._device())
