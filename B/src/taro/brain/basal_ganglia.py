@@ -80,9 +80,9 @@ class TaroLearner:
 
         B2-2：従来は発話全体に単一のδしか与えず、系列内のどの文字が
         良かったかを区別できなかった（クレジット割り当て問題）。
-        creditsを渡すと、文字ごとの一致度（compute_alignment_credit）で
-        δを重み付けし、良かった文字はより強く強化し、目標語にない
-        余分な文字は抑制する。
+        creditsを渡すと、文字ごとの一致度（compute_alignment_credit、
+        ⚠️逸脱：詳細はimitation.py参照）でδを重み付けし、良かった文字は
+        より強く強化し、目標語にない余分な文字は抑制する。
 
         loss = -Σ (δ * credit_i) * log_prob(生成したi番目のトークン)
 
