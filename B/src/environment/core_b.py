@@ -294,7 +294,7 @@ class TaroEnvironmentB:
 
         # 発声（喃語）：speech_plan=None で喃語期のパスを使う
         ne_level = self.locus_coeruleus.get_ne_level()
-        generated, _log_probs, _ = self.brain.generate(
+        generated, log_probs, _ = self.brain.generate(
             hidden=self._hidden,
             max_length=self.max_output_length,
             eos_idx=2,
@@ -310,7 +310,8 @@ class TaroEnvironmentB:
         self.lungs.consume(len(generated))
 
         if not generated:
-            return {"taro": "", "R": 0.0, "r_pred": 0.0, "r_home": 0.0}
+            return {"taro": "", "R": 0.0, "r_pred": 0.0, "r_home": 0.0,
+                    "tokens": [], "log_probs": []}
 
         # 自分の声を聞く（hidden state更新）。学習はしない。
         full_tokens = [1] + generated + [2]
@@ -339,7 +340,42 @@ class TaroEnvironmentB:
             "r_pred": 0.0,  # 睡眠時に計算するため未算出
             "r_home": r_home,
             "R": R,
+            "tokens": generated,
+            "log_probs": log_probs,
         }
+
+    def respond_to_babble(self, generated_tokens, log_probs, target_word):
+        """
+        親が自発喃語に気づいて反応する（随伴的社会的フィードバック）。
+
+        【人間模倣】Goldstein & Schwade (2008)：養育者は乳児の自発発声の
+        約30〜50%に気づいて反応し、言葉らしい発声ほど反応をもらいやすい。
+        反応をもらった発声パターンは乳児が再び自発的に発しやすくなる。
+
+        B-9まで自発喃語（self_babble）は知覚学習（consolidate）のみで、
+        発声を選ぶ4つのhead（head_place等）には報酬が一切届いていなかった。
+        親との会話（step）と同じ経路（learn_action）をここでも使うことで、
+        模倣と自発発話が同じ強化学習の仕組みを共有するようにする。
+
+        target_word: 現在の内的状態に対応する言葉（例：空腹なら「まんま」）。
+        親が実際に発した言葉ではなく、状況に応じて自然に使われる言葉を想定。
+        """
+        if not generated_tokens or not log_probs:
+            return None
+
+        target_tokens = self.vocab.encode(target_word)
+        r_imit = compute_imitation_reward(target_tokens, generated_tokens,
+                                          vocab=self.vocab, vocal_tract=self.vocal_tract)
+        r_social = 0.5  # 親が気づいて反応してくれたこと自体の報酬
+
+        R = max(0.0, self.weights["w_imit"] * r_imit + self.weights["w_social"] * r_social)
+        delta = self.dopamine.compute_rpe(R)
+
+        a_loss = self.learner.learn_action(log_probs, delta)
+        zero_p_loss = torch.tensor(0.0, device=self.device)
+        _, al = self.learner.update(zero_p_loss, a_loss)
+
+        return {"r_imit": r_imit, "r_social": r_social, "R": R, "delta": delta, "a_loss": al}
 
     def consolidate(self):
         """

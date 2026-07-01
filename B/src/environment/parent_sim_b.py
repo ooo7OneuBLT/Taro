@@ -51,6 +51,9 @@ class ParentSchedule:
         self.babble_interval = bb.get("interval", 45)
         self.babble_arousal_threshold = bb.get("arousal_threshold", 0.3)
 
+        br = cfg.get("babble_response", {})
+        self.babble_response_prob = br.get("prob", 0.4)
+
         sp = cfg.get("speech", {})
         self.speak_with_care = sp.get("enabled", True)
         self.words = sp.get("words", {"feed": "まんま", "comfort": "よしよし", "hold": "まま"})
@@ -139,6 +142,9 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
         if currently_sleeping and not prev_sleeping:
             consol = env.consolidate()
             consolidate_count += consol["consolidated"]
+            env.logger.log_event(sim_seconds, "sleep_start",
+                                  consolidated=consol["consolidated"],
+                                  p_loss=round(consol["p_loss"], 4))
             if verbose and consol["consolidated"] > 0:
                 print(f"  t={sim_seconds:5d}s ({fmt_time(sim_seconds)}) | "
                       f"海馬→皮質: {consol['consolidated']}件定着 "
@@ -152,6 +158,8 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
             env.tick_body(elapsed_seconds=skip, sim_seconds=sim_seconds + skip)
             sim_seconds += skip
             sleep_count += 1
+            env.logger.log_event(sim_seconds, "sleep_end", duration=skip,
+                                  hunger=round(env.internal_state.hunger, 4))
             if verbose:
                 print(f"  t={sim_seconds:5d}s ({fmt_time(sim_seconds)}) | "
                       f"起きた（{skip//60}分寝た）| "
@@ -177,6 +185,11 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
         crying_now, intensity = env.check_cry()
         if crying_now and not was_crying:
             cry_count += 1
+            env.logger.log_event(sim_seconds, "cry_start",
+                                  intensity=round(intensity, 4),
+                                  hunger=round(env.internal_state.hunger, 4),
+                                  arousal=round(env.internal_state.get_arousal(), 4),
+                                  parent_present=schedule.present)
             if verbose and (cry_count <= 20 or cry_count % 50 == 0):
                 print(f"  t={sim_seconds:5d}s ({fmt_time(sim_seconds)}) | "
                       f"泣き始めた（強さ{intensity:.2f}）| "
@@ -184,18 +197,21 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
                       f"つらさ={env.internal_state.get_arousal():.2f} "
                       f"親{'在' if schedule.present else '不在'}")
             schedule.on_cry(sim_seconds)
+        elif was_crying and not crying_now:
+            env.logger.log_event(sim_seconds, "cry_end",
+                                  hunger=round(env.internal_state.hunger, 4))
         was_crying = crying_now
 
         if schedule.should_respond_now(sim_seconds):
             care_type = "feed" if env.internal_state.hunger > 0.5 else "comfort"
-            if care_type == "feed":
-                env.feed(schedule.feed_amount)
-                feed_count += 1
             env.comfort(care_type)
 
             word = schedule.choose_word(care_type)
             if word:
-                result = env.step(word, r_social=0.5)
+                result = env.step(word, r_social=0.5)  # 空腹のまま「まんま」を聞く・返す
+            if care_type == "feed":
+                env.feed(schedule.feed_amount)          # 発話の後に授乳
+                feed_count += 1
                 speak_count += 1
                 env.logger.log_turn(
                     result["turn"], sim_seconds, word, result["taro"],
@@ -204,10 +220,16 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
                     env.brain.temperature,
                     context=care_type, hunger=result["hunger"],
                 )
+                env.logger.log_event(sim_seconds, "feed",
+                                      amount=schedule.feed_amount,
+                                      hunger_before=round(result["hunger"], 4))
                 if verbose and (speak_count <= 30 or speak_count % 50 == 0):
                     print(f"  t={sim_seconds:5d}s ({fmt_time(sim_seconds)}) | "
                           f"親「{word}」→ 太郎「{result['taro']}」| "
                           f"模倣={result['r_imit']:.2f} hunger={result['hunger']:.2f}")
+            else:
+                env.logger.log_event(sim_seconds, "comfort",
+                                      hunger=round(env.internal_state.hunger, 4))
 
         # 自発的な喃語（穏やかな時間の練習）
         if (sim_seconds - last_babble_time >= schedule.babble_interval
@@ -228,6 +250,21 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
                 print(f"  t={sim_seconds:5d}s ({fmt_time(sim_seconds)}) | "
                       f"喃語「{result['taro']}」| "
                       f"arousal={env.internal_state.get_arousal():.2f}")
+
+            # 親が喃語に気づいて反応する（B-10：随伴的社会的フィードバック）
+            if random.random() < schedule.babble_response_prob:
+                target_care = "feed" if env.internal_state.hunger > 0.5 else "comfort"
+                target_word = schedule.choose_word(target_care)
+                if target_word:
+                    resp = env.respond_to_babble(result["tokens"], result["log_probs"], target_word)
+                    if resp:
+                        env.logger.log_event(
+                            sim_seconds, "babble_response",
+                            taro=result["taro"], target=target_word,
+                            r_imit=round(resp["r_imit"], 4), R=round(resp["R"], 4),
+                            delta=round(resp["delta"], 4),
+                            hunger=round(env.internal_state.hunger, 4),
+                        )
 
         if verbose and sim_seconds % schedule.log_interval == 0:
             state = "寝" if env.internal_state.is_sleeping() else \
