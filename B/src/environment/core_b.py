@@ -134,7 +134,7 @@ class TaroEnvironmentB:
         """replayViewer用トレースログを有効化する（Noneで無効）。"""
         self._trace = trace_logger
 
-    def trace_event(self, sim_seconds, kind, active, flows, utter=""):
+    def trace_event(self, sim_seconds, kind, active, flows, utter="", say=""):
         """
         1イベントを trace.jsonl に書き出す（replayViewer用）。
         発火した部品(active)・流れ(flows)・そのときの数値(空腹/NE/ドーパミン/
@@ -156,6 +156,8 @@ class TaroEnvironmentB:
         }
         rec = {"type": "event", "t": int(sim_seconds), "kind": kind,
                "modules": active, "flows": flows, "utter": utter}
+        if say:                       # 親の発話（あれば）。replayViewerの会話表示用。
+            rec["say"] = say
         rec.update({k: round(v, 3) for k, v in metrics.items()})
         self._trace.write_event(rec)
 
