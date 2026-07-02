@@ -40,6 +40,11 @@ const KIND_MODULES = {
   word_request:["stomach","insula","cortex","vocal"], feed:["stomach","insula","cortex","critic"],
   comfort:["cortex","insula"], cry:["stomach","insula","cortex","lungs"], sleep:["hippocampus","cortex"],
 };
+// イベント種別→日本語ラベル（scene表示用）と重要度（粗い粒度で残す優先度）
+const KIND_LABEL = { babble:"喃語", babble_response:"喃語に親が反応", word_request:"要求語（まんま）",
+  feed:"授乳", comfort:"あやし", cry:"泣く", sleep:"睡眠" };
+const KIND_SIG = { feed:6, word_request:6, babble_response:4, cry:3, comfort:2, sleep:1, babble:0 };
+
 const GAUGES = [
   { key:"hunger", label:"空腹" }, { key:"ne", label:"探索(NE)" },
   { key:"dopamine", label:"ドーパミン分泌量" }, { key:"happiness", label:"幸福度" },
@@ -239,7 +244,7 @@ function render() {
   el("seek").value=idx; el("seekReadout").textContent=(idx+1)+" / "+items.length;
   el("dateLabel").textContent=fmtDate(it.t);
   if (it.counts) { el("sceneLabel").textContent=`【${granLabel(activeGran)}集約】`; renderBucket(it); }
-  else { el("sceneLabel").textContent=it.kind||""; renderMoment(it); }
+  else { el("sceneLabel").textContent=KIND_LABEL[it.kind]||it.kind||""; renderMoment(it); }
   updatePlayhead();
   updateChat(it.t);
 }
@@ -348,8 +353,25 @@ function routeFile(name, text){
   datasets[gran]=parseAny(text);
 }
 
+function sigOf(ev){ const s=KIND_SIG[ev.kind]; return s==null?1:s; }
+// 粗い粒度＝各時間窓で「最も重要なイベント1件」を実データのまま取り出す。
+// 集約して臓器を全部光らせる（矢印も出ない）のをやめ、イベント発生時の実際の動き
+// （発火した部品＋流れの矢印＋その瞬間の数値）をそのまま見せる。
+function downsampleRaw(raw, windowSec){
+  const pick=new Map();
+  raw.forEach(ev=>{ if(ev.counts) return; const k=Math.floor(ev.t/windowSec);
+    const cur=pick.get(k); if(!cur||sigOf(ev)>sigOf(cur)) pick.set(k,ev); });
+  return [...pick.values()].sort((a,b)=>a.t-b.t);
+}
+function buildGransFromRaw(){
+  const raw=datasets.raw; if(!raw||!raw.length) return;
+  const W={hour:3600, day:86400, month:2592000, year:31536000};
+  for(const g in W) datasets[g]=downsampleRaw(raw, W[g]);
+}
+
 function afterLoad(){
-  const order=["day","month","hour","year","raw"];
+  buildGransFromRaw();                 // rawがあれば粗い粒度も実イベントで作り直す
+  const order=["hour","day","month","year","raw"];
   const g=order.find(x=>datasets[x]&&datasets[x].length);
   if(g) setActive(g);
 }
