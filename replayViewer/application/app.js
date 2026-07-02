@@ -168,6 +168,38 @@ function applyActive(){
     const bg=el("blabelbg_"+id); if(bg) bg.classList.toggle("on",on);
   }
 }
+// NN活性ビュー（かっこよさ用・汎用）：実アーキテクチャ 入力→GRU隠れ128→出口 を描き、
+// イベントごとに発火した隠れノード(rec.fire)を光らせる。意味は読めないが「本物のNNが
+// 動いている」感を出す。どのモデルでも fire さえ記録すれば使える汎用ビュー。
+const NN_HID = 128;
+let _nnHidPos = [], _nnLit = [];
+function buildNNView(){
+  const svg=el("nnSvg"); if(!svg) return; svg.innerHTML="";
+  const edges=mk("g",{},svg), nodes=mk("g",{},svg), labels=mk("g",{},svg);
+  const inX=28, inYs=[]; for(let i=0;i<6;i++){ const y=50+i*38; inYs.push(y);
+    mk("circle",{cx:inX,cy:y,r:4,class:"nn-node nn-in"},nodes); }
+  const cols=16, rows=8, x0=92, x1=338, y0=28, y1=274; _nnHidPos=[];
+  for(let i=0;i<NN_HID;i++){ const c=i%cols, r=Math.floor(i/cols);
+    const x=x0+(x1-x0)*c/(cols-1), y=y0+(y1-y0)*r/(rows-1); _nnHidPos.push([x,y]);
+    mk("circle",{cx:x,cy:y,r:3.1,class:"nn-node",id:"nnh_"+i},nodes); }
+  const headDefs=[["食べ物予期",70],["発声",118],["価値",166],["次の音の予測",214]];
+  const hX=432, headPos=[];
+  headDefs.forEach(([lab,y])=>{ headPos.push([hX,y]);
+    mk("circle",{cx:hX,cy:y,r:5,class:"nn-node nn-head"},nodes);
+    const t=mk("text",{x:hX-9,y:y+3,"text-anchor":"end",class:"nn-headlabel"},labels); t.textContent=lab; });
+  const rnd=a=>a[Math.floor(Math.random()*a.length)];
+  for(let k=0;k<80;k++){ const y=rnd(inYs), p=rnd(_nnHidPos);
+    mk("line",{x1:inX,y1:y,x2:p[0],y2:p[1],class:"nn-edge"},edges); }
+  for(let k=0;k<80;k++){ const p=rnd(_nnHidPos), q=rnd(headPos);
+    mk("line",{x1:p[0],y1:p[1],x2:q[0],y2:q[1],class:"nn-edge"},edges); }
+  svg.insertBefore(edges, nodes);   // 辺を下に
+}
+function updateNN(fire){
+  _nnLit.forEach(i=>{ const n=el("nnh_"+i); if(n) n.classList.remove("on"); });
+  _nnLit = Array.isArray(fire)?fire:[];
+  _nnLit.forEach(i=>{ const n=el("nnh_"+i); if(n) n.classList.add("on"); });
+}
+
 function buildNet() {
   const edges=el("netEdges"),nodes=el("netNodes");
   NET_EDGES.forEach(([a,b])=>mk("line",{x1:cx(a),y1:cy(a),x2:cx(b),y2:cy(b),class:"net-edge","data-edge":a+"|"+b},edges));
@@ -238,6 +270,7 @@ function renderMoment(m) {
   });
   if(active.size){ const f=[...active][0]; if(NET[f]){ const badge=mk("text",{x:NET[f].x,y:NET[f].y-22,"text-anchor":"middle",class:"fire-badge","font-size":13},el("netNodes")); badge.textContent="発火!"; bgFor(badge, el("netNodes"), "lblbg badgebg"); } }
   setGauges(m.gauges);
+  updateNN(m.fire);
   el("utterVal").textContent=m.utter?m.utter:"—";
 }
 function renderBucket(b) {
@@ -403,7 +436,7 @@ function parseAny(text){
     else if(o.type==="comprehension") comprehension.push({t:o.t,mama:o.mama,maman:o.maman,aua:o.aua});
     else if(o.type==="snap") gauges={hunger:o.hunger,ne:o.ne,dopamine:o.dopamine,happiness:o.happiness};
     else if(o.type==="event"){ const g=(o.hunger!=null)?{hunger:o.hunger,ne:o.ne,dopamine:o.dopamine,happiness:o.happiness}:Object.assign({},gauges);
-      out.push({t:o.t,kind:o.kind,active:o.modules||[],flows:o.flows||[],utter:o.utter||"",say:o.say||"",gauges:g}); }
+      out.push({t:o.t,kind:o.kind,active:o.modules||[],flows:o.flows||[],utter:o.utter||"",say:o.say||"",fire:o.fire||null,gauges:g}); }
     else if(o.active) out.push(o);
   });
   return out;
@@ -443,7 +476,11 @@ function afterLoad(){
 
 // ---- 初期化 ----
 function init(){
-  buildBody(); buildNet(); buildComp();
+  buildBody(); buildNet(); buildComp(); buildNNView();
+  el("nm_region").onclick=()=>{ el("netSvg").hidden=false; el("nnSvg").hidden=true;
+    el("nm_region").classList.add("sel"); el("nm_nn").classList.remove("sel"); };
+  el("nm_nn").onclick=()=>{ el("netSvg").hidden=true; el("nnSvg").hidden=false;
+    el("nm_nn").classList.add("sel"); el("nm_region").classList.remove("sel"); };
   enableZoom("panel_body",[0,0,300,380],box=>{ bodyBox=box; layoutBodyLabels(); });
   enableZoom("panel_net",[0,0,460,300]);
 
@@ -460,10 +497,11 @@ function init(){
   // 無ければ sample_trace.json（生の見本）を使う。
   const files=["trace_overview_year.jsonl","trace_overview_month.jsonl","trace_overview_day.jsonl",
                "trace_overview_hour.jsonl","milestones.json","trace.jsonl"];
-  Promise.allSettled(files.map(f=>fetch(f).then(r=>r.ok?r.text():Promise.reject()).then(t=>routeFile(f,t))))
+  const bust="?_="+Date.now();   // ブラウザのHTTPキャッシュを避けて常に最新のログを読む
+  Promise.allSettled(files.map(f=>fetch(f+bust).then(r=>r.ok?r.text():Promise.reject()).then(t=>routeFile(f,t))))
     .then(()=>{
       if(Object.keys(datasets).length) afterLoad();
-      else fetch("sample_trace.json").then(r=>r.text()).then(t=>{ datasets.raw=parseAny(t); setActive("raw"); })
+      else fetch("sample_trace.json"+bust).then(r=>r.text()).then(t=>{ datasets.raw=parseAny(t); setActive("raw"); })
         .catch(()=>{ el("sceneLabel").textContent="ログが読めません（サーバー経由で開く／フォルダを選択）"; });
     });
 

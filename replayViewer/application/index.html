@@ -96,6 +96,14 @@
           animation:dash .5s linear infinite; filter:drop-shadow(0 0 3px var(--flow));
           vector-effect:non-scaling-stroke; }
   .fire-badge { fill:var(--fire); font-size:12px; font-weight:700; }
+  /* NN活性ビュー（かっこよさ用・汎用） */
+  #netSvg, #nnSvg { flex:1 1 auto; min-height:0; width:100%; height:100%; display:block; padding:4px; }
+  .nn-node { fill:#16283e; stroke:#2b4a68; stroke-width:1; transition:fill .12s; }
+  .nn-node.on { fill:var(--flow); stroke:var(--flow); filter:drop-shadow(0 0 3px var(--flow)); }
+  .nn-head { fill:#14263c; stroke:var(--cyan); stroke-width:1.3; }
+  .nn-in { stroke:var(--muted); }
+  .nn-edge { stroke:var(--grid); stroke-width:.5; opacity:.22; vector-effect:non-scaling-stroke; }
+  .nn-headlabel { fill:var(--muted); font-size:10px; }
   @keyframes dash { to { stroke-dashoffset:-11; } }
 
   .gauge-row { margin:5px 2px; }
@@ -199,12 +207,17 @@
   </div>
 
   <div class="panel" id="panel_net">
-    <div class="bar"><span class="grip">⠿</span><h2>NETWORK / ネットワーク図 — 矢印＝流れの向き（上り/下りは二車線）</h2></div>
-    <svg viewBox="0 0 460 300" preserveAspectRatio="xMidYMid meet">
+    <div class="bar"><span class="grip">⠿</span><h2>NETWORK / 太郎の脳</h2>
+      <span class="wbtns">
+        <button class="wbtn nm sel" id="nm_region">部位図</button><button class="wbtn nm" id="nm_nn">NN活性</button>
+      </span>
+    </div>
+    <svg id="netSvg" viewBox="0 0 460 300" preserveAspectRatio="xMidYMid meet">
       <g id="netEdges"></g>
       <g id="netFlows"></g>
       <g id="netNodes"></g>
     </svg>
+    <svg id="nnSvg" viewBox="0 0 460 300" preserveAspectRatio="xMidYMid meet" hidden></svg>
   </div>
 
   <div class="panel" id="panel_metrics">
