@@ -243,6 +243,13 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
     last_babble_time = -schedule.babble_interval
     prev_sleeping = False
 
+    # 理解の配線メーター（replayViewer用）：月イチで「聞いた語→食べ物予期」を測って記録する。
+    # 満腹(0.1)で測るのは、空腹だと語によらず予期が上がるため（語の寄与＝理解は満腹時に出る）。
+    # リプレイで「まんま→食べ物予期の線が育って光る／あうあ→は暗いまま」を見せるためのデータ。
+    _COMP_WORDS = ["まんま", "ままん", "あうあ"]
+    _comp_interval = 2592000     # 30日ごと
+    _last_comp = -_comp_interval
+
     if verbose:
         print(f"=== 目標B シミュレーション開始 ===")
         print(f"最大: {max_sim_seconds}秒 ({max_sim_seconds//60}分)")
@@ -334,6 +341,17 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
         # 時間割授乳（B2-14・年齢graded）：月齢に応じた食事時刻に、空腹に関わらず「まんま」と
         # 言って授乳。0-5ヶ月は0回（ほぼ需要ベース）で、成長とともに増える（離乳の移行）。
         # 満腹寄りでもまんまを聞く機会になり語と空腹の相関を緩める。授乳量も年齢で変わる。
+        # 理解の配線メーター：月イチで「聞いた語→食べ物予期」を測ってトレースに記録。
+        if trace is not None and sim_seconds - _last_comp >= _comp_interval:
+            _last_comp = sim_seconds
+            cvals = {}
+            for _w in _COMP_WORDS:
+                _s = env.comprehension_probe(_w, 0.1, n_samples=1).get("satiety")
+                cvals[_w] = round(_s, 4) if _s is not None else None
+            trace.write_event({"type": "comprehension", "t": sim_seconds,
+                               "mama": cvals["まんま"], "maman": cvals["ままん"],
+                               "aua": cvals["あうあ"]})
+
         # オンデマンド授乳（下の should_respond）が現実同様の主経路として残る。
         fa = _age_feed_amount(sim_seconds)
         if (schedule.meal_due(sim_seconds) and schedule.present
