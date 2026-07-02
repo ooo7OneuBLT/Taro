@@ -26,12 +26,13 @@ class LocusCoeruleus:
 
     def __init__(self, reward_window=20, base_ne=0.5,
                  ne_increase_rate=0.05, ne_decrease_rate=0.03,
-                 min_ne=0.1, max_ne=1.0):
+                 min_ne=0.1, max_ne=1.0, mature_max_ne=0.3):
         """
         reward_window: 最近何ターンの報酬を見るか
         base_ne: NEの基準レベル
         ne_increase_rate: 報酬ゼロ時のNE上昇速度
         ne_decrease_rate: 報酬あり時のNE低下速度
+        mature_max_ne: 完全成熟時のNE上限（探索の天井）
         """
         self.reward_history = []
         self.reward_window = reward_window
@@ -41,6 +42,31 @@ class LocusCoeruleus:
         self.ne_decrease_rate = ne_decrease_rate
         self.min_ne = min_ne
         self.max_ne = max_ne
+
+        # 【人間模倣】成熟による探索の結晶化（B2-8）。
+        # 若い個体はゆらぎ（探索）が大きく、育つにつれてゆらぎが減り
+        # 「うまくいったやり方」に固まる（結晶化）。人間ではシナプス刈り込み・
+        # 臨界期の閉じ・前頭前野の成熟が、鳥ではLMANの運動系への影響低下が
+        # これを担う。太郎では発達の進行（月齢）に応じてNEの上限を
+        # max_ne → mature_max_ne へ下げることで近似する（声道が月齢で
+        # 解禁されるのと同じ「月齢による成熟」の一貫）。
+        # 注：複数の実在する成熟機構（刈り込み等）を、太郎が既に持つ1つの
+        # ゆらぎ調整本能に集約した近似であり、NE単独が人間の結晶化を
+        # 駆動すると主張するものではない。
+        self.mature_max_ne = mature_max_ne
+        self.maturation = 0.0  # 0=新生児（探索大）, 1=完全成熟（結晶化）
+
+    def mature(self, progress):
+        """
+        発達の進行度（0〜1）を受け取り、探索の天井を下げる。
+
+        progress = 経過時間 / 完全成熟までの時間（声道stage3と同じ月齢基準）。
+        """
+        self.maturation = max(0.0, min(1.0, progress))
+
+    def _ceiling(self):
+        """現在の発達段階での探索の天井（NE上限）。成熟が進むほど低い。"""
+        return self.max_ne - self.maturation * (self.max_ne - self.mature_max_ne)
 
     def observe_reward(self, reward):
         """毎ターンの報酬を観測する。"""
@@ -62,9 +88,14 @@ class LocusCoeruleus:
 
         recent_avg = sum(self.reward_history) / len(self.reward_history)
 
+        # 探索の天井は成熟で下がる（B2-8）。報酬ベースの調整（既存）と
+        # 成熟ベースの上限（新規）の両方が同時に働く＝人間の2機構を再現。
+        ceiling = self._ceiling()
+
         if recent_avg < 0.1:
-            # 報酬がほぼゼロ → NEを増やす（探索モードへ）
-            self.ne_level = min(self.max_ne,
+            # 報酬がほぼゼロ → NEを増やす（探索モードへ）。ただし成熟した
+            # 天井は超えられない（育つと際限なくは探索しない）。
+            self.ne_level = min(ceiling,
                                 self.ne_level + self.ne_increase_rate)
         elif recent_avg > 0.3:
             # 報酬が十分ある → NEを減らす（搾取モードへ）
@@ -76,6 +107,11 @@ class LocusCoeruleus:
                 self.ne_level -= self.ne_decrease_rate * 0.5
             elif self.ne_level < self.base_ne:
                 self.ne_level += self.ne_increase_rate * 0.5
+
+        # 成熟した天井を超えていたら引き下げる（発達が進むと過去の高い
+        # 探索水準はもう維持できない）。
+        if self.ne_level > ceiling:
+            self.ne_level = ceiling
 
         return self.ne_level
 
