@@ -84,6 +84,7 @@ let items = [];         // 現在表示中のデータ列
 let idx = 0, timer = null, speed = 1;
 let TOTAL_T = 2 * 365 * 86400;
 let chatMsgs = [];      // {t, who:'parent'|'taro', text, cry}
+let comprehension = []; // {t, mama, maman, aua} 月イチの「語→食べ物予期」測定（理解の配線用）
 let bodyBox = {x:0,y:0,w:300,h:380};   // 体ビューの現在のviewBox（ズーム/パンで変わる）
 let activeMods = new Set();             // 今光っている部品
 
@@ -186,6 +187,40 @@ function setModules(activeSet) {
   activeMods=activeSet; applyActive();
   for (const id in NET) el("nn_"+id).classList.toggle("on",activeSet.has(id));
 }
+// 理解の配線図：3つの語 → 「食べ物予期」ノード。線が太い/明るいほど「その語で食べ物が
+// 来る」と結びついている＝理解している。まんまが育って光り、あうあは暗いままなのを見せる。
+const COMP_WORDS = [["まんま","mama",34],["ままん","maman",78],["あうあ","aua",122]];
+function buildComp(){
+  const svg=el("compSvg"); if(!svg) return;
+  svg.innerHTML="";
+  const nx=228, ny=78;
+  mk("rect",{x:nx,y:ny-22,width:64,height:44,rx:10,class:"comp-node"},svg);
+  const nt=mk("text",{x:nx+32,y:ny+4,"text-anchor":"middle","font-size":11.5,fill:"var(--cyan)"},svg);
+  nt.textContent="食べ物予期";
+  COMP_WORDS.forEach(([label,key,wy])=>{
+    mk("line",{x1:66,y1:wy,x2:nx,y2:ny,class:"comp-line","data-key":key,"stroke-width":1,opacity:.25},svg);
+    const t=mk("text",{x:6,y:wy+4,class:"comp-wlabel"},svg); t.textContent=label;
+    mk("text",{x:(66+nx)/2,y:(wy+ny)/2-3,"text-anchor":"middle",class:"comp-val","data-key":key},svg);
+  });
+  updateComp(items&&items[idx]?items[idx].t:0);
+}
+function updateComp(t){
+  const svg=el("compSvg"); if(!svg) return;
+  const title=el("compTitle");
+  if(!comprehension.length){ if(title) title.textContent="理解の配線：この記録には理解メーターのデータがありません（12ヶ月トレースで記録）"; return; }
+  let cur=comprehension[0];
+  for(const c of comprehension){ if(c.t<=t+0.5) cur=c; else break; }
+  const vals={mama:cur.mama, maman:cur.maman, aua:cur.aua};
+  svg.querySelectorAll(".comp-line").forEach(ln=>{
+    const v=vals[ln.getAttribute("data-key")]; const s=(v==null)?0:v;
+    ln.setAttribute("stroke-width",(1+s*8).toFixed(1));
+    ln.setAttribute("opacity",(0.12+s*0.88).toFixed(2));
+  });
+  svg.querySelectorAll(".comp-val").forEach(tx=>{
+    const v=vals[tx.getAttribute("data-key")]; tx.textContent=(v==null)?"":v.toFixed(2);
+  });
+}
+
 function setGauges(g) {
   GAUGES.forEach(x=>{ const v=(g&&g[x.key]!=null)?g[x.key]:0;
     el("gauge_"+x.key).style.width=Math.round(v*100)+"%"; el("gval_"+x.key).textContent=Math.round(v*100)+"%"; });
@@ -275,6 +310,7 @@ function render() {
   else { el("sceneLabel").textContent=KIND_LABEL[it.kind]||it.kind||""; renderMoment(it); }
   updatePlayhead();
   updateChat(it.t);
+  updateComp(it.t);
 }
 function granLabel(g){ const f=GRANS.find(x=>x[0]===g); return f?f[1]:g; }
 
@@ -364,6 +400,7 @@ function parseAny(text){
     line=line.trim(); if(!line) return;
     let o; try{o=JSON.parse(line);}catch(e){return;}
     if(o.type==="bucket") out.push(o);
+    else if(o.type==="comprehension") comprehension.push({t:o.t,mama:o.mama,maman:o.maman,aua:o.aua});
     else if(o.type==="snap") gauges={hunger:o.hunger,ne:o.ne,dopamine:o.dopamine,happiness:o.happiness};
     else if(o.type==="event"){ const g=(o.hunger!=null)?{hunger:o.hunger,ne:o.ne,dopamine:o.dopamine,happiness:o.happiness}:Object.assign({},gauges);
       out.push({t:o.t,kind:o.kind,active:o.modules||[],flows:o.flows||[],utter:o.utter||"",say:o.say||"",gauges:g}); }
@@ -406,7 +443,7 @@ function afterLoad(){
 
 // ---- 初期化 ----
 function init(){
-  buildBody(); buildNet();
+  buildBody(); buildNet(); buildComp();
   enableZoom("panel_body",[0,0,300,380],box=>{ bodyBox=box; layoutBodyLabels(); });
   enableZoom("panel_net",[0,0,460,300]);
 
@@ -438,7 +475,7 @@ function init(){
   GRANS.forEach(([g])=>{ const b=el("gran_"+g); if(b) b.onclick=()=>setActive(g); });
 
   el("folderInput").onchange=e=>{
-    datasets={}; milestones=[];
+    datasets={}; milestones=[]; comprehension=[];
     const fs=[...e.target.files]; let pending=fs.length;
     if(!pending) return;
     fs.forEach(f=>{ const r=new FileReader(); r.onload=()=>{ routeFile(f.name,r.result); if(--pending===0) afterLoad(); }; r.readAsText(f); });
