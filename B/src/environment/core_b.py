@@ -423,7 +423,8 @@ class TaroEnvironmentB:
 
         return sims
 
-    def respond_to_babble(self, generated_tokens, log_probs, candidate_words, r_habit=0.0):
+    def respond_to_babble(self, generated_tokens, log_probs, candidate_words, r_habit=0.0,
+                          hunger=0.0, social=True, mand=False):
         """
         親が自発喃語に気づいて反応する（随伴的社会的フィードバック）。
 
@@ -470,7 +471,24 @@ class TaroEnvironmentB:
         r_imit = best_r_imit
         r_social = 0.5  # 親が気づいて反応してくれたこと自体の報酬
 
-        R = max(0.0, self.weights["w_imit"] * r_imit + self.weights["w_social"] * r_social + r_habit)
+        # 2つの報酬経路を合算して1回で学習する（同じlog_probsに2度backward
+        # するとエラーになるため、更新はここ1か所に統一）。
+        R = 0.0
+        # 経路1：社会的反応（Goldstein & Schwade）。言葉らしさへの反応で、
+        # 空腹とは無関係に起きる（＝これ単独だと無条件にまんまを言うよう学ぶ）。
+        if social:
+            R += self.weights["w_imit"] * r_imit + self.weights["w_social"] * r_social
+        # 経路2：要求語（mand, Skinner 1957）。B2-9追加。空腹という動因状態で
+        # まんま様発声をして食べ物が得られると、その解消（ホッとする）が報酬になる。
+        # 満腹時は食べ物が来ても解消がない＝報酬にならないので、hungerに比例
+        # させる（閾値ではなく連続。満腹に近いほど自然にゼロへ）。恒常性報酬
+        # (r_home)と同じ重みw_homeを使い、「まんまと言ったこと」に信用を割り当てる
+        # ことで、これまで結びついていなかった「空腹→まんま→ホッとする」を配線する。
+        r_mand = 0.0
+        if mand:
+            r_mand = self.weights.get("w_home", 0.3) * max(0.0, hunger)
+            R += r_mand
+        R = max(0.0, R + r_habit)
 
         body_state = self._body_state_tensor()
         value = self.brain.critic(body_state)
@@ -486,8 +504,8 @@ class TaroEnvironmentB:
         zero_p_loss = torch.tensor(0.0, device=self.device)
         _, al = self.learner.update(zero_p_loss, a_loss, value_loss)
 
-        return {"r_imit": r_imit, "r_social": r_social, "R": R, "delta": delta,
-                "a_loss": al, "recognized_word": best_word}
+        return {"r_imit": r_imit, "r_social": r_social, "r_mand": r_mand, "R": R,
+                "delta": delta, "a_loss": al, "recognized_word": best_word}
 
     def consolidate(self):
         """
