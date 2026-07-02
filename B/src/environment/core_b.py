@@ -158,8 +158,28 @@ class TaroEnvironmentB:
                "modules": active, "flows": flows, "utter": utter}
         if say:                       # 親の発話（あれば）。replayViewerの会話表示用。
             rec["say"] = say
+        fire = self._fire_indices()   # そのイベント時に発火したGRUノード番号（NN活性ビュー用）
+        if fire is not None:
+            rec["fire"] = fire
         rec.update({k: round(v, 3) for k, v in metrics.items()})
         self._trace.write_event(rec)
+
+    def _fire_indices(self, top_k=32):
+        """直近の隠れ状態(self._hidden)から「発火した」GRUノードの番号リストを返す。
+        活性の大きい上位top_k個を発火とする（常に一定数が光って賑やか＝かっこよさ用。
+        どのノードが強いかはイベントで変わる）。replayViewerのNN活性ビューが使う。
+        隠れ状態が無ければNone。"""
+        h = self._hidden
+        if h is None:
+            return None
+        try:
+            vec = h.detach().reshape(-1)
+            n = min(int(self.brain.hidden_dim), vec.shape[0])
+            vec = vec[-n:].abs()                 # GRU最終層の隠れ状態の強さ
+            k = min(top_k, n)
+            return vec.topk(k).indices.reshape(-1).tolist()
+        except Exception:
+            return None
 
     def _body_state_tensor(self):
         """内部状態をテンソルに変換して脳に渡す。"""
