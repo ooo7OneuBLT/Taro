@@ -96,6 +96,25 @@ class TaroBrain(nn.Module):
         # 反復が徐々に変異へ移行する発達的傾向も自然に再現される。
         self.reduplication_bias = 2.0
 
+        # 発声のたびに「許可された音だけ残すマスク」を作り直していたが、
+        # 許可集合は声道の段階が変わるとき（年に数回）しか変わらない。
+        # (ベクトル長, 許可indexの組) をキーにキャッシュし、生成の各文字での
+        # マスク再構築（_choose_param・_log_prob_of・_normalized_entropy）を
+        # 省く。計算結果は完全に同一で、速度だけ改善する。
+        self._mask_cache = {}
+
+    def _get_mask(self, logits, allowed_indices):
+        """許可index以外を-infにする加算マスク。段階ごとにキャッシュする。"""
+        key = (logits.shape[-1], tuple(allowed_indices))
+        m = self._mask_cache.get(key)
+        if m is None or m.device != logits.device or m.dtype != logits.dtype:
+            m = torch.full((logits.shape[-1],), float("-inf"),
+                           device=logits.device, dtype=logits.dtype)
+            for i in allowed_indices:
+                m[i] = 0.0
+            self._mask_cache[key] = m
+        return m
+
     def forward_hidden(self, x, hidden=None, body_state=None):
         """
         入力トークンを処理して隠れ状態を更新する。
@@ -277,9 +296,7 @@ class TaroBrain(nn.Module):
         """小脳の逆モデルが指定した値のlog確率を計算する。"""
         if len(allowed_indices) == 1:
             return torch.tensor(0.0, device=logits.device)
-        mask = torch.full_like(logits, float("-inf"))
-        for i in allowed_indices:
-            mask[i] = 0.0
+        mask = self._get_mask(logits, allowed_indices)
         masked_logits = logits + mask
         probs = F.softmax(masked_logits, dim=-1)
         if value < len(probs):
@@ -297,9 +314,7 @@ class TaroBrain(nn.Module):
         """
         if len(allowed_indices) <= 1:
             return 0.0
-        mask = torch.full_like(logits, float("-inf"))
-        for i in allowed_indices:
-            mask[i] = 0.0
+        mask = self._get_mask(logits, allowed_indices)
         masked_logits = logits + mask
         probs = F.softmax(masked_logits, dim=-1)
         idx = torch.tensor(allowed_indices, device=logits.device)
@@ -330,9 +345,7 @@ class TaroBrain(nn.Module):
         if len(allowed_indices) == 1:
             return allowed_indices[0], torch.tensor(0.0, device=logits.device)
 
-        mask = torch.full_like(logits, float("-inf"))
-        for i in allowed_indices:
-            mask[i] = 0.0
+        mask = self._get_mask(logits, allowed_indices)
         masked_logits = logits + mask
         probs = F.softmax(masked_logits, dim=-1)
         dist = torch.distributions.Categorical(probs)
