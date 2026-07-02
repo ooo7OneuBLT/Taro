@@ -203,6 +203,12 @@ class TaroEnvironmentB:
             _, h = self.brain.forward_hidden(listen_input, body_state=body_state)
         self._hidden = h
 
+        # B2-11：海馬に記録し、睡眠中に何度も反芻させる。太郎が起きている間に
+        # 親と話す機会（年1万回程度）は自発喃語（年10万回以上）よりずっと少なく、
+        # この頻度差が理解の学習を産出より大きく遅らせていた。睡眠リプレイで
+        # 反芻回数を稼ぎ、実際の会話機会の少なさを補う。
+        self.hippocampus.record_episode(full_tokens, body_state, satiety_target=satiety_target)
+
         # 発話計画
         self.brocas_area.plan(parent_text, self.cerebellum, self.vocal_tract)
 
@@ -591,27 +597,42 @@ class TaroEnvironmentB:
         睡眠移行時に海馬の経験を大脳皮質（GRU）に定着させる。
 
         【人間模倣】NREM睡眠中のシャープ波リプル（海馬→皮質の一方向転送）を模倣。
-        覚醒中に蓄積した喃語経験を順に再生し、予測モデルを強化する。
-        行動学習（政策勾配）はここでは行わない（知覚定着のみ）。
+        覚醒中に蓄積した経験を順に再生し、予測モデルを強化する。
+        行動学習（政策勾配）はここでは行わない（知覚定着＋B2-11で満腹予期の反芻）。
+
+        B2-11：親との会話（satiety_targetあり）も海馬に記録されるようになった
+        ため、ここで一緒に満腹予期（satiety_head）を反芻・強化する。実際に
+        親と話す機会は少なくても、眠るたびに同じ記憶を何度も再生することで
+        理解の学習量を稼ぐ（自発喃語が無制限に練習できるのと対称にする）。
         """
         experiences = self.hippocampus.replay()
         if not experiences:
             self.hippocampus.clear()
-            return {"consolidated": 0, "p_loss": 0.0}
+            return {"consolidated": 0, "p_loss": 0.0, "s_loss": 0.0}
 
         total_p_loss = None
-        for full_tokens, body_state in experiences:
-            p_loss, _, _ = self.learner.learn_perception(full_tokens, body_state=body_state)
+        total_s_loss = None
+        s_count = 0
+        for full_tokens, body_state, satiety_target in experiences:
+            p_loss, _, satiety_logit = self.learner.learn_perception(full_tokens, body_state=body_state)
             if isinstance(p_loss, torch.Tensor):
                 total_p_loss = p_loss if total_p_loss is None else total_p_loss + p_loss
+            if satiety_target is not None and satiety_logit is not None:
+                tgt = torch.tensor(float(satiety_target), device=satiety_logit.device,
+                                   dtype=satiety_logit.dtype)
+                s_loss = F.binary_cross_entropy_with_logits(satiety_logit, tgt)
+                total_s_loss = s_loss if total_s_loss is None else total_s_loss + s_loss
+                s_count += 1
 
+        combined_s_loss = (total_s_loss / s_count) if total_s_loss is not None else None
         if total_p_loss is not None:
-            pl, _ = self.learner.update(total_p_loss / len(experiences), 0.0)
+            pl, _ = self.learner.update(total_p_loss / len(experiences), 0.0, satiety_loss=combined_s_loss)
         else:
             pl = 0.0
 
+        s_val = combined_s_loss.item() if isinstance(combined_s_loss, torch.Tensor) else 0.0
         self.hippocampus.clear()
-        return {"consolidated": len(experiences), "p_loss": pl}
+        return {"consolidated": len(experiences), "p_loss": pl, "s_loss": s_val, "s_count": s_count}
 
     def save(self, tag="manual"):
         return self.archive.save_snapshot(

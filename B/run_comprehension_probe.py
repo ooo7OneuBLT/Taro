@@ -50,7 +50,7 @@ with open(log_path, "w", encoding="utf-8") as logf:
         r = run_simulation_b(
             max_sim_seconds=months * 2592000,
             verbose=False,
-            run_name=f"B2-10_comprehension_train{suffix}",
+            run_name=f"B2-11_comprehension_train{suffix}",
         )
         log(f"[学習完了] {time.strftime('%Y-%m-%d %H:%M:%S')} ({(time.time()-start)/60:.1f}分)")
         log(f"泣き{r['cry_count']} 食事{r['feed_count']} 要求語{r['request_count']} 喃語{r['babble_count']}")
