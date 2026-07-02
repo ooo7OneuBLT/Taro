@@ -11,6 +11,7 @@ import sys
 import os
 import random
 import yaml
+import torch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -342,12 +343,15 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
         # 言って授乳。0-5ヶ月は0回（ほぼ需要ベース）で、成長とともに増える（離乳の移行）。
         # 満腹寄りでもまんまを聞く機会になり語と空腹の相関を緩める。授乳量も年齢で変わる。
         # 理解の配線メーター：月イチで「聞いた語→食べ物予期」を測ってトレースに記録。
+        # 測定が学習の乱数列を乱さないよう、プローブ前後でRNGを保存/復元する（非侵襲測定）。
         if trace is not None and sim_seconds - _last_comp >= _comp_interval:
             _last_comp = sim_seconds
+            _rt, _rp = torch.get_rng_state(), random.getstate()
             cvals = {}
             for _w in _COMP_WORDS:
                 _s = env.comprehension_probe(_w, 0.1, n_samples=1).get("satiety")
                 cvals[_w] = round(_s, 4) if _s is not None else None
+            torch.set_rng_state(_rt); random.setstate(_rp)
             trace.write_event({"type": "comprehension", "t": sim_seconds,
                                "mama": cvals["まんま"], "maman": cvals["ままん"],
                                "aua": cvals["あうあ"]})

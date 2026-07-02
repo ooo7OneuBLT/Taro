@@ -477,6 +477,7 @@ function afterLoad(){
 // ---- 初期化 ----
 function init(){
   buildBody(); buildNet(); buildComp(); buildNNView();
+  el("netSvg").hidden=false; el("nnSvg").hidden=true;   // 初期は部位図だけ（確実に）
   el("nm_region").onclick=()=>{ el("netSvg").hidden=false; el("nnSvg").hidden=true;
     el("nm_region").classList.add("sel"); el("nm_nn").classList.remove("sel"); };
   el("nm_nn").onclick=()=>{ el("netSvg").hidden=true; el("nnSvg").hidden=false;
