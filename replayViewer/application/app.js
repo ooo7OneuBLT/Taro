@@ -477,11 +477,12 @@ function afterLoad(){
 // ---- 初期化 ----
 function init(){
   buildBody(); buildNet(); buildComp(); buildNNView();
-  el("netSvg").hidden=false; el("nnSvg").hidden=true;   // 初期は部位図だけ（確実に）
-  el("nm_region").onclick=()=>{ el("netSvg").hidden=false; el("nnSvg").hidden=true;
-    el("nm_region").classList.add("sel"); el("nm_nn").classList.remove("sel"); };
-  el("nm_nn").onclick=()=>{ el("netSvg").hidden=true; el("nnSvg").hidden=false;
-    el("nm_nn").classList.add("sel"); el("nm_region").classList.remove("sel"); };
+  const showNet=on=>{ el("netSvg").style.display=on?"block":"none";
+    el("nnSvg").style.display=on?"none":"block";
+    el("nm_region").classList.toggle("sel",on); el("nm_nn").classList.toggle("sel",!on); };
+  showNet(true);                       // 初期は部位図だけ（インラインstyleで確実に）
+  el("nm_region").onclick=()=>showNet(true);
+  el("nm_nn").onclick=()=>showNet(false);
   enableZoom("panel_body",[0,0,300,380],box=>{ bodyBox=box; layoutBodyLabels(); });
   enableZoom("panel_net",[0,0,460,300]);
 
