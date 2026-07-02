@@ -99,11 +99,11 @@
   /* NN活性ビュー（かっこよさ用・汎用） */
   #netSvg, #nnSvg { flex:1 1 auto; min-height:0; width:100%; height:100%; display:block; padding:4px; }
   #netSvg[hidden], #nnSvg[hidden] { display:none; }   /* hidden属性をID指定より優先させる */
-  .nn-node { fill:#16283e; stroke:#2b4a68; stroke-width:1; transition:fill .12s; }
-  .nn-node.on { fill:var(--flow); stroke:var(--flow); filter:drop-shadow(0 0 3px var(--flow)); }
-  .nn-head { fill:#14263c; stroke:var(--cyan); stroke-width:1.3; }
-  .nn-in { stroke:var(--muted); }
-  .nn-edge { stroke:var(--grid); stroke-width:.5; opacity:.22; vector-effect:non-scaling-stroke; }
+  .nn-node { fill:#3aa8c0; stroke:none; transition:fill .1s, filter .1s; }
+  .nn-node.on { fill:var(--flow); filter:drop-shadow(0 0 4px var(--flow)); }
+  .nn-head { fill:#5bd6e6; }
+  .nn-in { fill:#7f9fae; }
+  .nn-edge2 { vector-effect:non-scaling-stroke; }
   .nn-headlabel { fill:var(--muted); font-size:10px; }
   @keyframes dash { to { stroke-dashoffset:-11; } }
 
