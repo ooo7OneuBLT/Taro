@@ -51,6 +51,31 @@ const GAUGES = [
 ];
 const GRANS = [["year","年"],["month","月"],["day","日"],["hour","時"],["raw","生"]];
 
+// 臓器・脳部位の説明（クリックで小窓に出す。太郎の設計に即した内容）
+const ORGAN_INFO = {
+  cortex:        ["大脳皮質", "太郎の脳の本体。聞いた音を予測し、次に出す音を選ぶ再帰ネット（GRU）。知覚・産出・理解の統合中枢。"],
+  cerebellum:    ["小脳", "発声の運動をなめらかに整える。運動の学習と協調をになう。"],
+  vocal:         ["声道", "口・のど・声帯。音を実際に作る発声器官（調音）。"],
+  lungs:         ["肺", "発声のための空気。息が続く範囲で声を出す（喃語の長さを左右する）。"],
+  stomach:       ["胃", "食べ物を受け取り消化する器官。空腹・満腹のもと。"],
+  critic:        ["クリティック", "「今どれくらい良い状態か」を評価する価値関数（強化学習のcritic）。報酬の基準線。"],
+  basal_ganglia: ["基底核", "行動選択と強化学習の中枢。うまくいった発声を出やすくする（方策の更新）。"],
+  insula:        ["島皮質", "内受容感覚。体の中（空腹など）を感じ取って脳に伝える。"],
+  hippocampus:   ["海馬", "記憶。起きた出来事を覚え、睡眠中に反芻して定着させる（睡眠リプレイ）。"],
+  locus:         ["青斑核", "ノルアドレナリンで「探索⇄集中」を調整。新しい音を試す度合い（喃語のゆらぎ）を制御する。"],
+};
+function showOrganInfo(id, evt){
+  const info=ORGAN_INFO[id]; if(!info) return;
+  el("organInfoTitle").textContent=info[0];
+  el("organInfoDesc").textContent=info[1];
+  const box=el("organInfo"); box.hidden=false;
+  const w=box.offsetWidth||260, h=box.offsetHeight||90;
+  let x=(evt?evt.clientX:innerWidth/2)+12, y=(evt?evt.clientY:120)+8;
+  box.style.left=Math.max(6,Math.min(x,innerWidth-w-6))+"px";
+  box.style.top=Math.max(6,Math.min(y,innerHeight-h-6))+"px";
+}
+function hideOrganInfo(){ const b=el("organInfo"); if(b) b.hidden=true; }
+
 const SVGNS = "http://www.w3.org/2000/svg";
 let datasets = {};      // gran -> array of items (buckets or raw moments)
 let milestones = [];
@@ -128,6 +153,7 @@ function layoutBodyLabels(){
       const t=mk("text",{x:lx, y:ly+font*0.34, "text-anchor":side==="L"?"end":"start",
         class:"blabel", id:"blabel_"+id, "font-size":font}, labels);
       t.textContent=o.label;
+      t.addEventListener("click", e=>{ e.stopPropagation(); showOrganInfo(id, e); });
       const bg=bgFor(t, labels); if(bg) bg.id="blabelbg_"+id;
     });
   });
@@ -223,6 +249,8 @@ function rebuildChat(){
     d.className="msg "+m.who+(m.cry?" cry":"");
     d.dataset.t=m.t;
     d.innerHTML='<span class="who">'+(m.who==="parent"?"親":"太郎")+" ・ "+fmtDate(m.t)+"</span>"+escapeHtml(m.text);
+    d.title="クリックでこの発言の時刻へ移動";
+    d.addEventListener("click", ()=>jumpToTime(m.t));   // 発言時刻へスキップ
     box.appendChild(d);
   });
 }
@@ -381,6 +409,15 @@ function init(){
   buildBody(); buildNet();
   enableZoom("panel_body",[0,0,300,380],box=>{ bodyBox=box; layoutBodyLabels(); });
   enableZoom("panel_net",[0,0,460,300]);
+
+  // 臓器の図形をクリックしても説明を出す（名前ラベルと同じ）。閉じる操作も配線。
+  for(const id in BODY){ const o=el("organ_"+id);
+    if(o) o.addEventListener("click", e=>{ e.stopPropagation(); showOrganInfo(id, e); }); }
+  el("organInfoX").addEventListener("click", hideOrganInfo);
+  document.addEventListener("click", e=>{
+    if(!e.target.closest("#organInfo") && !e.target.closest(".blabel") && !e.target.closest(".organ")) hideOrganInfo();
+  });
+  document.addEventListener("keydown", e=>{ if(e.key==="Escape") hideOrganInfo(); });
 
   // 既定：同じフォルダに置かれた概観/生ログ/マイルストーンを取りに行く。
   // 無ければ sample_trace.json（生の見本）を使う。

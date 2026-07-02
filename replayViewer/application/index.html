@@ -61,8 +61,17 @@
   .organ.on .detail { stroke:var(--fire); opacity:.8; }
   .leader { stroke:var(--line); stroke-width:1; opacity:.7; vector-effect:non-scaling-stroke; }
   .leader.on { stroke:var(--fire); opacity:.9; }
-  .blabel { fill:var(--ink); font-weight:600; transition:.2s; paint-order:stroke; }
+  .blabel { fill:var(--ink); font-weight:600; transition:.2s; paint-order:stroke; cursor:pointer; }
   .blabel.on { fill:var(--fire); }
+  .organ .shape, .organ.marker { cursor:pointer; }
+  /* 臓器の説明小窓 */
+  .organ-info { position:fixed; z-index:20; max-width:270px; background:#0f1826;
+    border:1px solid var(--cyan); border-radius:9px; padding:9px 12px 11px;
+    box-shadow:0 8px 26px rgba(0,0,0,.55); font-size:12.5px; }
+  .organ-info h3 { margin:0 0 4px; font-size:13px; color:var(--cyan); }
+  .organ-info p { margin:0; color:var(--ink); line-height:1.5; }
+  .organ-info .x { position:absolute; top:3px; right:8px; cursor:pointer; color:var(--muted); font-size:13px; }
+  .organ-info .x:hover { color:var(--ink); }
   .lblbg { fill:rgba(6,11,20,.86); stroke:var(--line); stroke-width:.5; }
   .lblbg.on { stroke:var(--fire); }
   .flow { stroke:var(--flow); stroke-width:2.4; fill:none; stroke-dasharray:5 6;
@@ -92,7 +101,8 @@
               display:flex; flex-direction:column; gap:7px; }
   .msg { max-width:82%; padding:5px 10px; border-radius:13px; font-size:13px; line-height:1.35;
          opacity:.34; transform:translateY(2px); transition:opacity .2s, box-shadow .2s;
-         word-break:break-word; }
+         word-break:break-word; cursor:pointer; }
+  .msg:hover { outline:1px solid var(--cyan); }
   .msg .who { display:block; font-size:9.5px; color:var(--muted); margin-bottom:1px; letter-spacing:.03em; }
   .msg.parent { align-self:flex-start; background:#16283e; border:1px solid var(--line);
                 border-bottom-left-radius:4px; }
@@ -198,6 +208,12 @@
   <div class="panel" id="panel_chat">
     <div class="bar"><span class="grip">⠿</span><h2>CHAT / 親↔太郎の会話（再生に同期）</h2></div>
     <div id="chatList"><div class="chat-empty">会話ログを読み込むと表示されます</div></div>
+  </div>
+
+  <div id="organInfo" class="organ-info" hidden>
+    <span class="x" id="organInfoX">✕</span>
+    <h3 id="organInfoTitle"></h3>
+    <p id="organInfoDesc"></p>
   </div>
 
   <div class="bottom">
