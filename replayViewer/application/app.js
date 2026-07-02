@@ -171,40 +171,37 @@ function applyActive(){
 // NN活性ビュー（かっこよさ用・汎用）：実アーキテクチャ 入力→GRU隠れ128→出口 を描き、
 // イベントごとに発火した隠れノード(rec.fire)を光らせる。意味は読めないが「本物のNNが
 // 動いている」感を出す。どのモデルでも fire さえ記録すれば使える汎用ビュー。
-// 画像のような層状の見た目（かっこよさ用・スタイライズ）。太郎の本物は1つのGRU層(128)なので
-// 中間の「層」は見た目のための分割。発火(rec.fire)は各隠れノードに代表インデックスを割り当てて反映。
-const NN_LAYERS = [ {n:6,x:38,kind:"in"}, {n:8,x:140}, {n:8,x:225}, {n:8,x:310}, {n:4,x:420,kind:"out"} ];
+// 正直な図：太郎の本物のGRUは「1層・128ユニット」。128を16×8に並べる（層は1つ。並びは
+// 見やすさのための配置で、層を増やしているわけではない）。発火(rec.fire)は実ノード番号に直結。
+const NN_HID = 128;
 const NN_COLORS = ["#46c8e0","#d86ac0","#ffd23a"];
-const NN_OUTLBL = ["食べ物予期","発声","価値","次の音の予測"];
-let _nnMap=[], _nnLit=[];
+let _nnLit=[];
 function buildNNView(){
   const svg=el("nnSvg"); if(!svg) return; svg.innerHTML="";
   const gE=mk("g",{},svg), gN=mk("g",{},svg), gL=mk("g",{},svg);
-  const top=28, bot=272;
-  const yOf=(L)=>{ const ys=[]; for(let i=0;i<L.n;i++) ys.push(L.n===1?150:top+(bot-top)*i/(L.n-1)); return ys; };
-  const pos=NN_LAYERS.map(yOf);
-  let ci=0;
-  for(let l=0;l<NN_LAYERS.length-1;l++){ const x1=NN_LAYERS[l].x, x2=NN_LAYERS[l+1].x, first=(l===0);
-    pos[l].forEach(y1=>pos[l+1].forEach(y2=>{
-      mk("line",{x1,y1,x2,y2,class:"nn-edge2",
-        stroke:first?"#5b6b7d":NN_COLORS[ci++%3], "stroke-width":first?.5:.7,
-        opacity:first?.35:.5},gE); })); }
-  const totalHidden=NN_LAYERS.slice(1,-1).reduce((s,L)=>s+L.n,0);   // 24
-  _nnMap=[]; let h=0;
-  NN_LAYERS.forEach((L,l)=>{ pos[l].forEach((y,i)=>{
-    const hidden=(l>0 && l<NN_LAYERS.length-1);
-    const cls="nn-node"+(L.kind==="out"?" nn-head":L.kind==="in"?" nn-in":"");
-    const c=mk("circle",{cx:L.x,cy:y,r:L.kind==="out"?6:5,class:cls},gN);
-    if(hidden){ const gi=h++; c.id="nnl_"+gi; _nnMap[gi]=Math.round(gi*127/(totalHidden-1)); }
-  }); });
-  pos[NN_LAYERS.length-1].forEach((y,i)=>{ const t=mk("text",{x:NN_LAYERS[NN_LAYERS.length-1].x-10,
-    y:y+3,"text-anchor":"end",class:"nn-headlabel"},gL); t.textContent=NN_OUTLBL[i]||""; });
+  const inX=34, inYs=[]; for(let i=0;i<6;i++){ const y=64+i*34; inYs.push(y);
+    mk("circle",{cx:inX,cy:y,r:4.5,class:"nn-node nn-in"},gN); }
+  const cols=16, rows=8, x0=96, x1=330, y0=44, y1=272, hp=[];
+  for(let i=0;i<NN_HID;i++){ const c=i%cols, r=Math.floor(i/cols);
+    const x=x0+(x1-x0)*c/(cols-1), y=y0+(y1-y0)*r/(rows-1); hp.push([x,y]);
+    mk("circle",{cx:x,cy:y,r:3.2,class:"nn-node",id:"nnh_"+i},gN); }
+  const heads=[["食べ物予期",70],["発声",118],["価値",166],["次の音の予測",214]], hX=424, hpos=[];
+  heads.forEach(([lab,y])=>{ hpos.push([hX,y]); mk("circle",{cx:hX,cy:y,r:6,class:"nn-node nn-head"},gN);
+    const t=mk("text",{x:hX-10,y:y+3,"text-anchor":"end",class:"nn-headlabel"},gL); t.textContent=lab; });
+  const rnd=a=>a[Math.floor(Math.random()*a.length)]; let ci=0;
+  for(let k=0;k<70;k++){ const y=rnd(inYs), p=rnd(hp);
+    mk("line",{x1:inX,y1:y,x2:p[0],y2:p[1],class:"nn-edge2",stroke:"#5b6b7d","stroke-width":.5,opacity:.3},gE); }
+  for(let k=0;k<120;k++){ const p=rnd(hp), q=rnd(hpos);
+    mk("line",{x1:p[0],y1:p[1],x2:q[0],y2:q[1],class:"nn-edge2",stroke:NN_COLORS[ci++%3],"stroke-width":.6,opacity:.45},gE); }
+  svg.insertBefore(gE,gN);
+  const t=mk("text",{x:x0,y:28,class:"nn-headlabel"},gL);
+  t.textContent="GRU隠れ層：1層 × 128ユニット（発火＝活性上位32が光る）";
   updateNN(items&&items[idx]?items[idx].fire:null);
 }
 function updateNN(fire){
-  _nnLit.forEach(gi=>{ const n=el("nnl_"+gi); if(n) n.classList.remove("on"); });
-  const set=new Set(Array.isArray(fire)?fire:[]); _nnLit=[];
-  _nnMap.forEach((rep,gi)=>{ if(set.has(rep)){ const n=el("nnl_"+gi); if(n){ n.classList.add("on"); _nnLit.push(gi); } } });
+  _nnLit.forEach(i=>{ const n=el("nnh_"+i); if(n) n.classList.remove("on"); });
+  _nnLit=Array.isArray(fire)?fire:[];
+  _nnLit.forEach(i=>{ const n=el("nnh_"+i); if(n) n.classList.add("on"); });
 }
 
 function buildNet() {
