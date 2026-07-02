@@ -21,6 +21,20 @@ def _project_root():
     return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
+# 【人間模倣・B2-14】発達に合わせて授乳の量・回数・時間割の度合いを変える。
+# 人間：0-6ヶ月はほぼ需要ベース（空腹で飲む・少量・頻回）、6ヶ月から離乳で時間割が
+# 増え、18ヶ月で3食＋間食2回へ。量は増え回数は減る（CDC/AAP/Solid Starts, 参考文献§9）。
+def _dev_months(sim_seconds):
+    return sim_seconds / 2592000.0   # 1ヶ月=30日
+
+def _age_feed_amount(sim_seconds):
+    """1回の授乳量。新生児は胃が小さく少量、成長で増える（0.30→0.70で頭打ち）。
+    少量だと血糖が満タンまで届かず早く空腹に戻る＝頻回、多量だと持つ＝少回、と
+    回数も年齢で自然に変わる。"""
+    m = _dev_months(sim_seconds)
+    return 0.30 + min(1.0, m / 12.0) * 0.40
+
+
 class ParentSchedule:
     """
     親の在/不在スケジュール。schedule.yamlから読み込む。
@@ -56,8 +70,10 @@ class ParentSchedule:
 
         ml = cfg.get("meals", {})
         self.meals_enabled = ml.get("enabled", False)
-        self.meal_times = sorted(ml.get("times", []))
-        self._next_meal_abs = None
+        # B2-14：食事時刻は月齢から動的に決める（年齢graded）。日中の時間帯だけ使う。
+        self.meal_day_start = ml.get("day_start", 25200)   # 7:00
+        self.meal_day_end = ml.get("day_end", 75600)       # 21:00
+        self._last_meal_served = -1                        # 直近に出した時間割授乳の絶対秒
 
         sp = cfg.get("speech", {})
         self.speak_with_care = sp.get("enabled", True)
@@ -114,31 +130,39 @@ class ParentSchedule:
             return None
         return self.words.get(care_type, None)
 
-    def _advance_next_meal(self):
-        """_next_meal_abs を、次の食事時刻（絶対秒）に進める。"""
-        day, tod = divmod(self._next_meal_abs, 86400)
-        later = [t for t in self.meal_times if t > tod]
-        if later:
-            self._next_meal_abs = day * 86400 + later[0]
-        else:                                   # 今日はもう無い→翌日の最初へ
-            self._next_meal_abs = (day + 1) * 86400 + self.meal_times[0]
+    def meals_for_age(self, months):
+        """月齢に応じた「1日の時間割授乳の時刻」（秒, 日中に均等配置）。
+        0-5ヶ月＝0回（ほぼ完全な需要ベース）、6ヶ月から離乳で増え、18ヶ月で5回
+        （3食＋間食2回）へ。人間の需要→時間割の移行を模倣。"""
+        if months < 5:    n = 0
+        elif months < 7:  n = 1
+        elif months < 9:  n = 2
+        elif months < 12: n = 3
+        elif months < 18: n = 4
+        else:             n = 5
+        if n <= 0:
+            return []
+        s, e = self.meal_day_start, self.meal_day_end
+        if n == 1:
+            return [(s + e) // 2]
+        step = (e - s) // (n - 1)
+        return [s + i * step for i in range(n)]
 
     def meal_due(self, sim_seconds):
-        """
-        時間割授乳（B2-12）：この秒が食事時刻に達したら1回だけTrueを返す。
-        睡眠などで複数の食事時刻を飛ばした場合は、まとめて次の未来の時刻まで
-        進めてから1回だけ知らせる（寝ている間に逃した食事は食べない＝現実的）。
-        """
-        if not (self.meals_enabled and self.meal_times):
+        """時間割授乳（B2-14・年齢graded）：今日の食事時刻を過ぎたら1回だけTrue。
+        月齢が上がると食事時刻が増える。寝て逃した食事は食べない（最新の1回のみ）。"""
+        if not self.meals_enabled:
             return False
-        if self._next_meal_abs is None:         # 初回：今以降の最初の食事時刻
-            day, tod = divmod(sim_seconds, 86400)
-            later = [t for t in self.meal_times if t >= tod]
-            self._next_meal_abs = (day * 86400 + later[0]) if later \
-                else ((day + 1) * 86400 + self.meal_times[0])
-        if sim_seconds >= self._next_meal_abs:
-            while sim_seconds >= self._next_meal_abs:
-                self._advance_next_meal()
+        times = self.meals_for_age(_dev_months(sim_seconds))
+        if not times:
+            return False
+        day, tod = divmod(sim_seconds, 86400)
+        passed = [t for t in times if t <= tod]
+        if not passed:
+            return False
+        latest = day * 86400 + max(passed)
+        if latest > self._last_meal_served:
+            self._last_meal_served = latest
             return True
         return False
 
@@ -307,17 +331,18 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
                                   hunger=round(env.internal_state.hunger, 4))
         was_crying = crying_now
 
-        # 時間割授乳（B2-12）：決まった食事時刻に、空腹に関わらず「まんま」と言って授乳。
-        # 空腹と語の完全相関を崩し、満腹寄りでもまんまを聞く機会を作る（語を空腹から独立した
-        # 手がかりにする）。満腹時は恒常性報酬が低いので「満腹時のまんまは嬉しくない」も
-        # 自然に学ばれる。オンデマンド授乳（下の should_respond）は現実同様に残す。
+        # 時間割授乳（B2-14・年齢graded）：月齢に応じた食事時刻に、空腹に関わらず「まんま」と
+        # 言って授乳。0-5ヶ月は0回（ほぼ需要ベース）で、成長とともに増える（離乳の移行）。
+        # 満腹寄りでもまんまを聞く機会になり語と空腹の相関を緩める。授乳量も年齢で変わる。
+        # オンデマンド授乳（下の should_respond）が現実同様の主経路として残る。
+        fa = _age_feed_amount(sim_seconds)
         if (schedule.meal_due(sim_seconds) and schedule.present
                 and not env.internal_state.sleeping and not env.internal_state.drowsy):
             env.comfort("feed")
             meal_word = schedule.choose_word("feed")
             if meal_word:
                 m = env.step(meal_word, r_social=0.5, satiety_target=1.0)
-                env.feed(schedule.feed_amount)
+                env.feed(fa)
                 feed_count += 1
                 speak_count += 1
                 meal_count += 1
@@ -328,7 +353,7 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
                     m["r_imit"], m["r_pred"], m["r_social"],
                     m["R"], m["delta"], m["p_loss"], m["a_loss"],
                     env.brain.temperature, context="meal", hunger=m["hunger"])
-                env.logger.log_event(sim_seconds, "feed", amount=schedule.feed_amount,
+                env.logger.log_event(sim_seconds, "feed", amount=round(fa, 3),
                                      hunger_before=round(m["hunger"], 4), scheduled=True)
                 tr("feed", m["taro"], say=meal_word)
                 schedule.last_feed_time = sim_seconds
@@ -344,7 +369,7 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
                 result = env.step(word, r_social=0.5,
                                   satiety_target=(1.0 if care_type == "feed" else 0.0))
             if care_type == "feed":
-                env.feed(schedule.feed_amount)          # 発話の後に授乳
+                env.feed(fa)                            # 発話の後に授乳（量は年齢graded）
                 feed_count += 1
                 speak_count += 1
                 env.logger.log_turn(
@@ -355,7 +380,7 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
                     context=care_type, hunger=result["hunger"],
                 )
                 env.logger.log_event(sim_seconds, "feed",
-                                      amount=schedule.feed_amount,
+                                      amount=round(fa, 3),
                                       hunger_before=round(result["hunger"], 4))
                 tr("feed", result["taro"], say=word)
                 if verbose and (speak_count <= 30 or speak_count % 50 == 0):
