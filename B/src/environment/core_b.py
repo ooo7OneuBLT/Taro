@@ -154,6 +154,12 @@ class TaroEnvironmentB:
             vm.get("stage3_time", 1500),
             decouple_time=vm.get("decouple_time", 1200),
         )
+        # 【人間模倣】探索の結晶化（B2-8）。声道と同じ月齢基準で、発達が
+        # 進むほどNEの探索上限を下げる。完全成熟＝声道stage3の解禁時期
+        # （12ヶ月）を基準にする。
+        full_maturity = vm.get("stage3_time", 1500)
+        if full_maturity > 0:
+            self.locus_coeruleus.mature(sim_seconds / full_maturity)
 
     def check_cry(self):
         """

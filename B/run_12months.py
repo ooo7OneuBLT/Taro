@@ -60,7 +60,7 @@ with open(log_path, "w", encoding="utf-8") as logf:
         r = run_simulation_b(
             max_sim_seconds=31536000,  # 12ヶ月（365日）
             verbose=False,
-            run_name=f"B2-6_12months{suffix}",
+            run_name=f"B2-8_12months{suffix}",
         )
 
         elapsed = time.time() - start

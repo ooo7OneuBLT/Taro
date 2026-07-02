@@ -86,6 +86,16 @@ class TaroBrain(nn.Module):
 
         self.perception_head = nn.Linear(hidden_dim, vocab_size)
 
+        # 【人間模倣】喃語の反復性（Frame/Content理論, MacNeilage & Davis 1998）。
+        # 喃語は顎の開閉振動（フレーム）が生む音節で、舌・唇（コンテンツ）は
+        # 最初ほとんど動かないため同じ音節が反復される（ままま等）。これを
+        # 「直前に出した音の口の形を選び直しやすくする」調音の慣性バイアスとして
+        # 近似する。声道の物理定数（口を動かすには前の形から動かす手間がかかる）
+        # の一種であり、行動の閾値ではない。logit空間への加算。学習が進んで
+        # コンテンツ制御が強まる（logitが大きくなる）ほど相対的に弱まるので、
+        # 反復が徐々に変異へ移行する発達的傾向も自然に再現される。
+        self.reduplication_bias = 2.0
+
     def forward_hidden(self, x, hidden=None, body_state=None):
         """
         入力トークンを処理して隠れ状態を更新する。
@@ -163,6 +173,10 @@ class TaroBrain(nn.Module):
         # 既存のサンプリング分布を再利用するだけ。
         is_babble = speech_plan is None
 
+        # 【人間模倣】反復バイアス用：直前の音節の口の形を覚えておく（Frame/Content）。
+        # generate()呼び出しごとにリセット（前の発話を引きずらない）。
+        prev_place = prev_manner = prev_voicing = prev_vowel = None
+
         for t in range(max_chars):
             h_last = out[0, -1]
             pl, ml, vl, vol = self.forward_articulation(h_last)
@@ -195,13 +209,21 @@ class TaroBrain(nn.Module):
                     s_vowel, _ = self._choose_param(vol, allowed_vowel)
             else:
                 # 発話計画なし（喃語期）→ 大脳皮質が自力で選ぶ
-                s_place, _ = self._choose_param(pl, allowed_place)
+                # 【人間模倣】反復バイアス：直前の音節の口の形へ戻りやすくする
+                # （Frame/Content理論）。log_probは下でノイズ適用後の値を
+                # 生のlogit（pl等）から計算するため、バイアスは選択のみに効き、
+                # 学習対象（log_prob）は歪めない（B2-6の不変条件を維持）。
+                s_place, _ = self._choose_param(
+                    self._reduplicate_bias(pl, prev_place, allowed_place), allowed_place)
                 if vocal_tract.is_coupled():
                     s_manner = vocal_tract.get_manner_for_place(s_place)
                 else:
-                    s_manner, _ = self._choose_param(ml, allowed_manner)
-                s_voicing, _ = self._choose_param(vl, allowed_voicing)
-                s_vowel, _ = self._choose_param(vol, allowed_vowel)
+                    s_manner, _ = self._choose_param(
+                        self._reduplicate_bias(ml, prev_manner, allowed_manner), allowed_manner)
+                s_voicing, _ = self._choose_param(
+                    self._reduplicate_bias(vl, prev_voicing, allowed_voicing), allowed_voicing)
+                s_vowel, _ = self._choose_param(
+                    self._reduplicate_bias(vol, prev_vowel, allowed_vowel), allowed_vowel)
 
             # NEによる局所ノイズ注入（計画があっても少しずれる＝人間的な誤差）
             s_place = self._apply_ne_noise(s_place, ne_level, allowed_place)
@@ -211,6 +233,11 @@ class TaroBrain(nn.Module):
                 s_manner = vocal_tract.get_manner_for_place(s_place)
             s_voicing = self._apply_ne_noise(s_voicing, ne_level, allowed_voicing)
             s_vowel = self._apply_ne_noise(s_vowel, ne_level, allowed_vowel)
+
+            # 【人間模倣】反復バイアス用に、実際に発声された（ノイズ適用後の）
+            # 口の形を次の音節へ引き継ぐ。慣性は「今いる口の位置」に働くため。
+            prev_place, prev_manner = s_place, s_manner
+            prev_voicing, prev_vowel = s_voicing, s_vowel
 
             # B2-6修正：log_probは実際に発声される（ノイズ適用後の）値から
             # 計算する。従来はノイズ適用前の意図した値のlog_probを学習対象に
@@ -280,6 +307,23 @@ class TaroBrain(nn.Module):
         entropy = -(p * torch.log(p)).sum()
         max_entropy = torch.log(torch.tensor(float(len(allowed_indices)), device=logits.device))
         return (entropy / max_entropy).item() if max_entropy > 0 else 0.0
+
+    def _reduplicate_bias(self, logits, prev_idx, allowed_indices):
+        """
+        【人間模倣】直前に選んだ調音（口の形）へ戻りやすくする調音慣性バイアス。
+
+        Frame/Content理論（MacNeilage & Davis 1998）：喃語期は顎（フレーム）が
+        反復し、舌・唇（コンテンツ）が据え置かれるため同じ音節が繰り返される。
+        prev_idxが許可集合にあるとき、その選択肢のlogitに定数を足し、
+        次の音節が同じ口の形になりやすくする。閾値ではなく物理的な慣性の近似。
+        """
+        if prev_idx is None or len(allowed_indices) <= 1:
+            return logits
+        if prev_idx not in allowed_indices:
+            return logits
+        biased = logits.clone()
+        biased[prev_idx] = biased[prev_idx] + self.reduplication_bias
+        return biased
 
     def _choose_param(self, logits, allowed_indices):
         """脳がパラメータを選ぶ（意図）。ノイズなし。"""
