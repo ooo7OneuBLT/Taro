@@ -67,10 +67,18 @@ class TaroBrain(nn.Module):
             from taro.brain.instincts.critic import Critic
             self.insula = Insula(state_dim=body_state_dim, embedding_dim=embedding_dim)
             self.critic = Critic(state_dim=body_state_dim)
+            # 【人間模倣】満腹予期ヘッド（B2-10）。GRUの隠れ状態（聞いた音＋体の
+            # 状態を統合した表現）から「もうすぐ満腹になる（授乳が来る）か」を予測する。
+            # OFCの結果同定（何が来るか＝正体の予期）＋島皮質の内受容予測に相当し、
+            # criticの「価値（良さ）」とは別に「特定の結果（ごはん）」を予期する。
+            # これまで価値・予期系は体の状態しか見ておらず「聞いた音→体の未来」の
+            # 経路が欠けていた（理解テストA案で実証）。その欠けた向きを配線する。
+            self.satiety_head = nn.Linear(hidden_dim, 1)
             gru_input_dim = embedding_dim + embedding_dim
         else:
             self.insula = None
             self.critic = None
+            self.satiety_head = None
 
         self.gru = nn.GRU(gru_input_dim, hidden_dim, num_layers, batch_first=True)
 
@@ -102,6 +110,14 @@ class TaroBrain(nn.Module):
         # マスク再構築（_choose_param・_log_prob_of・_normalized_entropy）を
         # 省く。計算結果は完全に同一で、速度だけ改善する。
         self._mask_cache = {}
+
+    def predict_satiety(self, hidden_last):
+        """
+        【人間模倣】聞いた音＋体の状態（GRU隠れ状態）から「もうすぐ満腹になる
+        （授乳が来る）」予期を出す（B2-10）。hidden_last: (hidden_dim,) の
+        最終時刻表現。戻り値: 0〜1（1に近い＝満腹が来ると予期）。
+        """
+        return torch.sigmoid(self.satiety_head(hidden_last)).squeeze(-1)
 
     def _get_mask(self, logits, allowed_indices):
         """許可index以外を-infにする加算マスク。段階ごとにキャッシュする。"""
