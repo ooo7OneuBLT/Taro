@@ -113,9 +113,18 @@ class TaroBrain(nn.Module):
 
     def predict_satiety(self, hidden_last):
         """
-        【人間模倣】聞いた音＋体の状態（GRU隠れ状態）から「もうすぐ満腹になる
-        （授乳が来る）」予期を出す（B2-10）。hidden_last: (hidden_dim,) の
-        最終時刻表現。戻り値: 0〜1（1に近い＝満腹が来ると予期）。
+        【人間模倣】聞いた音＋体の状態（GRU隠れ状態）から「食べ物（授乳）が
+        来る」ことの先取り＝referent anticipation を出す（B2-10）。
+
+        重要（指標の意味づけ, 2026-07-02訂正）：これは「“今”満腹かどうかの報告」
+        ではない。今の満腹度は体が内受容感覚で直接知っており、語で当てるのは順序が
+        逆（＝hungerだけで解ける近道になる）。理解の証拠として読むべきは、hungerを
+        固定して“聞いた語だけ”を変えたときの本出力の差（＝語の寄与）である。
+        乳児研究で理解を「語→対象の先取り活性化（anticipatory looking）」で測るのに
+        対応する（Bergelson & Swingley 2012 PNAS ほか, 参考文献§9）。ただし連合的・
+        パブロフ的な先取りであり、完全な象徴的参照の証明ではない（初期理解の代理）。
+
+        hidden_last: (hidden_dim,) の最終時刻表現。戻り値: 0〜1。
         """
         return torch.sigmoid(self.satiety_head(hidden_last)).squeeze(-1)
 

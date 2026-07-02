@@ -87,7 +87,10 @@ class TaroEnvironmentB:
         bv = self.cfg.get("blood_vessel", {})
         self.blood_vessel = BloodVessel(
             initial_glucose=float(bv.get("initial_glucose", 0.5)),
-            consumption_rate=float(bv.get("consumption_rate", 0.0001)),
+            # 【人間模倣・較正2026-07-02】0.0001だと約27回/日と人間(6〜12ヶ月は
+            # 1日6〜10回, 2〜3時間おき)の3〜4倍速く空腹になっていた。calibrate_hunger.py
+            # で振って 0.00003＝約7.5回/日(≈3.2時間おき)に合わせた。時間割授乳の前提。
+            consumption_rate=float(bv.get("consumption_rate", 0.00003)),
         )
         self._glucose_efficiency = float(bv.get("glucose_efficiency", 3.0))
         ad = self.cfg.get("adenosine", {})
@@ -509,7 +512,10 @@ class TaroEnvironmentB:
         with torch.no_grad():
             out, hidden = self.brain.forward_hidden(listen_input, body_state=body_state)
             critic_value = self.brain.critic(body_state).item()
-            # B2-10：聞いた語＋状態から「満腹が来る」予期を読む（理解の本命指標）
+            # B2-10：聞いた語＋状態から「食べ物（授乳）が来る」先取りを読む。
+            # 注意（指標訂正2026-07-02）：この生値そのものは理解の証拠ではない
+            # （hungerで説明できる分を含む）。理解は run_comprehension_probe 側で
+            # hungerを固定し“語だけ”変えたときの差（語の寄与）として読む。
             satiety = (self.brain.predict_satiety(out[0, -1]).item()
                        if getattr(self.brain, "satiety_head", None) is not None else None)
             hidden_vec = hidden.detach().reshape(-1).cpu().tolist()

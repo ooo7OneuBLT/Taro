@@ -62,6 +62,9 @@ with open(log_path, "w", encoding="utf-8") as logf:
         hungers = [(0.1, "満腹"), (0.9, "空腹")]
 
         log("\n[理解テスト] 語を聞かせた直後の内部を読む（産出でなく受信側）")
+        log("  ※ 指標訂正(2026-07-02)：理解＝『語→食べ物(授乳)の先取り』。生の予測値そのものは")
+        log("     hungerで説明できる分を含むので理解の証拠にしない。hungerを固定し“語だけ”を")
+        log("     変えたときの差（＝語の寄与）が本命指標（乳児研究の予期的注視に対応, 参考文献§9）。")
         results = {}
         for hv, hname in hungers:
             for w in words:
@@ -69,17 +72,20 @@ with open(log_path, "w", encoding="utf-8") as logf:
                 results[(hname, w)] = res
                 sat = res.get("satiety")
                 sat_s = f"{sat:.4f}" if sat is not None else "N/A"
-                log(f"  [{hname}] 「{w}」を聞く → 満腹予期={sat_s} ／ critic価値={res['critic_value']:.4f} "
+                log(f"  [{hname}] 「{w}」を聞く → 食べ物予期(生値)={sat_s} ／ critic価値={res['critic_value']:.4f} "
                     f"／ 聞いた後の発声のまんま類似={res['echoic_mama_sim']:.4f} (n={res['n']})")
 
-        log("\n[Rung2本命：意味] 満腹予期が“聞いた語”で変わるか（まんま>他 なら『まんま→ごはん』を理解）")
+        log("\n[本命指標：語の寄与] hunger一定で“語だけ”変えたとき、まんまが他語より食べ物を強く")
+        log("  先取りするか。まんま−あうあ>0 なら『まんま→食べ物』の先取り＝初期・連合的理解の証拠。")
+        log("  （同じhunger内で比べるので、体が既に知っている満腹度の分は相殺される）")
         for hv, hname in hungers:
             sm = results[(hname, "まんま")].get("satiety")
             ss = results[(hname, "ままん")].get("satiety")
             sa = results[(hname, "あうあ")].get("satiety")
             if sm is not None:
-                log(f"  [{hname}] まんま={sm:.4f}  ままん={ss:.4f}  あうあ={sa:.4f}  "
-                    f"→ まんま−あうあ={sm-sa:+.4f}")
+                log(f"  [{hname}固定] まんま={sm:.4f}  ままん={ss:.4f}  あうあ={sa:.4f}  "
+                    f"→ 語の寄与 まんま−あうあ={sm-sa:+.4f}"
+                    f"{'  ★語で食べ物を先取り' if sm-sa > 0.05 else '  （語の寄与ほぼ無し＝まだ理解せず）'}")
 
         log("\n[Rung1：認識] 聞いた直後の隠れ状態が語ごとに区別できるか（コサイン類似, 1に近い=似てる）")
         for hv, hname in hungers:

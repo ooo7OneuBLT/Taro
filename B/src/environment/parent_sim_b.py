@@ -54,6 +54,11 @@ class ParentSchedule:
         br = cfg.get("babble_response", {})
         self.babble_response_prob = br.get("prob", 0.4)
 
+        ml = cfg.get("meals", {})
+        self.meals_enabled = ml.get("enabled", False)
+        self.meal_times = sorted(ml.get("times", []))
+        self._next_meal_abs = None
+
         sp = cfg.get("speech", {})
         self.speak_with_care = sp.get("enabled", True)
         self.words = sp.get("words", {"feed": "まんま", "comfort": "よしよし", "hold": "まま"})
@@ -109,6 +114,34 @@ class ParentSchedule:
             return None
         return self.words.get(care_type, None)
 
+    def _advance_next_meal(self):
+        """_next_meal_abs を、次の食事時刻（絶対秒）に進める。"""
+        day, tod = divmod(self._next_meal_abs, 86400)
+        later = [t for t in self.meal_times if t > tod]
+        if later:
+            self._next_meal_abs = day * 86400 + later[0]
+        else:                                   # 今日はもう無い→翌日の最初へ
+            self._next_meal_abs = (day + 1) * 86400 + self.meal_times[0]
+
+    def meal_due(self, sim_seconds):
+        """
+        時間割授乳（B2-12）：この秒が食事時刻に達したら1回だけTrueを返す。
+        睡眠などで複数の食事時刻を飛ばした場合は、まとめて次の未来の時刻まで
+        進めてから1回だけ知らせる（寝ている間に逃した食事は食べない＝現実的）。
+        """
+        if not (self.meals_enabled and self.meal_times):
+            return False
+        if self._next_meal_abs is None:         # 初回：今以降の最初の食事時刻
+            day, tod = divmod(sim_seconds, 86400)
+            later = [t for t in self.meal_times if t >= tod]
+            self._next_meal_abs = (day * 86400 + later[0]) if later \
+                else ((day + 1) * 86400 + self.meal_times[0])
+        if sim_seconds >= self._next_meal_abs:
+            while sim_seconds >= self._next_meal_abs:
+                self._advance_next_meal()
+            return True
+        return False
+
 
 # replayViewer用：イベント種別ごとに「発火する部品」と「情報の流れ」を対応づける。
 # （抽象表示。太郎の内部を1本1本計測するのではなく、イベントの意味に基づく模式的な発火）
@@ -154,6 +187,8 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
 
     cry_count = 0
     feed_count = 0
+    meal_count = 0          # 時間割授乳の回数（B2-12）
+    meal_low_hunger = 0     # そのうち満腹寄り(hunger<0.5)で行われた回数＝語と空腹の脱相関
     speak_count = 0
     babble_count = 0
     request_count = 0
@@ -249,6 +284,32 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
             env.logger.log_event(sim_seconds, "cry_end",
                                   hunger=round(env.internal_state.hunger, 4))
         was_crying = crying_now
+
+        # 時間割授乳（B2-12）：決まった食事時刻に、空腹に関わらず「まんま」と言って授乳。
+        # 空腹と語の完全相関を崩し、満腹寄りでもまんまを聞く機会を作る（語を空腹から独立した
+        # 手がかりにする）。満腹時は恒常性報酬が低いので「満腹時のまんまは嬉しくない」も
+        # 自然に学ばれる。オンデマンド授乳（下の should_respond）は現実同様に残す。
+        if (schedule.meal_due(sim_seconds) and schedule.present
+                and not env.internal_state.sleeping and not env.internal_state.drowsy):
+            env.comfort("feed")
+            meal_word = schedule.choose_word("feed")
+            if meal_word:
+                m = env.step(meal_word, r_social=0.5, satiety_target=1.0)
+                env.feed(schedule.feed_amount)
+                feed_count += 1
+                speak_count += 1
+                meal_count += 1
+                if m["hunger"] < 0.5:
+                    meal_low_hunger += 1
+                env.logger.log_turn(
+                    m["turn"], sim_seconds, meal_word, m["taro"],
+                    m["r_imit"], m["r_pred"], m["r_social"],
+                    m["R"], m["delta"], m["p_loss"], m["a_loss"],
+                    env.brain.temperature, context="meal", hunger=m["hunger"])
+                env.logger.log_event(sim_seconds, "feed", amount=schedule.feed_amount,
+                                     hunger_before=round(m["hunger"], 4), scheduled=True)
+                tr("feed", m["taro"])
+                schedule.last_feed_time = sim_seconds
 
         if schedule.should_respond_now(sim_seconds):
             care_type = "feed" if env.internal_state.hunger > 0.5 else "comfort"
@@ -379,6 +440,8 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
         "sim_seconds": sim_seconds,
         "cry_count": cry_count,
         "feed_count": feed_count,
+        "meal_count": meal_count,
+        "meal_low_hunger": meal_low_hunger,
         "speak_count": speak_count,
         "babble_count": babble_count,
         "request_count": request_count,
