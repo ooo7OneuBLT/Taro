@@ -626,8 +626,20 @@ class TaroEnvironmentB:
                                            vocab=self.vocab, vocal_tract=self.vocal_tract)
         a_loss = self.learner.learn_action(log_probs, delta, credits=credits)
         value_loss = self.learner.compute_value_loss(value, R)
-        zero_p_loss = torch.tensor(0.0, device=self.device)
-        _, al = self.learner.update(zero_p_loss, a_loss, value_loss)
+
+        # 【学習材料は限定しない（2026-07-02, #4）】親の返事(best_word)を"知覚入力"として
+        # 太郎に聞かせる。これまで返事は報酬(産出の強化)だけで、耳から言葉が入っておらず、
+        # 理解(聞いて分かる)の学習機会が乏しかった（喃語は年10万回でも親の発話を聞く機会は
+        # 少ない、という頻度差の主因のひとつ）。ここで親の語を知覚学習に通し、海馬にも記録して
+        # 睡眠で反芻する。満腹予期の教師は付けない（この社会的返事の後に授乳が来るわけでは
+        # ないため）＝純粋に「その語を聞いた」という知覚材料として扱う。副次的に、まんまを
+        # 授乳以外の場面でも聞くことになり、語と空腹の相関がさらに緩む。
+        heard_tokens = [1] + best_word_tokens + [2]
+        p_loss_heard, _, _ = self.learner.learn_perception(heard_tokens, body_state=body_state)
+        self.hippocampus.record_episode(heard_tokens, body_state, satiety_target=None)
+        p_arg = p_loss_heard if isinstance(p_loss_heard, torch.Tensor) \
+            else torch.tensor(0.0, device=self.device)
+        _, al = self.learner.update(p_arg, a_loss, value_loss)
 
         return {"r_imit": r_imit, "r_social": r_social, "r_mand": r_mand, "R": R,
                 "delta": delta, "a_loss": al, "recognized_word": best_word}
