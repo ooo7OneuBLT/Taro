@@ -14,18 +14,37 @@
   html, body { height:100%; }
   body { margin:0; overflow:hidden; background:var(--bg); color:var(--ink);
          font-family:"Segoe UI","Hiragino Kaku Gothic ProN","Meiryo",sans-serif; }
-  #app { position:relative; height:100vh; }
-  h1 { position:absolute; top:6px; left:12px; margin:0; font-size:14px; font-weight:600; letter-spacing:.05em; z-index:5; }
-  h1 span { font-size:11px; color:var(--muted); font-weight:400; }
+  /* 隙間なく敷き詰めた固定グリッド：左=体／中=ネット+数値／右=会話／下=再生バー */
+  #app { display:grid; height:100vh; gap:3px; padding:3px;
+         grid-template-columns: 1.9fr 1.3fr 1.05fr;
+         grid-template-rows: 18px minmax(0,1fr) minmax(0,1fr) auto;
+         grid-template-areas:
+           "title title title"
+           "body  net    chat"
+           "body  metrics chat"
+           "bottom bottom bottom"; }
+  h1 { grid-area:title; margin:0; font-size:12px; font-weight:600; letter-spacing:.04em;
+       align-self:center; padding-left:4px; white-space:nowrap; overflow:hidden; }
+  h1 span { font-size:10px; color:var(--muted); font-weight:400; }
 
-  /* 自由に動かせる・リサイズできるパネル */
-  .panel { position:absolute; resize:both; overflow:hidden; min-width:240px; min-height:150px;
+  .panel { position:relative; overflow:hidden; min-width:0; min-height:0;
            background:linear-gradient(180deg,var(--bg2),var(--panel)); border:1px solid var(--line);
-           border-radius:10px; display:flex; flex-direction:column; }
-  .bar { flex:0 0 auto; cursor:move; user-select:none; padding:5px 8px 3px; border-bottom:1px solid var(--line);
+           border-radius:8px; display:flex; flex-direction:column; }
+  #panel_body{ grid-area:body; } #panel_net{ grid-area:net; }
+  #panel_metrics{ grid-area:metrics; } #panel_chat{ grid-area:chat; }
+  .bar { flex:0 0 auto; user-select:none; padding:5px 8px 3px; border-bottom:1px solid var(--line);
          display:flex; align-items:center; gap:6px; }
-  .bar h2 { font-size:11px; color:var(--cyan); font-weight:600; letter-spacing:.06em; margin:0; }
+  .bar h2 { font-size:11px; color:var(--cyan); font-weight:600; letter-spacing:.06em; margin:0;
+            white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .bar .grip { color:var(--muted); font-size:11px; }
+  .wbtns { margin-left:auto; display:flex; gap:3px; flex:0 0 auto; }
+  .wbtn { font-size:11px; line-height:1; padding:2px 6px; border:1px solid var(--line);
+          background:#12233a; color:var(--muted); border-radius:5px; cursor:pointer; }
+  .wbtn:hover { background:#1a3252; color:var(--ink); }
+  /* 最小化＝タイトルバーだけに畳む */
+  .panel.min { min-height:0 !important; height:auto !important; resize:none; }
+  .panel.min > :not(.bar) { display:none; }
+  .panel.max { resize:none; }
   .panel > svg { flex:1 1 auto; min-height:0; width:100%; height:100%; display:block; padding:4px; }
   #gauges { flex:1 1 auto; min-height:0; padding:8px 10px; overflow:auto; }
 
@@ -39,12 +58,15 @@
   .organ.on .shape, .organ.marker.on { fill:var(--fire-soft); stroke:var(--fire); stroke-width:1.8;
             filter:drop-shadow(0 0 5px var(--fire)); vector-effect:non-scaling-stroke; }
   .organ.on .detail { stroke:var(--fire); opacity:.8; }
-  .leader { stroke:var(--line); stroke-width:1; opacity:.7; }
+  .leader { stroke:var(--line); stroke-width:1; opacity:.7; vector-effect:non-scaling-stroke; }
   .leader.on { stroke:var(--fire); opacity:.9; }
-  .blabel { fill:var(--muted); font-size:12px; transition:.2s; }
-  .blabel.on { fill:var(--fire); font-weight:600; }
-  .flow { stroke:var(--fire); stroke-width:2.6; fill:none; stroke-dasharray:5 6;
-          animation:dash .5s linear infinite; filter:drop-shadow(0 0 3px var(--fire)); }
+  .blabel { fill:var(--ink); font-weight:600; transition:.2s; paint-order:stroke; }
+  .blabel.on { fill:var(--fire); }
+  .lblbg { fill:rgba(6,11,20,.86); stroke:var(--line); stroke-width:.5; }
+  .lblbg.on { stroke:var(--fire); }
+  .flow { stroke:var(--fire); stroke-width:2.4; fill:none; stroke-dasharray:5 6;
+          animation:dash .5s linear infinite; filter:drop-shadow(0 0 3px var(--fire));
+          vector-effect:non-scaling-stroke; }
 
   .nnode circle { fill:#12233a; stroke:var(--cyan); stroke-width:1.6; transition:.2s; }
   .nnode text { fill:var(--muted); font-size:12px; transition:.2s; }
@@ -53,8 +75,9 @@
   .nnode.on text { fill:var(--fire); font-weight:600; }
   .net-edge { stroke:var(--grid); stroke-width:1.5; }
   .net-edge.on { stroke:rgba(255,90,90,.22); }
-  .net-flow { stroke:var(--fire); stroke-width:2.6; fill:none; stroke-dasharray:5 6;
-          animation:dash .5s linear infinite; filter:drop-shadow(0 0 3px var(--fire)); }
+  .net-flow { stroke:var(--fire); stroke-width:2.4; fill:none; stroke-dasharray:5 6;
+          animation:dash .5s linear infinite; filter:drop-shadow(0 0 3px var(--fire));
+          vector-effect:non-scaling-stroke; }
   .fire-badge { fill:var(--fire); font-size:12px; font-weight:700; }
   @keyframes dash { to { stroke-dashoffset:-11; } }
 
@@ -79,9 +102,9 @@
   .msg.cur { box-shadow:0 0 0 2px var(--fire); }
   .chat-empty { color:var(--muted); font-size:12px; padding:12px 6px; }
 
-  .bottom { position:fixed; left:8px; right:8px; bottom:8px; z-index:5;
+  .bottom { grid-area:bottom; position:relative; z-index:5;
             background:linear-gradient(180deg,var(--bg2),var(--panel)); border:1px solid var(--line);
-            border-radius:10px; padding:7px 12px; }
+            border-radius:8px; padding:7px 12px; }
   .scene { display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; margin-bottom:6px; }
   .scene .k { font-size:15px; font-weight:600; color:var(--ink); }
   .scene .d { font-size:12px; color:var(--cyan); }
@@ -106,44 +129,49 @@
   input[type=range] { flex:1; min-width:120px; accent-color:var(--fire); }
   .filebar { font-size:11px; color:var(--muted); margin-top:6px; }
   input[type=file] { color:var(--muted); }
+  #bottomToggle { position:absolute; top:5px; right:8px; z-index:6; padding:1px 8px; font-size:11px;
+                  color:var(--muted); }
+  .bottom.min .scene, .bottom.min .filebar { display:none; }
 </style>
 </head>
 <body>
 <div id="app">
-  <h1>太郎リプレイビューア <span>(v4・パネルはドラッグ移動/右下リサイズ・体ビューはホイールで拡大縮小/ダブルクリックで戻す)</span></h1>
+  <h1>太郎リプレイビューア <span>(v5・固定レイアウト／体ビューはホイールで拡大・右ドラッグで移動・ダブルクリックで戻す)</span></h1>
 
   <div class="panel" id="panel_body">
     <div class="bar"><span class="grip">⠿</span><h2>BODY / 体ビュー — 働いている部品が赤く光る</h2></div>
-    <svg viewBox="0 0 300 360" preserveAspectRatio="xMidYMid meet">
+    <svg viewBox="0 0 300 380" preserveAspectRatio="xMidYMid meet">
       <defs>
-        <marker id="arrowF" markerWidth="7" markerHeight="7" refX="5.5" refY="3" orient="auto">
-          <path d="M0,0 L6,3 L0,6 Z" fill="var(--fire)"></path>
+        <marker id="arrowF" markerWidth="6" markerHeight="6" refX="4.5" refY="2.6" orient="auto">
+          <path d="M0,0 L5,2.6 L0,5.2 Z" fill="var(--fire)"></path>
         </marker>
       </defs>
-      <!-- 体の輪郭（細線・大きめ・臓器と間隔をあける） -->
-      <circle class="body-outline" cx="150" cy="58" r="40"></circle>
-      <rect class="body-outline" x="108" y="104" width="84" height="152" rx="34"></rect>
-      <rect class="body-outline" x="62"  y="120" width="22" height="108" rx="11"></rect>
-      <rect class="body-outline" x="216" y="120" width="22" height="108" rx="11"></rect>
-      <rect class="body-outline" x="120" y="256" width="26" height="98" rx="13"></rect>
-      <rect class="body-outline" x="154" y="256" width="26" height="98" rx="13"></rect>
+      <!-- 体の輪郭（細線）。頭を大きく、脳の構造が収まるように -->
+      <circle class="body-outline" cx="150" cy="84" r="58"></circle>
+      <rect class="body-outline" x="104" y="150" width="92" height="142" rx="38"></rect>
+      <rect class="body-outline" x="56"  y="166" width="22" height="110" rx="11"></rect>
+      <rect class="body-outline" x="222" y="166" width="22" height="110" rx="11"></rect>
+      <rect class="body-outline" x="116" y="294" width="28" height="84" rx="14"></rect>
+      <rect class="body-outline" x="156" y="294" width="28" height="84" rx="14"></rect>
+      <!-- 脳（頭の中）：大脳皮質＝上部を大きく占める／小脳＝後下部 -->
       <g id="organ_cortex" class="organ">
-        <ellipse class="shape" cx="150" cy="54" rx="28" ry="20"></ellipse>
-        <path class="detail" d="M150,34 v40 M135,38 q6,16 0,32 M165,38 q-6,16 0,32"></path>
+        <ellipse class="shape" cx="150" cy="72" rx="42" ry="28"></ellipse>
+        <path class="detail" d="M150,46 v50 M130,52 q9,20 0,40 M170,52 q-9,20 0,40"></path>
       </g>
       <g id="organ_cerebellum" class="organ">
-        <ellipse class="shape" cx="174" cy="90" rx="15" ry="9"></ellipse>
-        <path class="detail" d="M162,86 h24 M162,90 h24 M162,94 h24"></path>
+        <ellipse class="shape" cx="171" cy="113" rx="14" ry="8"></ellipse>
+        <path class="detail" d="M160,110 h22 M160,113 h22 M160,116 h22"></path>
       </g>
+      <!-- 声道＝首（喉頭）／肺＝胸／胃＝腹。臓器は小さめに -->
       <g id="organ_vocal" class="organ">
-        <path class="shape" d="M139,110 q11,-7 22,0 v13 q-11,7 -22,0 z"></path>
+        <path class="shape" d="M142,146 q8,-5 16,0 v10 q-8,5 -16,0 z"></path>
       </g>
       <g id="organ_lungs" class="organ">
-        <path class="shape" d="M141,140 c-21,4 -28,28 -23,51 c3,11 17,11 19,0 c4,-21 4,-39 4,-51 z"></path>
-        <path class="shape" d="M159,140 c21,4 28,28 23,51 c-3,11 -17,11 -19,0 c-4,-21 -4,-39 -4,-51 z"></path>
+        <path class="shape" d="M148,172 c-16,3 -21,22 -18,39 c2,9 12,9 14,0 c3,-16 3,-29 3,-39 z"></path>
+        <path class="shape" d="M152,172 c16,3 21,22 18,39 c-2,9 -12,9 -14,0 c-3,-16 -3,-29 -3,-39 z"></path>
       </g>
       <g id="organ_stomach" class="organ">
-        <path class="shape" d="M146,198 c22,-5 37,10 34,30 c-1,18 -19,28 -35,21 c-5,-2 -3,-10 3,-8 c11,4 23,-4 23,-16 c0,-15 -13,-25 -25,-22 c-6,1 -7,-6 -1,-7 z"></path>
+        <path class="shape" d="M148,230 c17,-4 29,8 27,24 c-1,14 -15,22 -28,16 c-4,-2 -2,-8 2,-7 c9,3 18,-3 18,-13 c0,-12 -10,-20 -20,-17 c-5,1 -6,-5 -1,-6 z"></path>
       </g>
       <g id="bodyMarkers"></g>
       <g id="bodyFlows"></g>

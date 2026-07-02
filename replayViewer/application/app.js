@@ -2,17 +2,24 @@
 // 概観（時/日/月/年バケツ）を軽く表示し、粒度切替と生ログ(詳細)を行き来する。
 // マイルストーン（節目）を旗で表示し、クリックでその時点へジャンプする。
 
+// 解剖学的な近似配置（脳の構造は頭の中／声道=首・肺=胸・胃=腹）。
+// mx,my は各部位の中心。organ:trueは形を描く臓器、falseは点マーカー。
+// 【将来3D化のメモ】究極の見やすさには3Dが有利。その場合もこのデータ駆動構造は
+// 流用できる：BODYに z を足して3座標にし、体ビューのSVGだけを Three.js等の
+// WebGLシーンに差し替える（臓器=メッシュ、flows=3D線、ラベルはスプライト）。
+// パネル/会話/ウィンドウ操作/再生の仕組みはそのまま使える。近すぎて重なる問題は
+// 奥行きで解消できる。
 const BODY = {
-  cortex:        { label:"大脳皮質",   mx:150, my:54,  side:"L", organ:true  },
-  critic:        { label:"クリティック", mx:124, my:62,  side:"L", organ:false },
-  basal_ganglia: { label:"基底核",     mx:150, my:78,  side:"L", organ:false },
-  insula:        { label:"島皮質",     mx:128, my:160, side:"L", organ:false },
-  lungs:         { label:"肺",         mx:141, my:166, side:"L", organ:true  },
-  hippocampus:   { label:"海馬",       mx:176, my:60,  side:"R", organ:false },
-  cerebellum:    { label:"小脳",       mx:174, my:90,  side:"R", organ:true  },
-  locus:         { label:"青斑核",     mx:166, my:118, side:"R", organ:false },
-  vocal:         { label:"声道",       mx:150, my:116, side:"R", organ:true  },
-  stomach:       { label:"胃",         mx:162, my:216, side:"R", organ:true  },
+  cortex:        { label:"大脳皮質",   mx:150, my:70,  side:"L", organ:true  },  // 頭・上部
+  insula:        { label:"島皮質",     mx:124, my:86,  side:"L", organ:false },  // 脳の外側（肺でなく頭内）
+  basal_ganglia: { label:"基底核",     mx:142, my:90,  side:"L", organ:false },  // 脳の深部
+  vocal:         { label:"声道",       mx:150, my:151, side:"L", organ:true  },  // 首・喉頭
+  lungs:         { label:"肺",         mx:150, my:196, side:"L", organ:true  },  // 胸
+  hippocampus:   { label:"海馬",       mx:166, my:96,  side:"R", organ:false },  // 脳の深部
+  cerebellum:    { label:"小脳",       mx:171, my:113, side:"R", organ:true  },  // 頭・後下部
+  critic:        { label:"クリティック", mx:158, my:104, side:"R", organ:false }, // 抽象（腹側線条体あたり）
+  locus:         { label:"青斑核",     mx:150, my:130, side:"R", organ:false },  // 脳幹（頭の底）
+  stomach:       { label:"胃",         mx:152, my:250, side:"R", organ:true  },  // 腹
 };
 const NET = {
   cerebellum:    { label:"小脳",   x:230, y:38  }, locus:{ label:"青斑核", x:95, y:58 },
@@ -47,7 +54,7 @@ let items = [];         // 現在表示中のデータ列
 let idx = 0, timer = null, speed = 1;
 let TOTAL_T = 2 * 365 * 86400;
 let chatMsgs = [];      // {t, who:'parent'|'taro', text, cry}
-let bodyBox = {x:0,y:0,w:300,h:360};   // 体ビューの現在のviewBox（ズーム/パンで変わる）
+let bodyBox = {x:0,y:0,w:300,h:380};   // 体ビューの現在のviewBox（ズーム/パンで変わる）
 let activeMods = new Set();             // 今光っている部品
 
 const el = id => document.getElementById(id);
@@ -60,6 +67,19 @@ function mk(name, attrs, parent) {
 function fmtDate(t) {
   const days = Math.floor(t / 86400), y = Math.floor(days / 365), rem = days % 365;
   return `${y}年 ${Math.floor(rem / 30)}か月 ${rem % 30}日`;
+}
+// テキストの実サイズ(getBBox)を測って、後ろに背景の角丸長方形を敷く。
+// 矢印や臓器と文字が重なっても読めるようにするため。textより前(下)に挿入する。
+function bgFor(textEl, group, cls){
+  try{
+    const bb=textEl.getBBox();
+    const f=parseFloat(textEl.getAttribute("font-size"))||12;
+    const px=f*0.3, py=f*0.16;
+    const r=mk("rect",{x:bb.x-px,y:bb.y-py,width:bb.width+px*2,height:bb.height+py*2,
+      rx:f*0.28,class:cls||"lblbg"});
+    group.insertBefore(r, textEl);
+    return r;
+  }catch(e){ return null; }
 }
 function cx(id){ return NET[id].x; } function cy(id){ return NET[id].y; }
 function seg(x1,y1,x2,y2,p1,p2,off){
@@ -74,28 +94,36 @@ function buildBody() {
     mk("circle",{cx:BODY[id].mx,cy:BODY[id].my,r:5.5,class:"organ marker",id:"organ_"+id},markers);
   layoutBodyLabels();
 }
-// 引き出し線＋名前を、今見えている範囲（bodyBox）に合わせて動的に配置する。
-// ・見えている臓器だけ名前を出す（ズーム時に画面外は隠す）
-// ・各辺に均等に並べて重ならないようにする
-// ・文字/線は画面上ほぼ一定サイズになるよう viewBox 幅で逆スケール
+// 引き出し線＋名前を配置する。名前は臓器の座標を基準に置く（＝モデルと一緒に
+// パン/ズームで動く）。臓器から少し外側にずらし、はみ出さないよう現在の表示範囲に
+// クランプする。見えている臓器だけ表示。文字は画面上ほぼ一定サイズ（実ピクセル基準）。
 function layoutBodyLabels(){
   const labels=el("bodyLabels"),leaders=el("bodyLeaders");
   if(!labels||!leaders) return;
   labels.innerHTML=""; leaders.innerHTML="";
-  const b=bodyBox, x0=b.x, x1=b.x+b.w, y0=b.y, y1=b.y+b.h;
-  const font=12*(b.w/300), margin=b.w*0.02, pad=b.h*0.05;
+  const svg=el("panel_body")&&el("panel_body").querySelector("svg");
+  const b=bodyBox, x0=b.x, x1=b.x+b.w, y0=b.y, y1=b.y+b.h, cxm=b.x+b.w/2;
+  const rect=svg?svg.getBoundingClientRect():{width:b.w,height:b.h};
+  const scale=Math.min(rect.width/b.w, rect.height/b.h)||1;
+  const font=13/scale;                 // 画面上つねに約13px
+  const lineH=font*1.5, margin=font*0.7, off=b.w*0.32;
   const inside=m=>m.mx>=x0&&m.mx<=x1&&m.my>=y0&&m.my<=y1;
   ["L","R"].forEach(side=>{
     const ids=Object.keys(BODY).filter(id=>BODY[id].side===side&&inside(BODY[id]))
               .sort((a,c)=>BODY[a].my-BODY[c].my);
-    if(!ids.length) return;
-    const lx=side==="L"?x0+margin:x1-margin, anchor=side==="L"?"start":"end";
-    const top=y0+pad, bot=y1-pad, span=bot-top;
-    ids.forEach((id,i)=>{
-      const ly=ids.length===1?(top+bot)/2:top+span*i/(ids.length-1);
-      mk("line",{x1:lx,y1:ly,x2:BODY[id].mx,y2:BODY[id].my,class:"leader",id:"leader_"+id},leaders);
-      const t=mk("text",{x:lx,y:ly+font*0.34,"text-anchor":anchor,class:"blabel",id:"blabel_"+id,"font-size":font},labels);
-      t.textContent=BODY[id].label;
+    let lastY=-1e9;
+    ids.forEach(id=>{
+      const o=BODY[id];
+      let lx = side==="L" ? o.mx-off : o.mx+off;                 // 臓器基準でずらす
+      lx = side==="L" ? Math.max(x0+margin, Math.min(lx, cxm-margin))   // 表示範囲にクランプ
+                      : Math.min(x1-margin, Math.max(lx, cxm+margin));
+      let ly = Math.max(o.my, lastY+lineH);                      // 上から順に重なり回避
+      ly = Math.min(ly, y1-margin); lastY = ly;
+      mk("line",{x1:lx,y1:ly,x2:o.mx,y2:o.my,class:"leader",id:"leader_"+id},leaders);
+      const t=mk("text",{x:lx, y:ly+font*0.34, "text-anchor":side==="L"?"end":"start",
+        class:"blabel", id:"blabel_"+id, "font-size":font}, labels);
+      t.textContent=o.label;
+      const bg=bgFor(t, labels); if(bg) bg.id="blabelbg_"+id;
     });
   });
   applyActive();
@@ -105,6 +133,7 @@ function applyActive(){
     const o=el("organ_"+id); if(o) o.classList.toggle("on",on);
     const l=el("leader_"+id); if(l) l.classList.toggle("on",on);
     const t=el("blabel_"+id); if(t) t.classList.toggle("on",on);
+    const bg=el("blabelbg_"+id); if(bg) bg.classList.toggle("on",on);
   }
 }
 function buildNet() {
@@ -113,13 +142,14 @@ function buildNet() {
   for (const id in NET) {
     const n=NET[id], g=mk("g",{class:"nnode",id:"nn_"+id},nodes);
     mk("circle",{cx:n.x,cy:n.y,r:15},g);
-    const t=mk("text",{x:n.x,y:n.y+30,"text-anchor":"middle"},g); t.textContent=n.label;
+    const t=mk("text",{x:n.x,y:n.y+30,"text-anchor":"middle","font-size":13},g); t.textContent=n.label;
+    bgFor(t, g);   // 矢印と重なっても読めるよう背景を敷く
   }
 }
 function clearFlows() {
   el("bodyFlows").innerHTML=""; el("netFlows").innerHTML="";
   document.querySelectorAll(".net-edge.on").forEach(e=>e.classList.remove("on"));
-  document.querySelectorAll(".fire-badge").forEach(e=>e.remove());
+  document.querySelectorAll(".fire-badge, .badgebg").forEach(e=>e.remove());
 }
 function setModules(activeSet) {
   activeMods=activeSet; applyActive();
@@ -140,7 +170,7 @@ function renderMoment(m) {
     document.querySelectorAll(".net-edge").forEach(e=>{const[ea,eb]=e.getAttribute("data-edge").split("|");
       if((ea===a&&eb===b)||(ea===b&&eb===a))e.classList.add("on");});
   });
-  if(active.size){ const f=[...active][0]; if(NET[f]){ const badge=mk("text",{x:NET[f].x,y:NET[f].y-22,"text-anchor":"middle",class:"fire-badge"},el("netNodes")); badge.textContent="発火!"; } }
+  if(active.size){ const f=[...active][0]; if(NET[f]){ const badge=mk("text",{x:NET[f].x,y:NET[f].y-22,"text-anchor":"middle",class:"fire-badge","font-size":13},el("netNodes")); badge.textContent="発火!"; bgFor(badge, el("netNodes"), "lblbg badgebg"); } }
   setGauges(m.gauges);
   el("utterVal").textContent=m.utter?m.utter:"—";
 }
@@ -325,7 +355,7 @@ function afterLoad(){
 // ---- 初期化 ----
 function init(){
   buildBody(); buildNet();
-  enableZoom("panel_body",[0,0,300,360],box=>{ bodyBox=box; layoutBodyLabels(); });
+  enableZoom("panel_body",[0,0,300,380],box=>{ bodyBox=box; layoutBodyLabels(); });
   enableZoom("panel_net",[0,0,460,300]);
 
   // 既定：同じフォルダに置かれた概観/生ログ/マイルストーンを取りに行く。
@@ -355,28 +385,6 @@ function init(){
 }
 document.addEventListener("DOMContentLoaded", init);
 
-// パネル移動（ヘッダをドラッグ）／リサイズ(CSS)
-function makeDraggable(panel,handle){
-  let sx,sy,ol,ot,drag=false;
-  handle.addEventListener("pointerdown",e=>{drag=true;sx=e.clientX;sy=e.clientY;const r=panel.getBoundingClientRect();ol=r.left;ot=r.top;handle.setPointerCapture(e.pointerId);e.preventDefault();});
-  handle.addEventListener("pointermove",e=>{if(!drag)return;const nl=Math.max(0,Math.min(innerWidth-60,ol+(e.clientX-sx))),nt=Math.max(0,Math.min(innerHeight-40,ot+(e.clientY-sy)));panel.style.left=nl+"px";panel.style.top=nt+"px";panel.style.zIndex=3;});
-  handle.addEventListener("pointerup",()=>{drag=false;});
-}
-function place(id,l,t,w,h){const p=el(id);p.style.left=l+"px";p.style.top=t+"px";p.style.width=w+"px";p.style.height=h+"px";}
-// パネル初期配置。左＝体ビュー(大)／中＝ネット+数値／右＝会話。
-function layoutPanels(){
-  const W=innerWidth,H=innerHeight,top=28,bottomH=120,avail=Math.max(200,H-top-bottomH-8);
-  const chatW=Math.max(240,Math.round(W*0.22)), chatX=W-chatW-8;
-  const zoneW=Math.max(200,chatX-16);          // 体＋中列に使える幅
-  const bodyW=Math.round(zoneW*0.56), midX=8+bodyW+12, midW=Math.max(160,chatX-midX-12);
-  const netH=Math.round(avail*0.58);
-  place("panel_body",8,top,bodyW,avail);
-  place("panel_net",midX,top,midW,netH);
-  place("panel_metrics",midX,top+netH+8,midW,avail-netH-8);
-  place("panel_chat",chatX,top,chatW,avail);
-}
-document.addEventListener("DOMContentLoaded",()=>{
-  layoutPanels();
-  ["panel_body","panel_net","panel_metrics","panel_chat"].forEach(id=>{const p=el(id);makeDraggable(p,p.querySelector(".bar"));});
-  let rt; addEventListener("resize",()=>{clearTimeout(rt);rt=setTimeout(layoutPanels,150);});
-});
+// レイアウトはCSSグリッドで固定（隙間なくきっちり敷き詰め）。ウィンドウ操作は廃止。
+// ウィンドウのリサイズ時に、体ラベルの文字サイズ（実ピクセル基準）を再計算する。
+let _rt; addEventListener("resize",()=>{ clearTimeout(_rt); _rt=setTimeout(layoutBodyLabels,150); });
