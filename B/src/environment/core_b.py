@@ -142,14 +142,19 @@ class TaroEnvironmentB:
         if self._trace is None:
             return
         arousal = self.internal_state.get_arousal()
-        self._trace.write_event({
-            "type": "event", "t": int(sim_seconds), "kind": kind,
-            "modules": active, "flows": flows, "utter": utter,
-            "hunger": round(float(self.internal_state.hunger), 3),
-            "ne": round(float(self.locus_coeruleus.get_ne_level()), 3),
-            "dopamine": round(max(0.0, min(1.0, float(self.dopamine.get_baseline()))), 3),
-            "happiness": round(max(0.0, min(1.0, 1.0 - float(arousal))), 3),
-        })
+        # 記録する数値はここに1行足すだけで増やせる（後処理の集約は数値を
+        # 自動検出するので、足せば概観ログにも自動で反映される）。0〜1推奨。
+        metrics = {
+            "hunger":    float(self.internal_state.hunger),
+            "ne":        float(self.locus_coeruleus.get_ne_level()),
+            "dopamine":  max(0.0, min(1.0, float(self.dopamine.get_baseline()))),
+            "happiness": max(0.0, min(1.0, 1.0 - float(arousal))),
+            # 例）"sleepiness": float(self.internal_state.sleepiness),
+        }
+        rec = {"type": "event", "t": int(sim_seconds), "kind": kind,
+               "modules": active, "flows": flows, "utter": utter}
+        rec.update({k: round(v, 3) for k, v in metrics.items()})
+        self._trace.write_event(rec)
 
     def _body_state_tensor(self):
         """内部状態をテンソルに変換して脳に渡す。"""
