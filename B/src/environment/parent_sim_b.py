@@ -168,8 +168,16 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
 
     trace_path: 指定すると replayViewer 用の trace.jsonl を書き出す（オプトイン）。
     """
-    env = TaroEnvironmentB(run_name=run_name or "B_sim")
+    rn = run_name or "B_sim"
+    env = TaroEnvironmentB(run_name=rn)
     schedule = ParentSchedule(schedule_path=schedule_path)
+
+    # 【2026-07-02】既定でreplayViewer用ログを replayViewer/data/<run名>/ に出力する。
+    # trace_path=False を渡せば無効化できる。
+    if trace_path is None:
+        _data = os.path.join(_project_root(), "..", "replayViewer", "data", rn)
+        os.makedirs(_data, exist_ok=True)
+        trace_path = os.path.join(_data, "trace.jsonl")
 
     trace = None
     if trace_path:
@@ -177,13 +185,27 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
         trace = TraceLogger(trace_path)
         env.set_trace(trace)
 
-    def tr(kind, utter="", say=""):
-        m = TRACE_MAP.get(kind)
-        if m:
-            env.trace_event(sim_seconds, kind, m["modules"], m["flows"], utter, say=say)
-
     if max_sim_seconds is None:
         max_sim_seconds = schedule.max_seconds
+
+    # 長い走行でトレースが巨大化しないよう、頻出イベント（喃語・喃語反応・泣き・あやし）は
+    # 期間に応じて間引いて記録する。授乳・要求語・睡眠など重要イベントは常に全部記録。
+    _days = max(1.0, max_sim_seconds / 86400.0)
+    sample_n = max(1, round(_days / 2))
+    _tr_ct = {}
+    _FREQUENT = {"babble", "babble_response", "cry", "comfort"}
+
+    def tr(kind, utter="", say=""):
+        if trace is None:
+            return
+        m = TRACE_MAP.get(kind)
+        if not m:
+            return
+        if kind in _FREQUENT:
+            _tr_ct[kind] = _tr_ct.get(kind, 0) + 1
+            if _tr_ct[kind] % sample_n != 0:
+                return
+        env.trace_event(sim_seconds, kind, m["modules"], m["flows"], utter, say=say)
 
     cry_count = 0
     feed_count = 0
@@ -433,8 +455,22 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
               f"喃語: {babble_count}回  要求語: {request_count}回  睡眠: {sleep_count}回  定着: {consolidate_count}件")
 
     env.logger.close()
+    trace_dir = None
     if trace:
         trace.close()
+        trace_dir = os.path.dirname(trace_path)
+        # 粒度別の概観＋マイルストーンをその場で作る（replayViewerがそのまま読める）
+        try:
+            _r = _project_root()
+            if _r not in sys.path:
+                sys.path.insert(0, _r)
+            import build_trace_index
+            build_trace_index.build(trace_path)
+        except Exception as _e:
+            if verbose:
+                print(f"[trace] 概観の集約をスキップ: {_e}")
+        if verbose:
+            print(f"[trace] replayViewer用ログ: {trace_dir}")
 
     return {
         "sim_seconds": sim_seconds,
@@ -447,6 +483,7 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
         "request_count": request_count,
         "sleep_count": sleep_count,
         "consolidate_count": consolidate_count,
+        "trace_dir": trace_dir,
         "env": env,
     }
 
