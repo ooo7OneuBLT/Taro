@@ -423,6 +423,61 @@ class TaroEnvironmentB:
 
         return sims
 
+    def comprehension_probe(self, heard_word, hunger_value, n_samples=100):
+        """
+        理解テスト（A案・産出でなく「聞く」側を測る／モデルは変更しない）。
+
+        産出側（diagnostic_babble_at_hunger）は「空腹だとまんまと言う」を測るが、
+        それは要求発声（conditioned mand）でも成立し、意味の理解を意味しない。
+        こちらは逆に、太郎に heard_word を「聞かせた」あと、その瞬間の内部を読む：
+
+        - critic_value：唯一の「予期」スカラー。ただし critic は body_state しか
+          入力に取らないので、聞いた語によって変わらないはず（＝現アーキテクチャに
+          "聞いた語→体の未来の予期" を表す場所が無いことの実証）。
+        - hidden：聞いた直後のGRU隠れ状態。語ごとに区別できるか＝認識のRung1。
+        - echoic_mama_sim：聞いた直後の隠れ状態から発声させ、「まんま」への
+          平均類似度。聞く→言うの結び付き（まんまを聞くとまんまを言いやすいか）。
+
+        hunger_value で空腹を固定し、他の内的状態は現在値に揃える
+        （diagnostic_babble_at_hunger と同じdo介入）。実際の状態は変えない。
+        """
+        current_state = self.internal_state.get_state_vector()
+        sleepiness, discomfort = current_state[1], current_state[2]
+        arousal = max(hunger_value, sleepiness, discomfort)
+        fake_state = [hunger_value, sleepiness, discomfort, arousal]
+        body_state = torch.tensor(fake_state, dtype=torch.float32, device=self.device)
+
+        heard_tokens = [1] + self.vocab.encode(heard_word) + [2]
+        listen_input = torch.tensor([heard_tokens], device=self.device)
+
+        ne_level = self.locus_coeruleus.get_ne_level()
+        sims = []
+        with torch.no_grad():
+            _, hidden = self.brain.forward_hidden(listen_input, body_state=body_state)
+            critic_value = self.brain.critic(body_state).item()
+            hidden_vec = hidden.detach().reshape(-1).cpu().tolist()
+            for _ in range(n_samples):
+                generated, _, _ = self.brain.generate(
+                    hidden=hidden,
+                    max_length=self.max_output_length,
+                    eos_idx=2,
+                    stamina=self.lungs.get(),
+                    vocal_tract=self.vocal_tract,
+                    ne_level=ne_level,
+                    cerebellum=None,
+                    speech_plan=None,
+                    body_state=body_state,
+                )
+                if generated:
+                    sims.append(self.word_similarity(generated, "まんま"))
+
+        return {
+            "critic_value": critic_value,
+            "hidden": hidden_vec,
+            "echoic_mama_sim": (sum(sims) / len(sims) if sims else 0.0),
+            "n": len(sims),
+        }
+
     def respond_to_babble(self, generated_tokens, log_probs, candidate_words, r_habit=0.0,
                           hunger=0.0, social=True, mand=False):
         """
