@@ -266,38 +266,51 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
                       f"喃語「{result['taro']}」| "
                       f"arousal={env.internal_state.get_arousal():.2f}")
 
-            # 親が喃語に気づいて反応する（B-10：随伴的社会的フィードバック）
-            # B-11修正：内的状態から正解を決め打ちせず、太郎が実際に発した音を
-            # 全候補語と比較し、最も近い語との類似度で判定する
-            if random.random() < schedule.babble_response_prob and schedule.words:
-                candidate_words = list(schedule.words.values())
-                resp = env.respond_to_babble(result["tokens"], result["log_probs"], candidate_words,
-                                             r_habit=result["r_habit"])
-                if resp:
-                    env.logger.log_event(
-                        sim_seconds, "babble_response",
-                        taro=result["taro"], target=resp["recognized_word"],
-                        r_imit=round(resp["r_imit"], 4), R=round(resp["R"], 4),
-                        delta=round(resp["delta"], 4),
-                        hunger=round(env.internal_state.hunger, 4),
-                    )
-
-            # B2-1：空腹時に「まんま」に近い発声をしたら、泣いた時と同じ経路で
-            # 親に気づかせる（要求語として機能させる）。太郎の発話内容が
-            # 初めて実際の授乳タイミングに影響する
-            # B2-3修正：類似度による足切り（0.4未満なら無反応）をやめ、
-            # 類似度そのものを「親が気づく確率」として連続的に使う。
-            # 完璧に言えなくても近いほど気づかれやすい、という段階のない
-            # オールオアナッシングではない反応にした
-            if env.internal_state.hunger > 0.5:
+            # 喃語への2つの反応経路を判定する。
+            #   経路1（社会的）：親が言葉らしい発声に気づいて反応（Goldstein &
+            #     Schwade）。空腹とは無関係、確率 babble_response_prob で発火。
+            #   経路2（要求語=mand, B2-1）：空腹時にまんま様発声をすると、泣いた
+            #     ときと同じ経路で親に気づかせ実際に授乳させる。類似度そのものを
+            #     気づかれる確率として連続的に使う（B2-3で閾値撤廃）。
+            # B2-9修正：学習の更新は respond_to_babble の1か所に統一する（同じ
+            # log_probsに2度backwardするとエラーのため）。どちらかが発火したら
+            # まとめて1回だけ更新し、mand発火時は hunger に比例した「ホッとする
+            # 報酬」を加算して「空腹→まんま」を配線する。物理的な授乳トリガー
+            # （on_word_request）は従来どおり別に呼ぶ。
+            hunger_now = env.internal_state.hunger
+            social_fired = (random.random() < schedule.babble_response_prob) and bool(schedule.words)
+            mand_fired = False
+            similarity = 0.0
+            if hunger_now > 0.5:
                 similarity = env.word_similarity(result["tokens"], "まんま")
-                if random.random() < similarity:
-                    request_count += 1
-                    env.logger.log_event(sim_seconds, "word_request",
-                                          taro=result["taro"],
-                                          similarity=round(similarity, 4),
-                                          hunger=round(env.internal_state.hunger, 4))
-                    schedule.on_word_request(sim_seconds)
+                mand_fired = random.random() < similarity
+
+            resp = None
+            if (social_fired or mand_fired) and schedule.words:
+                candidate_words = list(schedule.words.values())
+                resp = env.respond_to_babble(
+                    result["tokens"], result["log_probs"], candidate_words,
+                    r_habit=result["r_habit"], hunger=hunger_now,
+                    social=social_fired, mand=mand_fired,
+                )
+
+            if social_fired and resp:
+                env.logger.log_event(
+                    sim_seconds, "babble_response",
+                    taro=result["taro"], target=resp["recognized_word"],
+                    r_imit=round(resp["r_imit"], 4), R=round(resp["R"], 4),
+                    delta=round(resp["delta"], 4),
+                    hunger=round(hunger_now, 4),
+                )
+
+            if mand_fired:
+                request_count += 1
+                env.logger.log_event(sim_seconds, "word_request",
+                                      taro=result["taro"],
+                                      similarity=round(similarity, 4),
+                                      hunger=round(hunger_now, 4),
+                                      r_mand=round(resp["r_mand"], 4) if resp else 0.0)
+                schedule.on_word_request(sim_seconds)
 
         if verbose and sim_seconds % schedule.log_interval == 0:
             state = "寝" if env.internal_state.is_sleeping() else \
