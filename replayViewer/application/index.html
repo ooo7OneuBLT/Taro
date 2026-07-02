@@ -70,6 +70,17 @@
   .scene .u b { font-size:17px; color:var(--ink); font-weight:600; margin-left:5px; }
   .controls { display:flex; align-items:center; gap:8px; }
   .yr { font-size:11px; color:var(--muted); white-space:nowrap; }
+  .gran-label { font-size:11px; color:var(--muted); margin-left:6px; }
+  .granbar { display:inline-flex; border:1px solid var(--line); border-radius:7px; overflow:hidden; }
+  .granbtn { border:0; border-right:1px solid var(--line); border-radius:0; padding:4px 9px; font-size:12px; }
+  .granbtn:last-child { border-right:0; }
+  .granbtn.sel { background:var(--fire); color:#fff; border-color:var(--fire); }
+  .tl { display:flex; align-items:center; gap:8px; margin-top:6px; }
+  .tlmid { flex:1; display:flex; flex-direction:column; gap:2px; min-width:120px; }
+  .tlmid svg { width:100%; height:22px; display:block; }
+  .ms-line { stroke:var(--fire); stroke-width:1.5; opacity:.7; }
+  .ms-flag { fill:var(--fire); }
+  .ms:hover .ms-flag { fill:#ff9a4a; }
   button, select { font:inherit; font-size:13px; padding:4px 10px; border:1px solid var(--line);
                    background:#12233a; border-radius:7px; cursor:pointer; color:var(--ink); }
   button:hover { background:#1a3252; }
@@ -149,13 +160,26 @@
         <option value="0.5">0.5x</option><option value="1" selected>1x</option>
         <option value="2">2x</option><option value="4">4x</option>
       </select>
-      <span class="yr">0年</span>
-      <input id="seek" type="range" min="0" max="0" value="0" step="1">
-      <span class="yr">2年</span>
+      <span class="gran-label">粒度</span>
+      <span class="granbar">
+        <button class="granbtn" id="gran_year">年</button><button class="granbtn" id="gran_month">月</button><button class="granbtn" id="gran_day">日</button><button class="granbtn" id="gran_hour">時</button><button class="granbtn" id="gran_raw">生</button>
+      </span>
       <span class="d" id="seekReadout">1 / 1</span>
     </div>
+    <div class="tl">
+      <span class="yr">0年</span>
+      <div class="tlmid">
+        <svg viewBox="0 0 700 24" preserveAspectRatio="none">
+          <line x1="8" y1="16" x2="692" y2="16" stroke="var(--line)" stroke-width="2"></line>
+          <g id="msFlags"></g>
+          <rect id="playhead" x="7" y="11" width="2" height="10" fill="var(--fire)"></rect>
+        </svg>
+        <input id="seek" type="range" min="0" max="0" value="0" step="1">
+      </div>
+      <span class="yr" id="axisEnd">2年</span>
+    </div>
     <div class="filebar">
-      本番のログ(trace.jsonl)を読み込む：<input id="fileInput" type="file" accept=".jsonl,.json,.txt">（未指定ならサンプルで再生）
+      ログフォルダを選択（trace.jsonl・概観・milestonesをまとめて読込）：<input id="folderInput" type="file" webkitdirectory>
     </div>
   </div>
 </div>
