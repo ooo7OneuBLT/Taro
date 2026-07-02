@@ -1,0 +1,33 @@
+[
+  { "t": 1296000,  "kind": "喃語（母音のみ）", "active": ["locus","cortex","vocal"],
+    "flows": [["locus","cortex"],["cortex","vocal"]], "utter": "あうあ",
+    "gauges": { "hunger":0.30, "ne":0.75, "dopamine":0.10, "happiness":0.55 } },
+
+  { "t": 9720000,  "kind": "空腹で泣く", "active": ["stomach","insula","cortex","lungs"],
+    "flows": [["stomach","insula"],["insula","cortex"],["cortex","lungs"]], "utter": "（泣き声）",
+    "gauges": { "hunger":0.82, "ne":0.85, "dopamine":0.08, "happiness":0.20 } },
+
+  { "t": 9723600,  "kind": "授乳される", "active": ["stomach","insula","critic"],
+    "flows": [["stomach","insula"],["insula","critic"]], "utter": "",
+    "gauges": { "hunger":0.35, "ne":0.55, "dopamine":0.30, "happiness":0.70 } },
+
+  { "t": 18100000, "kind": "要求語（空腹→まんま）", "active": ["stomach","insula","cortex","vocal"],
+    "flows": [["stomach","insula"],["insula","cortex"],["cortex","vocal"]], "utter": "まんま",
+    "gauges": { "hunger":0.74, "ne":0.50, "dopamine":0.40, "happiness":0.45 } },
+
+  { "t": 18103600, "kind": "「まんま」を聞く→満腹を予期", "active": ["cortex","insula","critic"],
+    "flows": [["cortex","insula"],["insula","critic"]], "utter": "",
+    "gauges": { "hunger":0.72, "ne":0.48, "dopamine":0.52, "happiness":0.50 } },
+
+  { "t": 27000000, "kind": "機嫌よく喃語", "active": ["locus","cortex","vocal","cerebellum"],
+    "flows": [["locus","cortex"],["cortex","cerebellum"],["cortex","vocal"]], "utter": "ばぶぶ",
+    "gauges": { "hunger":0.18, "ne":0.40, "dopamine":0.22, "happiness":0.72 } },
+
+  { "t": 36000000, "kind": "睡眠：記憶の定着", "active": ["hippocampus","cortex"],
+    "flows": [["hippocampus","cortex"]], "utter": "",
+    "gauges": { "hunger":0.22, "ne":0.20, "dopamine":0.15, "happiness":0.60 } },
+
+  { "t": 55000000, "kind": "要求語（成熟後）", "active": ["stomach","insula","cortex","vocal","critic"],
+    "flows": [["stomach","insula"],["insula","cortex"],["cortex","vocal"],["cortex","critic"]], "utter": "まんま",
+    "gauges": { "hunger":0.68, "ne":0.30, "dopamine":0.60, "happiness":0.55 } }
+]

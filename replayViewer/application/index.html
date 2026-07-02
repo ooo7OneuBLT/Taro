@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>太郎リプレイビューア</title>
+<style>
+  :root {
+    --bg:#0a0f1c; --bg2:#0f1626; --panel:#0e1424; --line:#243a55; --grid:#13233a;
+    --ink:#cfe3f2; --muted:#6f8aa6; --cyan:#46c8e0; --cyan-soft:rgba(70,200,224,.14);
+    --fire:#ff5a5a; --fire-soft:rgba(255,90,90,.20);
+  }
+  * { box-sizing:border-box; }
+  html, body { height:100%; }
+  body { margin:0; overflow:hidden; background:var(--bg); color:var(--ink);
+         font-family:"Segoe UI","Hiragino Kaku Gothic ProN","Meiryo",sans-serif; }
+  #app { position:relative; height:100vh; }
+  h1 { position:absolute; top:6px; left:12px; margin:0; font-size:14px; font-weight:600; letter-spacing:.05em; z-index:5; }
+  h1 span { font-size:11px; color:var(--muted); font-weight:400; }
+
+  /* 自由に動かせる・リサイズできるパネル */
+  .panel { position:absolute; resize:both; overflow:hidden; min-width:240px; min-height:150px;
+           background:linear-gradient(180deg,var(--bg2),var(--panel)); border:1px solid var(--line);
+           border-radius:10px; display:flex; flex-direction:column; }
+  .bar { flex:0 0 auto; cursor:move; user-select:none; padding:5px 8px 3px; border-bottom:1px solid var(--line);
+         display:flex; align-items:center; gap:6px; }
+  .bar h2 { font-size:11px; color:var(--cyan); font-weight:600; letter-spacing:.06em; margin:0; }
+  .bar .grip { color:var(--muted); font-size:11px; }
+  .panel > svg { flex:1 1 auto; min-height:0; width:100%; height:100%; display:block; padding:4px; }
+  #gauges { flex:1 1 auto; min-height:0; padding:8px 10px; overflow:auto; }
+
+  .body-outline { fill:rgba(70,200,224,.05); stroke:var(--cyan); stroke-width:1.4; opacity:.55; }
+  .organ .shape { fill:var(--cyan-soft); stroke:var(--cyan); stroke-width:1.6; transition:.2s; }
+  .organ.marker { fill:var(--cyan-soft); stroke:var(--cyan); stroke-width:1.6; transition:.2s; }
+  .organ .detail { fill:none; stroke:var(--cyan); stroke-width:1; opacity:.6; }
+  .organ.on .shape, .organ.marker.on { fill:var(--fire-soft); stroke:var(--fire); stroke-width:2.4;
+            filter:drop-shadow(0 0 5px var(--fire)); }
+  .organ.on .detail { stroke:var(--fire); opacity:.8; }
+  .leader { stroke:var(--line); stroke-width:1; opacity:.7; }
+  .leader.on { stroke:var(--fire); opacity:.9; }
+  .blabel { fill:var(--muted); font-size:12px; transition:.2s; }
+  .blabel.on { fill:var(--fire); font-weight:600; }
+  .flow { stroke:var(--fire); stroke-width:2.6; fill:none; stroke-dasharray:5 6;
+          animation:dash .5s linear infinite; filter:drop-shadow(0 0 3px var(--fire)); }
+
+  .nnode circle { fill:#12233a; stroke:var(--cyan); stroke-width:1.6; transition:.2s; }
+  .nnode text { fill:var(--muted); font-size:12px; transition:.2s; }
+  .nnode.on circle { fill:var(--fire-soft); stroke:var(--fire); stroke-width:2.6;
+            filter:drop-shadow(0 0 6px var(--fire)); }
+  .nnode.on text { fill:var(--fire); font-weight:600; }
+  .net-edge { stroke:var(--grid); stroke-width:1.5; }
+  .net-edge.on { stroke:rgba(255,90,90,.22); }
+  .net-flow { stroke:var(--fire); stroke-width:2.6; fill:none; stroke-dasharray:5 6;
+          animation:dash .5s linear infinite; filter:drop-shadow(0 0 3px var(--fire)); }
+  .fire-badge { fill:var(--fire); font-size:12px; font-weight:700; }
+  @keyframes dash { to { stroke-dashoffset:-11; } }
+
+  .gauge-row { margin:5px 2px; }
+  .gauge-row .lab { display:flex; justify-content:space-between; font-size:11px; color:var(--muted); margin-bottom:2px; }
+  .track { height:8px; background:#0b1626; border:1px solid var(--line); border-radius:99px; overflow:hidden; }
+  .fill { height:100%; border-radius:99px; width:0; transition:width .3s; }
+
+  .bottom { position:fixed; left:8px; right:8px; bottom:8px; z-index:5;
+            background:linear-gradient(180deg,var(--bg2),var(--panel)); border:1px solid var(--line);
+            border-radius:10px; padding:7px 12px; }
+  .scene { display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; margin-bottom:6px; }
+  .scene .k { font-size:15px; font-weight:600; color:var(--ink); }
+  .scene .d { font-size:12px; color:var(--cyan); }
+  .scene .u { font-size:12px; color:var(--muted); margin-left:auto; }
+  .scene .u b { font-size:17px; color:var(--ink); font-weight:600; margin-left:5px; }
+  .controls { display:flex; align-items:center; gap:8px; }
+  .yr { font-size:11px; color:var(--muted); white-space:nowrap; }
+  button, select { font:inherit; font-size:13px; padding:4px 10px; border:1px solid var(--line);
+                   background:#12233a; border-radius:7px; cursor:pointer; color:var(--ink); }
+  button:hover { background:#1a3252; }
+  input[type=range] { flex:1; min-width:120px; accent-color:var(--fire); }
+  .filebar { font-size:11px; color:var(--muted); margin-top:6px; }
+  input[type=file] { color:var(--muted); }
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>太郎リプレイビューア <span>(v2・サンプル／パネルはドラッグ移動・右下でリサイズ可)</span></h1>
+
+  <div class="panel" id="panel_body">
+    <div class="bar"><span class="grip">⠿</span><h2>BODY / 体ビュー — 働いている部品が赤く光る</h2></div>
+    <svg viewBox="0 0 480 320" preserveAspectRatio="xMidYMid meet">
+      <defs>
+        <marker id="arrowF" markerWidth="7" markerHeight="7" refX="5.5" refY="3" orient="auto">
+          <path d="M0,0 L6,3 L0,6 Z" fill="var(--fire)"></path>
+        </marker>
+      </defs>
+      <circle class="body-outline" cx="240" cy="54" r="34"></circle>
+      <rect class="body-outline" x="210" y="86" width="60" height="140" rx="26"></rect>
+      <rect class="body-outline" x="183" y="96" width="17" height="92" rx="8.5"></rect>
+      <rect class="body-outline" x="280" y="96" width="17" height="92" rx="8.5"></rect>
+      <rect class="body-outline" x="214" y="222" width="21" height="86" rx="10"></rect>
+      <rect class="body-outline" x="245" y="222" width="21" height="86" rx="10"></rect>
+      <g id="organ_cortex" class="organ">
+        <ellipse class="shape" cx="240" cy="50" rx="23" ry="16"></ellipse>
+        <path class="detail" d="M240,35 v30 M228,38 q5,12 0,24 M252,38 q-5,12 0,24"></path>
+      </g>
+      <g id="organ_cerebellum" class="organ">
+        <ellipse class="shape" cx="252" cy="80" rx="13" ry="8"></ellipse>
+        <path class="detail" d="M243,76 h18 M243,80 h18 M243,84 h18"></path>
+      </g>
+      <g id="organ_vocal" class="organ">
+        <path class="shape" d="M232,102 q8,-6 16,0 v10 q-8,6 -16,0 z"></path>
+      </g>
+      <g id="organ_lungs" class="organ">
+        <path class="shape" d="M234,130 c-16,3 -22,22 -18,40 c2,9 13,9 15,0 c3,-16 3,-30 3,-40 z"></path>
+        <path class="shape" d="M246,130 c16,3 22,22 18,40 c-2,9 -13,9 -15,0 c-3,-16 -3,-30 -3,-40 z"></path>
+      </g>
+      <g id="organ_stomach" class="organ">
+        <path class="shape" d="M238,176 c17,-4 29,8 27,24 c-1,14 -15,22 -28,16 c-4,-2 -2,-8 2,-7 c9,3 18,-3 18,-13 c0,-12 -10,-20 -20,-17 c-5,1 -6,-5 -1,-6 z"></path>
+      </g>
+      <g id="bodyMarkers"></g>
+      <g id="bodyFlows"></g>
+      <g id="bodyLeaders"></g>
+      <g id="bodyLabels"></g>
+    </svg>
+  </div>
+
+  <div class="panel" id="panel_net">
+    <div class="bar"><span class="grip">⠿</span><h2>NETWORK / ネットワーク図 — 矢印＝流れの向き（上り/下りは二車線）</h2></div>
+    <svg viewBox="0 0 460 300" preserveAspectRatio="xMidYMid meet">
+      <g id="netEdges"></g>
+      <g id="netFlows"></g>
+      <g id="netNodes"></g>
+    </svg>
+  </div>
+
+  <div class="panel" id="panel_metrics">
+    <div class="bar"><span class="grip">⠿</span><h2>METRICS / 数値一覧</h2></div>
+    <div id="gauges"></div>
+  </div>
+
+  <div class="bottom">
+    <div class="scene">
+      <span class="k" id="sceneLabel">—</span>
+      <span class="d" id="dateLabel"></span>
+      <span class="u">発声：<b id="utterVal">—</b></span>
+    </div>
+    <div class="controls">
+      <button id="prevBtn">⏮</button>
+      <button id="playBtn">▶ 再生</button>
+      <button id="nextBtn">⏭</button>
+      <select id="speedSel">
+        <option value="0.5">0.5x</option><option value="1" selected>1x</option>
+        <option value="2">2x</option><option value="4">4x</option>
+      </select>
+      <span class="yr">0年</span>
+      <input id="seek" type="range" min="0" max="0" value="0" step="1">
+      <span class="yr">2年</span>
+      <span class="d" id="seekReadout">1 / 1</span>
+    </div>
+    <div class="filebar">
+      本番のログ(trace.jsonl)を読み込む：<input id="fileInput" type="file" accept=".jsonl,.json,.txt">（未指定ならサンプルで再生）
+    </div>
+  </div>
+</div>
+
+  <script src="app.js"></script>
+  <script>
+    (function(){
+      const box = document.getElementById("gauges");
+      const gs = [["hunger","空腹","#ff7a4a"],["ne","探索(NE)","#8aa6c8"],
+        ["dopamine","ドーパミン分泌量","#46c8e0"],["happiness","幸福度","#4bd08a"]];
+      gs.forEach(([k,label,color])=>{
+        const row=document.createElement("div"); row.className="gauge-row";
+        row.innerHTML='<div class="lab"><span>'+label+'</span><span id="gval_'+k+'">0%</span></div>'+
+          '<div class="track"><div class="fill" id="gauge_'+k+'" style="background:'+color+'"></div></div>';
+        box.appendChild(row);
+      });
+    })();
+  </script>
+</body>
+</html>
