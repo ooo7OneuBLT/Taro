@@ -8,7 +8,7 @@
     "gauges": { "hunger":0.82, "ne":0.85, "dopamine":0.08, "happiness":0.20 } },
 
   { "t": 9723600,  "kind": "授乳される", "active": ["stomach","insula","critic"],
-    "flows": [["stomach","insula"],["insula","critic"]], "utter": "",
+    "flows": [["stomach","insula"],["insula","critic"]], "utter": "", "say": "まんま",
     "gauges": { "hunger":0.35, "ne":0.55, "dopamine":0.30, "happiness":0.70 } },
 
   { "t": 18100000, "kind": "要求語（空腹→まんま）", "active": ["stomach","insula","cortex","vocal"],
@@ -16,7 +16,7 @@
     "gauges": { "hunger":0.74, "ne":0.50, "dopamine":0.40, "happiness":0.45 } },
 
   { "t": 18103600, "kind": "「まんま」を聞く→満腹を予期", "active": ["cortex","insula","critic"],
-    "flows": [["cortex","insula"],["insula","critic"]], "utter": "",
+    "flows": [["cortex","insula"],["insula","critic"]], "utter": "", "say": "まんま",
     "gauges": { "hunger":0.72, "ne":0.48, "dopamine":0.52, "happiness":0.50 } },
 
   { "t": 27000000, "kind": "機嫌よく喃語", "active": ["locus","cortex","vocal","cerebellum"],

@@ -177,10 +177,10 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
         trace = TraceLogger(trace_path)
         env.set_trace(trace)
 
-    def tr(kind, utter=""):
+    def tr(kind, utter="", say=""):
         m = TRACE_MAP.get(kind)
         if m:
-            env.trace_event(sim_seconds, kind, m["modules"], m["flows"], utter)
+            env.trace_event(sim_seconds, kind, m["modules"], m["flows"], utter, say=say)
 
     if max_sim_seconds is None:
         max_sim_seconds = schedule.max_seconds
@@ -308,7 +308,7 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
                     env.brain.temperature, context="meal", hunger=m["hunger"])
                 env.logger.log_event(sim_seconds, "feed", amount=schedule.feed_amount,
                                      hunger_before=round(m["hunger"], 4), scheduled=True)
-                tr("feed", m["taro"])
+                tr("feed", m["taro"], say=meal_word)
                 schedule.last_feed_time = sim_seconds
 
         if schedule.should_respond_now(sim_seconds):
@@ -335,7 +335,7 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
                 env.logger.log_event(sim_seconds, "feed",
                                       amount=schedule.feed_amount,
                                       hunger_before=round(result["hunger"], 4))
-                tr("feed", result["taro"])
+                tr("feed", result["taro"], say=word)
                 if verbose and (speak_count <= 30 or speak_count % 50 == 0):
                     print(f"  t={sim_seconds:5d}s ({fmt_time(sim_seconds)}) | "
                           f"親「{word}」→ 太郎「{result['taro']}」| "
@@ -343,7 +343,7 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
             else:
                 env.logger.log_event(sim_seconds, "comfort",
                                       hunger=round(env.internal_state.hunger, 4))
-                tr("comfort")
+                tr("comfort", say=word)
 
         # 自発的な喃語（穏やかな時間の練習）
         if (sim_seconds - last_babble_time >= schedule.babble_interval
@@ -402,7 +402,7 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
                     delta=round(resp["delta"], 4),
                     hunger=round(hunger_now, 4),
                 )
-                tr("babble_response", result["taro"])
+                tr("babble_response", result["taro"], say=resp["recognized_word"])
 
             if mand_fired:
                 request_count += 1
