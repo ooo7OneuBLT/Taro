@@ -11,6 +11,7 @@
 
 import os
 import torch
+import torch.nn.functional as F
 import yaml
 from collections import deque
 from taro.brain import (Vocabulary, TaroBrain, Cerebellum, BrocasArea, TaroLearner,
@@ -177,10 +178,14 @@ class TaroEnvironmentB:
         """世話。discomfortやsleepinessを下げる。"""
         self.internal_state.apply_care(care_type)
 
-    def step(self, parent_text, r_social=0.0):
+    def step(self, parent_text, r_social=0.0, satiety_target=None):
         """
         親が話しかけたときの1ターン。モデルAのstep()と同じ構造だが、
         島皮質経由で体の感覚が脳に入る点と、恒常性の報酬が加わる点が異なる。
+
+        satiety_target: B2-10。この発話の後に授乳が来るかの実際の結果
+            （1.0=授乳が来る／0.0=来ない）。Noneなら満腹予期は学習しない。
+            太郎はこの結果を教師に「聞いた音＋状態→満腹の到来」を予測できるよう学ぶ。
         """
         parent_tokens = self.vocab.encode(parent_text)
         self.brain.resize_embedding(self.vocab.size)
@@ -190,7 +195,7 @@ class TaroEnvironmentB:
 
         # 知覚学習
         full_tokens = [1] + parent_tokens + [2]
-        p_loss, pred_probs = self.learner.learn_perception(full_tokens, body_state=body_state)
+        p_loss, pred_probs, satiety_logit = self.learner.learn_perception(full_tokens, body_state=body_state)
 
         # 聞く（体の感覚も合流）
         listen_input = torch.tensor([full_tokens], device=self.device)
@@ -244,7 +249,18 @@ class TaroEnvironmentB:
                                            vocab=self.vocab, vocal_tract=self.vocal_tract)
         a_loss = self.learner.learn_action(log_probs, delta, credits=credits)
         value_loss = self.learner.compute_value_loss(value, R)
-        pl, al = self.learner.update(p_loss, a_loss, value_loss)
+
+        # B2-10：満腹予期の学習。この発話の後に授乳が来たか（satiety_target）を
+        # 教師に、「聞いた音＋状態→満腹の到来」を予測できるよう satiety_head と
+        # GRU表現を更新する。まんまは授乳時に、よしよしは慰め時に聞くので、
+        # 太郎は「まんまを聞く→ごはんが来る」を学べる。
+        satiety_loss = None
+        if satiety_target is not None and satiety_logit is not None:
+            tgt = torch.tensor(float(satiety_target), device=satiety_logit.device,
+                               dtype=satiety_logit.dtype)
+            satiety_loss = F.binary_cross_entropy_with_logits(satiety_logit, tgt)
+
+        pl, al = self.learner.update(p_loss, a_loss, value_loss, satiety_loss=satiety_loss)
 
         # 青斑核
         self.locus_coeruleus.observe_reward(R)
@@ -453,8 +469,11 @@ class TaroEnvironmentB:
         ne_level = self.locus_coeruleus.get_ne_level()
         sims = []
         with torch.no_grad():
-            _, hidden = self.brain.forward_hidden(listen_input, body_state=body_state)
+            out, hidden = self.brain.forward_hidden(listen_input, body_state=body_state)
             critic_value = self.brain.critic(body_state).item()
+            # B2-10：聞いた語＋状態から「満腹が来る」予期を読む（理解の本命指標）
+            satiety = (self.brain.predict_satiety(out[0, -1]).item()
+                       if getattr(self.brain, "satiety_head", None) is not None else None)
             hidden_vec = hidden.detach().reshape(-1).cpu().tolist()
             for _ in range(n_samples):
                 generated, _, _ = self.brain.generate(
@@ -473,6 +492,7 @@ class TaroEnvironmentB:
 
         return {
             "critic_value": critic_value,
+            "satiety": satiety,
             "hidden": hidden_vec,
             "echoic_mama_sim": (sum(sims) / len(sims) if sims else 0.0),
             "n": len(sims),
@@ -581,7 +601,7 @@ class TaroEnvironmentB:
 
         total_p_loss = None
         for full_tokens, body_state in experiences:
-            p_loss, _ = self.learner.learn_perception(full_tokens, body_state=body_state)
+            p_loss, _, _ = self.learner.learn_perception(full_tokens, body_state=body_state)
             if isinstance(p_loss, torch.Tensor):
                 total_p_loss = p_loss if total_p_loss is None else total_p_loss + p_loss
 

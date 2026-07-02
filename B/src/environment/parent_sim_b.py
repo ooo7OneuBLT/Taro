@@ -223,7 +223,10 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
 
             word = schedule.choose_word(care_type)
             if word:
-                result = env.step(word, r_social=0.5)  # 空腹のまま「まんま」を聞く・返す
+                # B2-10：この発話の後に授乳が来るか（feedなら1.0）を満腹予期の教師にする。
+                # まんまは授乳時・よしよしは慰め時に聞くので「まんま→ごはん」を学べる。
+                result = env.step(word, r_social=0.5,
+                                  satiety_target=(1.0 if care_type == "feed" else 0.0))
             if care_type == "feed":
                 env.feed(schedule.feed_amount)          # 発話の後に授乳
                 feed_count += 1

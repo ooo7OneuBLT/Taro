@@ -50,7 +50,7 @@ with open(log_path, "w", encoding="utf-8") as logf:
         r = run_simulation_b(
             max_sim_seconds=months * 2592000,
             verbose=False,
-            run_name=f"B2-9_comprehension_train{suffix}",
+            run_name=f"B2-10_comprehension_train{suffix}",
         )
         log(f"[学習完了] {time.strftime('%Y-%m-%d %H:%M:%S')} ({(time.time()-start)/60:.1f}分)")
         log(f"泣き{r['cry_count']} 食事{r['feed_count']} 要求語{r['request_count']} 喃語{r['babble_count']}")
@@ -67,8 +67,19 @@ with open(log_path, "w", encoding="utf-8") as logf:
             for w in words:
                 res = env.comprehension_probe(w, hv, n_samples=200)
                 results[(hname, w)] = res
-                log(f"  [{hname}] 「{w}」を聞く → critic価値={res['critic_value']:.4f} "
+                sat = res.get("satiety")
+                sat_s = f"{sat:.4f}" if sat is not None else "N/A"
+                log(f"  [{hname}] 「{w}」を聞く → 満腹予期={sat_s} ／ critic価値={res['critic_value']:.4f} "
                     f"／ 聞いた後の発声のまんま類似={res['echoic_mama_sim']:.4f} (n={res['n']})")
+
+        log("\n[Rung2本命：意味] 満腹予期が“聞いた語”で変わるか（まんま>他 なら『まんま→ごはん』を理解）")
+        for hv, hname in hungers:
+            sm = results[(hname, "まんま")].get("satiety")
+            ss = results[(hname, "ままん")].get("satiety")
+            sa = results[(hname, "あうあ")].get("satiety")
+            if sm is not None:
+                log(f"  [{hname}] まんま={sm:.4f}  ままん={ss:.4f}  あうあ={sa:.4f}  "
+                    f"→ まんま−あうあ={sm-sa:+.4f}")
 
         log("\n[Rung1：認識] 聞いた直後の隠れ状態が語ごとに区別できるか（コサイン類似, 1に近い=似てる）")
         for hv, hname in hungers:

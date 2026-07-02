@@ -37,7 +37,7 @@ class TaroLearner:
         戻り値: prediction_loss (float), prediction_probs (list of tensors)
         """
         if len(input_tokens) < 2:
-            return 0.0, []
+            return 0.0, [], None
 
         device = self.brain._device()
         x = torch.tensor([input_tokens[:-1]], device=device)
@@ -54,7 +54,13 @@ class TaroLearner:
             for i in range(probs_all.size(0)):
                 probs_list.append(probs_all[i])
 
-        return loss, probs_list
+        # B2-10：満腹予期ヘッド用に、聞き終えた時点の隠れ表現から生ロジットを返す
+        # （呼び出し側が実際の結果=授乳の有無を教師にして学習させる）。
+        satiety_logit = None
+        if getattr(self.brain, "satiety_head", None) is not None:
+            satiety_logit = self.brain.satiety_head(out[0, -1]).squeeze(-1)
+
+        return loss, probs_list, satiety_logit
 
     def compute_value_loss(self, value_pred, reward):
         """
@@ -104,15 +110,17 @@ class TaroLearner:
 
         return policy_loss
 
-    def update(self, perception_loss, policy_loss, value_loss=None):
+    def update(self, perception_loss, policy_loss, value_loss=None, satiety_loss=None):
         """
-        知覚・行動・価値の損失を合算し、重みを1回更新する。
+        知覚・行動・価値・満腹予期の損失を合算し、重みを1回更新する。
 
         ⚠️ ここで誤差逆伝播（backprop）を使う【⚠️逸脱】。
         """
         total_loss = perception_loss + policy_loss
         if value_loss is not None:
             total_loss = total_loss + value_loss
+        if satiety_loss is not None:
+            total_loss = total_loss + satiety_loss
 
         self.optimizer.zero_grad()
         if isinstance(total_loss, torch.Tensor) and total_loss.requires_grad:
