@@ -1,0 +1,4 @@
+# run_trace.py が生成する実データ（ローカルで自動読込するがコミットしない）
+trace.jsonl
+trace_overview_*.jsonl
+milestones.json

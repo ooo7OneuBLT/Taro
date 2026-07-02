@@ -196,7 +196,9 @@ function messagesOf(ev){
   const say=ev.say||ev.parent;
   if(say) out.push({t:ev.t, who:"parent", text:say});
   const u=ev.utter;
-  if(u) out.push({t:ev.t, who:"taro", text:u, cry:/泣/.test(u)});
+  // 自分ひとりの喃語(kind==="babble")は"会話"ではないので出さない。会話（親への応答・
+  // 要求語・授乳/慰め時の発話）だけ表示する。喃語そのものは体ビュー側で見える。
+  if(u && ev.kind!=="babble") out.push({t:ev.t, who:"taro", text:u, cry:/泣/.test(u)});
   return out;
 }
 // 会話の元データは常に生イベント列（バケツには発話が無いため）。
@@ -331,7 +333,7 @@ function parseAny(text){
     if(o.type==="bucket") out.push(o);
     else if(o.type==="snap") gauges={hunger:o.hunger,ne:o.ne,dopamine:o.dopamine,happiness:o.happiness};
     else if(o.type==="event"){ const g=(o.hunger!=null)?{hunger:o.hunger,ne:o.ne,dopamine:o.dopamine,happiness:o.happiness}:Object.assign({},gauges);
-      out.push({t:o.t,kind:o.kind,active:o.modules||[],flows:o.flows||[],utter:o.utter||"",gauges:g}); }
+      out.push({t:o.t,kind:o.kind,active:o.modules||[],flows:o.flows||[],utter:o.utter||"",say:o.say||"",gauges:g}); }
     else if(o.active) out.push(o);
   });
   return out;
