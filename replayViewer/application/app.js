@@ -172,7 +172,13 @@ function parseTrace(text) {
     line = line.trim(); if (!line) return;
     let o; try { o = JSON.parse(line); } catch(e){ return; }
     if (o.type === "snap") gauges = { hunger:o.hunger, ne:o.ne, dopamine:o.dopamine, happiness:o.happiness };
-    else if (o.type === "event") out.push({ t:o.t, kind:o.kind, active:o.modules||[], flows:o.flows||[], utter:o.utter||"", gauges:Object.assign({},gauges) });
+    else if (o.type === "event") {
+      // イベント行が数値を自分で持っていればそれを使い、無ければ直近のsnapを使う
+      const g = (o.hunger != null)
+        ? { hunger:o.hunger, ne:o.ne, dopamine:o.dopamine, happiness:o.happiness }
+        : Object.assign({}, gauges);
+      out.push({ t:o.t, kind:o.kind, active:o.modules||[], flows:o.flows||[], utter:o.utter||"", gauges:g });
+    }
     else if (o.active) out.push(o);
   });
   return out;

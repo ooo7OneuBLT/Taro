@@ -124,6 +124,33 @@ class TaroEnvironmentB:
         # 隠れ状態の保持（イベント間で維持）
         self._hidden = None
 
+        # replayViewer用トレースログ（オプトイン。set_traceで有効化）
+        self._trace = None
+
+    def set_trace(self, trace_logger):
+        """replayViewer用トレースログを有効化する（Noneで無効）。"""
+        self._trace = trace_logger
+
+    def trace_event(self, sim_seconds, kind, active, flows, utter=""):
+        """
+        1イベントを trace.jsonl に書き出す（replayViewer用）。
+        発火した部品(active)・流れ(flows)・そのときの数値(空腹/NE/ドーパミン/
+        幸福度)を記録する。トレース無効時は何もしない。
+        happiness＝1−arousal(つらさの裏返し)、dopamine＝報酬予測のbaseline を
+        表示用スカラーとして使う（正確な生理値ではない近似）。
+        """
+        if self._trace is None:
+            return
+        arousal = self.internal_state.get_arousal()
+        self._trace.write_event({
+            "type": "event", "t": int(sim_seconds), "kind": kind,
+            "modules": active, "flows": flows, "utter": utter,
+            "hunger": round(float(self.internal_state.hunger), 3),
+            "ne": round(float(self.locus_coeruleus.get_ne_level()), 3),
+            "dopamine": round(max(0.0, min(1.0, float(self.dopamine.get_baseline()))), 3),
+            "happiness": round(max(0.0, min(1.0, 1.0 - float(arousal))), 3),
+        })
+
     def _body_state_tensor(self):
         """内部状態をテンソルに変換して脳に渡す。"""
         vec = self.internal_state.get_state_vector()

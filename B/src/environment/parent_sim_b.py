@@ -110,13 +110,44 @@ class ParentSchedule:
         return self.words.get(care_type, None)
 
 
+# replayViewer用：イベント種別ごとに「発火する部品」と「情報の流れ」を対応づける。
+# （抽象表示。太郎の内部を1本1本計測するのではなく、イベントの意味に基づく模式的な発火）
+TRACE_MAP = {
+    "babble":        {"modules": ["locus", "cortex", "vocal"],
+                      "flows": [["locus", "cortex"], ["cortex", "vocal"]]},
+    "babble_response": {"modules": ["cortex", "vocal"],
+                      "flows": [["cortex", "vocal"]]},
+    "word_request":  {"modules": ["stomach", "insula", "cortex", "vocal"],
+                      "flows": [["stomach", "insula"], ["insula", "cortex"], ["cortex", "vocal"]]},
+    "feed":          {"modules": ["stomach", "insula", "cortex", "critic"],
+                      "flows": [["cortex", "insula"], ["insula", "critic"], ["stomach", "insula"]]},
+    "comfort":       {"modules": ["cortex", "insula"], "flows": [["cortex", "insula"]]},
+    "cry":           {"modules": ["stomach", "insula", "cortex", "lungs"],
+                      "flows": [["stomach", "insula"], ["insula", "cortex"], ["cortex", "lungs"]]},
+    "sleep":         {"modules": ["hippocampus", "cortex"], "flows": [["hippocampus", "cortex"]]},
+}
+
+
 def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
-                     schedule_path=None):
+                     schedule_path=None, trace_path=None):
     """
     B用シミュレーション。イベント駆動で太郎を育てる。
+
+    trace_path: 指定すると replayViewer 用の trace.jsonl を書き出す（オプトイン）。
     """
     env = TaroEnvironmentB(run_name=run_name or "B_sim")
     schedule = ParentSchedule(schedule_path=schedule_path)
+
+    trace = None
+    if trace_path:
+        from trace_logger import TraceLogger
+        trace = TraceLogger(trace_path)
+        env.set_trace(trace)
+
+    def tr(kind, utter=""):
+        m = TRACE_MAP.get(kind)
+        if m:
+            env.trace_event(sim_seconds, kind, m["modules"], m["flows"], utter)
 
     if max_sim_seconds is None:
         max_sim_seconds = schedule.max_seconds
@@ -160,6 +191,7 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
             env.logger.log_event(sim_seconds, "sleep_start",
                                   consolidated=consol["consolidated"],
                                   p_loss=round(consol["p_loss"], 4))
+            tr("sleep")
             if verbose and consol["consolidated"] > 0:
                 print(f"  t={sim_seconds:5d}s ({fmt_time(sim_seconds)}) | "
                       f"海馬→皮質: {consol['consolidated']}件定着 "
@@ -205,6 +237,7 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
                                   hunger=round(env.internal_state.hunger, 4),
                                   arousal=round(env.internal_state.get_arousal(), 4),
                                   parent_present=schedule.present)
+            tr("cry")
             if verbose and (cry_count <= 20 or cry_count % 50 == 0):
                 print(f"  t={sim_seconds:5d}s ({fmt_time(sim_seconds)}) | "
                       f"泣き始めた（強さ{intensity:.2f}）| "
@@ -241,6 +274,7 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
                 env.logger.log_event(sim_seconds, "feed",
                                       amount=schedule.feed_amount,
                                       hunger_before=round(result["hunger"], 4))
+                tr("feed", result["taro"])
                 if verbose and (speak_count <= 30 or speak_count % 50 == 0):
                     print(f"  t={sim_seconds:5d}s ({fmt_time(sim_seconds)}) | "
                           f"親「{word}」→ 太郎「{result['taro']}」| "
@@ -248,6 +282,7 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
             else:
                 env.logger.log_event(sim_seconds, "comfort",
                                       hunger=round(env.internal_state.hunger, 4))
+                tr("comfort")
 
         # 自発的な喃語（穏やかな時間の練習）
         if (sim_seconds - last_babble_time >= schedule.babble_interval
@@ -255,6 +290,7 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
             result = env.self_babble()
             babble_count += 1
             last_babble_time = sim_seconds
+            tr("babble", result["taro"])
             env.logger.log_babble(
                 sim_seconds,
                 result["taro"],
@@ -305,6 +341,7 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
                     delta=round(resp["delta"], 4),
                     hunger=round(hunger_now, 4),
                 )
+                tr("babble_response", result["taro"])
 
             if mand_fired:
                 request_count += 1
@@ -313,6 +350,7 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
                                       similarity=round(similarity, 4),
                                       hunger=round(hunger_now, 4),
                                       r_mand=round(resp["r_mand"], 4) if resp else 0.0)
+                tr("word_request", result["taro"])
                 schedule.on_word_request(sim_seconds)
 
         if verbose and sim_seconds % schedule.log_interval == 0:
@@ -334,6 +372,8 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
               f"喃語: {babble_count}回  要求語: {request_count}回  睡眠: {sleep_count}回  定着: {consolidate_count}件")
 
     env.logger.close()
+    if trace:
+        trace.close()
 
     return {
         "sim_seconds": sim_seconds,
