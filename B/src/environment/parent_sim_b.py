@@ -78,7 +78,9 @@ class ParentSchedule:
 
         sp = cfg.get("speech", {})
         self.speak_with_care = sp.get("enabled", True)
-        self.words = sp.get("words", {"feed": "まんま", "comfort": "よしよし", "hold": "まま"})
+        self.words = sp.get("words", {"feed": "まんま", "sleep": "ねんね", "comfort": "だっこ"})
+        # B2-17：世話ごとの「枠つき」言い回し。芯の語を含みつつ枠が変わる（繰り返し＋変化）。
+        self.templates = sp.get("templates", {})
 
         sim = cfg.get("simulation", {})
         self.max_seconds = sim.get("max_seconds", 3600)
@@ -129,6 +131,22 @@ class ParentSchedule:
     def choose_word(self, care_type):
         if not self.speak_with_care:
             return None
+        return self.words.get(care_type, None)
+
+    def choose_template(self, care_type, months=None):
+        """B2-17：親が実際に言う言い回しを1つ選ぶ。テンプレがあれば抽選、無ければ芯の語。
+        B2-18（cを軽く）：月齢で"解禁数"が増える。新生児は短く単純な言い回しだけ→成長で
+        長く多彩に。※新しい語は増えない（視覚が無く物の名前を接地できないため）。"""
+        if not self.speak_with_care:
+            return None
+        tmpls = self.templates.get(care_type)
+        if tmpls:
+            ordered = sorted(tmpls, key=len)                 # 短い（単純）ものを先に
+            if months is None:
+                k = len(ordered)
+            else:
+                k = min(len(ordered), 1 + int(months // 3))  # 3か月ごとに1つ解禁
+            return random.choice(ordered[:k])
         return self.words.get(care_type, None)
 
     def meals_for_age(self, months):
@@ -183,6 +201,8 @@ TRACE_MAP = {
     "cry":           {"modules": ["stomach", "insula", "cortex", "lungs"],
                       "flows": [["stomach", "insula"], ["insula", "cortex"], ["cortex", "lungs"]]},
     "sleep":         {"modules": ["hippocampus", "cortex"], "flows": [["hippocampus", "cortex"]]},
+    "sleep_word":    {"modules": ["cortex", "insula"], "flows": [["cortex", "insula"]]},
+    "excrete":       {"modules": ["stomach", "insula"], "flows": [["stomach", "insula"]]},
 }
 
 
@@ -246,8 +266,9 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
 
     # 理解の配線メーター（replayViewer用）：月イチで「聞いた語→食べ物予期」を測って記録する。
     # 満腹(0.1)で測るのは、空腹だと語によらず予期が上がるため（語の寄与＝理解は満腹時に出る）。
-    # リプレイで「まんま→食べ物予期の線が育って光る／あうあ→は暗いまま」を見せるためのデータ。
-    _COMP_WORDS = ["まんま", "ままん", "あうあ"]
+    # B2-20：3語（まんま/ねんね/だっこ）を測り、「まんまだけが食べ物予期を上げ、ねんね・だっこは
+    # 上げない」＝3語が別物として区別されているか（混線してないか＝意味）を可視化する。
+    _COMP_WORDS = ["まんま", "ねんね", "だっこ"]
     _comp_interval = 2592000     # 30日ごと
     _last_comp = -_comp_interval
 
@@ -304,6 +325,15 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
 
         # うとうと中は時間を飛ばす
         if env.internal_state.is_drowsy():
+            # B2-16：入眠時に親が「ねんね」と言う（合図が先→その後に眠りが来る）。眠りは
+            # 太郎自身がやることなので親は"寝かしつける＝声をかける"だけ。満腹予期は付けない。
+            sleep_say = schedule.choose_template("sleep", _dev_months(sim_seconds))  # B2-17/18
+            if sleep_say and schedule.present:
+                sr = env.step(sleep_say, r_social=0.5, satiety_target=0.0)
+                speak_count += 1
+                env.logger.log_event(sim_seconds, "sleep_word", say=sleep_say,
+                                     sleepiness=round(env.internal_state.sleepiness, 4))
+                tr("sleep_word", sr["taro"], say=sleep_say)
             if not was_drowsy and verbose:
                 print(f"  t={sim_seconds:5d}s ({fmt_time(sim_seconds)}) | うとうと...")
             was_drowsy = True
@@ -316,6 +346,13 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
         env.tick_body(elapsed_seconds=1, sim_seconds=sim_seconds + 1)
         sim_seconds += 1
         schedule.update_presence(sim_seconds)
+
+        # B2-19：排泄が起きたら記録（おむつが汚れて不快が上がる原因イベント）
+        if env.internal_state._just_excreted:
+            env.internal_state._just_excreted = False
+            env.logger.log_event(sim_seconds, "excrete",
+                                  discomfort=round(env.internal_state.discomfort, 4))
+            tr("excrete")
 
         # 泣きの検出（泣き始めたときだけ通知）
         crying_now, intensity = env.check_cry()
@@ -353,17 +390,17 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
                 cvals[_w] = round(_s, 4) if _s is not None else None
             torch.set_rng_state(_rt); random.setstate(_rp)
             trace.write_event({"type": "comprehension", "t": sim_seconds,
-                               "mama": cvals["まんま"], "maman": cvals["ままん"],
-                               "aua": cvals["あうあ"]})
+                               "mama": cvals["まんま"], "nenne": cvals["ねんね"],
+                               "dakko": cvals["だっこ"]})
 
         # オンデマンド授乳（下の should_respond）が現実同様の主経路として残る。
         fa = _age_feed_amount(sim_seconds)
         if (schedule.meal_due(sim_seconds) and schedule.present
                 and not env.internal_state.sleeping and not env.internal_state.drowsy):
             env.comfort("feed")
-            meal_word = schedule.choose_word("feed")
-            if meal_word:
-                m = env.step(meal_word, r_social=0.5, satiety_target=1.0)
+            meal_say = schedule.choose_template("feed", _dev_months(sim_seconds))  # B2-17/18：枠つき・月齢連動
+            if meal_say:
+                m = env.step(meal_say, r_social=0.5, satiety_target=1.0)
                 env.feed(fa)
                 feed_count += 1
                 speak_count += 1
@@ -371,31 +408,31 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
                 if m["hunger"] < 0.5:
                     meal_low_hunger += 1
                 env.logger.log_turn(
-                    m["turn"], sim_seconds, meal_word, m["taro"],
+                    m["turn"], sim_seconds, meal_say, m["taro"],
                     m["r_imit"], m["r_pred"], m["r_social"],
                     m["R"], m["delta"], m["p_loss"], m["a_loss"],
                     env.brain.temperature, context="meal", hunger=m["hunger"])
                 env.logger.log_event(sim_seconds, "feed", amount=round(fa, 3),
                                      hunger_before=round(m["hunger"], 4), scheduled=True)
-                tr("feed", m["taro"], say=meal_word)
+                tr("feed", m["taro"], say=meal_say)
                 schedule.last_feed_time = sim_seconds
 
         if schedule.should_respond_now(sim_seconds):
             care_type = "feed" if env.internal_state.hunger > 0.5 else "comfort"
             env.comfort(care_type)
 
-            word = schedule.choose_word(care_type)
-            if word:
+            say_text = schedule.choose_template(care_type, _dev_months(sim_seconds))  # B2-17/18
+            if say_text:
                 # B2-10：この発話の後に授乳が来るか（feedなら1.0）を満腹予期の教師にする。
-                # まんまは授乳時・よしよしは慰め時に聞くので「まんま→ごはん」を学べる。
-                result = env.step(word, r_social=0.5,
+                # まんまは授乳時・だっこは慰め時に聞くので「まんま→ごはん」を学べる。
+                result = env.step(say_text, r_social=0.5,
                                   satiety_target=(1.0 if care_type == "feed" else 0.0))
             if care_type == "feed":
                 env.feed(fa)                            # 発話の後に授乳（量は年齢graded）
                 feed_count += 1
                 speak_count += 1
                 env.logger.log_turn(
-                    result["turn"], sim_seconds, word, result["taro"],
+                    result["turn"], sim_seconds, say_text, result["taro"],
                     result["r_imit"], result["r_pred"], result["r_social"],
                     result["R"], result["delta"], result["p_loss"], result["a_loss"],
                     env.brain.temperature,
@@ -404,15 +441,15 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
                 env.logger.log_event(sim_seconds, "feed",
                                       amount=round(fa, 3),
                                       hunger_before=round(result["hunger"], 4))
-                tr("feed", result["taro"], say=word)
+                tr("feed", result["taro"], say=say_text)
                 if verbose and (speak_count <= 30 or speak_count % 50 == 0):
                     print(f"  t={sim_seconds:5d}s ({fmt_time(sim_seconds)}) | "
-                          f"親「{word}」→ 太郎「{result['taro']}」| "
+                          f"親「{say_text}」→ 太郎「{result['taro']}」| "
                           f"模倣={result['r_imit']:.2f} hunger={result['hunger']:.2f}")
             else:
                 env.logger.log_event(sim_seconds, "comfort",
                                       hunger=round(env.internal_state.hunger, 4))
-                tr("comfort", say=word)
+                tr("comfort", say=say_text)
 
         # 自発的な喃語（穏やかな時間の練習）
         if (sim_seconds - last_babble_time >= schedule.babble_interval
@@ -421,15 +458,6 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
             babble_count += 1
             last_babble_time = sim_seconds
             tr("babble", result["taro"])
-            env.logger.log_babble(
-                sim_seconds,
-                result["taro"],
-                env.internal_state.hunger,
-                env.internal_state.get_arousal(),
-                result["R"],
-                result["r_pred"],
-                result["r_home"],
-            )
             if verbose and babble_count <= 5:
                 print(f"  t={sim_seconds:5d}s ({fmt_time(sim_seconds)}) | "
                       f"喃語「{result['taro']}」| "
@@ -437,7 +465,7 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
 
             # 喃語への2つの反応経路を判定する。
             #   経路1（社会的）：親が言葉らしい発声に気づいて反応（Goldstein &
-            #     Schwade）。空腹とは無関係、確率 babble_response_prob で発火。
+            #     Schwade）。空腹とは無関係だが、**言葉らしい発声ほど気づかれやすい**。
             #   経路2（要求語=mand, B2-1）：空腹時にまんま様発声をすると、泣いた
             #     ときと同じ経路で親に気づかせ実際に授乳させる。類似度そのものを
             #     気づかれる確率として連続的に使う（B2-3で閾値撤廃）。
@@ -447,19 +475,51 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
             # 報酬」を加算して「空腹→まんま」を配線する。物理的な授乳トリガー
             # （on_word_request）は従来どおり別に呼ぶ。
             hunger_now = env.internal_state.hunger
-            social_fired = (random.random() < schedule.babble_response_prob) and bool(schedule.words)
+            # B2-16：欲求ごとに言い分ける。いま最も強い欲求を選び、その専用語に似た声を
+            # 出したら（＝mand）その欲求を解消する。空腹だけでなく眠い・不快にも一般化。
+            st = env.internal_state
+            drives = [
+                ("feed",    schedule.words.get("feed", "まんま"),    st.hunger),
+                ("sleep",   schedule.words.get("sleep", "ねんね"),   st.sleepiness),
+                ("comfort", schedule.words.get("comfort", "だっこ"), st.discomfort),
+            ]
+            dom_key, dom_word, dom_level = max(drives, key=lambda d: d[2])
+
+            # B5-2修正：Goldstein & Schwade「言葉らしい発声ほど気づかれやすい」。
+            # 従来は発声内容と無関係の固定確率で「気づくか」を決めていた（＝docstringの
+            # 主旨と実装がズレていた）。最も近い語への音韻的類似度 word_sim（言葉らしさ、
+            # まんま/ねんね/だっこ いずれかへの近さ＝母語の語らしさ）で気づく確率を高める。
+            # ⚠️定数0.5＝語らしさに依らない基礎反応の割合（未検証・除去テスト可）。
+            word_sim = 0.0
+            if schedule.words:
+                word_sim = max(env.word_similarity(result["tokens"], w)
+                               for w in schedule.words.values())
+            p_notice = schedule.babble_response_prob * (0.5 + word_sim)
+            social_fired = (random.random() < p_notice) and bool(schedule.words)
             mand_fired = False
             similarity = 0.0
-            if hunger_now > 0.5:
-                similarity = env.word_similarity(result["tokens"], "まんま")
+            if dom_level > 0.5 and dom_word:
+                similarity = env.word_similarity(result["tokens"], dom_word)
                 mand_fired = random.random() < similarity
+
+            env.logger.log_babble(
+                sim_seconds,
+                result["taro"],
+                env.internal_state.hunger,
+                env.internal_state.get_arousal(),
+                result["R"],
+                result["r_pred"],
+                result["r_home"],
+                word_sim=word_sim,
+                responded=(social_fired or mand_fired),
+            )
 
             resp = None
             if (social_fired or mand_fired) and schedule.words:
                 candidate_words = list(schedule.words.values())
                 resp = env.respond_to_babble(
                     result["tokens"], result["log_probs"], candidate_words,
-                    r_habit=result["r_habit"], hunger=hunger_now,
+                    r_habit=result["r_habit"], hunger=dom_level,   # 報酬は解消される欲求の強さに比例
                     social=social_fired, mand=mand_fired,
                 )
 
@@ -476,12 +536,23 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
             if mand_fired:
                 request_count += 1
                 env.logger.log_event(sim_seconds, "word_request",
-                                      taro=result["taro"],
+                                      taro=result["taro"], drive=dom_key, word=dom_word,
                                       similarity=round(similarity, 4),
-                                      hunger=round(hunger_now, 4),
+                                      level=round(dom_level, 4),
                                       r_mand=round(resp["r_mand"], 4) if resp else 0.0)
                 tr("word_request", result["taro"])
-                schedule.on_word_request(sim_seconds)
+                # 欲求ごとに応える（親がその語を言ってから解消する）
+                if dom_key == "feed":
+                    schedule.on_word_request(sim_seconds)          # 既存：授乳を予約（feed時にまんま）
+                elif dom_key == "sleep":
+                    env.internal_state.drowsy = True               # 寝かしつけ→入眠へ（ねんね発話は入眠処理で）
+                    env.internal_state._drowsy_remaining = random.randint(300, 600)
+                elif dom_key == "comfort":
+                    if schedule.present:
+                        c_say = schedule.choose_template("comfort", _dev_months(sim_seconds)) or dom_word
+                        cr = env.step(c_say, r_social=0.5, satiety_target=0.0)
+                        tr("comfort", cr["taro"], say=c_say)
+                    env.comfort("comfort")                          # 不快を下げる
 
         if verbose and sim_seconds % schedule.log_interval == 0:
             state = "寝" if env.internal_state.is_sleeping() else \

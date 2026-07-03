@@ -26,6 +26,23 @@ class Cerebellum:
         self.forward_map = {}
         self.inverse_map = {}
         self.experience_count = {}
+        # B5-3：運動の自動化（VMS＝vocal motor scheme）。よく練習した口の動きほど
+        # 自動化され、実行時のばらつき（運動ノイズ）が減って形が安定する＝結晶化。
+        # 報酬ではなく「反復回数そのもの」で固める（Vihman；DIVA/小脳の運動学習）。
+        # ⚠️定数：自動化の練習スケール（この回数でおよそ半分自動化）。未検証・後で
+        # 感度確認と除去テスト（数を入れる原則）。
+        self.automatization_scale = 2000
+
+    def automatization(self, place, manner, voicing, vowel):
+        """
+        この口の動きの自動化度（0=不慣れ 〜 1=ほぼ完全自動）。練習回数で飽和する。
+
+        【人間模倣】運動スキルは反復練習で自動化し、実行のばらつきが減る
+        （DIVAモデル／小脳・大脳基底核の手続き的学習）。自動化度が高いほど
+        generate時のNEノイズ（運動ノイズ）を抑え「形の安定＝結晶化」を表す。
+        """
+        n = self.experience_count.get((place, manner, voicing, vowel), 0)
+        return n / (n + self.automatization_scale)
 
     def learn_from_experience(self, place, manner, voicing, vowel, produced_char):
         """

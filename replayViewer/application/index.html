@@ -100,10 +100,12 @@
   #netSvg, #nnSvg { flex:1 1 auto; min-height:0; width:100%; height:100%; display:block; padding:4px; }
   #netSvg[hidden], #nnSvg[hidden] { display:none; }   /* hidden属性をID指定より優先させる */
   .nn-node { fill:#3aa8c0; stroke:none; transition:fill .1s, filter .1s; }
-  .nn-node.on { fill:var(--flow); filter:drop-shadow(0 0 4px var(--flow)); }
+  .nn-node.on { fill:#fff6c0; r:5.5;
+                filter:drop-shadow(0 0 6px var(--flow)) drop-shadow(0 0 10px var(--flow)); }
   .nn-head { fill:#5bd6e6; }
   .nn-in { fill:#7f9fae; }
-  .nn-edge2 { vector-effect:non-scaling-stroke; }
+  .nn-edge2 { vector-effect:non-scaling-stroke; transition:opacity .1s, stroke-width .1s; }
+  .nn-edge2.on { stroke:var(--flow)!important; opacity:.5!important; stroke-width:.9!important; }
   .nn-headlabel { fill:var(--muted); font-size:10px; }
   @keyframes dash { to { stroke-dashoffset:-11; } }
 
@@ -113,6 +115,8 @@
   .fill { height:100%; border-radius:99px; width:0; transition:width .3s; }
 
   /* チャット（親↔太郎の会話） */
+  .chat-toggle { margin-left:auto; font-size:11px; color:var(--muted); display:flex;
+                 align-items:center; gap:4px; cursor:pointer; white-space:nowrap; }
   #chatList { flex:1 1 auto; min-height:0; overflow-y:auto; padding:8px 8px 12px;
               display:flex; flex-direction:column; gap:7px; }
   .msg { max-width:82%; padding:5px 10px; border-radius:13px; font-size:13px; line-height:1.35;
@@ -125,6 +129,11 @@
   .msg.taro { align-self:flex-end; background:var(--cyan-soft); border:1px solid var(--cyan);
               color:#eaf7fb; border-bottom-right-radius:4px; }
   .msg.cry { font-style:italic; }
+  /* 行動・出来事（発話でない）＝中央寄せ・吹き出しなし・破線で会話と区別 */
+  .msg.action { align-self:center; max-width:90%; background:transparent; border:1px dashed var(--line);
+                color:var(--muted); font-size:11px; text-align:center; padding:3px 10px; border-radius:9px; }
+  .msg.action .who { display:inline; margin:0 6px 0 0; }
+  .msg.bab { font-style:italic; }   /* 太郎の独り言（喃語）はイタリックで区別 */
   .msg.seen { opacity:1; transform:none; }
   .msg.cur { box-shadow:0 0 0 2px var(--fire); }
   .chat-empty { color:var(--muted); font-size:12px; padding:12px 6px; }
@@ -218,7 +227,7 @@
       <g id="netFlows"></g>
       <g id="netNodes"></g>
     </svg>
-    <svg id="nnSvg" viewBox="0 0 460 300" preserveAspectRatio="xMidYMid meet" hidden></svg>
+    <svg id="nnSvg" viewBox="0 0 540 300" preserveAspectRatio="xMidYMid meet" hidden></svg>
   </div>
 
   <div class="panel" id="panel_metrics">
@@ -231,7 +240,8 @@
   </div>
 
   <div class="panel" id="panel_chat">
-    <div class="bar"><span class="grip">⠿</span><h2>CHAT / 親↔太郎の会話（再生に同期）</h2></div>
+    <div class="bar"><span class="grip">⠿</span><h2>CHAT / 親↔太郎の会話（再生に同期）</h2>
+      <label class="chat-toggle"><input type="checkbox" id="showBabble"> 喃語も表示</label></div>
     <div id="chatList"><div class="chat-empty">会話ログを読み込むと表示されます</div></div>
   </div>
 
@@ -284,7 +294,8 @@
     (function(){
       const box = document.getElementById("gauges");
       const gs = [["hunger","空腹","#ff7a4a"],["ne","探索(NE)","#8aa6c8"],
-        ["dopamine","ドーパミン分泌量","#46c8e0"],["happiness","幸福度","#4bd08a"]];
+        ["dopamine","ドーパミン分泌量","#46c8e0"],["happiness","幸福度","#4bd08a"],
+        ["pleasure","味の快(liking)","#d86ac0"]];
       gs.forEach(([k,label,color])=>{
         const row=document.createElement("div"); row.className="gauge-row";
         row.innerHTML='<div class="lab"><span>'+label+'</span><span id="gval_'+k+'">0%</span></div>'+

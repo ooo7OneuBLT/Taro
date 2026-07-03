@@ -38,16 +38,18 @@ class Hippocampus:
         self.max_capacity = max_capacity
         self.episodes = []
 
-    def record_episode(self, full_tokens, body_state, satiety_target=None):
+    def record_episode(self, full_tokens, body_state, event_time=0.0, reward_since=0.0):
         """
         経験を1件記録する。容量超過時は最古のものを削除（FIFO）。
 
-        satiety_target: 親との会話の場合のみ指定（この発話の後に授乳が
-            来たか、1.0/0.0）。自発喃語ではNoneのまま（教師データが無い）。
+        B3/B4：保存内容 (full_tokens, body_state, event_time, reward_since)。
+        event_time＝発生時刻(秒)。reward_since＝直近エピソード以降に得た「味の快(US)」の合計。
+        睡眠中の consolidate で、連続イベント間の「実際の安腹＋味の快」を報酬に、時間割引きの
+        TD学習で満腹予期を育てる（全知ラベルは廃止。理解を経験から創発させる）。
         """
         if len(self.episodes) >= self.max_capacity:
             self.episodes.pop(0)
-        self.episodes.append((full_tokens, body_state, satiety_target))
+        self.episodes.append((full_tokens, body_state, event_time, reward_since))
 
     def replay(self):
         """蓄積した全経験をリストで返す。"""

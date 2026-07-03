@@ -42,6 +42,15 @@ class InternalState:
         self._cry_remaining = 0      # 残りの泣き時間（秒）
         self.cry_intensity = 0.0     # 泣きの強さ（0〜1）
 
+        # --- 消化の下流（B2-19：軽い排泄）。食べた分が便として溜まり、閾値で排泄→おむつが
+        #     汚れて不快が上がる。人間の不快は"じわじわ"でなく排泄という出来事で起きる。 ---
+        self._bowel = 0.0            # 溜まった便（授乳で増える）
+        self._just_excreted = False  # 直近tickで排泄したか（ロギング用フラグ）
+
+    def on_feed(self, amount):
+        """授乳された分の一部が、時間差で便として溜まる（B2-19）。"""
+        self._bowel += amount * 0.7
+
     def update_from_body(self, stomach, blood_vessel=None, lungs=None):
         """臓器から状態を受け取る。blood_vessel があれば血糖値から空腹を計算。"""
         if blood_vessel is not None:
@@ -119,8 +128,14 @@ class InternalState:
         else:
             # adenosine なしで呼ばれた場合のフォールバック
             self.sleepiness = min(1.0, self.sleepiness + 0.00025 * elapsed_seconds)
-        # 不快が上がる（ゆっくり。おむつ濡れなどの蓄積）
+        # 不快が上がる（ゆっくり。汗・体勢など一般的なぐずり）
         self.discomfort = min(1.0, self.discomfort + 0.00005 * elapsed_seconds)
+
+        # B2-19：便が閾値を超えたら排泄。おむつが汚れて不快が跳ね上がる（＝原因のある不快）。
+        if self._bowel >= 0.6:
+            self._bowel = 0.0
+            self.discomfort = min(1.0, self.discomfort + 0.4)
+            self._just_excreted = True
 
         # 眠さが高いとうとうとし始める
         if self.sleepiness >= 0.9:
@@ -132,12 +147,19 @@ class InternalState:
         if self.crying:
             # 泣き続けている間、強さがゆっくり変わる
             self._cry_remaining -= elapsed_seconds
+            # B2-21（B）：泣くのは疲れる。泣いている間は疲労（アデノシン）が余計に溜まる＝生理的
+            # コスト。泣くほど眠くなり、いずれ泣き疲れて眠る。話す（このコスト無し）方が結果的に
+            # 得なので、学習は自然に話す方へ向かう。※泣きを直接抑えるルールは置かない（泣きは反射）。
+            if adenosine is not None:
+                adenosine.level = min(1.0, adenosine.level
+                                      + 0.0002 * self.cry_intensity * elapsed_seconds)
             if self._cry_remaining <= 0 or self.get_arousal() < 0.15:
                 self.crying = False
                 self._cry_remaining = 0
                 self.cry_intensity = 0.0
         else:
-            # 新たに泣き始めるかの判定
+            # 新たに泣き始めるかの判定（反射：つらさが高いほど泣きやすい。抑制ルールは置かない。
+            # A：話す側が学習で育つと、欲求が早く解消されて泣く状況そのものが減る＝創発的に減少）
             arousal = self.get_arousal()
             cry_chance = arousal ** 2 * 0.01
             if random.random() < cry_chance:

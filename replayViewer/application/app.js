@@ -41,13 +41,15 @@ const KIND_MODULES = {
   comfort:["cortex","insula"], cry:["stomach","insula","cortex","lungs"], sleep:["hippocampus","cortex"],
 };
 // イベント種別→日本語ラベル（scene表示用）と重要度（粗い粒度で残す優先度）
-const KIND_LABEL = { babble:"喃語", babble_response:"喃語に親が反応", word_request:"要求語（まんま）",
-  feed:"授乳", comfort:"あやし", cry:"泣く", sleep:"睡眠" };
-const KIND_SIG = { feed:6, word_request:6, babble_response:4, cry:3, comfort:2, sleep:1, babble:0 };
+const KIND_LABEL = { babble:"喃語", babble_response:"喃語に親が反応", word_request:"要求語",
+  feed:"授乳", comfort:"あやし", cry:"泣く", sleep:"睡眠", excrete:"排泄", sleep_word:"寝かしつけ" };
+const KIND_SIG = { feed:6, word_request:6, excrete:5, babble_response:4, cry:3, comfort:2,
+  sleep_word:2, sleep:1, babble:0 };
 
 const GAUGES = [
   { key:"hunger", label:"空腹" }, { key:"ne", label:"探索(NE)" },
   { key:"dopamine", label:"ドーパミン分泌量" }, { key:"happiness", label:"幸福度" },
+  { key:"pleasure", label:"味の快(liking)" },
 ];
 const GRANS = [["year","年"],["month","月"],["day","日"],["hour","時"],["raw","生"]];
 
@@ -84,7 +86,7 @@ let items = [];         // 現在表示中のデータ列
 let idx = 0, timer = null, speed = 1;
 let TOTAL_T = 2 * 365 * 86400;
 let chatMsgs = [];      // {t, who:'parent'|'taro', text, cry}
-let comprehension = []; // {t, mama, maman, aua} 月イチの「語→食べ物予期」測定（理解の配線用）
+let comprehension = []; // {t, mama, nenne, dakko} 月イチの「語→食べ物予期」測定（3語の区別＝理解）
 let bodyBox = {x:0,y:0,w:300,h:380};   // 体ビューの現在のviewBox（ズーム/パンで変わる）
 let activeMods = new Set();             // 今光っている部品
 
@@ -98,6 +100,12 @@ function mk(name, attrs, parent) {
 function fmtDate(t) {
   const days = Math.floor(t / 86400), y = Math.floor(days / 365), rem = days % 365;
   return `${y}年 ${Math.floor(rem / 30)}か月 ${rem % 30}日`;
+}
+// 日付＋時刻（時:分:秒）。チャットで「いつ」を秒まで見せる用。
+function fmtDateTime(t) {
+  const sod = Math.floor(t % 86400);
+  const p = n => String(n).padStart(2, "0");
+  return `${fmtDate(t)} ${p(Math.floor(sod/3600))}:${p(Math.floor((sod%3600)/60))}:${p(sod%60)}`;
 }
 // テキストの実サイズ(getBBox)を測って、後ろに背景の角丸長方形を敷く。
 // 矢印や臓器と文字が重なっても読めるようにするため。textより前(下)に挿入する。
@@ -176,6 +184,7 @@ function applyActive(){
 const NN_HID = 128;
 const NN_COLORS = ["#46c8e0","#d86ac0","#ffd23a"];
 let _nnLit=[];
+let _nnEdges=[];   // {el, h:隠れ層ユニット番号} 発火時にその線を光らせる
 function buildNNView(){
   const svg=el("nnSvg"); if(!svg) return; svg.innerHTML="";
   const gE=mk("g",{},svg), gN=mk("g",{},svg), gL=mk("g",{},svg);
@@ -187,12 +196,18 @@ function buildNNView(){
     mk("circle",{cx:x,cy:y,r:3.2,class:"nn-node",id:"nnh_"+i},gN); }
   const heads=[["食べ物予期",70],["発声",118],["価値",166],["次の音の予測",214]], hX=424, hpos=[];
   heads.forEach(([lab,y])=>{ hpos.push([hX,y]); mk("circle",{cx:hX,cy:y,r:6,class:"nn-node nn-head"},gN);
-    const t=mk("text",{x:hX-10,y:y+3,"text-anchor":"end",class:"nn-headlabel"},gL); t.textContent=lab; });
+    const t=mk("text",{x:hX+12,y:y+3,"text-anchor":"start",class:"nn-headlabel"},gL); t.textContent=lab; });
   const rnd=a=>a[Math.floor(Math.random()*a.length)]; let ci=0;
-  for(let k=0;k<70;k++){ const y=rnd(inYs), p=rnd(hp);
-    mk("line",{x1:inX,y1:y,x2:p[0],y2:p[1],class:"nn-edge2",stroke:"#5b6b7d","stroke-width":.5,opacity:.3},gE); }
-  for(let k=0;k<120;k++){ const p=rnd(hp), q=rnd(hpos);
-    mk("line",{x1:p[0],y1:p[1],x2:q[0],y2:q[1],class:"nn-edge2",stroke:NN_COLORS[ci++%3],"stroke-width":.6,opacity:.45},gE); }
+  _nnEdges=[];
+  // 実際のGRUは全結合＝どのユニットも入力・出力とつながっている。全部描くと潰れるので
+  // 各隠れユニットにつき左右1本ずつだけ描く（孤立点が出ないよう全128個をカバー）。
+  for(let hi=0;hi<NN_HID;hi++){ const p=hp[hi];
+    const y=rnd(inYs);  // 入力→隠れ（左・薄く）
+    const l1=mk("line",{x1:inX,y1:y,x2:p[0],y2:p[1],class:"nn-edge2",stroke:"#5b6b7d","stroke-width":.5,opacity:.22},gE);
+    _nnEdges.push({el:l1,h:hi});
+    const q=rnd(hpos);  // 隠れ→ヘッド（右・色つき）
+    const l2=mk("line",{x1:p[0],y1:p[1],x2:q[0],y2:q[1],class:"nn-edge2",stroke:NN_COLORS[ci++%3],"stroke-width":.6,opacity:.4},gE);
+    _nnEdges.push({el:l2,h:hi}); }
   svg.insertBefore(gE,gN);
   const t=mk("text",{x:x0,y:28,class:"nn-headlabel"},gL);
   t.textContent="GRU隠れ層：1層 × 128ユニット（発火＝活性上位32が光る）";
@@ -202,6 +217,9 @@ function updateNN(fire){
   _nnLit.forEach(i=>{ const n=el("nnh_"+i); if(n) n.classList.remove("on"); });
   _nnLit=Array.isArray(fire)?fire:[];
   _nnLit.forEach(i=>{ const n=el("nnh_"+i); if(n) n.classList.add("on"); });
+  // 発火したユニットにつながる線も光らせる
+  const lit=new Set(_nnLit);
+  _nnEdges.forEach(e=>{ if(lit.has(e.h)) e.el.classList.add("on"); else e.el.classList.remove("on"); });
 }
 
 function buildNet() {
@@ -225,7 +243,7 @@ function setModules(activeSet) {
 }
 // 理解の配線図：3つの語 → 「食べ物予期」ノード。線が太い/明るいほど「その語で食べ物が
 // 来る」と結びついている＝理解している。まんまが育って光り、あうあは暗いままなのを見せる。
-const COMP_WORDS = [["まんま","mama",34],["ままん","maman",78],["あうあ","aua",122]];
+const COMP_WORDS = [["まんま","mama",34],["ねんね","nenne",78],["だっこ","dakko",122]];
 function buildComp(){
   const svg=el("compSvg"); if(!svg) return;
   svg.innerHTML="";
@@ -246,7 +264,7 @@ function updateComp(t){
   if(!comprehension.length){ if(title) title.textContent="理解の配線：この記録には理解メーターのデータがありません（12ヶ月トレースで記録）"; return; }
   let cur=comprehension[0];
   for(const c of comprehension){ if(c.t<=t+0.5) cur=c; else break; }
-  const vals={mama:cur.mama, maman:cur.maman, aua:cur.aua};
+  const vals={mama:cur.mama, nenne:cur.nenne, dakko:cur.dakko};
   svg.querySelectorAll(".comp-line").forEach(ln=>{
     const v=vals[ln.getAttribute("data-key")]; const s=(v==null)?0:v;
     ln.setAttribute("stroke-width",(1+s*8).toFixed(1));
@@ -293,15 +311,24 @@ function renderBucket(b) {
 
 // ---- チャット（親↔太郎の会話） ----
 function escapeHtml(s){ return String(s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
-// 1イベント→0〜2の発話。say=親の言葉（あれば）、utter=太郎の発声（あれば）。
+// 発話でない「行動・出来事」も時系列に混ぜて見せる（会話とは別スタイル）。
+const ACTION_LABEL = {
+  feed:"🍼 授乳した", cry:"😢 泣きだした", excrete:"💩 排泄（おむつが汚れた）",
+  sleep:"😴 眠った", comfort:"🤱 あやした",
+};
+// 1イベント→発話（親/太郎）＋行動、を時系列アイテムとして返す。
 function messagesOf(ev){
   const out=[];
   const say=ev.say||ev.parent;
-  if(say) out.push({t:ev.t, who:"parent", text:say});
+  if(say) out.push({t:ev.t, who:"parent", type:"speech", text:say});
   const u=ev.utter;
-  // 自分ひとりの喃語(kind==="babble")は"会話"ではないので出さない。会話（親への応答・
-  // 要求語・授乳/慰め時の発話）だけ表示する。喃語そのものは体ビュー側で見える。
-  if(u && ev.kind!=="babble") out.push({t:ev.t, who:"taro", text:u, cry:/泣/.test(u)});
+  // 自分ひとりの喃語(kind==="babble")は既定では"会話"でないので出さない。ただし
+  // 「喃語も表示」チェック時は太郎の独り言も含める（全発話を見たいとき用）。
+  const showBab = el("showBabble") && el("showBabble").checked;
+  if(u && (ev.kind!=="babble" || showBab)) out.push({t:ev.t, who:"taro", type:"speech", text:u, cry:/泣/.test(u), bab:ev.kind==="babble"});
+  // 行動（授乳・泣き・排泄・睡眠・あやし）を1行の出来事として追加
+  const act=ACTION_LABEL[ev.kind];
+  if(act) out.push({t:ev.t, type:"action", text:act});
   return out;
 }
 // 会話の元データは常に生イベント列（バケツには発話が無いため）。
@@ -311,31 +338,48 @@ function chatSource(){
 }
 function rebuildChat(){
   const box=el("chatList"); if(!box) return;
-  chatMsgs=[];
+  chatMsgs=[]; _chatIdx=-1;   // 差分更新の追跡をリセット
   chatSource().forEach(ev=>{ if(!ev.counts) messagesOf(ev).forEach(m=>chatMsgs.push(m)); });
   chatMsgs.sort((a,b)=>a.t-b.t);
   box.innerHTML="";
   if(!chatMsgs.length){ box.innerHTML='<div class="chat-empty">この期間に発話ログはありません</div>'; return; }
+  // クリック→時刻ジャンプは1つの委譲リスナーで処理（1.6万件の個別リスナーを付けない）。
+  if(!box._jumpDelegated){
+    box._jumpDelegated=true;
+    box.addEventListener("click", e=>{ const t=e.target.closest(".msg"); if(t && t.dataset.t) jumpToTime(+t.dataset.t); });
+  }
+  // DocumentFragmentに一括構築してから1回だけ挿入（挿入毎のリフローを避ける）。
+  const frag=document.createDocumentFragment();
   chatMsgs.forEach(m=>{
     const d=document.createElement("div");
-    d.className="msg "+m.who+(m.cry?" cry":"");
     d.dataset.t=m.t;
-    d.innerHTML='<span class="who">'+(m.who==="parent"?"親":"太郎")+" ・ "+fmtDate(m.t)+"</span>"+escapeHtml(m.text);
-    d.title="クリックでこの発言の時刻へ移動";
-    d.addEventListener("click", ()=>jumpToTime(m.t));   // 発言時刻へスキップ
-    box.appendChild(d);
+    if(m.type==="action"){
+      d.className="msg action";
+      d.innerHTML='<span class="who">'+fmtDateTime(m.t)+"</span>"+escapeHtml(m.text);
+    } else {
+      d.className="msg "+m.who+(m.cry?" cry":"")+(m.bab?" bab":"");
+      d.innerHTML='<span class="who">'+(m.who==="parent"?"親":"太郎")+" ・ "+fmtDateTime(m.t)+"</span>"+escapeHtml(m.text);
+    }
+    d.title="クリックでこの時刻へ移動";
+    frag.appendChild(d);
   });
+  box.appendChild(frag);
 }
+let _chatIdx=-1;   // 直近で"seen"にした末尾の位置（差分更新用）
 function updateChat(curT){
   const box=el("chatList"); if(!box||!chatMsgs.length) return;
-  const kids=box.children; let last=-1;
-  for(let i=0;i<kids.length;i++){
-    const seen=(+kids[i].dataset.t)<=curT+0.5;
-    kids[i].classList.toggle("seen",seen);
-    kids[i].classList.remove("cur");
-    if(seen) last=i;
-  }
-  if(last>=0){ kids[last].classList.add("cur"); kids[last].scrollIntoView({block:"nearest"}); }
+  const kids=box.children;
+  const target=curT+0.5;
+  // 二分探索：t<=target を満たす最大index（chatMsgsは時刻昇順）。全走査O(N)を避ける。
+  let lo=0, hi=chatMsgs.length-1, nb=-1;
+  while(lo<=hi){ const mid=(lo+hi)>>1; if(chatMsgs[mid].t<=target){ nb=mid; lo=mid+1; } else hi=mid-1; }
+  if(nb===_chatIdx) return;                       // 変化なし＝何もしない（重さの元を断つ）
+  // 前回位置との差分だけ .seen を付け外し（YouTube的に"動いた分"だけ処理）
+  if(nb>_chatIdx){ for(let i=_chatIdx+1;i<=nb;i++){ const k=kids[i]; if(k) k.classList.add("seen"); } }
+  else { for(let i=nb+1;i<=_chatIdx;i++){ const k=kids[i]; if(k) k.classList.remove("seen"); } }
+  if(_chatIdx>=0 && kids[_chatIdx]) kids[_chatIdx].classList.remove("cur");
+  _chatIdx=nb;
+  if(nb>=0 && kids[nb]){ kids[nb].classList.add("cur"); kids[nb].scrollIntoView({block:"nearest"}); }
 }
 
 function render() {
@@ -369,8 +413,12 @@ function drawMilestones(){
 }
 function jumpToTime(t){
   stop();
-  let best=0,bd=Infinity;
-  items.forEach((it,i)=>{ const d=Math.abs(it.t-t); if(d<bd){bd=d;best=i;} });
+  if(!items.length) return;
+  // items は時刻昇順 → 二分探索で最近傍を探す（O(N)→O(log N)）
+  let lo=0, hi=items.length-1;
+  while(lo<hi){ const mid=(lo+hi)>>1; if(items[mid].t < t) lo=mid+1; else hi=mid; }
+  let best=lo;
+  if(lo>0 && Math.abs(items[lo-1].t - t) <= Math.abs(items[lo].t - t)) best=lo-1;
   go(best);
 }
 
@@ -437,7 +485,7 @@ function parseAny(text){
     line=line.trim(); if(!line) return;
     let o; try{o=JSON.parse(line);}catch(e){return;}
     if(o.type==="bucket") out.push(o);
-    else if(o.type==="comprehension") comprehension.push({t:o.t,mama:o.mama,maman:o.maman,aua:o.aua});
+    else if(o.type==="comprehension") comprehension.push({t:o.t,mama:o.mama,nenne:o.nenne,dakko:o.dakko});
     else if(o.type==="snap") gauges={hunger:o.hunger,ne:o.ne,dopamine:o.dopamine,happiness:o.happiness};
     else if(o.type==="event"){ const g=(o.hunger!=null)?{hunger:o.hunger,ne:o.ne,dopamine:o.dopamine,happiness:o.happiness}:Object.assign({},gauges);
       out.push({t:o.t,kind:o.kind,active:o.modules||[],flows:o.flows||[],utter:o.utter||"",say:o.say||"",fire:o.fire||null,gauges:g}); }
@@ -498,6 +546,7 @@ function init(){
     if(!e.target.closest("#organInfo") && !e.target.closest(".blabel") && !e.target.closest(".organ")) hideOrganInfo();
   });
   document.addEventListener("keydown", e=>{ if(e.key==="Escape") hideOrganInfo(); });
+  { const sb=el("showBabble"); if(sb) sb.addEventListener("change", ()=>{ rebuildChat(); render&&render(); }); }
 
   // 既定：同じフォルダに置かれた概観/生ログ/マイルストーンを取りに行く。
   // 無ければ sample_trace.json（生の見本）を使う。
@@ -508,7 +557,7 @@ function init(){
     .then(()=>{
       if(Object.keys(datasets).length) afterLoad();
       else fetch("sample_trace.json"+bust).then(r=>r.text()).then(t=>{ datasets.raw=parseAny(t); setActive("raw"); })
-        .catch(()=>{ el("sceneLabel").textContent="ログが読めません（サーバー経由で開く／フォルダを選択）"; });
+        .catch(()=>{ el("sceneLabel").textContent="ログが読めません。「ビューアを開く.bat」から起動するか、右上のフォルダ選択でtrace_*.jsonlを選んでください（file://直接では読めません）"; });
     });
 
   el("playBtn").onclick=()=>timer?stop():play();

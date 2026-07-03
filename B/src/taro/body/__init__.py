@@ -7,3 +7,4 @@ from taro.body.lungs import Lungs
 from taro.body.internal_state import InternalState
 from taro.body.blood_vessel import BloodVessel
 from taro.body.adenosine import Adenosine
+from taro.body.tongue import Tongue
