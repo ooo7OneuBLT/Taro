@@ -10,6 +10,7 @@
 """
 
 import os
+import math
 import torch
 import torch.nn.functional as F
 import yaml
@@ -17,8 +18,8 @@ from collections import deque
 from taro.brain import (Vocabulary, TaroBrain, Cerebellum, BrocasArea, TaroLearner,
                         compute_imitation_reward, compute_prediction_reward,
                         Dopamine, Habituation, LocusCoeruleus, compute_total_reward,
-                        Homeostasis, Hippocampus, compute_alignment_credit)
-from taro.body import VocalTract, Stomach, Lungs, InternalState, BloodVessel, Adenosine
+                        Homeostasis, Hippocampus, compute_alignment_credit, Hedonic)
+from taro.body import VocalTract, Stomach, Lungs, InternalState, BloodVessel, Adenosine, Tongue
 from sim_clock import SimClock
 from archive import Archive
 from logger import Logger
@@ -107,6 +108,18 @@ class TaroEnvironmentB:
         self.brain.to(self.device)
         self.brain.set_vocab_mapping(self.vocab.char2idx)
 
+        # B3：満腹予期を教師ラベルでなく経験(TD)で学ぶか。True=イベント単位の時間割引TD。
+        self.td_satiety = bool(self.cfg.get("td_satiety", True))
+        self._now = 0                    # 直近tickの時刻(秒)。record_episodeの時刻に使う
+        self._td_tau = 1800.0            # TDの時間割引の時定数(秒)＝授乳/消化のスケールに合わせる
+
+        # B4：味覚。舌(検知)＝体の器官、快(liking)＝脳の本能（ドーパミンwantingとは別）。
+        # 食べた瞬間の快を、満腹予期TDの強いUS（合図まんまへ後退させる燃料）にする。
+        self.tongue = Tongue()                 # 甘みを検知するセンサー
+        self.hedonic = Hedonic()               # 甘み→快(liking)。オピオイド的
+        self._milk_sweetness = 0.8             # ⚠️未検証：まんま/母乳の甘み値（後で感度確認）
+        self._pleasure_since = 0.0             # 直近エピソード以降に得た快の合計（TDのUSに渡す）
+
         # 脳の部品
         self.habituation = Habituation(history_size=20, decay_rate=0.05)
         self.locus_coeruleus = LocusCoeruleus()
@@ -152,6 +165,7 @@ class TaroEnvironmentB:
             "ne":        float(self.locus_coeruleus.get_ne_level()),
             "dopamine":  max(0.0, min(1.0, float(self.dopamine.get_baseline()))),
             "happiness": max(0.0, min(1.0, 1.0 - float(arousal))),
+            "pleasure":  max(0.0, min(1.0, float(self.hedonic.get()))),   # B4：味の快(liking)
             # 例）"sleepiness": float(self.internal_state.sleepiness),
         }
         rec = {"type": "event", "t": int(sim_seconds), "kind": kind,
@@ -194,6 +208,7 @@ class TaroEnvironmentB:
         胃の消化量 → 血管（血糖値）→ 空腹感 の順に更新。
         声道の成熟もここで進める（時間が経てば成熟する。親との会話は無関係）。
         """
+        self._now = sim_seconds          # B3：イベント記録の時刻に使う（呼び出し側の変更不要）
         for _ in range(elapsed_seconds):
             self.stomach.tick()
             self.blood_vessel.receive_glucose(
@@ -218,6 +233,8 @@ class TaroEnvironmentB:
         full_maturity = vm.get("stage3_time", 1500)
         if full_maturity > 0:
             self.locus_coeruleus.mature(sim_seconds / full_maturity)
+        # B4：味の快は一過性（食べた瞬間に強く→数秒で消える）。表示用に減衰（学習は別変数）。
+        self.hedonic.last_pleasure *= 0.5
 
     def check_cry(self):
         """
@@ -230,6 +247,10 @@ class TaroEnvironmentB:
     def feed(self, amount=0.6):
         """授乳を開始する。一瞬ではなく、約30分かけて少しずつ胃に入る。"""
         self.stomach.start_feeding(amount)
+        self.internal_state.on_feed(amount)   # B2-19：消化の下流（時間差で排泄→おむつ不快）へ
+        # B4：食べた瞬間、舌が甘みを検知→脳が快(liking)を出す。これを満腹予期TDのUSに積む。
+        taste = self.tongue.taste(self._milk_sweetness)
+        self._pleasure_since += self.hedonic.evaluate(taste)
 
     def comfort(self, care_type="comfort"):
         """世話。discomfortやsleepinessを下げる。"""
@@ -264,7 +285,9 @@ class TaroEnvironmentB:
         # 親と話す機会（年1万回程度）は自発喃語（年10万回以上）よりずっと少なく、
         # この頻度差が理解の学習を産出より大きく遅らせていた。睡眠リプレイで
         # 反芻回数を稼ぎ、実際の会話機会の少なさを補う。
-        self.hippocampus.record_episode(full_tokens, body_state, satiety_target=satiety_target)
+        self.hippocampus.record_episode(full_tokens, body_state, event_time=self._now,
+                                        reward_since=self._pleasure_since)
+        self._pleasure_since = 0.0   # B4：快はこのエピソードに渡したのでリセット
 
         # 発話計画
         self.brocas_area.plan(parent_text, self.cerebellum, self.vocal_tract)
@@ -313,12 +336,11 @@ class TaroEnvironmentB:
         a_loss = self.learner.learn_action(log_probs, delta, credits=credits)
         value_loss = self.learner.compute_value_loss(value, R)
 
-        # B2-10：満腹予期の学習。この発話の後に授乳が来たか（satiety_target）を
-        # 教師に、「聞いた音＋状態→満腹の到来」を予測できるよう satiety_head と
-        # GRU表現を更新する。まんまは授乳時に、よしよしは慰め時に聞くので、
-        # 太郎は「まんまを聞く→ごはんが来る」を学べる。
+        # 満腹予期の学習。B3：既定(td_satiety=True)では全知ラベルを使わず、
+        # 睡眠中の consolidate で「経験した安腹→時間割引TD」で学ぶ（ここでは何もしない）。
+        # td_satiety=False のときだけ従来の教師あり(B2-10)にフォールバックする（比較用）。
         satiety_loss = None
-        if satiety_target is not None and satiety_logit is not None:
+        if (not self.td_satiety) and satiety_target is not None and satiety_logit is not None:
             tgt = torch.tensor(float(satiety_target), device=satiety_logit.device,
                                dtype=satiety_logit.dtype)
             satiety_loss = F.binary_cross_entropy_with_logits(satiety_logit, tgt)
@@ -413,7 +435,9 @@ class TaroEnvironmentB:
         self._hidden = h
 
         # 海馬に経験を記録（睡眠移行時にまとめて定着）
-        self.hippocampus.record_episode(full_tokens, body_state)
+        self.hippocampus.record_episode(full_tokens, body_state, event_time=self._now,
+                                        reward_since=self._pleasure_since)
+        self._pleasure_since = 0.0
 
         # 馴化（飽き）：親との会話だけでなく自発喃語にも適用する
         # B-11修正：従来はstep()にしか適用されておらず、1日240〜380回起きる
@@ -656,7 +680,9 @@ class TaroEnvironmentB:
         # 授乳以外の場面でも聞くことになり、語と空腹の相関がさらに緩む。
         heard_tokens = [1] + best_word_tokens + [2]
         p_loss_heard, _, _ = self.learner.learn_perception(heard_tokens, body_state=body_state)
-        self.hippocampus.record_episode(heard_tokens, body_state, satiety_target=None)
+        self.hippocampus.record_episode(heard_tokens, body_state, event_time=self._now,
+                                        reward_since=self._pleasure_since)
+        self._pleasure_since = 0.0
         p_arg = p_loss_heard if isinstance(p_loss_heard, torch.Tensor) \
             else torch.tensor(0.0, device=self.device)
         _, al = self.learner.update(p_arg, a_loss, value_loss)
@@ -682,16 +708,38 @@ class TaroEnvironmentB:
             self.hippocampus.clear()
             return {"consolidated": 0, "p_loss": 0.0, "s_loss": 0.0}
 
+        # B3/B4：満腹予期のTD学習。ブートストラップに使う「次イベントの予期V」は、
+        # 本パスで出た satiety_logit を .detach() して流用する（consolidate中は重みを
+        # 更新しないので、別に no_grad で測り直しても同じ値になる＝順伝播を半分に短縮）。
         total_p_loss = None
-        total_s_loss = None
-        s_count = 0
-        for full_tokens, body_state, satiety_target in experiences:
+        logits = []   # 各経験の satiety_logit（勾配あり。無ければ None）
+        Vs = []       # 各経験の予期 V=sigmoid(logit) を detach したもの（ブートストラップ用）
+        for full_tokens, body_state, event_time, _reward_since in experiences:
             p_loss, _, satiety_logit = self.learner.learn_perception(full_tokens, body_state=body_state)
             if isinstance(p_loss, torch.Tensor):
                 total_p_loss = p_loss if total_p_loss is None else total_p_loss + p_loss
-            if satiety_target is not None and satiety_logit is not None:
-                tgt = torch.tensor(float(satiety_target), device=satiety_logit.device,
-                                   dtype=satiety_logit.dtype)
+            logits.append(satiety_logit)
+            Vs.append(torch.sigmoid(satiety_logit).item() if satiety_logit is not None else 0.0)
+
+        total_s_loss = None
+        s_count = 0
+        for i, (full_tokens, body_state, event_time, _reward_since) in enumerate(experiences):
+            satiety_logit = logits[i]
+            # B3/B4：満腹予期を「イベント単位の時間割引TD」で更新（全知ラベルなし）。
+            # 目標 = 次イベントまでに得た報酬（空腹の低下＝経験した安腹 ＋ 味の快liking=US）
+            #        ＋ γ^Δt × 次イベントの予期。＝図のドーパミンTD（予期が授乳→まんまへ後退）。
+            if self.td_satiety and satiety_logit is not None and i + 1 < len(experiences):
+                _tok_n, bs_n, t_n, taste_r = experiences[i + 1]
+                try:
+                    h_now = float(body_state[0]); h_next = float(bs_n[0])   # body_state[0]=空腹
+                except Exception:
+                    h_now = h_next = 0.0
+                relief = max(0.0, h_now - h_next)                     # 空腹の低下＝食べ物が来た（経験）
+                reward = relief + float(taste_r)                      # ＋味の快(US。食べた瞬間の強い報酬)
+                dt = max(0.0, float(t_n) - float(event_time))
+                discount = math.exp(-dt / self._td_tau)               # 時間割引 γ^Δt（SMDP）
+                target = min(1.0, reward + discount * Vs[i + 1])
+                tgt = torch.tensor(target, device=satiety_logit.device, dtype=satiety_logit.dtype)
                 s_loss = F.binary_cross_entropy_with_logits(satiety_logit, tgt)
                 total_s_loss = s_loss if total_s_loss is None else total_s_loss + s_loss
                 s_count += 1

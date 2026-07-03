@@ -13,4 +13,4 @@ from taro.brain.insula import Insula
 from taro.brain.instincts import (compute_imitation_reward, compute_prediction_reward,
                                    Dopamine, Habituation, LocusCoeruleus,
                                    compute_total_reward, Homeostasis, Critic,
-                                   compute_alignment_credit)
+                                   compute_alignment_credit, Hedonic)

@@ -269,14 +269,22 @@ class TaroBrain(nn.Module):
                 s_vowel, _ = self._choose_param(
                     self._reduplicate_bias(vol, prev_vowel, allowed_vowel), allowed_vowel)
 
+            # B5-3：運動の自動化（VMS）。意図した口の動きがよく練習されているほど
+            # 運動ノイズを抑えて安定して出す＝形の結晶化。報酬は足さず、練習回数だけで
+            # 決まる（小脳の手続き的学習）。自動化度auto∈[0,1]でNEノイズを縮小する。
+            eff_ne = ne_level
+            if cerebellum is not None:
+                auto = cerebellum.automatization(s_place, s_manner, s_voicing, s_vowel)
+                eff_ne = ne_level * (1.0 - auto)
+
             # NEによる局所ノイズ注入（計画があっても少しずれる＝人間的な誤差）
-            s_place = self._apply_ne_noise(s_place, ne_level, allowed_place)
+            s_place = self._apply_ne_noise(s_place, eff_ne, allowed_place)
             if not vocal_tract.is_coupled():
-                s_manner = self._apply_ne_noise(s_manner, ne_level, allowed_manner)
+                s_manner = self._apply_ne_noise(s_manner, eff_ne, allowed_manner)
             else:
                 s_manner = vocal_tract.get_manner_for_place(s_place)
-            s_voicing = self._apply_ne_noise(s_voicing, ne_level, allowed_voicing)
-            s_vowel = self._apply_ne_noise(s_vowel, ne_level, allowed_vowel)
+            s_voicing = self._apply_ne_noise(s_voicing, eff_ne, allowed_voicing)
+            s_vowel = self._apply_ne_noise(s_vowel, eff_ne, allowed_vowel)
 
             # 【人間模倣】反復バイアス用に、実際に発声された（ノイズ適用後の）
             # 口の形を次の音節へ引き継ぐ。慣性は「今いる口の位置」に働くため。

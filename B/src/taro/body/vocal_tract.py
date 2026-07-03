@@ -24,14 +24,15 @@ MANNERS = ["なし", "鼻音", "破裂音", "摩擦音", "破擦音", "弾き音
 VOICINGS = ["無声", "有声"]
 
 # 母音（口の形）
-VOWELS = ["あ", "い", "う", "え", "お"]
+# index 5 = 「ん」専用の「母音なし」（音節性鼻音）。stage1から解禁。
+VOWELS = ["あ", "い", "う", "え", "お", "（母音なし）"]
 
 # パラメータ数
 NUM_PLACE = len(PLACES)      # 7
 NUM_MANNER = len(MANNERS)    # 7
 NUM_VOICING = len(VOICINGS)  # 2
-NUM_VOWEL = len(VOWELS)      # 5
-TOTAL_PARAMS = NUM_PLACE + NUM_MANNER + NUM_VOICING + NUM_VOWEL  # 21
+NUM_VOWEL = len(VOWELS)      # 6（B-6追加：index 5 = 音節性鼻音「ん」）
+TOTAL_PARAMS = NUM_PLACE + NUM_MANNER + NUM_VOICING + NUM_VOWEL  # 22
 
 # --- ひらがな ↔ 調音パラメータの変換表 ---
 # (調音点, 調音法, 声帯, 母音) → ひらがな
@@ -97,8 +98,11 @@ _ARTICULATION_TABLE = {
     # わ行（両唇・半母音・有声）
     (1, 6, 1, 0): "わ", (1, 6, 1, 4): "を",
 
-    # ん（軟口蓋・鼻音・有声・特殊：母音なしだが便宜上「あ」母音の位置）
-    (5, 1, 1, 0): "ん",
+    # ん（両唇・鼻音・有声・母音なし）
+    # B-6：「まんま」の「ん」は両唇鼻音[m]に同化するため place=両唇(1) で定義。
+    # 旧定義 (5,1,1,0) は velar(stage3)が必要で早期に産出不可だった。
+    # vowel=5（母音なし）は stage1 から解禁。
+    (1, 1, 1, 5): "ん",
 }
 
 # 逆引き：ひらがな → パラメータ
@@ -135,8 +139,14 @@ STAGE_ALLOWED_VOICING = {
     2: [1],              # まだ有声のみ
     3: [0, 1],           # 無声も解放
 }
-# 母音は最初から全部使える（顎の開閉）
-STAGE_ALLOWED_VOWEL = {s: list(range(NUM_VOWEL)) for s in range(4)}
+# 母音：stage0はあいうえお(0-4)のみ。「ん」(index 5)はstage1から解禁。
+# 人間の音節性鼻音は規準喃語（6ヶ月〜）と同時に現れる。
+STAGE_ALLOWED_VOWEL = {
+    0: [0, 1, 2, 3, 4],
+    1: [0, 1, 2, 3, 4, 5],
+    2: [0, 1, 2, 3, 4, 5],
+    3: [0, 1, 2, 3, 4, 5],
+}
 
 # --- A2-6：調音パラメータの連動パターン ---
 # 赤ちゃんの口は最初、調音点と調音法が「くっついて」一緒に動く。

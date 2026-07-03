@@ -124,8 +124,14 @@ class Logger:
         record = {"sim_seconds": sim_seconds, "event": event_type, **fields}
         self._events_f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
-    def log_babble(self, sim_seconds, taro_text, hunger, arousal, R, r_pred, r_home):
-        """喃語1回分を babble.jsonl に記録する。"""
+    def log_babble(self, sim_seconds, taro_text, hunger, arousal, R, r_pred, r_home,
+                   word_sim=None, responded=None):
+        """喃語1回分を babble.jsonl に記録する。
+
+        B5-2：word_sim（最も近い語への音韻的類似度＝言葉らしさ）と responded
+        （親が随伴反応したか）も記録し、「言葉らしい発声ほど反応をもらい、
+        その音型が後で増えるか」を後から測れるようにする。
+        """
         record = {
             "sim_seconds": sim_seconds,
             "taro": taro_text,
@@ -135,6 +141,10 @@ class Logger:
             "r_pred": round(r_pred, 4),
             "r_home": round(r_home, 4),
         }
+        if word_sim is not None:
+            record["word_sim"] = round(word_sim, 4)
+        if responded is not None:
+            record["responded"] = bool(responded)
         self._babble_f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
     def plot_learning_curve(self):
