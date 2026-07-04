@@ -45,11 +45,18 @@ const KIND_LABEL = { babble:"喃語", babble_response:"喃語に親が反応", w
   feed:"授乳", comfort:"あやし", cry:"泣く", sleep:"睡眠", excrete:"排泄", sleep_word:"寝かしつけ" };
 const KIND_SIG = { feed:6, word_request:6, excrete:5, babble_response:4, cry:3, comfort:2,
   sleep_word:2, sleep:1, babble:0 };
+// 太郎の発話はすべて「自発」が起点。バッジは"その後どうなったか"を示す。
+const TARO_ORIGIN = {
+  babble:          ["自発", "origin-spont"],       // 自発 → 親は反応せず
+  babble_response: ["自発→親反応", "origin-resp"],  // 自発 → 親が気づいて反応
+  word_request:    ["自発→要求", "origin-req"],     // 自発 → 空腹等で要求として成立
+};
 
 const GAUGES = [
   { key:"hunger", label:"空腹" }, { key:"ne", label:"探索(NE)" },
   { key:"dopamine", label:"ドーパミン分泌量" }, { key:"happiness", label:"幸福度" },
   { key:"pleasure", label:"味の快(liking)" },
+  { key:"sleepiness", label:"眠さ" }, { key:"discomfort", label:"不快" },
 ];
 const GRANS = [["year","年"],["month","月"],["day","日"],["hour","時"],["raw","生"]];
 
@@ -325,7 +332,7 @@ function messagesOf(ev){
   // 自分ひとりの喃語(kind==="babble")は既定では"会話"でないので出さない。ただし
   // 「喃語も表示」チェック時は太郎の独り言も含める（全発話を見たいとき用）。
   const showBab = el("showBabble") && el("showBabble").checked;
-  if(u && (ev.kind!=="babble" || showBab)) out.push({t:ev.t, who:"taro", type:"speech", text:u, cry:/泣/.test(u), bab:ev.kind==="babble"});
+  if(u && (ev.kind!=="babble" || showBab)) out.push({t:ev.t, who:"taro", type:"speech", text:u, cry:/泣/.test(u), bab:ev.kind==="babble", kind:ev.kind});
   // 行動（授乳・泣き・排泄・睡眠・あやし）を1行の出来事として追加
   const act=ACTION_LABEL[ev.kind];
   if(act) out.push({t:ev.t, type:"action", text:act});
@@ -358,7 +365,13 @@ function rebuildChat(){
       d.innerHTML='<span class="who">'+fmtDateTime(m.t)+"</span>"+escapeHtml(m.text);
     } else {
       d.className="msg "+m.who+(m.cry?" cry":"")+(m.bab?" bab":"");
-      d.innerHTML='<span class="who">'+(m.who==="parent"?"親":"太郎")+" ・ "+fmtDateTime(m.t)+"</span>"+escapeHtml(m.text);
+      // 太郎の発話は全て「自発」が起点。その後の結末で色分けする（親反応・要求成立）。
+      let badge="";
+      if(m.who==="taro" && !m.cry){
+        const b=TARO_ORIGIN[m.kind];
+        if(b) badge='<span class="origin '+b[1]+'">'+b[0]+"</span>";
+      }
+      d.innerHTML='<span class="who">'+(m.who==="parent"?"親":"太郎")+" ・ "+fmtDateTime(m.t)+"</span>"+badge+escapeHtml(m.text);
     }
     d.title="クリックでこの時刻へ移動";
     frag.appendChild(d);
@@ -553,12 +566,46 @@ function init(){
   const files=["trace_overview_year.jsonl","trace_overview_month.jsonl","trace_overview_day.jsonl",
                "trace_overview_hour.jsonl","milestones.json","trace.jsonl"];
   const bust="?_="+Date.now();   // ブラウザのHTTPキャッシュを避けて常に最新のログを読む
+  // 今どのランを表示しているか（_meta.jsonがあれば読む。無ければ「不明」と表示）。
+  // ここで読んだ run_name を覚えておき、下のポーリングで「差し替わったら自動リロード」に使う。
+  let _loadedRun=null;
+  fetch("_meta.json"+bust).then(r=>r.ok?r.json():Promise.reject()).then(m=>{
+    _loadedRun=m.run_name||"?";
+    el("runBadge").textContent=`📂 表示中: ${_loadedRun}${m.copied_at?"（読み込み: "+m.copied_at+"）":""}`;
+  }).catch(()=>{ _loadedRun=""; el("runBadge").textContent="📂 表示中: (このフォルダの既定ログ／_meta.jsonなし)"; });
+  // Claudeが別のシミュレーションのデータに丸ごと差し替えた時、データファイル自体は
+  // ページ読み込み時にしか取りに行かない（毎回全部読み直すのは無駄なため）。
+  // _meta.jsonのrun_nameが変わっていたら「差し替わった」と判断し、ページ全体を
+  // 自動リロードすることで、ユーザーが手動更新しなくても新しいランに切り替わる。
+  setInterval(()=>{
+    fetch("_meta.json?_="+Date.now()).then(r=>r.ok?r.json():null).then(m=>{
+      if(_loadedRun===null) return;   // 初回読み込みがまだなら判定しない
+      const name=m?(m.run_name||"?"):"";
+      if(name!==_loadedRun) location.reload();
+    }).catch(()=>{});
+  }, 2000);
   Promise.allSettled(files.map(f=>fetch(f+bust).then(r=>r.ok?r.text():Promise.reject()).then(t=>routeFile(f,t))))
     .then(()=>{
       if(Object.keys(datasets).length) afterLoad();
       else fetch("sample_trace.json"+bust).then(r=>r.text()).then(t=>{ datasets.raw=parseAny(t); setActive("raw"); })
         .catch(()=>{ el("sceneLabel").textContent="ログが読めません。「ビューアを開く.bat」から起動するか、右上のフォルダ選択でtrace_*.jsonlを選んでください（file://直接では読めません）"; });
     });
+
+  // 外部（Claude）から特定時点へ誘導する仕組み：_goto.json を数秒おきに確認し、
+  // seq（連番）が前回と変わっていたら jumpToTime(t) する。ユーザーが普段通り
+  // ブラウザで開いているこの画面が、サーバー側のファイル書き換えだけで動く
+  // （拡張機能や新しいサーバーは不要）。gran指定があれば先にその粒度へ切り替える
+  // （例：生ログ(raw)で1件ずつ見せたい時）。
+  let _lastGotoSeq=null;
+  setInterval(()=>{
+    if(!items.length) return;
+    fetch("_goto.json?_="+Date.now()).then(r=>r.ok?r.json():null).then(g=>{
+      if(!g || g.seq===_lastGotoSeq) return;
+      _lastGotoSeq=g.seq;
+      if(g.gran && datasets[g.gran] && datasets[g.gran].length && g.gran!==activeGran) setActive(g.gran);
+      jumpToTime(g.t);
+    }).catch(()=>{});
+  }, 1500);
 
   el("playBtn").onclick=()=>timer?stop():play();
   el("prevBtn").onclick=()=>{stop();go(idx-1);};

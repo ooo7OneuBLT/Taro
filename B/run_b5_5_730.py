@@ -1,5 +1,6 @@
 """B5-5(B5-2の実装ズレ修正=言葉らしさで気づかれやすさ)込みの2年シミュ。使い方: python run_b5_5_730.py <seed>"""
 import sys, os, random
+import perf_setup  # torch importより前に：BLASスレッド制限＋優先度DOWN
 import torch
 torch.set_num_threads(2)
 

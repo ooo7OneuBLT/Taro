@@ -1,5 +1,6 @@
 """味覚(B4)版の2年シミュを、既存データを壊さない別名で出力する。使い方: python run_taste730.py <seed>"""
 import sys, os, random
+import perf_setup  # torch importより前に：BLASスレッド制限＋優先度DOWN
 import torch
 torch.set_num_threads(2)
 

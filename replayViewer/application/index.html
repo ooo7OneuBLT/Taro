@@ -134,6 +134,12 @@
                 color:var(--muted); font-size:11px; text-align:center; padding:3px 10px; border-radius:9px; }
   .msg.action .who { display:inline; margin:0 6px 0 0; }
   .msg.bab { font-style:italic; }   /* 太郎の独り言（喃語）はイタリックで区別 */
+  /* 発話の起点バッジ：太郎の発話はすべて「自発」が起点。結末で色分け。 */
+  .origin { display:inline-block; font-size:9px; font-style:normal; font-weight:600; white-space:nowrap;
+            padding:0 5px; margin:0 5px 2px 0; border-radius:8px; vertical-align:middle; letter-spacing:.02em; }
+  .origin.origin-spont { background:#e7ecf2; color:#5a6b7a; }               /* 自発（反応なし）＝控えめ */
+  .origin.origin-resp  { background:#dbeeff; color:#1c6fb0; }               /* 自発→親反応＝青 */
+  .origin.origin-req   { background:#ffe6cf; color:#c2650a; }               /* 自発→要求成立＝橙 */
   .msg.seen { opacity:1; transform:none; }
   .msg.cur { box-shadow:0 0 0 2px var(--fire); }
   .chat-empty { color:var(--muted); font-size:12px; padding:12px 6px; }
@@ -173,6 +179,7 @@
 <body>
 <div id="app">
   <h1>太郎リプレイビューア <span>(v5・固定レイアウト／体ビューはホイールで拡大・右ドラッグで移動・ダブルクリックで戻す)</span></h1>
+  <div id="runBadge" style="font-size:12px; color:var(--muted); margin:-6px 0 8px 2px;">読み込み中…</div>
 
   <div class="panel" id="panel_body">
     <div class="bar"><span class="grip">⠿</span><h2>BODY / 体ビュー — 働いている部品が赤く光る</h2></div>
@@ -295,7 +302,8 @@
       const box = document.getElementById("gauges");
       const gs = [["hunger","空腹","#ff7a4a"],["ne","探索(NE)","#8aa6c8"],
         ["dopamine","ドーパミン分泌量","#46c8e0"],["happiness","幸福度","#4bd08a"],
-        ["pleasure","味の快(liking)","#d86ac0"]];
+        ["pleasure","味の快(liking)","#d86ac0"],
+        ["sleepiness","眠さ","#7a6ad8"],["discomfort","不快","#c0392b"]];
       gs.forEach(([k,label,color])=>{
         const row=document.createElement("div"); row.className="gauge-row";
         row.innerHTML='<div class="lab"><span>'+label+'</span><span id="gval_'+k+'">0%</span></div>'+

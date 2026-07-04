@@ -11,11 +11,12 @@
 
 import os
 import math
+import random
 import torch
 import torch.nn.functional as F
 import yaml
 from collections import deque
-from taro.brain import (Vocabulary, TaroBrain, Cerebellum, BrocasArea, TaroLearner,
+from taro.brain import (Vocabulary, TaroBrain, Cerebellum, Lexicon, BrocasArea, TaroLearner,
                         compute_imitation_reward, compute_prediction_reward,
                         Dopamine, Habituation, LocusCoeruleus, compute_total_reward,
                         Homeostasis, Hippocampus, compute_alignment_credit, Hedonic)
@@ -125,6 +126,12 @@ class TaroEnvironmentB:
         self.locus_coeruleus = LocusCoeruleus()
         self.cerebellum = Cerebellum()
         self.brocas_area = BrocasArea()
+        # B6-1：原-辞書（聞いた発話から予測しやすい並びを1単位として蓄える）
+        self.lexicon = Lexicon()
+        # B6-2：自発発声で「自由喃語」と「辞書の語」を頻度で競わせるときの、自由喃語側の
+        # 引きの強さ。⚠️唯一の定数。除去テスト可（→∞で語を一切出さない＝B6-1までの挙動）。
+        # 辞書頻度が累積で育つほど語が選ばれやすくなり、喃語→単語の移行がなだらかに創発する。
+        self._k_babble = 1000.0
         self.homeostasis = Homeostasis()
         hc = self.cfg.get("hippocampus", {})
         self.hippocampus = Hippocampus(max_capacity=hc.get("max_capacity", 500))
@@ -166,7 +173,8 @@ class TaroEnvironmentB:
             "dopamine":  max(0.0, min(1.0, float(self.dopamine.get_baseline()))),
             "happiness": max(0.0, min(1.0, 1.0 - float(arousal))),
             "pleasure":  max(0.0, min(1.0, float(self.hedonic.get()))),   # B4：味の快(liking)
-            # 例）"sleepiness": float(self.internal_state.sleepiness),
+            "sleepiness": max(0.0, min(1.0, float(self.internal_state.sleepiness))),
+            "discomfort": max(0.0, min(1.0, float(self.internal_state.discomfort))),
         }
         rec = {"type": "event", "t": int(sim_seconds), "kind": kind,
                "modules": active, "flows": flows, "utter": utter}
@@ -274,6 +282,30 @@ class TaroEnvironmentB:
         # 知覚学習
         full_tokens = [1] + parent_tokens + [2]
         p_loss, pred_probs, satiety_logit = self.learner.learn_perception(full_tokens, body_state=body_state)
+
+        # B6-1：聞く側で分節して原-辞書に蓄積（Saffranの統計的分節）。
+        # pred_probs[k] は full_tokens[k+1] を直前から予測した確率分布。parent_tokens[k]
+        # ＝full_tokens[k+1] なので、その確率＝「その音を予測できた自信度」＝遷移確率。
+        # 報酬は使わず、予測の自信度と頻度だけで「よく知っている並び」を単位化する。
+        # 読点等は書き言葉の区切り記号で、赤ちゃんが実際に耳にする音ではない（無音の間に
+        # 相当）ため、そこで発話を句に区切ってから句ごとに独立して分節する（単に取り除くと
+        # 前後の句がくっついて誤った並びになるため）。
+        if len(pred_probs) >= len(parent_tokens) and len(parent_tokens) >= 2:
+            PUNCT = "、。！？…・"
+            clause_toks = []; clause_confs = []
+            for k in range(len(parent_tokens)):
+                if k < len(parent_text) and parent_text[k] in PUNCT:
+                    if clause_toks:
+                        self.lexicon.observe(clause_toks, clause_confs)
+                    clause_toks = []; clause_confs = []
+                    continue
+                clause_toks.append(parent_tokens[k])
+                try:
+                    clause_confs.append(float(pred_probs[k][parent_tokens[k]]))
+                except Exception:
+                    clause_confs.append(0.0)
+            if clause_toks:
+                self.lexicon.observe(clause_toks, clause_confs)
 
         # 聞く（体の感覚も合流）
         listen_input = torch.tensor([full_tokens], device=self.device)
@@ -392,6 +424,41 @@ class TaroEnvironmentB:
             "partial_match": partial_match,
         }
 
+    def _pick_lexicon_word(self):
+        """
+        B6-2：自発発声で「辞書の語を単位として出す」か「自由喃語」かを選ぶ。
+
+        【人間模倣】語テンプレート（Vihman）が育つと産出がそれに導かれる。候補は
+        「太郎が調音できる（＝喃語練習で口の動きを覚えた）辞書の語」だけ＝調音フィルタ
+        （初語は"自分が産出に慣れている音"で構成される, Vihman）。自由喃語(K_babble)と
+        各語(辞書頻度)を重みにサンプリングする。辞書頻度が累積で育つほど語が選ばれ、
+        喃語→単語の移行がなだらかに創発する。空腹などの状態は使わない（それはB6-4）。
+
+        戻り値：産出する語のテキスト（辞書の語が選ばれたとき）／None（自由喃語）。
+        """
+        if not self.lexicon.counts:
+            return None
+        words = []
+        weights = []
+        for toks, cnt in self.lexicon.counts.items():
+            text = self.vocab.decode(list(toks))
+            # 全文字を調音できる語だけ候補にする（調音フィルタ）
+            if text and all(self.cerebellum.lookup_motor(ch) is not None for ch in text):
+                words.append(text)
+                weights.append(cnt)
+        if not words:
+            return None
+        total = sum(weights) + self._k_babble
+        r = random.random() * total
+        if r < self._k_babble:            # 自由喃語が選ばれた
+            return None
+        r -= self._k_babble
+        for w, wt in zip(words, weights):
+            if r < wt:
+                return w
+            r -= wt
+        return words[-1]
+
     def self_babble(self):
         """
         太郎が一人で喃語を出す。脳の現在の分布からサンプリング。
@@ -399,14 +466,25 @@ class TaroEnvironmentB:
         【人間模倣】
         0〜6か月の乳児は穏やかな時間に発話計画なしで自発的に声を出す。
         脳が「今出しやすい音」を自由に試す → 海馬に記録 → 睡眠時に皮質へ定着。
-        発話計画（ブローカ野）なし = 喃語期のパス（cortex.pyのgenerate）。
+
+        B6-2：辞書の語が育つと、自発発声の一部が「その語をブローカ野で区切って産出」
+        （＝まとまりで出て止まる）に置き換わる。どの語が出るかは頻度×調音可能性で創発
+        （まんま/だっこの個体差は保たれる）。語が選ばれなければ従来通り自由喃語。
 
         B-5変更：喃語のたびに学習しない。経験を海馬に蓄積し、
         睡眠移行時に consolidate() でまとめて大脳皮質を更新する。
         """
         body_state = self._body_state_tensor()
 
-        # 発声（喃語）：speech_plan=None で喃語期のパスを使う
+        # B6-2：辞書の語を単位として出すか、自由喃語か。語なら計画（ブローカ野）を使う。
+        word_text = self._pick_lexicon_word()
+        if word_text:
+            self.brocas_area.plan(word_text, self.cerebellum, self.vocal_tract)
+            speech_plan = self.brocas_area
+        else:
+            speech_plan = None            # 自由喃語（従来の喃語期パス）
+
+        # 発声
         ne_level = self.locus_coeruleus.get_ne_level()
         generated, log_probs, _ = self.brain.generate(
             hidden=self._hidden,
@@ -416,7 +494,7 @@ class TaroEnvironmentB:
             vocal_tract=self.vocal_tract,
             ne_level=ne_level,
             cerebellum=self.cerebellum,
-            speech_plan=None,
+            speech_plan=speech_plan,
             body_state=body_state,
         )
 
