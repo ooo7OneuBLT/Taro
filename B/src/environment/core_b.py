@@ -158,13 +158,17 @@ class TaroEnvironmentB:
         """replayViewer用トレースログを有効化する（Noneで無効）。"""
         self._trace = trace_logger
 
-    def trace_event(self, sim_seconds, kind, active, flows, utter="", say=""):
+    def trace_event(self, sim_seconds, kind, active, flows, utter="", say="", consolidated=0):
         """
         1イベントを trace.jsonl に書き出す（replayViewer用）。
         発火した部品(active)・流れ(flows)・そのときの数値(空腹/NE/ドーパミン/
         幸福度)を記録する。トレース無効時は何もしない。
         happiness＝1−arousal(つらさの裏返し)、dopamine＝報酬予測のbaseline を
         表示用スカラーとして使う（正確な生理値ではない近似）。
+
+        consolidated: 直前のconsolidate()で実際に再生・定着した記憶の件数（sleepイベント用）。
+        海馬の活動量は「記憶バッファの詰まり具合」ではなく「直前にどれだけ働いたか」で測るため、
+        consolidate()がバッファを空にする"前"の仕事量をここで受け取る必要がある。
         """
         if self._trace is None:
             return
@@ -189,11 +193,11 @@ class TaroEnvironmentB:
             rec["fire"] = fire
         # 各臓器の"実測"活動量[0-1]。従来のmodules（kind→部位の決め打ち表）と違い、実際に
         # その時点の内部変数を読んで数値化する。replayViewerはこれがあれば実測を優先表示する。
-        rec["organs"] = {k: round(v, 3) for k, v in self._organ_activity(utter).items()}
+        rec["organs"] = {k: round(v, 3) for k, v in self._organ_activity(utter, consolidated).items()}
         rec.update({k: round(v, 3) for k, v in metrics.items()})
         self._trace.write_event(rec)
 
-    def _organ_activity(self, utter=""):
+    def _organ_activity(self, utter="", consolidated=0):
         """
         各臓器の"実測"活動量[0-1]を返す（体ビューの実測表示用）。kindからの決め打ちでなく、
         その時点で実際にプログラムが保持している内部変数を読む。
@@ -241,9 +245,16 @@ class TaroEnvironmentB:
                 out["critic"] = float(max(0.0, min(1.0, torch.sigmoid(cv).mean().item())))
         except Exception:
             pass
-        # 海馬：エピソード記憶バッファの詰まり具合（睡眠前ほど高い）。
+        # 海馬：睡眠時は「直前にconsolidate()で実際に再生・定着させた件数」で活動を測る
+        # （NREM睡眠中のシャープ波リプル＝この瞬間こそ海馬が最も働く）。consolidate()は
+        # 処理後にバッファを空にするため、起きている間の「バッファの詰まり具合」を
+        # そのまま使うと睡眠時にはもう空＝無活動に見えてしまうバグがあった（ユーザー指摘）。
+        # 起きている間（consolidated=0）は従来通りバッファの詰まり具合（今後の仕事量の予兆）。
         try:
-            out["hippocampus"] = float(max(0.0, min(1.0, len(self.hippocampus.episodes) / max(1, self.hippocampus.max_capacity))))
+            if consolidated > 0:
+                out["hippocampus"] = float(max(0.0, min(1.0, consolidated / 50.0)))  # ⚠️正規化定数、未検証
+            else:
+                out["hippocampus"] = float(max(0.0, min(1.0, len(self.hippocampus.episodes) / max(1, self.hippocampus.max_capacity))))
         except Exception:
             pass
         # 産出経路（発声した文字数で駆動）：声道・小脳(運動実行)・基底核(行動選択)。
