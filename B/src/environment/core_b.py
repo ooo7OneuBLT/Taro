@@ -187,8 +187,60 @@ class TaroEnvironmentB:
         fire = self._fire_indices()   # そのイベント時に発火したGRUノード番号（NN活性ビュー用）
         if fire is not None:
             rec["fire"] = fire
+        # 各臓器の"実測"活動量[0-1]。従来のmodules（kind→部位の決め打ち表）と違い、実際に
+        # その時点の内部変数を読んで数値化する。replayViewerはこれがあれば実測を優先表示する。
+        rec["organs"] = {k: round(v, 3) for k, v in self._organ_activity(utter).items()}
         rec.update({k: round(v, 3) for k, v in metrics.items()})
         self._trace.write_event(rec)
+
+    def _organ_activity(self, utter=""):
+        """
+        各臓器の"実測"活動量[0-1]を返す（体ビューの実測表示用）。kindからの決め打ちでなく、
+        その時点で実際にプログラムが保持している内部変数を読む。スケール定数は表示用の
+        便宜（相対的な活動の比較が目的で、絶対値の生理的厳密さは求めない）。
+        """
+        out = {}
+        # 大脳皮質：GRU隠れ状態の平均活性の強さ
+        try:
+            h = self._hidden
+            if h is not None:
+                v = h.detach().reshape(-1).abs()
+                out["cortex"] = float(max(0.0, min(1.0, v.mean().item() * 3.0)))
+        except Exception:
+            pass
+        # 島皮質：内受容感覚の統合＝覚醒(つらさ)
+        out["insula"] = float(max(0.0, min(1.0, self.internal_state.get_arousal())))
+        # 胃：中身の割合（満ち具合）
+        try:
+            out["stomach"] = float(max(0.0, min(1.0, self.stomach.contents / max(1e-6, self.stomach.capacity))))
+        except Exception:
+            pass
+        # 青斑核：ノルアドレナリン(NE)レベル
+        out["locus"] = float(max(0.0, min(1.0, self.locus_coeruleus.get_ne_level())))
+        # 肺：呼気の消費（残量が減っているほど＝直前に発声したほど高い）
+        try:
+            out["lungs"] = float(max(0.0, min(1.0, 1.0 - self.lungs.air / max(1e-6, self.lungs.capacity))))
+        except Exception:
+            pass
+        # クリティック：今の体の状態価値
+        try:
+            with torch.no_grad():
+                cv = self.brain.critic(self._body_state_tensor())
+                out["critic"] = float(max(0.0, min(1.0, torch.sigmoid(cv).mean().item())))
+        except Exception:
+            pass
+        # 海馬：エピソード記憶バッファの詰まり具合（睡眠前ほど高い）
+        try:
+            out["hippocampus"] = float(max(0.0, min(1.0, len(self.hippocampus.episodes) / max(1, self.hippocampus.max_capacity))))
+        except Exception:
+            pass
+        # 産出経路（発声した文字数で駆動）：声道・小脳(運動実行)・基底核(行動選択)
+        # 割る数6は「発話1語ぶんの目安の長さ」＝数文字でもはっきり点灯させる表示用の便宜。
+        spoke = min(1.0, len(utter) / 6.0) if utter else 0.0
+        out["vocal"] = spoke
+        out["cerebellum"] = spoke
+        out["basal_ganglia"] = 1.0 if utter else 0.0
+        return out
 
     def _fire_indices(self, top_k=32):
         """直近の隠れ状態(self._hidden)から「発火した」GRUノードの番号リストを返す。

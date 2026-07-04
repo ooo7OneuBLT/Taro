@@ -175,9 +175,14 @@ function layoutBodyLabels(){
   });
   applyActive();
 }
+let organIntensity=null;   // {organ:0-1} 実測活動量。あれば強度で光らせる（無ければactiveModsで二値）
 function applyActive(){
-  for(const id in BODY){ const on=activeMods.has(id);
-    const o=el("organ_"+id); if(o) o.classList.toggle("on",on);
+  for(const id in BODY){
+    // 実測organsがあれば強度で判定（閾値0.3以上を点灯）、無ければ従来の二値(modules)。
+    let on, inten=1;
+    if(organIntensity && organIntensity[id]!=null){ inten=organIntensity[id]; on=inten>=0.3; }
+    else { on=activeMods.has(id); }
+    const o=el("organ_"+id); if(o){ o.classList.toggle("on",on); if(on) o.style.opacity=(0.45+0.55*inten).toFixed(2); else o.style.opacity=""; }
     const l=el("leader_"+id); if(l) l.classList.toggle("on",on);
     const t=el("blabel_"+id); if(t) t.classList.toggle("on",on);
     const bg=el("blabelbg_"+id); if(bg) bg.classList.toggle("on",on);
@@ -288,6 +293,7 @@ function setGauges(g) {
 }
 
 function renderMoment(m) {
+  organIntensity = m.organs || null;   // 実測があれば強度表示、無ければmodulesで二値（後方互換）
   const active=new Set(m.active||[]); setModules(active); clearFlows();
   (m.flows||[]).forEach(([a,b])=>{
     if(BODY[a]&&BODY[b]){ const c=seg(BODY[a].mx,BODY[a].my,BODY[b].mx,BODY[b].my,8,9);
@@ -500,8 +506,14 @@ function parseAny(text){
     if(o.type==="bucket") out.push(o);
     else if(o.type==="comprehension") comprehension.push({t:o.t,mama:o.mama,nenne:o.nenne,dakko:o.dakko});
     else if(o.type==="snap") gauges={hunger:o.hunger,ne:o.ne,dopamine:o.dopamine,happiness:o.happiness};
-    else if(o.type==="event"){ const g=(o.hunger!=null)?{hunger:o.hunger,ne:o.ne,dopamine:o.dopamine,happiness:o.happiness}:Object.assign({},gauges);
-      out.push({t:o.t,kind:o.kind,active:o.modules||[],flows:o.flows||[],utter:o.utter||"",say:o.say||"",fire:o.fire||null,gauges:g}); }
+    else if(o.type==="event"){
+      // ゲージ：記録にある数値キーを全部拾う（hunger等が無い行は直前のスナップを流用）
+      const GK=["hunger","ne","dopamine","happiness","pleasure","sleepiness","discomfort"];
+      let g;
+      if(o.hunger!=null){ g={}; GK.forEach(k=>{ if(o[k]!=null) g[k]=o[k]; }); }
+      else g=Object.assign({},gauges);
+      out.push({t:o.t,kind:o.kind,active:o.modules||[],flows:o.flows||[],utter:o.utter||"",say:o.say||"",
+                fire:o.fire||null,gauges:g,organs:o.organs||null}); }
     else if(o.active) out.push(o);
   });
   return out;
