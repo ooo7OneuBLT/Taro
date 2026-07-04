@@ -176,19 +176,32 @@ function layoutBodyLabels(){
   applyActive();
 }
 let organIntensity=null;   // {organ:0-1} 実測活動量。あれば強度で光らせる（無ければactiveModsで二値）
-// 強度→見た目のマッピング（安定=薄い/小さい、活発=濃い/太い/大きく光る）。CSSの固定値
-// (stroke-width:1.8, glow:5px 固定)だと0.45〜1.0のopacity差が暗い背景でほぼ見分けが
-// つかなかったため、輪郭の太さ・グローの大きさ・塗りの不透明度の3つをインラインで
-// 直接、強度に応じて連続的に変える（CSSの.onは色そのものの切替だけに使う）。
+// 強度→色そのもの（ヒートマップ：寒色=安定 → 暖色=活発）で表現する。同じ赤の濃淡（透明度・
+// 輪郭太さ）だけでは暗い背景でほぼ判別できなかったため（ユーザー指摘）、色相そのものを
+// 変える方式に変更：0付近は青みがかった寒色、上がるにつれ黄→橙→赤へ移る。色の違いは
+// 濃淡の違いよりずっと知覚しやすい（ヒートマップ/サーモグラフィと同じ発想）。
+function heatColor(inten){
+  // HSL：青(210°)→黄(50°)→赤(0°)。inten 0→1 で色相を210°から0°まで下げる。
+  const hue = 210 - 210 * Math.min(1, inten);
+  const light = 55 - 15 * inten;   // 活発なほど少し暗く濃い色にして締まりを出す
+  return `hsl(${hue.toFixed(0)}, 85%, ${light.toFixed(0)}%)`;
+}
 function paintIntensity(el, inten){
   if(!el) return;
-  // .shape(体ビュー臓器) → circle(NN部位図ノード) → el自身(markerはel自身がshape) の順で対象を探す
-  const shape=el.querySelector(".shape")||el.querySelector("circle")||el;
-  if(inten<=0){ shape.style.filter=""; shape.style.strokeWidth=""; shape.style.fillOpacity=""; return; }
-  shape.style.fillOpacity=(0.12+0.7*inten).toFixed(2);           // 塗り：ほぼ透明→ほぼ不透明
-  shape.style.strokeWidth=(1.0+2.5*inten).toFixed(2);            // 輪郭：細い→太い
-  const blur=(2+10*inten).toFixed(1);
-  shape.style.filter=`drop-shadow(0 0 ${blur}px var(--fire))`;   // グロー：小さい→大きい
+  // .shape(体ビュー臓器)は複数ありうる（例：肺は左右2枚）。全部に適用する
+  // （querySelectorだと最初の1枚にしか効かず左右非対称になるバグがあった）。
+  let shapes=[...el.querySelectorAll(".shape")];
+  if(!shapes.length){ const c=el.querySelector("circle"); shapes=c?[c]:[el]; }
+  shapes.forEach(shape=>{
+    if(inten<=0){ shape.style.filter=""; shape.style.strokeWidth=""; shape.style.fill=""; shape.style.stroke=""; return; }
+    const color=heatColor(inten);
+    shape.style.fill=color;
+    shape.style.stroke=color;
+    shape.style.fillOpacity=(0.35+0.55*inten).toFixed(2);
+    shape.style.strokeWidth=(1.2+2.0*inten).toFixed(2);
+    const blur=(2+9*inten).toFixed(1);
+    shape.style.filter=`drop-shadow(0 0 ${blur}px ${color})`;
+  });
 }
 function applyActive(){
   for(const id in BODY){
