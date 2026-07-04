@@ -302,7 +302,11 @@ function setGauges(g) {
 function renderMoment(m) {
   organIntensity = m.organs || null;   // 実測があれば強度表示、無ければmodulesで二値（後方互換）
   const active=new Set(m.active||[]); setModules(active); clearFlows();
+  // 実測organsがある時：流れ(矢印)は「両端がともに点灯している」ものだけ描く。矢印そのものは
+  // 実測でない模式的な経路なので、点灯していない臓器へ矢印が伸びてノードと矛盾しないようにする。
+  const litByMeasure = id => organIntensity && organIntensity[id]!=null && organIntensity[id]>=0.3;
   (m.flows||[]).forEach(([a,b])=>{
+    if(organIntensity && !(litByMeasure(a) && litByMeasure(b))) return;   // 片方でも消灯なら流れを描かない
     if(BODY[a]&&BODY[b]){ const c=seg(BODY[a].mx,BODY[a].my,BODY[b].mx,BODY[b].my,8,9);
       mk("line",{x1:c[0],y1:c[1],x2:c[2],y2:c[3],class:"flow","marker-end":"url(#arrowF)"},el("bodyFlows")); }
     if(NET[a]&&NET[b]){ const c=seg(cx(a),cy(a),cx(b),cy(b),17,23,6);
@@ -310,7 +314,13 @@ function renderMoment(m) {
     document.querySelectorAll(".net-edge").forEach(e=>{const[ea,eb]=e.getAttribute("data-edge").split("|");
       if((ea===a&&eb===b)||(ea===b&&eb===a))e.classList.add("on");});
   });
-  if(active.size){ const f=[...active][0]; if(NET[f]){ const badge=mk("text",{x:NET[f].x,y:NET[f].y-22,"text-anchor":"middle",class:"fire-badge","font-size":13},el("netNodes")); badge.textContent="発火!"; bgFor(badge, el("netNodes"), "lblbg badgebg"); } }
+  // 「発火!」バッジ：実測がある時は最も活動が強い臓器に付ける（無い時は従来=先頭module）。
+  let badgeId=null;
+  if(organIntensity){
+    let best=-1; for(const id in organIntensity){ if(NET[id]&&organIntensity[id]>best){ best=organIntensity[id]; badgeId=id; } }
+    if(best<0.3) badgeId=null;
+  } else if(active.size){ badgeId=[...active][0]; }
+  if(badgeId && NET[badgeId]){ const badge=mk("text",{x:NET[badgeId].x,y:NET[badgeId].y-22,"text-anchor":"middle",class:"fire-badge","font-size":13},el("netNodes")); badge.textContent="発火!"; bgFor(badge, el("netNodes"), "lblbg badgebg"); }
   setGauges(m.gauges);
   updateNN(m.fire);
   el("utterVal").textContent=m.utter?m.utter:"—";
