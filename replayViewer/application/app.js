@@ -176,15 +176,15 @@ function layoutBodyLabels(){
   applyActive();
 }
 let organIntensity=null;   // {organ:0-1} 実測活動量。あれば強度で光らせる（無ければactiveModsで二値）
-// 強度→色そのもの（ヒートマップ：寒色=安定 → 暖色=活発）で表現する。同じ赤の濃淡（透明度・
-// 輪郭太さ）だけでは暗い背景でほぼ判別できなかったため（ユーザー指摘）、色相そのものを
-// 変える方式に変更：0付近は青みがかった寒色、上がるにつれ黄→橙→赤へ移る。色の違いは
-// 濃淡の違いよりずっと知覚しやすい（ヒートマップ/サーモグラフィと同じ発想）。
+// 強度→色（単一の色相＝赤系だけで、暗く沈んだ色→明るく鮮やかな赤、の濃淡だけを変える）。
+// 色相を虹色に変える方式は「どの色が何を意味するか分からない」という指摘があったため撤回。
+// 色相は赤で固定し、彩度・明度だけを上げ下げする＝「暗い(目立たない)=安定、明るく鮮やかな
+// 赤=活発」という単純な一本の物差しにする（体温計・音量メーターと同じ発想）。
+// グローも強すぎて見づらいとの指摘があったため大幅に弱める。
 function heatColor(inten){
-  // HSL：青(210°)→黄(50°)→赤(0°)。inten 0→1 で色相を210°から0°まで下げる。
-  const hue = 210 - 210 * Math.min(1, inten);
-  const light = 55 - 15 * inten;   // 活発なほど少し暗く濃い色にして締まりを出す
-  return `hsl(${hue.toFixed(0)}, 85%, ${light.toFixed(0)}%)`;
+  const sat = 25 + 65 * inten;    // 彩度：くすんだ25%→鮮やかな90%
+  const light = 26 + 24 * inten;  // 明度：暗い26%→明るい50%
+  return `hsl(6, ${sat.toFixed(0)}%, ${light.toFixed(0)}%)`;   // 色相は赤(6°)で固定
 }
 function paintIntensity(el, inten){
   if(!el) return;
@@ -197,10 +197,10 @@ function paintIntensity(el, inten){
     const color=heatColor(inten);
     shape.style.fill=color;
     shape.style.stroke=color;
-    shape.style.fillOpacity=(0.35+0.55*inten).toFixed(2);
-    shape.style.strokeWidth=(1.2+2.0*inten).toFixed(2);
-    const blur=(2+9*inten).toFixed(1);
-    shape.style.filter=`drop-shadow(0 0 ${blur}px ${color})`;
+    shape.style.fillOpacity=(0.3+0.6*inten).toFixed(2);
+    shape.style.strokeWidth=(1.0+1.4*inten).toFixed(2);
+    // グローは強い活動の時だけ、控えめに（常時グロー多用で画面が眩しかったため大幅縮小）。
+    shape.style.filter = inten>0.55 ? `drop-shadow(0 0 ${(1.5*inten).toFixed(1)}px ${color})` : "";
   });
 }
 function applyActive(){
