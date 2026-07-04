@@ -176,13 +176,28 @@ function layoutBodyLabels(){
   applyActive();
 }
 let organIntensity=null;   // {organ:0-1} 実測活動量。あれば強度で光らせる（無ければactiveModsで二値）
+// 強度→見た目のマッピング（安定=薄い/小さい、活発=濃い/太い/大きく光る）。CSSの固定値
+// (stroke-width:1.8, glow:5px 固定)だと0.45〜1.0のopacity差が暗い背景でほぼ見分けが
+// つかなかったため、輪郭の太さ・グローの大きさ・塗りの不透明度の3つをインラインで
+// 直接、強度に応じて連続的に変える（CSSの.onは色そのものの切替だけに使う）。
+function paintIntensity(el, inten){
+  if(!el) return;
+  // .shape(体ビュー臓器) → circle(NN部位図ノード) → el自身(markerはel自身がshape) の順で対象を探す
+  const shape=el.querySelector(".shape")||el.querySelector("circle")||el;
+  if(inten<=0){ shape.style.filter=""; shape.style.strokeWidth=""; shape.style.fillOpacity=""; return; }
+  shape.style.fillOpacity=(0.12+0.7*inten).toFixed(2);           // 塗り：ほぼ透明→ほぼ不透明
+  shape.style.strokeWidth=(1.0+2.5*inten).toFixed(2);            // 輪郭：細い→太い
+  const blur=(2+10*inten).toFixed(1);
+  shape.style.filter=`drop-shadow(0 0 ${blur}px var(--fire))`;   // グロー：小さい→大きい
+}
 function applyActive(){
   for(const id in BODY){
-    // 実測organsがあれば強度で判定（閾値0.3以上を点灯）、無ければ従来の二値(modules)。
-    let on, inten=1;
-    if(organIntensity && organIntensity[id]!=null){ inten=organIntensity[id]; on=inten>=0.3; }
-    else { on=activeMods.has(id); }
-    const o=el("organ_"+id); if(o){ o.classList.toggle("on",on); if(on) o.style.opacity=(0.45+0.55*inten).toFixed(2); else o.style.opacity=""; }
+    // 実測organsがあれば強度で判定（点灯とみなす最小閾値0.05）、無ければ従来の二値(modules)。
+    let on, inten;
+    if(organIntensity && organIntensity[id]!=null){ inten=organIntensity[id]; on=inten>=0.05; }
+    else { on=activeMods.has(id); inten=on?1:0; }
+    const o=el("organ_"+id);
+    if(o){ o.classList.toggle("on",on); paintIntensity(o, on?inten:0); }
     const l=el("leader_"+id); if(l) l.classList.toggle("on",on);
     const t=el("blabel_"+id); if(t) t.classList.toggle("on",on);
     const bg=el("blabelbg_"+id); if(bg) bg.classList.toggle("on",on);
@@ -252,12 +267,13 @@ function clearFlows() {
 function setModules(activeSet) {
   activeMods=activeSet; applyActive();
   // NETWORK/部位図も体ビューと同じ実測(organIntensity)を優先して光らせる（無ければ従来通り
-  // modulesの二値）。2つのパネルで発火の判定がズレないようロジックを共通化する。
+  // modulesの二値）。2つのパネルで発火の判定・見た目がズレないようロジックを共通化する。
   for (const id in NET) {
-    let on, inten=1;
-    if(organIntensity && organIntensity[id]!=null){ inten=organIntensity[id]; on=inten>=0.3; }
-    else { on=activeSet.has(id); }
-    const g=el("nn_"+id); if(g){ g.classList.toggle("on",on); g.style.opacity=on?(0.45+0.55*inten).toFixed(2):""; }
+    let on, inten;
+    if(organIntensity && organIntensity[id]!=null){ inten=organIntensity[id]; on=inten>=0.05; }
+    else { on=activeSet.has(id); inten=on?1:0; }
+    const g=el("nn_"+id);
+    if(g){ g.classList.toggle("on",on); paintIntensity(g, on?inten:0); }
   }
 }
 // 理解の配線図：3つの語 → 「食べ物予期」ノード。線が太い/明るいほど「その語で食べ物が
