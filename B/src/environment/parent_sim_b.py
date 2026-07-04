@@ -193,8 +193,14 @@ TRACE_MAP = {
                       "flows": [["locus", "cortex"], ["cortex", "vocal"]]},
     "babble_response": {"modules": ["cortex", "vocal"],
                       "flows": [["cortex", "vocal"]]},
-    "word_request":  {"modules": ["stomach", "insula", "cortex", "vocal"],
+    # word_requestは欲求の種類(dom_key)によって発火する部位が変わる（tr()内で切替）。
+    # feed=胃由来、sleep=海馬（眠気の記憶・概日）、comfort=島皮質（不快の内受容）。
+    "word_request_feed":    {"modules": ["stomach", "insula", "cortex", "vocal"],
                       "flows": [["stomach", "insula"], ["insula", "cortex"], ["cortex", "vocal"]]},
+    "word_request_sleep":   {"modules": ["hippocampus", "insula", "cortex", "vocal"],
+                      "flows": [["hippocampus", "insula"], ["insula", "cortex"], ["cortex", "vocal"]]},
+    "word_request_comfort": {"modules": ["insula", "cortex", "vocal"],
+                      "flows": [["insula", "cortex"], ["cortex", "vocal"]]},
     "feed":          {"modules": ["stomach", "insula", "cortex", "critic"],
                       "flows": [["cortex", "insula"], ["insula", "critic"], ["stomach", "insula"]]},
     "comfort":       {"modules": ["cortex", "insula"], "flows": [["cortex", "insula"]]},
@@ -240,10 +246,13 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
     _tr_ct = {}
     _FREQUENT = {"babble", "babble_response", "cry", "comfort"}
 
-    def tr(kind, utter="", say=""):
+    def tr(kind, utter="", say="", map_key=None):
+        """map_key：発火部位の参照先だけ別のTRACE_MAPエントリに差し替えたい時に指定
+        （例：word_requestは欲求の種類(dom_key)で光る部位が変わるが、記録されるkindラベル
+        自体はreplayViewerの表示互換のためword_requestのまま統一する）。"""
         if trace is None:
             return
-        m = TRACE_MAP.get(kind)
+        m = TRACE_MAP.get(map_key or kind)
         if not m:
             return
         if kind in _FREQUENT:
@@ -540,7 +549,7 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
                                       similarity=round(similarity, 4),
                                       level=round(dom_level, 4),
                                       r_mand=round(resp["r_mand"], 4) if resp else 0.0)
-                tr("word_request", result["taro"])
+                tr("word_request", result["taro"], map_key=f"word_request_{dom_key}")
                 # 欲求ごとに応える（親がその語を言ってから解消する）
                 if dom_key == "feed":
                     schedule.on_word_request(sim_seconds)          # 既存：授乳を予約（feed時にまんま）
