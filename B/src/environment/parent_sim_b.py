@@ -246,10 +246,11 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
     _tr_ct = {}
     _FREQUENT = {"babble", "babble_response", "cry", "comfort"}
 
-    def tr(kind, utter="", say="", map_key=None):
+    def tr(kind, utter="", say="", map_key=None, consolidated=0):
         """map_key：発火部位の参照先だけ別のTRACE_MAPエントリに差し替えたい時に指定
         （例：word_requestは欲求の種類(dom_key)で光る部位が変わるが、記録されるkindラベル
-        自体はreplayViewerの表示互換のためword_requestのまま統一する）。"""
+        自体はreplayViewerの表示互換のためword_requestのまま統一する）。
+        consolidated：直前のconsolidate()で実際に再生した記憶件数（sleep用、海馬の活動量）。"""
         if trace is None:
             return
         m = TRACE_MAP.get(map_key or kind)
@@ -259,7 +260,7 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
             _tr_ct[kind] = _tr_ct.get(kind, 0) + 1
             if _tr_ct[kind] % sample_n != 0:
                 return
-        env.trace_event(sim_seconds, kind, m["modules"], m["flows"], utter, say=say)
+        env.trace_event(sim_seconds, kind, m["modules"], m["flows"], utter, say=say, consolidated=consolidated)
 
     cry_count = 0
     feed_count = 0
@@ -310,7 +311,7 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
             env.logger.log_event(sim_seconds, "sleep_start",
                                   consolidated=consol["consolidated"],
                                   p_loss=round(consol["p_loss"], 4))
-            tr("sleep")
+            tr("sleep", consolidated=consol["consolidated"])
             if verbose and consol["consolidated"] > 0:
                 print(f"  t={sim_seconds:5d}s ({fmt_time(sim_seconds)}) | "
                       f"海馬→皮質: {consol['consolidated']}件定着 "
