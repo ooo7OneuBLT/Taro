@@ -30,6 +30,10 @@ class Lexicon:
         # ⚠️構造的な下限であって調整用の恣意的定数ではない（1にすると全単音が語になる）。
         self.min_len = min_len
         self.counts = {}
+        # B6-4：語↔内的状態の連合（cross-situational statistical learning, Smith & Yu）。
+        # その語を聞いた時の動因状態[空腹,眠気,不快]を語ごとに累積し、平均を「その語が
+        # 結びつく状態」とする。報酬なし・共起の統計だけ。視覚が無いので指示対象＝内的状態。
+        self.state_sum = {}   # chunk -> [Σ空腹, Σ眠気, Σ不快, n]
 
     def segment(self, tokens, confidences):
         """
@@ -60,12 +64,34 @@ class Lexicon:
             return None
         return tuple(tokens[s:e])
 
-    def observe(self, tokens, confidences):
-        """発話を分節し、切り出した単位を辞書に登録（頻度+1）。切り出した単位を返す。"""
+    def observe(self, tokens, confidences, state=None):
+        """
+        発話を分節し、切り出した単位を辞書に登録（頻度+1）。切り出した単位を返す。
+
+        state: その語を聞いた時の動因状態[空腹,眠気,不快]（B6-4）。渡すと語↔状態の連合を
+        累積する（報酬でなく共起の統計）。
+        """
         chunk = self.segment(tokens, confidences)
         if chunk is not None:
             self.counts[chunk] = self.counts.get(chunk, 0) + 1
+            if state is not None and len(state) >= 3:
+                acc = self.state_sum.get(chunk)
+                if acc is None:
+                    acc = [0.0, 0.0, 0.0, 0]
+                    self.state_sum[chunk] = acc
+                acc[0] += float(state[0]); acc[1] += float(state[1]); acc[2] += float(state[2])
+                acc[3] += 1
         return chunk
+
+    def assoc(self, chunk):
+        """
+        B6-4：その語が結びつく内的状態の平均[空腹,眠気,不快]を返す（無ければNone）。
+        """
+        acc = self.state_sum.get(chunk)
+        if not acc or acc[3] == 0:
+            return None
+        n = acc[3]
+        return (acc[0] / n, acc[1] / n, acc[2] / n)
 
     def top(self, n=10):
         """頻度上位の語の型を返す。"""

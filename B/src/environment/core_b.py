@@ -132,6 +132,10 @@ class TaroEnvironmentB:
         # 引きの強さ。⚠️唯一の定数。除去テスト可（→∞で語を一切出さない＝B6-1までの挙動）。
         # 辞書頻度が累積で育つほど語が選ばれやすくなり、喃語→単語の移行がなだらかに創発する。
         self._k_babble = 1000.0
+        # B6-4：語の選択を「今の内的状態と語の連合状態の一致」でどれだけ後押しするか。
+        # ⚠️定数。除去テスト可（0で頻度のみ＝B6-2の挙動）。空腹時に「まんま(空腹と連合)」が
+        # 選ばれやすくなる＝mand化。報酬でなく共起連合(Smith & Yu)由来。
+        self._assoc_gain = 2.0
         self.homeostasis = Homeostasis()
         hc = self.cfg.get("hippocampus", {})
         self.hippocampus = Hippocampus(max_capacity=hc.get("max_capacity", 500))
@@ -291,12 +295,16 @@ class TaroEnvironmentB:
         # 相当）ため、そこで発話を句に区切ってから句ごとに独立して分節する（単に取り除くと
         # 前後の句がくっついて誤った並びになるため）。
         if len(pred_probs) >= len(parent_tokens) and len(parent_tokens) >= 2:
+            # B6-4：語↔内的状態の連合のため、聞いた瞬間の動因[空腹,眠気,不快]を渡す。
+            heard_state = (float(self.internal_state.hunger),
+                           float(self.internal_state.sleepiness),
+                           float(self.internal_state.discomfort))
             PUNCT = "、。！？…・"
             clause_toks = []; clause_confs = []
             for k in range(len(parent_tokens)):
                 if k < len(parent_text) and parent_text[k] in PUNCT:
                     if clause_toks:
-                        self.lexicon.observe(clause_toks, clause_confs)
+                        self.lexicon.observe(clause_toks, clause_confs, state=heard_state)
                     clause_toks = []; clause_confs = []
                     continue
                 clause_toks.append(parent_tokens[k])
@@ -305,7 +313,7 @@ class TaroEnvironmentB:
                 except Exception:
                     clause_confs.append(0.0)
             if clause_toks:
-                self.lexicon.observe(clause_toks, clause_confs)
+                self.lexicon.observe(clause_toks, clause_confs, state=heard_state)
 
         # 聞く（体の感覚も合流）
         listen_input = torch.tensor([full_tokens], device=self.device)
@@ -424,28 +432,52 @@ class TaroEnvironmentB:
             "partial_match": partial_match,
         }
 
+    @staticmethod
+    def _state_match(cur, assoc):
+        """
+        B6-4：今の動因状態curと、語が連合する状態assocの一致度（コサイン, 0〜1）。
+        両方とも非負ベクトルなので0〜1。どちらかがほぼ0（動因なし/連合なし）なら0。
+        """
+        if assoc is None:
+            return 0.0
+        dot = sum(c * a for c, a in zip(cur, assoc))
+        nc = math.sqrt(sum(c * c for c in cur))
+        na = math.sqrt(sum(a * a for a in assoc))
+        if nc < 1e-6 or na < 1e-6:
+            return 0.0
+        return max(0.0, min(1.0, dot / (nc * na)))
+
     def _pick_lexicon_word(self):
         """
-        B6-2：自発発声で「辞書の語を単位として出す」か「自由喃語」かを選ぶ。
+        B6-2/B6-4：自発発声で「辞書の語を単位として出す」か「自由喃語」かを選ぶ。
 
         【人間模倣】語テンプレート（Vihman）が育つと産出がそれに導かれる。候補は
         「太郎が調音できる（＝喃語練習で口の動きを覚えた）辞書の語」だけ＝調音フィルタ
-        （初語は"自分が産出に慣れている音"で構成される, Vihman）。自由喃語(K_babble)と
-        各語(辞書頻度)を重みにサンプリングする。辞書頻度が累積で育つほど語が選ばれ、
-        喃語→単語の移行がなだらかに創発する。空腹などの状態は使わない（それはB6-4）。
+        （初語は"自分が産出に慣れている音"で構成される, Vihman）。
+
+        B6-4：さらに「今の内的状態」と「語が連合する状態」の一致で重みを後押しする
+        （空腹時に、空腹と連合した"まんま"が選ばれやすい＝mand化）。連合は共起の統計
+        （Smith & Yu, cross-situational learning）で、報酬は使わない。
+
+        重み＝辞書頻度 ×（1 + 連合ゲイン × 状態一致）。連合を切れば（ゲイン0）頻度のみ。
 
         戻り値：産出する語のテキスト（辞書の語が選ばれたとき）／None（自由喃語）。
         """
         if not self.lexicon.counts:
             return None
+        # 今の動因状態[空腹,眠気,不快]
+        cur = (float(self.internal_state.hunger),
+               float(self.internal_state.sleepiness),
+               float(self.internal_state.discomfort))
         words = []
         weights = []
         for toks, cnt in self.lexicon.counts.items():
             text = self.vocab.decode(list(toks))
             # 全文字を調音できる語だけ候補にする（調音フィルタ）
             if text and all(self.cerebellum.lookup_motor(ch) is not None for ch in text):
+                match = self._state_match(cur, self.lexicon.assoc(toks))   # B6-4
+                weights.append(cnt * (1.0 + self._assoc_gain * match))
                 words.append(text)
-                weights.append(cnt)
         if not words:
             return None
         total = sum(weights) + self._k_babble
