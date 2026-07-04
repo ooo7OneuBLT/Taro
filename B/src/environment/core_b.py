@@ -219,13 +219,12 @@ class TaroEnvironmentB:
             pass
         # 島皮質：内受容感覚の統合＝覚醒(つらさ)。空腹/眠気/不快が高い時に上がる。
         out["insula"] = float(max(0.0, min(1.0, self.internal_state.get_arousal())))
-        # 胃：食事中は活動、そうでなければ中身の割合。空腹の赤ちゃんは普段ほぼ空なので、
-        # 「食べている時に光る」よう is_feeding を優先する。
+        # 胃：「今まさに食べている」という一時的な活動だけを表す。中身の量（消化中はずっと
+        # 残っている"状態"）は使わない——それは空腹ゲージと重複する上、消化が終わるまで
+        # ずっと薄く点灯し続けてしまう（喃語中も胃が反応して見える、というユーザー指摘の原因）。
+        # 体の臓器は「継続する状態」でなく「一時的な活動」だけを光らせる、という基準に統一する。
         try:
-            if self.stomach.is_feeding():
-                out["stomach"] = 1.0
-            else:
-                out["stomach"] = float(max(0.0, min(1.0, self.stomach.contents / max(1e-6, self.stomach.capacity))))
+            out["stomach"] = 1.0 if self.stomach.is_feeding() else 0.0
         except Exception:
             pass
         # 青斑核：ノルアドレナリン(NE)レベル。発達初期は本当に高く、育つと下がる（実測）。
@@ -245,16 +244,12 @@ class TaroEnvironmentB:
                 out["critic"] = float(max(0.0, min(1.0, torch.sigmoid(cv).mean().item())))
         except Exception:
             pass
-        # 海馬：睡眠時は「直前にconsolidate()で実際に再生・定着させた件数」で活動を測る
-        # （NREM睡眠中のシャープ波リプル＝この瞬間こそ海馬が最も働く）。consolidate()は
-        # 処理後にバッファを空にするため、起きている間の「バッファの詰まり具合」を
-        # そのまま使うと睡眠時にはもう空＝無活動に見えてしまうバグがあった（ユーザー指摘）。
-        # 起きている間（consolidated=0）は従来通りバッファの詰まり具合（今後の仕事量の予兆）。
+        # 海馬：「今まさに記憶を再生・定着させている」という一時的な活動だけを表す
+        # （NREM睡眠中のシャープ波リプル＝この瞬間こそ海馬が最も働く）。起きている間の
+        # 「バッファの詰まり具合」は胃の中身と同じ"継続する状態"であって"活動"ではないため
+        # 使わない（基準統一。以前は起きている間だけそれを使っていて胃と同種の問題があった）。
         try:
-            if consolidated > 0:
-                out["hippocampus"] = float(max(0.0, min(1.0, consolidated / 50.0)))  # ⚠️正規化定数、未検証
-            else:
-                out["hippocampus"] = float(max(0.0, min(1.0, len(self.hippocampus.episodes) / max(1, self.hippocampus.max_capacity))))
+            out["hippocampus"] = float(max(0.0, min(1.0, consolidated / 50.0))) if consolidated > 0 else 0.0  # ⚠️正規化定数、未検証
         except Exception:
             pass
         # 産出経路（発声した文字数で駆動）：声道・小脳(運動実行)・基底核(行動選択)。
