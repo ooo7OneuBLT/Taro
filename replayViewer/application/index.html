@@ -296,7 +296,11 @@
   </div>
 </div>
 
-  <script src="app.js"></script>
+  <script>
+    // app.js自体のブラウザキャッシュを常に回避する（データファイルと同じ ?_= 方式）。
+    // これが無いとリロードしても古いapp.jsのままになり、修正が反映されない事故が起きていた。
+    document.write('<script src="app.js?_=' + Date.now() + '"><\/script>');
+  </script>
   <script>
     (function(){
       const box = document.getElementById("gauges");
