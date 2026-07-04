@@ -251,7 +251,14 @@ function clearFlows() {
 }
 function setModules(activeSet) {
   activeMods=activeSet; applyActive();
-  for (const id in NET) el("nn_"+id).classList.toggle("on",activeSet.has(id));
+  // NETWORK/部位図も体ビューと同じ実測(organIntensity)を優先して光らせる（無ければ従来通り
+  // modulesの二値）。2つのパネルで発火の判定がズレないようロジックを共通化する。
+  for (const id in NET) {
+    let on, inten=1;
+    if(organIntensity && organIntensity[id]!=null){ inten=organIntensity[id]; on=inten>=0.3; }
+    else { on=activeSet.has(id); }
+    const g=el("nn_"+id); if(g){ g.classList.toggle("on",on); g.style.opacity=on?(0.45+0.55*inten).toFixed(2):""; }
+  }
 }
 // 理解の配線図：3つの語 → 「食べ物予期」ノード。線が太い/明るいほど「その語で食べ物が
 // 来る」と結びついている＝理解している。まんまが育って光り、あうあは暗いままなのを見せる。
