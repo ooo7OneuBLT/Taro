@@ -6,6 +6,7 @@
 """
 from taro.brain.cortex import TaroBrain, Vocabulary
 from taro.brain.cerebellum import Cerebellum
+from taro.brain.lexicon import Lexicon
 from taro.brain.left_frontal_lobe import BrocasArea
 from taro.brain.basal_ganglia import TaroLearner
 from taro.brain.hippocampus import Hippocampus
