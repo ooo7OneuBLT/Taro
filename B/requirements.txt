@@ -1,0 +1,8 @@
+# 目標B（初語）の依存ライブラリ。Python 3.12 で動作確認。
+# インストール: pip install -r B/requirements.txt
+
+torch         # 太郎の脳（GRU）と学習（方策勾配・予測誤差最小化）
+pyyaml        # 設定ファイル（config/config.yaml・schedule.yaml）の読み込み
+matplotlib    # 学習曲線などのグラフ出力
+numpy         # 数値計算（torch/matplotlibの依存としても必要）
+psutil        # （任意）CPUスレッド数・プロセス優先度の最適化。無くても動作する
