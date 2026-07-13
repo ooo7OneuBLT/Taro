@@ -26,6 +26,7 @@ import torch.nn as nn
 
 from taro_brain import TaroBrain
 from predictive_coding_latent import PredictiveCodingLatent
+from hippocampus import MotorHippocampus
 
 
 class TaroBrainWithMotor(TaroBrain):
@@ -34,7 +35,7 @@ class TaroBrainWithMotor(TaroBrain):
     """
 
     def __init__(self, vocab_size, sensory_dim=320, n_actuators=90,
-                 embedding_dim=64, hidden_dim=128, **kwargs):
+                 embedding_dim=64, hidden_dim=128, proprio_dim=621, **kwargs):
         super().__init__(vocab_size=vocab_size, embedding_dim=embedding_dim,
                           hidden_dim=hidden_dim, body_state_dim=0, **kwargs)
         self.sensory_dim = sensory_dim
@@ -64,6 +65,20 @@ class TaroBrainWithMotor(TaroBrain):
 
         # 運動性喃語：関節への命令を出す（潜在変数zから）
         self.motor_head = nn.Linear(self.latent_dim, n_actuators)
+
+        # ─── 目標C1/C2で実証した改良自己モデル（step_motorの旧アーキを更新した版）───
+        self.proprio_dim = proprio_dim
+        # ① 遠心性コピーを再帰の中へ：[感覚, 前回行動] → GRU入力。step_motorのsensory_proj
+        #    （感覚のみ）を置き換える改良（行動→感覚の結びつきを再帰で強める）。
+        self.motor_input_proj = nn.Linear(sensory_dim + n_actuators, embedding_dim)
+        # ② 予測ヘッドを非線形MLP＋LayerNorm。固有感覚の「変化量Δ」を予測（残差予測）。
+        #    LayerNormは発散（ヘッドの出力爆発）を防ぐ標準的安定化（DreamerV3準拠、
+        #    アブレーションで発散原因＝ヘッド増幅と確定したため）。
+        self.forward_model_head = nn.Sequential(
+            nn.Linear(self.latent_dim + n_actuators, hidden_dim), nn.SiLU(),
+            nn.LayerNorm(hidden_dim), nn.Linear(hidden_dim, proprio_dim))
+        # 海馬：睡眠リプレイで自己モデルを定着させる（C2で実証）。言語用海馬と同じCLS原理。
+        self.hippocampus = MotorHippocampus()
 
     def init_motor_hidden(self):
         return torch.zeros(self.num_layers, 1, self.hidden_dim)
@@ -164,3 +179,44 @@ class TaroBrainWithMotor(TaroBrain):
         （誤差0で報酬1、誤差が大きいほど0に漸近、常に(0, 1]に収まる）。
         """
         return 1.0 / (1.0 + prediction_error_value)
+
+    # ─── 改良自己モデル（C1）＋睡眠リプレイ（C2）の本実装 ───
+
+    def infer_latent(self, sensory_vec, prev_action, current_sensory_target, hidden):
+        """[感覚, 前回行動] → GRU → 潜在z（遠心性コピーを再帰の中に入れた改良版）。
+        戻り値: (z, kl_loss, recon_loss, new_hidden)。"""
+        emb = self.motor_input_proj(
+            torch.cat([sensory_vec, prev_action], dim=-1)).unsqueeze(0).unsqueeze(0)
+        out, new_hidden = self.motor_gru(emb, hidden)
+        z, kl_loss, recon_loss = self.pc_latent.infer(hidden[-1, 0], out[0, -1], current_sensory_target)
+        return z, kl_loss, recon_loss, new_hidden
+
+    def predict_proprio(self, z, action, current_proprio):
+        """残差予測：現在の固有感覚 + Δ(z, 行動) = 次の固有感覚の予測。"""
+        return current_proprio + self.forward_model_head(torch.cat([z, action], dim=-1))
+
+    def consolidate(self, learner, n_batches=200, batch_size=128):
+        """睡眠リプレイ：海馬に貯めた経験を再生し、順モデル（自己内部モデル）を定着させる。
+        言語用海馬が core_b.consolidate に定着を任せているのと同じ分担で、運動用の定着
+        ロジックをここに置く。覚醒時と同じ順モデル計算を、貯めた経験でバッチ再生する。"""
+        N = len(self.hippocampus)
+        if N < batch_size:
+            return
+        eps = self.hippocampus.replay()
+        SV = torch.stack([e[0] for e in eps]); PA = torch.stack([e[1] for e in eps])
+        AA = torch.stack([e[2] for e in eps]); CF = torch.stack([e[3] for e in eps])
+        CLP = torch.stack([e[4] for e in eps]); NLP = torch.stack([e[5] for e in eps])
+        H = torch.cat([e[6] for e in eps], dim=1)  # (num_layers, N, hidden_dim)
+        mse = torch.nn.functional.mse_loss
+        for _ in range(n_batches):
+            idx = torch.randint(0, N, (batch_size,))
+            hb = H[:, idx].contiguous()
+            emb = self.motor_input_proj(
+                torch.cat([SV[idx], PA[idx]], dim=-1)).unsqueeze(1)  # (bs,1,emb) batch_first
+            out, _ = self.motor_gru(emb, hb)
+            z, kl, rc = self.pc_latent.infer(hb[-1], out[:, 0], CF[idx])
+            pred = CLP[idx] + self.forward_model_head(torch.cat([z, AA[idx]], dim=-1))
+            loss = mse(pred, NLP[idx]) + kl + rc
+            learner.optimizer.zero_grad(); loss.backward()
+            torch.nn.utils.clip_grad_norm_(learner.brain.parameters(), learner.grad_clip)
+            learner.optimizer.step()

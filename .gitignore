@@ -55,3 +55,4 @@ C/docs/C/*
 # ビルド副産物
 venv_build.log
 *.log
+*.out
