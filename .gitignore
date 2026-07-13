@@ -31,3 +31,23 @@ CLAUDE.md
 # リプレイビューアの実行時制御ファイル（Claudeがデータ差し替え/ジャンプに使う一時状態）
 replayViewer/application/_goto.json
 replayViewer/application/_meta.json
+
+# === 目標C・D（unificationMIMo統合）===
+# ログ・アーカイブ・巨大な共有外部依存（MIMoはジャンクション）は追跡しない
+C/logs/
+D/logs/
+C/archive/
+D/archive/
+MIMo/
+.venv/
+
+# C/docs は相談準備・ロードマップ等の非公開資料を含む。
+# 既定で全て無視し、公開してよいファイルのみ明示的に許可する（allowlist）。
+C/docs/*
+!C/docs/README.md
+!C/docs/研究日誌.md
+!C/docs/開発計画.md
+!C/docs/検証の落とし穴チェックリスト.md
+!C/docs/C
+C/docs/C/*
+!C/docs/C/検証指標の一覧と変遷.md
