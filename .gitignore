@@ -51,3 +51,7 @@ C/docs/*
 !C/docs/C
 C/docs/C/*
 !C/docs/C/検証指標の一覧と変遷.md
+
+# ビルド副産物
+venv_build.log
+*.log
