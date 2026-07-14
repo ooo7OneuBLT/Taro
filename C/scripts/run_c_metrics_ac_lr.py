@@ -45,6 +45,7 @@ _CEREB = os.environ.get("C_CEREBELLUM", "1") == "1"  # 0で無効化可
 _INVPROBE = os.environ.get("C_INVPROBE", "0") == "1"  # 1=逆モデルStage1診断（学習後に1回）
 _INVEXEC = os.environ.get("C_INVEXEC", "0") == "1"  # 1=逆モデルStage1.5＝推論a*の実行テスト
 _GOALBABBLE = os.environ.get("C_GOALBABBLE", "0") == "1"  # 1=Goal Babbling(目標指向の探索)
+_GB_SWITCH = os.environ.get("C_GB_SWITCH", "pe")  # 探索/目標の切替: fixed(i%2) / ne(NE) / pe(予測誤差+NE, 既定)
 CSV_COLUMNS = ["life_min", "train_step", "classify", "margin", "corr", "persist",
                "agency", "mag_ratio", "real_min"]
 
@@ -346,6 +347,7 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
     buf = {k: [] for k in ("sv", "prev_a", "a", "cf", "clp", "nlp", "h")}
     # Goal Babbling 用の目標バッファ＝Self-Priorの最小版（過去に経験した固有感覚の分布）。
     goal_buf = []
+    pe_fast, pe_slow = 1.0, 1.0  # 予測誤差の速い/遅い走行平均（"いつもより驚いたか"の自己正規化用）
 
     def consolidate(n_batches=200, bs=128):
         """睡眠中の記憶定着：貯めた経験をバッチで再生し、自己モデル(予測経路)を復習で固める。"""
@@ -382,7 +384,21 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
             mean = policy_m
         # Goal Babbling：一部のステップで、経験(Self-Prior)から目標をサンプルし、逆算した
         # 行動を平均に据える（＝目標に手を伸ばす）。残りは今まで通りの探索（ハイブリッド）。
-        goal_step = _GOALBABBLE and len(goal_buf) >= 64 and (i % 2 == 0)
+        # 切り替え：fixed=i%2固定(暫定)／ne=NE(青斑核=探索/活用の神経調節, Aston-Jones &
+        # Cohen)から創発＝NEが高い(探索したい)ほど探索寄り、低い(落ち着き)ほど目標指向。
+        goal_step = False
+        if _GOALBABBLE and len(goal_buf) >= 64:
+            if _GB_SWITCH == "fixed":
+                goal_step = (i % 2 == 0)
+            elif _GB_SWITCH == "ne":
+                goal_step = torch.rand(1).item() < (1.0 - ne.get_ne_level())
+            else:  # "pe"：予測誤差(驚き)を主役＋NEを下駄、で探索/目標を創発
+                # 【逸脱/工学近似 ⚠️】向き（驚き大・NE大→探索、＝分かる所は狙い分からぬ所は探る）
+                # はEFE/LC-NE/予測符号化に基づく人間模倣だが、"足し算・等重み・この正規化・確率への
+                # 写像"という具体式には生物学的根拠なし＝恣意的。逸脱リスト参照。要感度確認・アブレーション。
+                rel = min(pe_fast / (pe_slow + 1e-6), 2.0) / 2.0     # [0,1], 0.5=平常の驚き
+                explore_drive = min(ne.get_ne_level() + rel, 1.0)
+                goal_step = torch.rand(1).item() < (1.0 - explore_drive)
         if goal_step:
             g = goal_buf[torch.randint(len(goal_buf), (1,)).item()]
             mean = infer_goal_action(z.detach(), clp, mean, g)
@@ -399,6 +415,8 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
             buf["clp"].append(clp.detach()); buf["nlp"].append(nlp.detach())
             buf["h"].append(state["hidden"].detach())
         pe = mse(pred, nlp)
+        pe_fast = 0.9 * pe_fast + 0.1 * pe.item()   # 次ステップの切替判断に使う（因果的に過去の驚き）
+        pe_slow = 0.99 * pe_slow + 0.01 * pe.item()
         rew = brain.sensorimotor_reward(pe.item())
         pl = learner.learn_action([lp], dop.compute_rpe(rew))
         hl = homeo.homeostatic_loss(sv); homeo.observe(sv)
