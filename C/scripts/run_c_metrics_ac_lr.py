@@ -26,6 +26,7 @@ from basal_ganglia import TaroLearner
 from dopamine import Dopamine
 from locus_coeruleus import LocusCoeruleus
 from developmental_clock import DevelopmentalClock
+from cerebellum_motor import MotorCerebellum
 from homeostatic_scaling import HomeostaticScaling
 from test_phase8_motor_learning import CombinedParams, rescale_action, to_tensor
 from sensory_encoders import ProprioceptionEncoder, VestibularEncoder
@@ -37,6 +38,10 @@ LOG_DIR = os.environ.get("C_LOGDIR", os.path.join(_BRIDGE, "logs", "C", "ac_prot
 _LR = float(os.environ.get("C_LR", "0.005"))
 _MATURE = os.environ.get("C_MATURE", "0") == "1"  # 1=学習進行に合わせて探索を結晶化
 _REPLAY = os.environ.get("C_REPLAY", "0") == "1"  # 1=睡眠中の経験リプレイ（記憶定着）を行う
+# 【注意すべき機能】既定ON＝運動小脳（自動化/結晶化）。良性は検証済み（発散・フリーズ・
+# agency崩壊なし）だが、現指標では効果ほぼ不変・常時稼働（約26%ブレンド）。将来の壁の
+# 切り分け時は「小脳が効いている可能性」を必ず確認する（`注意すべき機能リスト.md` 参照）。
+_CEREB = os.environ.get("C_CEREBELLUM", "1") == "1"  # 0で無効化可
 CSV_COLUMNS = ["life_min", "train_step", "classify", "margin", "corr", "persist",
                "agency", "mag_ratio", "real_min"]
 
@@ -99,6 +104,10 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
     learner = TaroLearner(CombinedParams(brain, fusion, emb_proj, nat_head), lr=_LR)
     dop = Dopamine(); ne = LocusCoeruleus(); homeo = HomeostaticScaling(dim=sdim)
     dev_clock = DevelopmentalClock()  # ③発達年齢（累積学習回数）。sim秒(②)とは別軸。
+    # 運動小脳。ON/OFFで乱数列を揃えるため、_CEREBに関わらず常に構築する（使う/学習する
+    # のは_CEREB時のみ。gate/imitationは乱数を消費しないので、初期化以降はON/OFFで乱数が一致）。
+    cereb = MotorCerebellum(brain.latent_dim, n_act)
+    cere_opt = torch.optim.Adam(cereb.parameters(), lr=_LR)
     state = {"obs": obs, "hidden": brain.init_motor_hidden(),
              "prev_a": torch.zeros(n_act)}
     t0 = time.time()
@@ -123,13 +132,21 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
         state["hidden"] = brain.init_motor_hidden()
         state["prev_a"] = torch.zeros(n_act)
 
+    def act_mean(z):
+        # 決定的な行動平均（評価・agency用、ノイズなし）。小脳ONなら自動化ブレンドを適用。
+        pm = torch.tanh(brain.motor_head(z))
+        if not _CEREB:
+            return pm
+        w, cere_a, _ = cereb.gate(z, pm)
+        return (1.0 - w) * pm + w * cere_a
+
     def evaluate():
         Zs, acts, nx, cu, self_err, ep = [], [], [], [], [], []
         pdel, adel = [], []
         for _ in range(n_eval):
             sv = fusion.encode(state["obs"]); cf = target_fusion.encode(state["obs"]).detach(); clp = ln_prop(state["obs"])
             z, _, _, hn = zc(sv, state["prev_a"], cf, state["hidden"]); z = z.detach()
-            a = torch.clamp(torch.tanh(brain.motor_head(z)), -1.0, 1.0).detach()
+            a = torch.clamp(act_mean(z), -1.0, 1.0).detach()
             pd = nat_head(torch.cat([z, a], dim=-1)).detach()
             state["obs"], term = step_k(rescale_action(a, env.action_space))
             nlp = ln_prop(state["obs"])
@@ -163,7 +180,7 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
         for _ in range(n):
             sv = fusion.encode(state["obs"]); cf = target_fusion.encode(state["obs"]).detach(); clp = ln_prop(state["obs"])
             z, _, _, hn = zc(sv, state["prev_a"], cf, state["hidden"]); z = z.detach()
-            a = torch.clamp(torch.tanh(brain.motor_head(z)), -1.0, 1.0).detach()
+            a = torch.clamp(act_mean(z), -1.0, 1.0).detach()
             pred = nat_head(torch.cat([z, a], dim=-1)).detach()
             state["obs"], term = step_k(rescale_action(a, env.action_space))
             nlp = ln_prop(state["obs"])
@@ -176,7 +193,7 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
         for k in range(n):
             sv = fusion.encode(state["obs"]); cf = target_fusion.encode(state["obs"]).detach(); clp = ln_prop(state["obs"])
             z, _, _, hn = zc(sv, state["prev_a"], cf, state["hidden"]); z = z.detach()
-            a_self = torch.clamp(torch.tanh(brain.motor_head(z)), -1.0, 1.0).detach()
+            a_self = torch.clamp(act_mean(z), -1.0, 1.0).detach()
             a_ext = self_acts[perm[k]]
             pred = nat_head(torch.cat([z, a_self], dim=-1)).detach()
             state["obs"], term = step_k(rescale_action(a_ext, env.action_space))
@@ -202,9 +219,10 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
         log_row([f"{life_min:.1f}", step, f"{cl:.2f}", f"{mg:.2f}", f"{co:.4f}",
                  f"{pr:.2f}", f"{ag:.2f}", f"{magr:.1f}", f"{real_min:.1f}"])
         noise = 0.05 + ne.get_ne_level() * 0.45
+        cereb_tag = f" cereb=on(err={cereb.err_ema.item():.2f})" if _CEREB else " cereb=off"
         print(f"[AC seed{seed} mat={_MATURE}] life={life_min:.0f}min | classify={cl:.1f}% margin={mg:+.1f}% "
               f"corr={co:.3f} persist={pr:.1f}% agency={ag:.1f}%(mag {magr:.0f}%) | "
-              f"noise={noise:.3f}(mat={ne.maturation:.2f}) real={real_min:.0f}min", flush=True)
+              f"noise={noise:.3f}(mat={ne.maturation:.2f}){cereb_tag} real={real_min:.0f}min", flush=True)
 
     # 経験バッファ（睡眠中リプレイ用）。各ステップの予測に必要な材料を貯める。
     buf = {k: [] for k in ("sv", "prev_a", "a", "cf", "clp", "nlp", "h")}
@@ -233,8 +251,16 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
     for i in range(n_train):
         sv = fusion.encode(state["obs"]); cf = target_fusion.encode(state["obs"]).detach(); clp = ln_prop(state["obs"])
         z, kl, rc, hn = zc(sv, state["prev_a"], cf, state["hidden"].detach())
-        mean = torch.tanh(brain.motor_head(z.detach()))
-        dist = torch.distributions.Normal(mean, 0.05 + ne.get_ne_level() * 0.45)
+        policy_m = torch.tanh(brain.motor_head(z.detach()))
+        std = 0.05 + ne.get_ne_level() * 0.45
+        if _CEREB:
+            # 自動化ブレンド：馴染んだ状態ほど小脳の滑らかな出力で置換＋探索ノイズ減（結晶化）
+            w_c, cere_a, e_c = cereb.gate(z.detach(), policy_m)
+            mean = (1.0 - w_c) * policy_m + w_c * cere_a
+            std = std * (1.0 - w_c)
+        else:
+            mean = policy_m
+        dist = torch.distributions.Normal(mean, std)
         a = torch.clamp(dist.sample(), -1.0, 1.0); lp = dist.log_prob(a).sum()
         pred = clp + nat_head(torch.cat([z, a.detach()], dim=-1))
         state["obs"], term = step_k(rescale_action(a, env.action_space)); nlp = ln_prop(state["obs"])
@@ -248,6 +274,11 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
         pl = learner.learn_action([lp], dop.compute_rpe(rew))
         hl = homeo.homeostatic_loss(sv); homeo.observe(sv)
         learner.update(pe + hl + kl + rc, pl)
+        if _CEREB:
+            # 小脳は方策とは別に、実際に行った運動を教師なしで真似て自動化パターンを固める。
+            closs = cereb.imitation_loss(z.detach(), a.detach())
+            cere_opt.zero_grad(); closs.backward(); cere_opt.step()
+            cereb.observe(e_c)  # 馴染み度の基準を更新（自己正規化）
         dev_clock.tick()  # ③発達年齢を進める（覚醒中の学習1回）。consolidate側では進めない。
         ne.observe_reward(rew); ne.release_ne()
         if _MATURE:
