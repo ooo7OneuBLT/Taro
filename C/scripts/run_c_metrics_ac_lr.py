@@ -25,6 +25,7 @@ from taro_brain_motor import TaroBrainWithMotor
 from basal_ganglia import TaroLearner
 from dopamine import Dopamine
 from locus_coeruleus import LocusCoeruleus
+from developmental_clock import DevelopmentalClock
 from homeostatic_scaling import HomeostaticScaling
 from test_phase8_motor_learning import CombinedParams, rescale_action, to_tensor
 from sensory_encoders import ProprioceptionEncoder, VestibularEncoder
@@ -97,6 +98,7 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
                              nn.LayerNorm(128), nn.Linear(128, prop_dim))
     learner = TaroLearner(CombinedParams(brain, fusion, emb_proj, nat_head), lr=_LR)
     dop = Dopamine(); ne = LocusCoeruleus(); homeo = HomeostaticScaling(dim=sdim)
+    dev_clock = DevelopmentalClock()  # ③発達年齢（累積学習回数）。sim秒(②)とは別軸。
     state = {"obs": obs, "hidden": brain.init_motor_hidden(),
              "prev_a": torch.zeros(n_act)}
     t0 = time.time()
@@ -246,9 +248,11 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
         pl = learner.learn_action([lp], dop.compute_rpe(rew))
         hl = homeo.homeostatic_loss(sv); homeo.observe(sv)
         learner.update(pe + hl + kl + rc, pl)
+        dev_clock.tick()  # ③発達年齢を進める（覚醒中の学習1回）。consolidate側では進めない。
         ne.observe_reward(rew); ne.release_ne()
         if _MATURE:
-            ne.mature((i + 1) / n_train)  # 学習進行に比例して結晶化（探索天井を1.0→0.3へ）
+            # 成熟は sim秒でなく発達年齢(学習回数)で駆動。n_train学習で完全成熟。
+            ne.mature(dev_clock.progress(n_train))
         state["hidden"] = hn.detach(); state["prev_a"] = a.detach()
         if term:
             reset_state()
