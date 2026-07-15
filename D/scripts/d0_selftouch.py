@@ -124,9 +124,19 @@ def run(seed=0, n_train=3600, ckpt=600, n_eval=60):
     csv_path = os.path.join(LOG_DIR, f"d0_seed{seed}_{stamp}.csv")
     with open(csv_path, "w", newline="", encoding="utf-8") as fp:
         csv.writer(fp).writerow(["train_step", "classify", "margin", "corr", "persist", "touch_mean",
-                                 "hand_touch_pct", "a_saturation", "real_min"])
+                                 "hand_touch_pct", "a_saturation",
+                                 "reward_mean", "pe_fast", "pe_slow", "ne_level", "cereb_w", "n_reset", "real_min"])
 
-    env = HybridEnv(gym.make("MIMoSelfBody-v0", actuation_model=ACTUATION))
+    # 【重要な修正 2026-07-15】太郎は環境の課題（目標部位を触れ）を無視して内発的動機で学ぶのに、
+    # 環境側の終了条件が生きていて太郎の人生を勝手に打ち切っていた（＝D0の結果を汚染）。
+    #  ① done_active=True … 課題を達成すると終了。目標部位はランダムなので、初期姿勢で既に
+    #     触れている目標を引くと**3 env.stepで終了**（＝1回も判断を完了できない）。
+    #  ② max_episode_steps=500 … 太郎はK=100なので**5回判断しただけで打ち切り**。
+    # 結果、常に同じ初期姿勢へリセットされ続け、「予測が完璧(corr 0.998)」という
+    # 測定アーティファクトまで出ていた（seed2）。
+    # → 課題終了を切り、エピソード長をCと同じ6000 env.step（＝太郎の判断60回）に揃える。
+    env = HybridEnv(gym.make("MIMoSelfBody-v0", actuation_model=ACTUATION,
+                             done_active=False, max_episode_steps=6000))
     obs, _ = env.reset()
     n_act = env.action_space.shape[0]
     prop_dim = to_tensor(obs["observation"]).shape[0]; tch_dim = to_tensor(obs["touch"]).shape[0]
@@ -138,7 +148,14 @@ def run(seed=0, n_train=3600, ckpt=600, n_eval=60):
     nat_head = nn.Sequential(nn.Linear(brain.latent_dim + n_act, 128), nn.SiLU(),
                              nn.LayerNorm(128), nn.Linear(128, out_dim))
     learner = TaroLearner(CombinedParams(brain, fusion, emb_proj, nat_head), lr=0.005)
-    dop = Dopamine(); ne = LocusCoeruleus(); homeo = HomeostaticScaling(dim=sdim)
+    dop = Dopamine()
+    # 【2026-07-15】NEは relative=True（報酬の絶対値でなく"いつもより良いか"で探索を決める）。
+    # 従来の固定閾値(<0.1で探索/>0.3で活用)は旧報酬 1/(1+誤差) の値域専用で、
+    # 学習進度(≒0.04)を入れると常に「報酬ゼロ」と誤認してNEが天井に張り付き、
+    # 逆に旧報酬(≒0.66)は常に「満足」でNEが底に落ちる＝**報酬の"意味"でなく"大きさ"が
+    # 探索量を支配し、動機の比較が交絡していた**（D0で実測）。相対化で尺度非依存にする。
+    ne = LocusCoeruleus(relative=True)
+    homeo = HomeostaticScaling(dim=sdim)
     cereb = MotorCerebellum(brain.latent_dim, n_act); cere_opt = torch.optim.Adam(cereb.parameters(), lr=0.005)
     state = {"obs": obs, "hidden": brain.init_motor_hidden(), "prev_a": torch.zeros(n_act)}
     t0 = time.time()
@@ -205,6 +222,11 @@ def run(seed=0, n_train=3600, ckpt=600, n_eval=60):
 
     # 予測誤差の速い/遅い走行平均＝学習進度の材料（Cのrunnerと同じ係数）
     pe_fast, pe_slow = 1.0, 1.0
+    # 診断用：チェックポイント間の内発報酬・小脳の自動化重みを貯める
+    # （飽和が28%→70%へ上がる原因が「動機の枯渇(報酬→0で無方向に漂流)」か
+    #  「小脳が飽和行動を自動化して正のフィードバック」かを切り分けるため）
+    rew_hist, cw_hist = [], []
+    n_reset = [0]   # チェックポイント間でエピソードが何回切れたか（細切れ人生の監視）
 
     def intrinsic_reward(pe_value):
         """内発的動機。progress＝学習進度（誤差が減っていれば正）／predict＝旧来の予測しやすさ。"""
@@ -255,6 +277,7 @@ def run(seed=0, n_train=3600, ckpt=600, n_eval=60):
         buf["a"].append(a.detach()); buf["cf"].append(cf.detach())
         buf["clp"].append(clp.detach()); buf["nlp"].append(nlp.detach()); buf["h"].append(state["hidden"].detach())
         pe = mse(pred, nlp); rew = intrinsic_reward(pe.item())
+        rew_hist.append(float(rew)); cw_hist.append(float(w_c))
         pl = learner.learn_action([lp], dop.compute_rpe(rew))
         hl = homeo.homeostatic_loss(sv); homeo.observe(sv)
         learner.update(pe + hl + kl + rc, pl)
@@ -263,16 +286,24 @@ def run(seed=0, n_train=3600, ckpt=600, n_eval=60):
         ne.observe_reward(rew); ne.release_ne()
         state["hidden"] = hn.detach(); state["prev_a"] = a.detach()
         if term:
+            n_reset[0] += 1
             reset_state()
         if (i + 1) % ckpt == 0:
             consolidate()
             cl, mg, co, pr, tm, hp, sa = evaluate()
             rm = (time.time() - t0) / 60
+            rw = float(np.mean(rew_hist)) if rew_hist else 0.0
+            cw = float(np.mean(cw_hist)) if cw_hist else 0.0
+            nel = float(ne.get_ne_level())
             with open(csv_path, "a", newline="", encoding="utf-8") as fp:
                 csv.writer(fp).writerow([i + 1, f"{cl:.2f}", f"{mg:.2f}", f"{co:.4f}", f"{pr:.2f}",
-                                         f"{tm:.1f}", f"{hp:.1f}", f"{sa:.1f}", f"{rm:.1f}"])
+                                         f"{tm:.1f}", f"{hp:.1f}", f"{sa:.1f}",
+                                         f"{rw:.6f}", f"{pe_fast:.4f}", f"{pe_slow:.4f}",
+                                         f"{nel:.3f}", f"{cw:.3f}", n_reset[0], f"{rm:.1f}"])
             print(f"  step {i+1}: margin={mg:+.1f}% corr={co:.3f} persist={pr:.1f}% | "
-                  f"自己接触={hp:.0f}% 飽和={sa:.0f}% 触覚={tm:.0f} ({rm:.0f}分)", flush=True)
+                  f"自己接触={hp:.0f}% 飽和={sa:.0f}% | 報酬={rw:+.5f} pe(速)={pe_fast:.3f} pe(遅)={pe_slow:.3f} "
+                  f"小脳w={cw:.2f} NE={nel:.2f} リセット={n_reset[0]}回 ({rm:.0f}分)", flush=True)
+            rew_hist.clear(); cw_hist.clear(); n_reset[0] = 0
 
     mdir = os.path.join(_HERE, os.pardir, "models"); os.makedirs(mdir, exist_ok=True)
     path = os.path.join(mdir, f"self_touch_{'muscle' if _MUSCLE else 'spring'}_{_REWARD}_seed{seed}.pt")
@@ -284,6 +315,19 @@ def run(seed=0, n_train=3600, ckpt=600, n_eval=60):
                            "actuation": "MuscleModel" if _MUSCLE else "SpringDamperModel", "reward": _REWARD,
                            "fusion": "SelfTouchFusion(interoception+proprio+touch)"}}, path)
     print(f"SAVED {path}\nlog={csv_path}", flush=True)
+
+    # 【必須】学習が終わったら必ず動画を出す（数字だけで判断させない）。
+    # 理由＝太郎の指標は「予測がうまいか」を測るが、予測を最もうまくする方法は
+    # 「何も面白いことをしない」こと。つまり**指標は行動の退化をむしろ高評価する**。
+    # 実測（2026-07-15）：margin+52/corr0.76が過去最高値なのに中身は筋肉の痙攣／
+    # corr0.998の正体は3stepごとのリセット／自己接触65%の正体は腕の叩きつけ。
+    # 指標は構造的にこの失敗を検出できないので、目視をワークフローに埋め込む。
+    try:
+        import subprocess
+        subprocess.run([sys.executable, os.path.join(_HERE, "d0_record_trained.py"),
+                        "20", path, "4"], timeout=900)
+    except Exception as e:
+        print(f"[警告] 自動録画に失敗（学習結果は保存済み）: {type(e).__name__}: {e}", flush=True)
     return path
 
 
