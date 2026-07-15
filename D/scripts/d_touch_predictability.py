@@ -55,6 +55,7 @@ from taro_brain_motor import TaroBrainWithMotor
 from cerebellum_motor import MotorCerebellum
 from test_phase8_motor_learning import rescale_action
 from run_c_metrics_ac_lr import MinimalFusion, _ENV_ID, _touch_params
+from d_thermal import ThermalWrapper
 
 K = 100
 SUB = 10   # K=100の中で10stepごとに標本を取る（隣接stepは相関が強すぎて水増しになる）
@@ -89,7 +90,8 @@ def collect(mp, n_dec):
     """学習済みの太郎を動かし、(固有感覚, 前庭, 真の状態, 触覚) を同時刻で集める。"""
     ck = torch.load(mp, weights_only=False); cfg = ck["config"]
     T = cfg["touch_dim"]
-    env = HybridEnv(gym.make(_ENV_ID, vision_params=None, touch_params=_touch_params()))
+    env = ThermalWrapper(HybridEnv(gym.make(_ENV_ID, vision_params=None,
+                                            touch_params=_touch_params())), tau=1.0)
     fusion = MinimalFusion(T); tfusion = MinimalFusion(T).freeze()
     n_act = env.action_space.shape[0]
     obs, _ = env.reset(seed=cfg["seed"])
@@ -110,7 +112,7 @@ def collect(mp, n_dec):
     # 「学習用と検証用が実質同じデータ」か「検証用が完全な外挿」のどちらかになる（初版の失敗）。
     n_ep = 40
     per_ep = max(1, n_dec // n_ep)
-    P, V, S, Y, EP = [], [], [], [], []
+    P, V, S, Y, TH, EP = [], [], [], [], [], []
     names = None
     for ep in range(n_ep):
         obs, _ = env.reset(seed=1000 + ep)      # 毎回ちがう初期姿勢（jitterで揺らぐ）
@@ -135,6 +137,7 @@ def collect(mp, n_dec):
                     V.append(np.asarray(obs["vestibular"], dtype=np.float32))
                     S.append(np.concatenate([d.qpos, d.qvel]).astype(np.float32))
                     Y.append(tb)
+                    TH.append(obs["thermal"].astype(np.float32))
                     EP.append(ep)
                 if te or tr:
                     break
@@ -144,7 +147,7 @@ def collect(mp, n_dec):
         if (ep + 1) % 10 == 0:
             print(f"  収集中 {ep+1}/{n_ep}エピソード  標本{len(P)}", flush=True)
     env.close()
-    return (np.stack(P), np.stack(V), np.stack(S), np.stack(Y), np.asarray(EP), names)
+    return (np.stack(P), np.stack(V), np.stack(S), np.stack(Y), np.stack(TH), np.asarray(EP), names)
 
 
 EP_GLOBAL = None
@@ -198,7 +201,7 @@ def main():
     n_dec = int(sys.argv[2]) if len(sys.argv) > 2 else 400
     print(f"=== 触覚は原理的に予測できるか（同時刻の対応づけ）===")
     print(f"model={os.path.basename(mp)}  {n_dec}判断ぶん収集（{SUB}stepごとに標本）\n")
-    P, V, S, Y, EP, names = collect(mp, n_dec)
+    P, V, S, Y, TH, EP, names = collect(mp, n_dec)
     global EP_GLOBAL
     EP_GLOBAL = EP
     ntr = int((EP < EP.max() * 0.8).sum()); nte = len(EP) - ntr
@@ -240,7 +243,28 @@ def main():
     (r2, r2tr) = fit_and_score(np.concatenate([P, V], 1), Y, "②固有感覚＋前庭")
     (r3, r3tr) = fit_and_score(S, Y, "③真の状態（オラクル）")
 
+    # ★本命（2026-07-15）：温度を**同じ入力・同じデータ・同じ分割・同じ出力次元(55)**にかける。
+    # 変えるのは予測対象だけ。固有感覚(+25%)側に来れば「滑らかなら学べる」＝仮説が実証、
+    # 触覚(-88%)側なら仮説は死ぬ。
+    print("\n--- ★本命：温度は予測できるか（対象だけを差し替え）---")
+    (rth, rthtr) = fit_and_score(S, TH, "④真の状態→温度")
+    (rth2, _) = fit_and_score(np.concatenate([P, V], 1), TH, "⑤太郎の感覚→温度")
+
     print("\n=== 判定 ===")
+    print("同じ入力(真の状態225次元)・同じデータ・同じ分割・同じ出力次元(55)で、予測対象だけを変えた：")
+    print(f"    固有感覚（学べると分かっている） 検証R² {ctrl2_te*100:+6.1f}%")
+    print(f"    温度（今回追加）                 検証R² {rth*100:+6.1f}%")
+    print(f"    接触力（学べない）               検証R² {r3*100:+6.1f}%")
+    if rth > ctrl2_te * 0.5:
+        print("\n→ **温度は学べる側**。予測対象を『暴れる力』から『滑らかな量』に変えれば学習できる")
+        print("   ＝ユーザーの仮説（力だけでは足りない）が、同じ測定器の対比で実証された。")
+    elif rth < 0:
+        print("\n→ **温度も学べない側**＝滑らかにしただけでは足りない。仮説は棄却。")
+        print("   滑らかさ以外の要因（例：接触の発生そのものがカオス的）を疑う。")
+    else:
+        print("\n→ 中間。温度は力より良いが固有感覚には届かない。本文を見て考える。")
+
+    print("\n--- 参考：接触力についての判定 ---")
     if env_msg:
         print("→ 測定器が壊れているので判定しない。")
         return

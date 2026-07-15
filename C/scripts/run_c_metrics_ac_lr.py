@@ -81,6 +81,17 @@ _NE_REL = os.environ.get("C_NE_RELATIVE", "0") == "1"
 #     触覚の次元数に薄められて何も分からない＝D0で踏んだ罠）。
 _SUPINE = os.environ.get("C_SUPINE", "0") == "1"
 _TOUCH = os.environ.get("C_TOUCH", "0") == "1"
+# 触覚を「予測対象」にするか「入力（文脈）」だけにするか。既定は従来どおり予測対象。
+#   target : 触覚を fusion の入力にもし、**予測対象にもする**（従来。仰向け3シードで
+#            触覚 persist 97〜104%＝学べない）
+#   input  : 触覚を fusion の入力にはするが、**予測対象からは外す**（＝予測するのは固有感覚だけ）
+# 【根拠・2026-07-15】同じ入力(真の物理状態)・同じデータ・同じ分割・同じ出力次元(55)で
+# 予測対象だけを変えた対比：固有感覚 +26.5% / 温度 −53.1% / 接触力 −54.4%（検証R²）。
+# ＝接触に由来する信号は、姿勢からの予測が原理的には可能でも**実質的に不可能**（接触は
+# 姿勢の不連続な関数）。温度で滑らかにしても解決しなかった（仮説は棄却済み）。
+# → **触覚を予測対象にすること自体が誤り**の可能性。触覚は「予測するもの」ではなく
+#   「予測に使う手がかり」ではないか、を測るための切替。
+_TOUCH_MODE = os.environ.get("C_TOUCH_MODE", "target")
 # 省メモリ版（絵を落とす。物理は不変・視覚ONなら自動で素に戻る）。詳細は D/scripts/mimo_lean.py。
 # 1本 2.64GB→0.28GB＝同時実行 6本→約22本。既定ON（仰向けは常に省メモリ版の上に載る）。
 # C_LEAN=0 で従来の素のモデルに戻せる（アブレーション/描画品質が要るとき用）。
@@ -128,9 +139,13 @@ class MinimalFusion:
 
 
 def ln_prop(obs):
-    """予測対象。既定は固有感覚のみ（従来のC）。C_TOUCH=1なら固有感覚＋触覚。"""
+    """予測対象。既定は固有感覚のみ（従来のC）。
+
+    C_TOUCH=1 かつ C_TOUCH_MODE=target のときだけ触覚を予測対象に加える。
+    C_TOUCH_MODE=input なら触覚は fusion の入力にだけ入り、予測対象は固有感覚のまま。
+    """
     v = to_tensor(obs["observation"])
-    if _TOUCH:
+    if _TOUCH and _TOUCH_MODE == "target":
         v = torch.cat([v, to_tensor(obs["touch"])])
     return torch.nn.functional.layer_norm(v, v.shape).detach()
 
@@ -162,9 +177,16 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
     touch_dim = int(env.observation_space["touch"].shape[0]) if _TOUCH else 0
     fusion = MinimalFusion(touch_dim); target_fusion = MinimalFusion(touch_dim).freeze()
     n_act = env.action_space.shape[0]
-    obs, _ = env.reset()
+    # 【バグ修正・2026-07-15】最初のresetに必ずseedを渡す。
+    # 環境の乱数(`env.unwrapped.np_random`)は gym が別に管理しており、torch.manual_seed も
+    # np.random.seed も効かない。仰向け環境は reset のたびに np_random で初期姿勢を揺らす
+    # （jitter）ので、**シードなしresetだと毎回ちがう姿勢から始まり、シードで再現できない**。
+    # 立位Cはjitterが無いので影響を受けず、この穴は仰向けを足すまで露呈しなかった。
+    # 症状：同一シード・同一条件のはずの2ランで life=0min が 58.99 vs 58.20 とズレる。
+    obs, _ = env.reset(seed=seed)
     sdim = fusion.encode(obs).shape[0]; prop_dim = to_tensor(obs["observation"]).shape[0]
-    out_dim = prop_dim + touch_dim   # nat_headが吐く次元＝予測対象の次元
+    # nat_headが吐く次元＝予測対象の次元。touch_mode=input なら触覚は予測対象に入らない。
+    out_dim = prop_dim + (touch_dim if _TOUCH_MODE == "target" else 0)
     brain = TaroBrainWithMotor(vocab_size=3, sensory_dim=sdim, n_actuators=n_act)
     emb_dim = brain.sensory_proj.out_features  # GRUの入力次元(=64)
 
@@ -480,7 +502,7 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
                  f"{pr:.2f}", f"{ag:.2f}", f"{magr:.1f}", f"{real_min:.1f}"])
         noise = 0.05 + ne.get_ne_level() * 0.45
         cereb_tag = f" cereb=on(err={cereb.err_ema.item():.2f})" if _CEREB else " cereb=off"
-        print(f"[AC seed{seed} rew={_REWARD} ne={'rel' if _NE_REL else 'abs'}] life={life_min:.0f}min | classify={cl:.1f}% margin={mg:+.1f}% "
+        print(f"[AC seed{seed} rew={_REWARD} ne={'rel' if _NE_REL else 'abs'} touch={_TOUCH_MODE if _TOUCH else 'off'}] life={life_min:.0f}min | classify={cl:.1f}% margin={mg:+.1f}% "
               f"corr={co:.3f} persist={pr:.1f}% agency={ag:.1f}%(mag {magr:.0f}%) | "
               f"noise={noise:.3f}(mat={ne.maturation:.2f}){cereb_tag} real={real_min:.0f}min", flush=True)
 
@@ -622,7 +644,7 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
                 "config": {"sdim": sdim, "prop_dim": prop_dim, "touch_dim": touch_dim,
                            "out_dim": out_dim, "n_act": n_act, "K": K,
                            "seed": seed, "n_train": n_train, "replay": _REPLAY,
-                           "cereb": _CEREB, "supine": _SUPINE, "touch": _TOUCH,
+                           "cereb": _CEREB, "supine": _SUPINE, "touch": _TOUCH, "touch_mode": _TOUCH_MODE,
                            "reward": _REWARD, "ne_relative": _NE_REL, "env_id": _ENV_ID,
                            "fusion": "MinimalFusion(interoception+proprio621+vestibular"
                                      + ("+touch)" if _TOUCH else ")")}}
