@@ -70,7 +70,21 @@ class D1Env(MIMoV2DummyEnv):
         super().__init__(**kwargs)
 
         m = self.model
-        if self._layout == "supine":
+        if self._layout == "held":
+            # 【2026-07-15】接触は「達成するもの」ではなく「与えられるもの」ではないか、を試す配置。
+            # 仰向けのアルファの**胸の上にベータを乗せる**＝重力が接触を保つ。
+            #   ・**到達力が要らない**：太郎は手を伸ばせない（実測 到達力~50%・縮退が原因で学習量では
+            #     解けない）。今日の壁はそこだった。抱っこなら接触は最初から在るので壁が消える。
+            #   ・**信号が一定にならない**：太郎が自分の腕を触る接触は太郎の姿勢で決まる（＝固有感覚の
+            #     焼き直し）。抱えた相手が動く接触は**相手の行動で決まる**＝太郎自身の状態からは
+            #     絶対に予測できない＝それが「他者」の定義。
+            #   ・**人間にも実在する**：カンガルーケア（肌と肌を合わせて抱く）。乳児は親を探して手を
+            #     伸ばさない。抱かれる。
+            m.body("hip").pos = [0, 0, 0.2]
+            m.body("hip").quat = _SUPINE_QUAT.copy()
+            m.body(BETA + "hip").pos = [0, 0, 0.2 + self._sep]   # アルファの真上
+            m.body(BETA + "hip").quat = _SUPINE_QUAT.copy()
+        elif self._layout == "supine":
             # 両者を仰向けに。ベータはアルファの真横（y方向）に、同じ向きで寝かせる。
             m.body("hip").pos = [0, 0, 0.2]
             m.body("hip").quat = _SUPINE_QUAT.copy()
@@ -87,7 +101,8 @@ class D1Env(MIMoV2DummyEnv):
         spec_b = mujoco.MjSpec.from_file(paths.SCENE)
         fr = spec_a.worldbody.add_frame()
         # 配置の高さは姿勢で変える（仰向けは床すれすれ、座位は少し上げる）
-        fr.pos = [0, self._sep, 0.0] if self._layout == "supine" else [self._sep, 0, 0.0]
+        fr.pos = ([0, 0, self._sep] if self._layout == "held" else
+                  ([0, self._sep, 0.0] if self._layout == "supine" else [self._sep, 0, 0.0]))
         fr.attach_body(spec_b.body("mimo_location"), BETA, "")
         if self._layout == "seated":
             # 骨盤支持＝根元(mimo_location)を世界に溶接する。
