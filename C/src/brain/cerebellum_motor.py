@@ -2,7 +2,7 @@
 運動小脳（連続版, MotorCerebellum） — 運動の自動化（結晶化）
 
 【人間模倣】反復練習した運動は自動化し、実行のばらつきが減って形が安定する
-（VMS＝Vocal Motor Schemes, Vihman／小脳のフィードフォワード制御, Miall & Wolpert 1996）。
+（VMS＝Vocal Motor Schemes, McCune & Vihman 2001／小脳のフィードフォワード制御, Miall & Wolpert 1996, Neural Networks 9:1265-1279）。
 太郎本体（B/src/taro/brain/cerebellum.py）の離散版（口の動きの辞書＋ n/(n+K)）と
 同じ原理を、MIMo の連続90関節へ移植したもの。
 

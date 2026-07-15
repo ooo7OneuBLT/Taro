@@ -97,7 +97,7 @@ class TaroBrain(nn.Module):
 
         self.perception_head = nn.Linear(hidden_dim, vocab_size)
 
-        # 【人間模倣】喃語の反復性（Frame/Content理論, MacNeilage & Davis 1998）。
+        # 【人間模倣】喃語の反復性（Frame/Content理論, MacNeilage 1998 BBS）。
         # 喃語は顎の開閉振動（フレーム）が生む音節で、舌・唇（コンテンツ）は
         # 最初ほとんど動かないため同じ音節が反復される（ままま等）。これを
         # 「直前に出した音の口の形を選び直しやすくする」調音の慣性バイアスとして
@@ -343,7 +343,7 @@ class TaroBrain(nn.Module):
         """
         許可された選択肢内でのカテゴリカル分布のエントロピーを0〜1に正規化する。
 
-        【人間模倣＝既存AI研究】Oudeyer & Kaplanらの内発的動機付けロボティクス
+        【人間模倣＝既存AI研究】Oudeyer, Kaplan & Hafner (2007) の内発的動機付けロボティクス
         （novelty-seeking）：まだ結果が予測しにくい行動ほど「面白い」。
         1に近いほど「まだどれを選ぶか定まっていない＝興味深い」、
         0に近いほど「ほぼ決まっている＝予測可能で退屈」。
@@ -363,7 +363,7 @@ class TaroBrain(nn.Module):
         """
         【人間模倣】直前に選んだ調音（口の形）へ戻りやすくする調音慣性バイアス。
 
-        Frame/Content理論（MacNeilage & Davis 1998）：喃語期は顎（フレーム）が
+        Frame/Content理論（MacNeilage 1998, BBS 21:499-546）：喃語期は顎（フレーム）が
         反復し、舌・唇（コンテンツ）が据え置かれるため同じ音節が繰り返される。
         prev_idxが許可集合にあるとき、その選択肢のlogitに定数を足し、
         次の音節が同じ口の形になりやすくする。閾値ではなく物理的な慣性の近似。
