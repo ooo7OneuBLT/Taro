@@ -55,6 +55,25 @@
 詳細な版管理表：[A/docs/版管理.md](A/docs/版管理.md)、[B/docs/版管理.md](B/docs/版管理.md)（B6-4まで記載）。それ以降の細かい進捗（リプレイビューアの改善等）は[研究日誌.md](B/docs/研究日誌.md)を参照。
 発達段階全体のロードマップ：[doc/発達段階ロードマップ.md](doc/発達段階ロードマップ.md)。
 
+## 引用・謝辞
+
+太郎の**体**は MIMo です。他の研究者の成果であり、作者が引用を明示的に要請しているため記載します。
+
+> Mattern, D., Schumacher, P., López, F. M., Raabe, M. C., Ernst, M. R., Aubret, A., & Triesch, J. (2024).
+> MIMo: A Multimodal Infant Model for Studying Cognitive Development.
+> *IEEE Transactions on Cognitive and Developmental Systems*, 16(4), 1291–1301.
+
+MIMo は MIT ライセンス（Copyright (c) 2025 F. M. López, D. Mattern, M. Lenz, P. Schumacher,
+M. C. Raabe, M. R. Ernst, A. Aubret, J. Triesch）。本リポジトリには含めていません。
+
+太郎の**脳**の各部品にも、実装の中身として使った研究があります（睡眠リプレイ、予測符号化、
+内発的動機、小脳の順モデル、内受容 ほか）。**実際に使った研究の全一覧**は [引用.md](引用.md) を
+参照してください。書誌情報は一次情報で裏を取っています。
+
+なお [引用.md](引用.md) は「**使った研究**」だけを載せ、「太郎が独自に到達した仕組みが既存研究と
+どう対応していたか」という**対応関係**は [関連研究.md](関連研究.md) に分けています。前者は事実、
+後者は主張なので、混ぜないためです。
+
 ## 関連研究との対応
 
 2026年7月、目標B6-4（語↔内的状態の連合）が、記号創発ロボティクス分野で確立された

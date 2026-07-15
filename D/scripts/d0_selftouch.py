@@ -48,7 +48,7 @@ ACTUATION = MuscleModel if _MUSCLE else SpringDamperModel
 #
 # 【人間模倣】乳児は「予測しやすいもの」でなく「**今まさに学べるもの**」を探す。
 # 学習進度＝予測誤差の"減り具合"を動機にするのが発達ロボティクスの標準
-# （Oudeyer & Kaplan, Intelligent Adaptive Curiosity / Schmidhuber の圧縮進度）。
+# （Oudeyer, Kaplan & Hafner 2007, Intelligent Adaptive Curiosity / Schmidhuber の圧縮進度）。
 # これは暗い部屋問題（学べない＝進度0＝退屈）と、ノイズTV問題（永遠に学べない＝進度0）
 # の両方を同時に避ける。
 _REWARD = os.environ.get("D0_REWARD", "progress")  # "progress"（学習進度） / "predict"（旧・予測しやすさ）
