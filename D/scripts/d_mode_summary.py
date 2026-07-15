@@ -26,26 +26,60 @@ LOG = os.path.join(_HERE, os.pardir, "logs", "mode")
 MODES = ["off", "target", "input"]
 
 
-def load(mode):
+def load(mode, at_step=None):
+    """at_step のチェックポイントの値を返す（Noneなら各ランの最終行）。
+
+    条件によって学習の実時間が大きく違う（触覚ありは触覚なしの約3倍遅い）。
+    完了だけを待つと比較が遅れるので、**全条件に共通する最新のチェックポイントで揃えて**
+    比べられるようにする。**学習段階の違うものを混ぜて比べない**のが要点（項1＝交絡）。
+    """
     rows = {}
     for p in sorted(glob.glob(os.path.join(LOG, mode, "ac_metrics_seed*_*.csv"))):
         seed = int(os.path.basename(p).split("seed")[1].split("_")[0])
         with open(p, encoding="utf-8") as fp:
-            r = list(csv.DictReader(fp))
+            r = [x for x in csv.DictReader(fp) if int(x["train_step"]) > 0]
         if not r:
             continue
-        last = r[-1]
-        if int(last["train_step"]) < 3600:      # 未完了は除く（途中の値を混ぜない）
-            continue
-        rows[seed] = {k: float(last[k]) for k in ("margin", "corr", "persist", "agency", "classify")}
+        if at_step is None:
+            pick = r[-1]
+        else:
+            cand = [x for x in r if int(x["train_step"]) == at_step]
+            if not cand:
+                continue
+            pick = cand[0]
+        rows[seed] = {k: float(pick[k]) for k in ("margin", "corr", "persist", "agency", "classify")}
+        rows[seed]["step"] = int(pick["train_step"])
     return rows
 
 
+def common_step():
+    """全条件・全シードに共通して存在する最大のtrain_step。"""
+    per_mode = []
+    for m in MODES:
+        steps = []
+        for p in glob.glob(os.path.join(LOG, m, "ac_metrics_seed*_*.csv")):
+            with open(p, encoding="utf-8") as fp:
+                s = {int(x["train_step"]) for x in csv.DictReader(fp) if int(x["train_step"]) > 0}
+            if s:
+                steps.append(s)
+        if not steps:
+            return None
+        per_mode.append(set.intersection(*steps))
+    common = set.intersection(*per_mode)
+    return max(common) if common else None
+
+
 def main():
-    print("=== 触覚の扱い3条件 × 6シード（仰向け・3600step）===")
+    step = common_step()
+    if step is None:
+        print("まだ比較できるチェックポイントが揃っていない。")
+        return
+    print("=== 触覚の扱い3条件 × 6シード（仰向け）===")
+    print(f"**全条件に共通する最新のチェックポイント train_step={step} で揃えて比較**")
+    print("（触覚ありは触覚なしの約3倍遅い。学習段階の違うものを混ぜて比べない＝項1）")
     print("off/input は予測対象が同一(固有感覚621)＝直接比較できる。")
     print("target は予測対象の85%が触覚なので、この margin は薄められた見かけの値（要分離測定）。\n")
-    data = {m: load(m) for m in MODES}
+    data = {m: load(m, step) for m in MODES}
     stats = {}
     for m in MODES:
         d = data[m]
@@ -64,21 +98,31 @@ def main():
     if "off" in stats and "input" in stats:
         a, b = stats["off"][0], stats["input"][0]
         diff = b.mean() - a.mean()
-        # ばらつきと差を比べる。差がばらつきに埋もれていれば「差がある」とは言わない（項12）。
-        pooled = np.sqrt((a.var(ddof=1) + b.var(ddof=1)) / 2) if len(a) > 1 and len(b) > 1 else float("nan")
-        print(f"\n=== off vs input（予測対象が同一なので直接比較できる）===")
-        print(f"  off  : {a.mean():+.2f}  (n={len(a)}, 標準偏差 {a.std(ddof=1):.2f})")
-        print(f"  input: {b.mean():+.2f}  (n={len(b)}, 標準偏差 {b.std(ddof=1):.2f})")
-        print(f"  差   : {diff:+.2f}   条件内のばらつき(pooled SD): {pooled:.2f}")
-        if abs(diff) < pooled:
-            print(f"\n→ **差はばらつきに埋もれている**（差{abs(diff):.2f} < ばらつき{pooled:.2f}）。")
-            print("   ＝触覚を文脈として持っても、自己モデルは良くも悪くもならない。")
-            print("   触覚は『予測するもの』でも『役に立つ手がかり』でもない、が今のところの読み。")
+        # 【修正・2026-07-15】「差 > 条件内のばらつき(pooled SD)」で有意と判定していたが**誤り**。
+        # 比べるべきは**差の標準誤差** SE=√(va/na + vb/nb)。pooled SD と比べると甘すぎて、
+        # 実際 off vs input の差 −2.70（p=0.098＝有意でない）を「悪くなる」と誤判定した。
+        # 分散が違う（1.71 vs 3.07）ので等分散を仮定しない Welch を使う。
+        va, vb = a.var(ddof=1), b.var(ddof=1)
+        se = np.sqrt(va / len(a) + vb / len(b))
+        t = diff / se if se > 0 else 0.0
+        df = ((va / len(a) + vb / len(b)) ** 2 /
+              ((va / len(a)) ** 2 / (len(a) - 1) + (vb / len(b)) ** 2 / (len(b) - 1)))
+        print("\n=== off vs input（予測対象が同一なので直接比較できる）===")
+        print(f"  off  : {a.mean():+.2f}  (n={len(a)}, 標準偏差 {a.std(ddof=1):.2f})  {np.round(a, 1)}")
+        print(f"  input: {b.mean():+.2f}  (n={len(b)}, 標準偏差 {b.std(ddof=1):.2f})  {np.round(b, 1)}")
+        print(f"  差   : {diff:+.2f}   差の標準誤差 {se:.2f}   Welchのt = {t:.2f} (自由度 {df:.1f})")
+        crit = 2.23   # 自由度≈10 の両側5%臨界値（scipy非依存でも判定できるように）
+        if abs(t) < crit:
+            print(f"\n→ **差は有意でない**（|t|={abs(t):.2f} < {crit}）。")
+            print("   ＝**触覚を文脈として持っても、自己モデルは損なわれない**。")
+            print("   触覚を入力に入れたまま、予測対象から外す設計が成立する。")
+            need = 2 * (2.8 * np.sqrt((va + vb) / 2) / abs(diff)) ** 2 if diff else float("inf")
+            print(f"   （この大きさの差を検出するには1条件あたり約{need:.0f}シード必要）")
         elif diff > 0:
-            print(f"\n→ **触覚を文脈として持つと自己モデルが良くなる**（+{diff:.2f} > ばらつき{pooled:.2f}）。")
+            print(f"\n→ **触覚を文脈として持つと自己モデルが良くなる**（|t|={abs(t):.2f} > {crit}）。")
             print("   ＝触覚は『予測するもの』ではなく『予測に使う手がかり』。設計変更の根拠になる。")
         else:
-            print(f"\n→ **触覚を文脈として持つと自己モデルが悪くなる**（{diff:.2f}）。")
+            print(f"\n→ **触覚を文脈として持つと自己モデルが悪くなる**（|t|={abs(t):.2f} > {crit}）。")
             print("   ＝触覚は入力としても害。Dで触覚を使う設計そのものを問い直す必要がある。")
     print("\n※targetの固有感覚だけの margin は d_supine_split.py で別途測る（合計は薄まるため）。")
 
