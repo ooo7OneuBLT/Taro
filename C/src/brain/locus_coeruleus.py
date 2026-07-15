@@ -29,13 +29,31 @@ class LocusCoeruleus:
 
     def __init__(self, reward_window=20, base_ne=0.5,
                  ne_increase_rate=0.05, ne_decrease_rate=0.03,
-                 min_ne=0.1, max_ne=1.0, mature_max_ne=0.3):
+                 min_ne=0.1, max_ne=1.0, mature_max_ne=0.3,
+                 relative=False, baseline_momentum=0.99):
         """
         reward_window: 最近何ターンの報酬を見るか
         base_ne: NEの基準レベル
         ne_increase_rate: 報酬ゼロ時のNE上昇速度
         ne_decrease_rate: 報酬あり時のNE低下速度
         mature_max_ne: 完全成熟時のNE上限（探索の天井）
+        relative: True で「報酬の絶対値の固定閾値(0.1/0.3)」でなく
+                  「長期の基準線と比べて、いつもより良いか」でNEを決める（下記）。
+        baseline_momentum: relative時の長期基準線の慣性
+
+        【relative=True を足した理由（2026-07-15・D0で発覚）】
+        従来の判定は報酬の**絶対値**に固定閾値（<0.1で探索／>0.3で活用）を当てていた。
+        この0.1/0.3は旧報酬 `1/(1+誤差)`（値域0〜1）に合わせた数字なので、
+        **値域の違う報酬関数を入れると壊れる**。実際、内発的動機を学習進度
+        （pe_slow−pe_fast≒0.04、時に負）に変えたところ、常に「<0.1＝報酬ゼロ」と
+        誤認してNEが天井に張り付き、「好奇心で探索している」ように見えて実態は
+        **"報酬が無いと勘違いして闇雲に探索していた"**だけだった。逆に旧報酬(≒0.66)は
+        常に「>0.3＝満足」でNEが底に落ち、探索を止めて暗い部屋（飽和76%）へ向かった。
+        ＝**報酬関数の"意味"でなく"大きさ"がNEを支配していた**（比較が交絡する）。
+
+        太郎は既に Dopamine.compute_rpe で「報酬 − 基準線」＝"いつもより良いか"を
+        計算している。NEだけが絶対値を見ているのは設計の不整合なので、同じ発想に揃える。
+        ＝新しい恣意的な定数を持ち込まず、閾値そのものを捨てる。
         """
         self.reward_history = []
         self.reward_window = reward_window
@@ -59,6 +77,9 @@ class LocusCoeruleus:
         # 人間の結晶化を駆動すると主張するものではない。
         self.mature_max_ne = mature_max_ne
         self.maturation = 0.0  # 0=新生児（探索大）, 1=完全成熟（結晶化）
+        self.relative = relative
+        self.baseline_momentum = baseline_momentum
+        self.baseline = None  # relative時の長期基準線（初回の報酬で初期化）
 
     def mature(self, progress):
         """
@@ -95,6 +116,33 @@ class LocusCoeruleus:
         # 探索の天井は成熟で下がる（B2-8）。報酬ベースの調整（既存）と
         # 成熟ベースの上限（新規）の両方が同時に働く＝人間の2機構を再現。
         ceiling = self._ceiling()
+
+        if self.relative:
+            # 【相対モード】報酬の絶対値でなく「長期の基準線と比べて、いつもより
+            # 良いか悪いか」で探索/活用を切り替える（＝ドーパミンのRPEと同じ発想）。
+            # 物差しは**報酬自身のばらつき(σ)**を使う＝どんな値域でも壊れず、
+            # 新しい恣意的な閾値も持ち込まない（従来の0.1/0.3は旧報酬の値域専用だった）。
+            # 従来版と同じ3分岐（探索／活用／中間は基準へ戻る）を保つ：中間帯が
+            # 無いとNEが必ず端まで振り切れて安定しない（実測で確認）。
+            m = self.baseline_momentum
+            if self.baseline is None:
+                self.baseline = recent_avg
+                self.baseline_var = 0.0
+            delta = recent_avg - self.baseline
+            self.baseline_var = m * self.baseline_var + (1 - m) * (delta ** 2)
+            self.baseline = m * self.baseline + (1 - m) * recent_avg
+            std = self.baseline_var ** 0.5
+            z = 0.0 if std < 1e-9 else delta / std
+            if z < -1.0:      # いつもより明確に悪い（-1σ超）→ もっと探索
+                self.ne_level = min(ceiling, self.ne_level + self.ne_increase_rate)
+            elif z > 1.0:     # いつもより明確に良い（+1σ超）→ 今のやり方を続ける
+                self.ne_level = max(self.min_ne, self.ne_level - self.ne_decrease_rate)
+            else:             # いつもどおり → 基準レベルへ戻る（安定装置）
+                if self.ne_level > self.base_ne:
+                    self.ne_level -= self.ne_decrease_rate * 0.5
+                elif self.ne_level < self.base_ne:
+                    self.ne_level += self.ne_increase_rate * 0.5
+            return min(self.ne_level, ceiling)
 
         if recent_avg < 0.1:
             # 報酬がほぼゼロ → NEを増やす（探索モードへ）。ただし成熟した

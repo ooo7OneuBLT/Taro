@@ -29,8 +29,20 @@ from developmental_clock import DevelopmentalClock
 from cerebellum_motor import MotorCerebellum
 from homeostatic_scaling import HomeostaticScaling
 from test_phase8_motor_learning import CombinedParams, rescale_action, to_tensor
-from sensory_encoders import ProprioceptionEncoder, VestibularEncoder
+from sensory_encoders import ProprioceptionEncoder, VestibularEncoder, TouchEncoder
 from insula import Insula
+
+# 仰向け環境（D側で定義）。C_SUPINE=1 のときだけ使う。
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                os.pardir, os.pardir, "D", "scripts"))
+from gymnasium.envs.registration import register
+if os.environ.get("C_SUPINE", "0") == "1":
+    from d_supine_env import SupineMimoEnv  # noqa
+    register(id="TaroSupine-v0", entry_point="d_supine_env:SupineMimoEnv", max_episode_steps=6000)
+elif os.environ.get("C_LEAN", "1") == "1":
+    from mimo_lean import LeanMimoEnv  # noqa
+    # max_episode_steps=6000 は MIMoBenchV2-v0 の登録値と同一（＝太郎の人生の長さを変えない）
+    register(id="TaroBenchV2Lean-v0", entry_point="mimo_lean:LeanMimoEnv", max_episode_steps=6000)
 
 mse = torch.nn.functional.mse_loss
 DT = 0.01
@@ -49,24 +61,64 @@ _GB_SWITCH = os.environ.get("C_GB_SWITCH", "pe")  # 探索/目標の切替: fixe
 _CLPROBE = os.environ.get("C_CLPROBE", "0") == "1"  # 1=C4診断＝閉ループ制御 vs 開ループの到達比較
 _CLTRAIN = os.environ.get("C_CLTRAIN", "0") == "1"  # 1=閉ループreaching訓練（held goal＋停止条件）
 _INVTRAJ = os.environ.get("C_INVTRAJ", "0") == "1"  # 1=各チェックポイントで逆probeも回し、逆モデルの"天井"軌跡(recover_corr/star)を記録
+# 内発的動機の切替（既定＝従来の「予測しやすさ」）。Cは触覚なし・margin+51が確立した唯一の
+# "うまくいくと分かっている環境"なので、ここで動機だけを差し替えれば**触覚という交絡なしに
+# 動機の良し悪しだけ**を判定できる（D0では予測対象の89%が触覚で交絡していた）。
+#   predict  : 1/(1+誤差)＝予測しやすい状態を求める（従来）
+#   progress : pe_slow−pe_fast＝学習進度（Oudeyerの好奇心。誤差が"減っている"ことを求める）
+_REWARD = os.environ.get("C_REWARD", "predict")
+# NEを相対化するか（既定＝従来の絶対閾値）。従来は報酬の絶対値に固定閾値(<0.1で探索/>0.3で活用)を
+# 当てるので、値域の違う報酬関数を入れると壊れる（学習進度≒0.04は常に「報酬ゼロ」と誤認される）。
+# relative=Trueは「長期基準線と比べていつもより良いか」で決める＝尺度非依存（D0で必要性が判明）。
+_NE_REL = os.environ.get("C_NE_RELATIVE", "0") == "1"
+# 【2026-07-15】姿勢と触覚の切替。どちらも既定OFF＝従来の立位・触覚なしのCと完全に同じ。
+#   C_SUPINE=1 : 仰向けで開始する。録画で判明した通り、既定(立位)のCは**開始3秒で転倒し、
+#     以降ずっと床でもがいている**。margin+51はその状態で出た数字。仮説＝「Cが成功したのは
+#     転んで偶然"手足が自由に振れる状態"になったから」。仰向けはそれを意図してやる。
+#     シーンはCと同一(benchmarkv2)のまま姿勢だけ変える＝比較で変わる要素は姿勢1つだけ。
+#   C_TOUCH=1  : 触覚を足す（乳児acuity＝somatotopy比を保ったまま解像度を2倍粗く）。
+#     予測対象が固有感覚621→固有感覚+触覚 になるので、評価は必ず分けて見る（合計だけ見ると
+#     触覚の次元数に薄められて何も分からない＝D0で踏んだ罠）。
+_SUPINE = os.environ.get("C_SUPINE", "0") == "1"
+_TOUCH = os.environ.get("C_TOUCH", "0") == "1"
+# 省メモリ版（絵を落とす。物理は不変・視覚ONなら自動で素に戻る）。詳細は D/scripts/mimo_lean.py。
+# 1本 2.64GB→0.28GB＝同時実行 6本→約22本。既定ON（仰向けは常に省メモリ版の上に載る）。
+# C_LEAN=0 で従来の素のモデルに戻せる（アブレーション/描画品質が要るとき用）。
+_LEAN = os.environ.get("C_LEAN", "1") == "1"
+_ENV_ID = "TaroSupine-v0" if _SUPINE else ("TaroBenchV2Lean-v0" if _LEAN else "MIMoBenchV2-v0")
+
+
+def _touch_params():
+    if not _TOUCH:
+        return None
+    from d_supine_env import infant_touch_params
+    return infant_touch_params(2.0)
 CSV_COLUMNS = ["life_min", "train_step", "classify", "margin", "corr", "persist",
                "agency", "mag_ratio", "real_min"]
 
 
 class MinimalFusion:
-    def __init__(self):
+    def __init__(self, touch_dim=0):
         self.insula = Insula(state_dim=4, embedding_dim=64)
         self.proprio = ProprioceptionEncoder(input_dim=621)
         self.vestibular = VestibularEncoder(input_dim=6)
+        # 触覚は C_TOUCH=1 のときだけ足す。0なら従来のCと1バイトも変わらない。
+        self.touch = TouchEncoder(input_dim=touch_dim, hidden_dim=256, embedding_dim=64) if touch_dim else None
 
     def parameters(self):
         import itertools
-        return itertools.chain(self.insula.parameters(), self.proprio.parameters(), self.vestibular.parameters())
+        ms = [self.insula.parameters(), self.proprio.parameters(), self.vestibular.parameters()]
+        if self.touch is not None:
+            ms.append(self.touch.parameters())
+        return itertools.chain(*ms)
 
     def encode(self, obs):
-        f = torch.cat([self.insula(to_tensor(obs["interoception"])),
-                       self.proprio(to_tensor(obs["observation"])),
-                       self.vestibular(to_tensor(obs["vestibular"]))], dim=-1)
+        parts = [self.insula(to_tensor(obs["interoception"])),
+                 self.proprio(to_tensor(obs["observation"])),
+                 self.vestibular(to_tensor(obs["vestibular"]))]
+        if self.touch is not None:
+            parts.append(self.touch(to_tensor(obs["touch"])))
+        f = torch.cat(parts, dim=-1)
         return torch.nn.functional.layer_norm(f, f.shape)
 
     def freeze(self):
@@ -76,7 +128,10 @@ class MinimalFusion:
 
 
 def ln_prop(obs):
+    """予測対象。既定は固有感覚のみ（従来のC）。C_TOUCH=1なら固有感覚＋触覚。"""
     v = to_tensor(obs["observation"])
+    if _TOUCH:
+        v = torch.cat([v, to_tensor(obs["touch"])])
     return torch.nn.functional.layer_norm(v, v.shape).detach()
 
 
@@ -98,11 +153,18 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
             csv.writer(fp).writerow(["train_step", "recover_corr", "infer_over_random",
                                      "star_over_random", "model_err_star"])
 
-    env = HybridEnv(gym.make("MIMoBenchV2-v0", vision_params=None, touch_params=None))
-    fusion = MinimalFusion(); target_fusion = MinimalFusion().freeze()
+    env = HybridEnv(gym.make(_ENV_ID, vision_params=None, touch_params=_touch_params()))
+    # 触覚の次元数は「センサ点の総数」＝モデル構築時点で確定しており、reset不要で取れる。
+    # ここで touch_dim を知るために env.reset() を足すと**乱数を1回余計に消費して学習の
+    # 乱数列がずれる**（落とし穴チェック項3）。触覚なし条件が従来のCと比較不能になるので厳禁。
+    # 観測空間はenv構築時に確定しているのでresetなしで読める。
+    # 注意：get_sensor_count()は「センサ点の数」(1202)で、観測は1点あたり力の3成分＝3606。
+    touch_dim = int(env.observation_space["touch"].shape[0]) if _TOUCH else 0
+    fusion = MinimalFusion(touch_dim); target_fusion = MinimalFusion(touch_dim).freeze()
     n_act = env.action_space.shape[0]
     obs, _ = env.reset()
     sdim = fusion.encode(obs).shape[0]; prop_dim = to_tensor(obs["observation"]).shape[0]
+    out_dim = prop_dim + touch_dim   # nat_headが吐く次元＝予測対象の次元
     brain = TaroBrainWithMotor(vocab_size=3, sensory_dim=sdim, n_actuators=n_act)
     emb_dim = brain.sensory_proj.out_features  # GRUの入力次元(=64)
 
@@ -113,9 +175,9 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
     # 「ヘッドが入力を無制限に増幅（pred爆発）」と確定したため（zの膨張は濡れ衣）。
     # 活性を正規化して出力爆発を防ぐ（深層ネット/世界モデルの標準的な安定化）。
     nat_head = nn.Sequential(nn.Linear(brain.latent_dim + n_act, 128), nn.SiLU(),
-                             nn.LayerNorm(128), nn.Linear(128, prop_dim))
+                             nn.LayerNorm(128), nn.Linear(128, out_dim))
     learner = TaroLearner(CombinedParams(brain, fusion, emb_proj, nat_head), lr=_LR)
-    dop = Dopamine(); ne = LocusCoeruleus(); homeo = HomeostaticScaling(dim=sdim)
+    dop = Dopamine(); ne = LocusCoeruleus(relative=_NE_REL); homeo = HomeostaticScaling(dim=sdim)
     dev_clock = DevelopmentalClock()  # ③発達年齢（累積学習回数）。sim秒(②)とは別軸。
     # 運動小脳。ON/OFFで乱数列を揃えるため、_CEREBに関わらず常に構築する（使う/学習する
     # のは_CEREB時のみ。gate/imitationは乱数を消費しないので、初期化以降はON/OFFで乱数が一致）。
@@ -418,7 +480,7 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
                  f"{pr:.2f}", f"{ag:.2f}", f"{magr:.1f}", f"{real_min:.1f}"])
         noise = 0.05 + ne.get_ne_level() * 0.45
         cereb_tag = f" cereb=on(err={cereb.err_ema.item():.2f})" if _CEREB else " cereb=off"
-        print(f"[AC seed{seed} mat={_MATURE}] life={life_min:.0f}min | classify={cl:.1f}% margin={mg:+.1f}% "
+        print(f"[AC seed{seed} rew={_REWARD} ne={'rel' if _NE_REL else 'abs'}] life={life_min:.0f}min | classify={cl:.1f}% margin={mg:+.1f}% "
               f"corr={co:.3f} persist={pr:.1f}% agency={ag:.1f}%(mag {magr:.0f}%) | "
               f"noise={noise:.3f}(mat={ne.maturation:.2f}){cereb_tag} real={real_min:.0f}min", flush=True)
 
@@ -512,7 +574,8 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
         pe = mse(pred, nlp)
         pe_fast = 0.9 * pe_fast + 0.1 * pe.item()   # 次ステップの切替判断に使う（因果的に過去の驚き）
         pe_slow = 0.99 * pe_slow + 0.01 * pe.item()
-        rew = brain.sensorimotor_reward(pe.item())
+        # 内発的動機。progress＝学習進度（誤差が減っていれば正）／predict＝従来の予測しやすさ。
+        rew = (pe_slow - pe_fast) if _REWARD == "progress" else brain.sensorimotor_reward(pe.item())
         pl = learner.learn_action([lp], dop.compute_rpe(rew))
         hl = homeo.homeostatic_loss(sv); homeo.observe(sv)
         learner.update(pe + hl + kl + rc, pl)
@@ -550,16 +613,68 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
     if os.environ.get("C_SAVEMODEL"):
         # 確立した自己モデルを保存（D等の下流で"最高モデル"を再利用するため）。opt-in。
         mp = os.environ["C_SAVEMODEL"]; os.makedirs(os.path.dirname(mp), exist_ok=True)
-        torch.save({"brain": brain.state_dict(),
-                    "fusion_insula": fusion.insula.state_dict(),
-                    "fusion_proprio": fusion.proprio.state_dict(),
-                    "fusion_vestibular": fusion.vestibular.state_dict(),
-                    "emb_proj": emb_proj.state_dict(), "nat_head": nat_head.state_dict(),
-                    "cereb": cereb.state_dict(),
-                    "config": {"sdim": sdim, "prop_dim": prop_dim, "n_act": n_act, "K": K,
-                               "seed": seed, "n_train": n_train, "replay": _REPLAY,
-                               "cereb": _CEREB, "fusion": "MinimalFusion(interoception+proprio621+vestibular)"}}, mp)
+        blob = {"brain": brain.state_dict(),
+                "fusion_insula": fusion.insula.state_dict(),
+                "fusion_proprio": fusion.proprio.state_dict(),
+                "fusion_vestibular": fusion.vestibular.state_dict(),
+                "emb_proj": emb_proj.state_dict(), "nat_head": nat_head.state_dict(),
+                "cereb": cereb.state_dict(),
+                "config": {"sdim": sdim, "prop_dim": prop_dim, "touch_dim": touch_dim,
+                           "out_dim": out_dim, "n_act": n_act, "K": K,
+                           "seed": seed, "n_train": n_train, "replay": _REPLAY,
+                           "cereb": _CEREB, "supine": _SUPINE, "touch": _TOUCH,
+                           "reward": _REWARD, "ne_relative": _NE_REL, "env_id": _ENV_ID,
+                           "fusion": "MinimalFusion(interoception+proprio621+vestibular"
+                                     + ("+touch)" if _TOUCH else ")")}}
+        if fusion.touch is not None:
+            blob["fusion_touch"] = fusion.touch.state_dict()
+        torch.save(blob, mp)
         print(f"SAVED MODEL {mp}", flush=True)
+    if os.environ.get("C_RECORD"):
+        # 【必須級・2026-07-15】学習後の太郎を等速で録画する（C_RECORD=<出力mp4>で有効）。
+        # 理由＝太郎の指標は「予測がうまいか」を測るが、予測を最もうまくする方法は
+        # 「何も面白いことをしない」こと。つまり**指標は行動の退化をむしろ高評価する**。
+        # 実測(D0)：margin+52/corr0.76が過去最高値なのに中身は筋肉の痙攣、corr0.998の
+        # 正体は環境の連続リセット。数字だけでは構造的に検出できないので目視を残す。
+        # 注意：脳はK=100(0.5秒)に1回判断するので、判断ごとに1枚だと7.5倍速になる。
+        # 判断の"間"のコマも撮って等速にする（render_everyステップ毎）。
+        try:
+            import cv2
+            # 学習と同じ環境で録画する（姿勢・触覚を揃え忘れると"学習時と違う太郎"を
+            # 見せることになる。D0の録画で実際にやらかした＝録画側だけリセットが残った）。
+            renv = HybridEnv(gym.make(_ENV_ID, vision_params=None,
+                                      touch_params=_touch_params(), render_mode="rgb_array"))
+            ro, _ = renv.reset(seed=seed)
+            rh = brain.init_motor_hidden(); rpa = torch.zeros(n_act)
+            frames = []; render_every = 4
+            for _ in range(20):   # 20判断＝10秒ぶん
+                sv = fusion.encode(ro); cf = target_fusion.encode(ro).detach()
+                z, _, _, rhn = zc(sv, rpa, cf, rh); z = z.detach()
+                a = torch.clamp(act_mean(z), -1.0, 1.0).detach()
+                ctrl = rescale_action(a, renv.action_space)
+                for k in range(K):
+                    ro, _, te, tr, _ = renv.step(ctrl)
+                    if k % render_every == 0:
+                        f = renv.render()
+                        if f is not None:
+                            frames.append(f)
+                    if te or tr:
+                        break
+                rh = rhn.detach(); rpa = a
+                if te or tr:
+                    ro, _ = renv.reset(); rh = brain.init_motor_hidden(); rpa = torch.zeros(n_act)
+            renv.close()
+            if frames:
+                mp4 = os.environ["C_RECORD"]; os.makedirs(os.path.dirname(mp4), exist_ok=True)
+                fps = (1.0 / DT) / render_every   # 等速再生になるfps
+                hh, ww, _ = frames[0].shape
+                vw = cv2.VideoWriter(mp4, cv2.VideoWriter_fourcc(*"mp4v"), fps, (ww, hh))
+                for f in frames:
+                    vw.write(cv2.cvtColor(f, cv2.COLOR_RGB2BGR))
+                vw.release()
+                print(f"RECORDED {mp4} ({len(frames)}フレーム, 等速{fps:.0f}fps)", flush=True)
+        except Exception as e:
+            print(f"[警告] 録画に失敗（学習結果は保存済み）: {type(e).__name__}: {e}", flush=True)
     print(f"DONE seed={seed} log={csv_path}", flush=True)
 
 
