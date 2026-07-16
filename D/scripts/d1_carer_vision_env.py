@@ -66,6 +66,59 @@ class CarerVisionEnv(CarerEnv):
 
     CARER_RGBA = (0.9, 0.2, 0.2, 1.0)   # 養育者は赤＝太郎(肌色)と色で見分けられる
 
+    def get_vision_obs(self):
+        """★MIMoの壊れたgym描画を迂回し、眼球カメラを**生APIで直接描画**する。
+
+        【なぜ差し替えるか・2026-07-16 確定】MIMoの `mimoVision/vision.py` は
+        `env.camera_name='eye_left'` を設定して `env.render()` を呼ぶ方式だが、gymnasium
+        1.2.3 の `MujocoEnv.render()` は `render_mode` しか渡さず camera_name を無視する。
+        レンダラは構築時に一度だけカメラを決め（既定は"track"→シーンに無い→**自由カメラ**）、
+        以後それを使い続ける。＝**全視覚obsが「外から太郎を見た映像」になっていた**
+        （実測：vision obs後 renderer.camera_id=-1・cam.type=FREE）。上流mainも同じコード＝
+        MIMo本体の非互換で、直っていない。＝自前で迂回する。
+
+        この差し替えは MIMoEnv.get_vision_obs のdocstringが明示的に許可している差し込み口
+        （"Override this function if you want to make some simple post-processing!"）。
+        戻り値の形（{カメラ名: 画像}）も本家と同一なので `_get_obs` はそのまま動く。
+
+        acuity（視覚acuity）・foveation（中心窩）は、設定されていれば本家と同じ後処理を
+        かける（本家 `self.vision` のヘルパを再利用）。lean_vision_params では両方OFF。
+        """
+        import mujoco
+        # レンダラはモデルごとに1つ作って使い回す（毎step作ると重い）。
+        # MIMoEnvはreset時にmodel/dataを作り直すので、モデルが変わったら作り直す。
+        cache = getattr(self, "_eye_renderers", None)
+        if cache is None or self._eye_renderers_model is not self.model:
+            for r in (cache or {}).values():
+                r.close()
+            self._eye_renderers = {}
+            self._eye_renderers_model = self.model
+            cache = self._eye_renderers
+
+        imgs = {}
+        for cam_name, p in self.vision_params.items():
+            wh = (p["width"], p["height"])
+            if wh not in cache:
+                cache[wh] = mujoco.Renderer(self.model, height=p["height"], width=p["width"])
+            ren = cache[wh]
+            cid = self.model.camera(cam_name).id
+            mjcam = mujoco.MjvCamera()
+            mjcam.type = mujoco.mjtCamera.mjCAMERA_FIXED
+            mjcam.fixedcamid = cid
+            ren.update_scene(self.data, camera=mjcam)
+            img = ren.render()
+            # 本家と同じ後処理（設定されていれば）。self.vision は本家のSimpleVisionインスタンス。
+            if self.vision is not None:
+                af = getattr(self.vision, "_acuity_functions", {}).get(cam_name)
+                if af is not None:
+                    img = self.vision._apply_acuity(img, cam_name)
+                fov = getattr(self.vision, "_foveation", {}).get(cam_name)
+                if fov:
+                    img = self.vision._apply_foveation(img, fov)
+            imgs[cam_name] = img
+        self.vision.sensor_outputs = imgs   # 本家の内部状態も一応そろえておく
+        return imgs
+
     def _initialize_simulation(self):
         spec = mujoco.MjSpec.from_file(self.fullpath)   # 親と同じ＝年齢調整済みシーン
         hand = spec.worldbody.add_body(name=CARER + "hand", pos=list(_HAND_HOME))
