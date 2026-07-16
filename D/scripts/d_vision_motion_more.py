@@ -79,10 +79,14 @@ def collect(mode, n_clip):
             # label=1: y増加=右へ（+y方向）/ label=0: y減少=左へ
         elif mode == "speed":
             # 両方とも「近づく」。label=1=速い（広く動く）/ label=0=遅い（狭く動く）。
-            # 開始位置はランダム（絶対位置で速度がバレないよう）。
-            span = (float(rng.uniform(0.11, 0.15)) if label else float(rng.uniform(0.02, 0.05)))
-            start = float(rng.uniform(0.40, 0.46))
-            zs = np.linspace(start, start - span, K)
+            # 【修正・2026-07-16】旧版は「同じ開始位置から広く/狭く動く」で作ったため、速い方が
+            # 終わりに近づきすぎて"速い=近い"に化け、1枚でバレた（1コマ対照89.6%）。
+            # → **中心の距離 mid を揃え、その周りに対称に動かす**。速い=広い幅・遅い=狭い幅だが
+            # 平均位置は同じ＝どの1枚も近さは同じ＝1枚では速さが分からない。速さは"幅"にしか
+            # 現れない（＝間隔の大きさで捉える、というユーザーの考えを正しく試せる形）。
+            mid = float(rng.uniform(0.34, 0.42))
+            span = (float(rng.uniform(0.14, 0.18)) if label else float(rng.uniform(0.03, 0.06)))
+            zs = np.linspace(mid + span / 2, mid - span / 2, K)   # midを中心に対称・近づく向き
             ys = np.zeros(K)
         else:
             raise ValueError(mode)
