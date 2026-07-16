@@ -4,7 +4,12 @@ D1の環境：太郎アルファ（学ぶ側）＋太郎ベータ（相手）を
 【なぜ2案あるか】2026-07-15
 目標は介護AI＝**太郎が触る側**（ユーザー判断）。設計書は「ベータを腕の届く位置に**座位**で配置」
 だが、**座らせるのが最初なのは発達順序に反する**：
-  ・自己接触＝胎児19週から。**姿勢制御ゼロ**（羊水に浮いている）で、しかも先読みまで完成
+  ・自己接触＝胎児14週から（Zoia et al. 2007, n=8）。**姿勢制御ゼロ**（羊水に浮いている）で成立
+    ※【訂正・2026-07-16】以前ここには「19週で先読みまで完成」と書いていたが**過大主張**だった。
+      文献調査の結果：口の開きが接触に先行するのは事実（Myowa-Yamakoshi & Takeshita 2006, n=27）
+      だが、「予期」は**著者の解釈**であり、反射や手-口カップリング運動プログラムを排除する統制は
+      存在しない（Reissland et al. 2014 自身が "it is unclear whether mouth opening anticipates
+      the touch or is a reaction to touch" と明記）。＝「先読みが完成している」とは言えない。
   ・外界へのリーチ＝生後4〜6ヶ月。**ここで初めて姿勢制御が要る**（Rochat & Goubet 1995）
 さらに「触る＝正確な到達が要る」も早とちりの可能性がある。**ベータを腕の振れる範囲に置けば、
 今のバタバタでも接触は起きる**かもしれない。＝支えも座位も要らないかもしれない。
@@ -97,8 +102,11 @@ class D1Env(MIMoV2DummyEnv):
         self.init_position = self.data.qpos.copy()
 
     def _initialize_simulation(self):
-        spec_a = mujoco.MjSpec.from_file(paths.SCENE)
-        spec_b = mujoco.MjSpec.from_file(paths.SCENE)
+        # 【修正・2026-07-16】paths.SCENE(無調整の生データ)ではなく self.fullpath を読む。
+        # MIMoEnv.__init__ の既定age=18によるadjust_mimo_to_age（一時シーンをself.fullpathに
+        # 格納）を素通りしていたバグ（d1_carer_env.pyで発見・詳細はそちら参照）と同型。
+        spec_a = mujoco.MjSpec.from_file(self.fullpath)
+        spec_b = mujoco.MjSpec.from_file(self.fullpath)
         fr = spec_a.worldbody.add_frame()
         # 配置の高さは姿勢で変える（仰向けは床すれすれ、座位は少し上げる）
         fr.pos = ([0, 0, self._sep] if self._layout == "held" else

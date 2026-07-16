@@ -52,6 +52,18 @@ from mimo_lean import strip_textures
 # 仰向けにする四元数（roll_over.py の supine と同じ式）
 _SUPINE_QUAT = np.array([0, -0.7071068, 0, 0.7071068]) * np.array([1, -1, 1, 1])
 CARER = "carer_"   # MIMoEnvの `robot:` / `act:` 判定から外れる接頭辞
+# 手の定位置（＝ctrl=0 のときに手がいる場所）。**太郎の落下開始高さ(z=0.61)より上**に置く。
+# 【なぜ・2026-07-16 実測】`hip.pos`を書き換えても太郎は瞬間移動せず、**立位(腰z=0.61)から
+# 重力で自由落下し、床に激突して仰向けに落ち着く**（settle_steps=100はこの落下〜着地が
+# ちょうど収まる時間だった）。旧・定位置 z=0.50 は**この落下経路のど真ん中**で：
+#   ・手をそのまま置く → 落ちてくる太郎を受け止める（実測：腰が0.050m→0.163m、着地未完了）
+#   ・落下中だけ手を退避させる → 退避へ**動く手が太郎を殴る**（斜め上へ逃がすと横から薙いで
+#     腰が水平に0.46mズレ、真上へ逃がすと下から突き上げて腰が0.61m→0.76mへ打ち上がった）
+# ＝**手を動かして避ける**のが誤り。定位置を最初から落下経路の外(上)に置けば、退避処理も
+# 二段階の落ち着かせも要らない。物理的にも自然：親は赤ちゃんを**寝かせてから**手を差し伸べる。
+_HAND_HOME = np.array([0.10, 0.0, 1.40])
+# スライド関節の可動域。定位置(z=1.40)から太郎(z≈0.05〜0.13)まで降ろせる幅が要る。
+_HAND_RANGE = 2.0
 
 
 class CarerEnv(MIMoV2DummyEnv):
@@ -69,18 +81,24 @@ class CarerEnv(MIMoV2DummyEnv):
         m = self.model
         m.body("hip").pos = [0, 0, 0.2]
         m.body("hip").quat = _SUPINE_QUAT.copy()
+        # 手は定位置(z=1.40＝落下経路の外)にいるので、太郎はここで邪魔されず自由落下し、
+        # 手なし版とまったく同じように仰向けへ着地する。詳細は _HAND_HOME の説明。
         for _ in range(self._settle_steps):
             mujoco.mj_step(self.model, self.data)
         self.init_position = self.data.qpos.copy()
 
     def _initialize_simulation(self):
-        spec = mujoco.MjSpec.from_file(paths.SCENE)
+        # 【修正・2026-07-16】paths.SCENE(無調整の生データ)ではなく self.fullpath を読む。
+        # MIMoEnv.__init__ は既定age=18でadjust_mimo_to_ageを実行し、年齢調整済みの一時シーン
+        # (benchmarkv2_scene_temp.xml)をself.fullpathに格納する。paths.SCENEを直接読むと
+        # この調整を素通りし、他の環境(仰向け単体など)と体のスケールが食い違う
+        # （実測：左手先ジオメトリ 0.00392m(調整後) vs 0.005m(無調整)、触覚センサ数1202→1543の真因）。
+        spec = mujoco.MjSpec.from_file(self.fullpath)
         # --- 養育者の手を生やす（世界に直付け＝付け根は動かない＝姿勢制御を持つ大人の代理）---
-        # 太郎（仰向け）は頭が+x側・腰が-x側に寝る（実測：腰[-0.036,0.003,0.05] 頭[0.263,-0.001,0.035]）。
-        # 手の**基準位置は太郎の遥か上(z=0.50)**にする。ここを胸の高さにすると、太郎が
-        # 落ち着く100stepの間ずっと手が邪魔をして、**太郎が手の上に乗ってしまう**
-        # （実測：腰が 0.050m → 0.132m に浮いた）。実験時にctrlで降ろす。
-        hand = spec.worldbody.add_body(name=CARER + "hand", pos=[0.10, 0.0, 0.50])
+        # 太郎（仰向け）は頭が+x側・腰が-x側に寝る（実測：腰[0.005,0.004,0.050] 頭[0.303,-0.002,0.068]）。
+        # 手の定位置は **太郎の落下開始高さ(z=0.61)より上**（_HAND_HOME の説明を参照）。
+        # 実験時に set_hand_target で降ろす。
+        hand = spec.worldbody.add_body(name=CARER + "hand", pos=list(_HAND_HOME))
         # 【重要】重力補償。これが無いと手が落下して太郎を弾き飛ばす
         # （実測：太郎の腰が 0.050m → 0.303m に浮き、x が -0.64 までずれた）。
         # 物理的にも正しい：**養育者の腕は大人自身が支えている**ので、太郎の上に落ちてはこない。
@@ -90,7 +108,7 @@ class CarerEnv(MIMoV2DummyEnv):
             j.name = CARER + nm
             j.type = mujoco.mjtJoint.mjJNT_SLIDE
             j.axis = ax
-            j.range = [-1.0, 1.0]
+            j.range = [-_HAND_RANGE, _HAND_RANGE]
             j.limited = mujoco.mjtLimited.mjLIMITED_TRUE
         g = hand.add_geom()
         g.name = CARER + "palm"
@@ -109,7 +127,7 @@ class CarerEnv(MIMoV2DummyEnv):
             a.gainprm = gp
             a.biastype = mujoco.mjtBias.mjBIAS_AFFINE
             a.biasprm = bp
-            a.ctrlrange = [-1.0, 1.0]
+            a.ctrlrange = [-_HAND_RANGE, _HAND_RANGE]
             a.ctrllimited = mujoco.mjtLimited.mjLIMITED_TRUE
 
         self.n_textures_stripped = strip_textures(spec) if self.vision_params is None else 0
@@ -132,8 +150,14 @@ class CarerEnv(MIMoV2DummyEnv):
         return self.model, self.data
 
     def set_hand_target(self, xyz):
-        """養育者の手を、この位置（絶対座標に近い指令）へ動かす。"""
-        self.data.ctrl[self.carer_actuators] = np.asarray(xyz, dtype=np.float64)
+        """養育者の手を、この**ワールド座標**へ動かす（位置サーボの目標を置くだけ）。
+
+        中のスライド関節は定位置 `_HAND_HOME` からの**相対**で動くので、ここで引き算して
+        吸収する。＝呼ぶ側は「太郎の胸は z=0.13 だからそこへ」と素直に書ける。
+        （相対のまま渡す旧仕様は、定位置を動かした途端に意味が変わる＝バグの温床だった）
+        """
+        rel = np.asarray(xyz, dtype=np.float64) - _HAND_HOME
+        self.data.ctrl[self.carer_actuators] = np.clip(rel, -_HAND_RANGE, _HAND_RANGE)
 
     @property
     def hand_pos(self):
