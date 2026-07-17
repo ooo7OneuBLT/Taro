@@ -45,14 +45,16 @@ from mimo_lean import strip_textures
 from d1_carer_env import CarerEnv, CARER, _HAND_HOME, _HAND_RANGE
 
 
-def lean_vision_params(size=64):
+def lean_vision_params(size=64, fovy=60):
     """他者（赤カプセル）を見分けるための最小の視覚パラメータ。
 
     既定の 256x256 は他者識別には過剰（実測：メモリは落とせば効かないが、CNNの計算は
     解像度に効く）。まず 64x64 で「相手が写る・行動が読める」を確かめ、足りなければ上げる。
     acuity/foveation は乳児の視覚acuityだが、この段階では交絡を避けてOFF（素の画素で測る）。
+    fovy=視野角(度)。既定60はMIMo本家のまま＝人間(単眼約150〜160°)よりかなり狭い。
+    egomotion実験で頭を振ると即座に視界外に出る問題を受け、広げて確かめる用に引数化。
     """
-    eye = {"width": size, "height": size, "fovy": 60, "acuity": False, "foveation": False}
+    eye = {"width": size, "height": size, "fovy": fovy, "acuity": False, "foveation": False}
     return {"eye_left": dict(eye), "eye_right": dict(eye)}
 
 
@@ -65,6 +67,7 @@ class CarerVisionEnv(CarerEnv):
     """
 
     CARER_RGBA = (0.9, 0.2, 0.2, 1.0)   # 養育者は赤＝太郎(肌色)と色で見分けられる
+    SHOW_EYES = True                    # 第三者視点で頭の向きが分かるよう装飾の目を付ける
 
     def get_vision_obs(self):
         """★MIMoの壊れたgym描画を迂回し、眼球カメラを**生APIで直接描画**する。
@@ -102,6 +105,9 @@ class CarerVisionEnv(CarerEnv):
                 cache[wh] = mujoco.Renderer(self.model, height=p["height"], width=p["width"])
             ren = cache[wh]
             cid = self.model.camera(cam_name).id
+            if "fovy" in p:      # ★視野角をモデルへ反映。mjCAMERA_FIXEDはmodel.cam_fovyを見るため
+                self.model.cam_fovy[cid] = p["fovy"]   # vision_paramsのfovyは元々acuity計算にしか
+                                                        # 使われておらず描画には未反映だった＝バグ修正
             mjcam = mujoco.MjvCamera()
             mjcam.type = mujoco.mjtCamera.mjCAMERA_FIXED
             mjcam.fixedcamid = cid
@@ -148,6 +154,22 @@ class CarerVisionEnv(CarerEnv):
             a.biasprm = bp
             a.ctrlrange = [-_HAND_RANGE, _HAND_RANGE]
             a.ctrllimited = mujoco.mjtLimited.mjLIMITED_TRUE
+
+        # ★第三者視点で「頭の向き」を分かるようにする装飾の目（黒い小球2個）。
+        #   目のカメラ(local≈[0.071,±0.025,0.068])を塞がないよう少し頭側にへこませて置く。
+        #   contype/conaffinity=0で非衝突＝物理・触覚に影響なし。SHOW_EYES=Falseで無効化。
+        if self.SHOW_EYES:
+            head = next((b for b in spec.bodies if b.name == "head"), None)
+            if head is not None:
+                for sy in (0.032, -0.032):
+                    e = head.add_geom()               # 白目＝肌色の頭に映えて向きが一目で分かる
+                    e.name = "taro_eye_L" if sy > 0 else "taro_eye_R"
+                    e.type = mujoco.mjtGeom.mjGEOM_SPHERE
+                    e.size = [0.020, 0, 0]
+                    e.pos = [0.064, sy, 0.058]        # カメラ(0.071,±0.025,0.068)より内側・下＝塞がない
+                    e.rgba = [0.97, 0.97, 0.97, 1.0]
+                    e.contype = 0
+                    e.conaffinity = 0
 
         # ★唯一の違い：視覚ONでもテクスチャを落とす（顔・服の絵は赤カプセルの識別に無関係）
         self.n_textures_stripped = strip_textures(spec)
