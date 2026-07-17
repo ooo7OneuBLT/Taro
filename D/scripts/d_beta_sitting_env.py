@@ -194,6 +194,13 @@ class BetaSittingEnv(MIMoV2DummyEnv):
         return self.data.body("mimo_location").xpos.copy()
 
 
+# 眼球カメラの直接描画（MIMoの壊れたgym描画を迂回する既存実装）を借用する。
+# CarerVisionEnvと同じ属性(self.vision_params/self.vision/self.model/self.data)を持つので、
+# メソッドをそのまま流用できる＝視覚ONにするとアルファの本当の眼球視界が得られる。
+from d1_carer_vision_env import CarerVisionEnv as _CVE
+BetaSittingEnv.get_vision_obs = _CVE.get_vision_obs
+
+
 if __name__ == "__main__":
     print("=== 座位アルファ＋左右ベータの検証 ===")
     env = BetaSittingEnv()
