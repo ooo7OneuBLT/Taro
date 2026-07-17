@@ -61,12 +61,50 @@ class BetaSittingEnv(MIMoV2DummyEnv):
         probe = mujoco.MjSpec.from_file(paths.SCENE).compile()
         valid_names = {mujoco.mj_id2name(probe, mujoco.mjtObj.mjOBJ_JOINT, i) for i in range(probe.njnt)}
         sitting = {k: v for k, v in SITTING_POSITION.items() if k in valid_names}
+
+        # ★訂正：股関節/胸の曲げ角度は溶接と綱引きして矛盾する（実測で発覚）。
+        # hip/lower_body/upper_body/chestを個別に溶接すると、それらを繋ぐ関節
+        # (hip_bend/hip_lean/hip_rot/chest_lean/chest_rot)は「各体を初期姿勢のまま
+        # 固定する」という制約により**実質ゼロに固定**される。ここでSITTING_POSITIONの
+        # 値(0.53rad等)を上書きしようとすると、溶接(その角度を認めない)と初期姿勢の
+        # 指定(その角度にしろ)が綱引きし、動画で見ると胴体が前に潰れる形で破綻していた。
+        # → 溶接に委ねて上書きしない(その関節はsittingに入れない)＝直立した姿勢になる。
+        # 直立でも「支えられて座っている」研究の対応は崩れない（胴体の向きでなく
+        # 頭の自由な動きが本質のため）。
+        for jn in ("robot:hip_bend1", "robot:hip_bend2", "robot:hip_lean1", "robot:hip_lean2",
+                   "robot:hip_rot1", "robot:hip_rot2", "robot:chest_lean", "robot:chest_rot"):
+            sitting.pop(jn, None)
+
+        # ★長座位（足を伸ばして座る）へ訂正。SITTING_POSITION既定は膝を深く曲げた姿勢
+        # （右膝-106°等）で、動画で見ると脚が浮いて不自然だった。乳児の座位でも比較的
+        # 早期に見られる姿勢（足を前に伸ばす＝股関節の回旋・外転を使わず単純な屈曲だけで
+        # 座れる、より基本的な座り方）。胴体は骨盤〜胸の溶接で既に支えているため、脚の
+        # 角度自体は転倒安定性には影響しない＝見た目の自然さのための変更。
+        # hip1(主屈曲)は既存の約-87°を活かす(座った股関節から脚を前へ)。hip2/hip3(外転/
+        # 回旋)と膝・足首・つま先は0(まっすぐ)にする＝脚がまっすぐ前に伸びる。
+        for side in ("left", "right"):
+            for j, v in ((f"robot:{side}_hip2", 0.0), (f"robot:{side}_hip3", 0.0),
+                          (f"robot:{side}_knee", 0.0), (f"robot:{side}_foot1", 0.0),
+                          (f"robot:{side}_foot2", 0.0), (f"robot:{side}_foot3", 0.0),
+                          (f"robot:{side}_toes", 0.0)):
+                if j in valid_names:
+                    sitting[j] = np.array([v])
+
         print(f"SITTING_POSITION: {len(SITTING_POSITION)}関節中 {len(sitting)}関節が本番シーンに存在"
               f"（欠落{len(SITTING_POSITION) - len(sitting)}は指・足先など座位に無関係な旧モデル固有関節）")
         super().__init__(initial_qpos=sitting, **kwargs)
 
+    # 座位に必要な下げ幅(m)。元シーンのmimo_locationは立位用の高さのまま＝関節角度だけ
+    # 座位にしても宙に浮く（実測：体の最下点z=0.289＝29cm浮いていた）。溶接前に根っこの
+    # 位置そのものを下げて、床に接地させてから固定する。⚠️経験的な定数＝感度確認が要る。
+    SIT_DROP_Z = 0.30
+
     def _initialize_simulation(self):
         spec = mujoco.MjSpec.from_file(self.fullpath)
+
+        # ★根っこの位置を座位の高さまで下げる（溶接で"その場"に固定する前に）。
+        mimo_body = spec.body("mimo_location")
+        mimo_body.pos = [mimo_body.pos[0], mimo_body.pos[1], mimo_body.pos[2] - self.SIT_DROP_Z]
 
         # ★座位で倒れないための溶接。
         # 【訂正・2026-07-17】骨盤(mimo_location)だけを固定する版を動画で確認したところ、
