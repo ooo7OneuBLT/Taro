@@ -13,7 +13,7 @@ import numpy as np
 import gymnasium as gym
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(_HERE, os.pardir, os.pardir, "C"))
+sys.path.insert(0, os.path.join(_HERE, os.pardir, os.pardir, "taro_core"))
 import paths
 paths.setup_brain_path()
 sys.path.insert(0, paths.MIMO_DIR)
