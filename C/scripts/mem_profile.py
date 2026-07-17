@@ -66,7 +66,7 @@ def main():
     mark("import torch")
 
     sys.path.insert(0, _HERE)
-    sys.path.insert(0, os.path.join(_HERE, os.pardir))
+    sys.path.insert(0, os.path.join(_HERE, os.pardir, os.pardir, "taro_core"))  # paths は taro_core へ移設
     import paths
     paths.setup_brain_path()
     sys.path.insert(0, paths.MIMO_DIR)
