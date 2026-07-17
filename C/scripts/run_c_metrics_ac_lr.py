@@ -110,34 +110,11 @@ CSV_COLUMNS = ["life_min", "train_step", "classify", "margin", "corr", "persist"
                "agency", "mag_ratio", "real_min"]
 
 
-class MinimalFusion:
-    def __init__(self, touch_dim=0):
-        self.insula = Insula(state_dim=4, embedding_dim=64)
-        self.proprio = ProprioceptionEncoder(input_dim=621)
-        self.vestibular = VestibularEncoder(input_dim=6)
-        # 触覚は C_TOUCH=1 のときだけ足す。0なら従来のCと1バイトも変わらない。
-        self.touch = TouchEncoder(input_dim=touch_dim, hidden_dim=256, embedding_dim=64) if touch_dim else None
-
-    def parameters(self):
-        import itertools
-        ms = [self.insula.parameters(), self.proprio.parameters(), self.vestibular.parameters()]
-        if self.touch is not None:
-            ms.append(self.touch.parameters())
-        return itertools.chain(*ms)
-
-    def encode(self, obs):
-        parts = [self.insula(to_tensor(obs["interoception"])),
-                 self.proprio(to_tensor(obs["observation"])),
-                 self.vestibular(to_tensor(obs["vestibular"]))]
-        if self.touch is not None:
-            parts.append(self.touch(to_tensor(obs["touch"])))
-        f = torch.cat(parts, dim=-1)
-        return torch.nn.functional.layer_norm(f, f.shape)
-
-    def freeze(self):
-        for p in self.parameters():
-            p.requires_grad_(False)
-        return self
+# MinimalFusion は taro_core/src/senses/fusion.py へ抽出済み（doc/移行記録_taro_core化_2026-07-17.md）。
+# ここでは import して従来どおり使う（`from run_c_metrics_ac_lr import MinimalFusion` する
+# D側スクリプトの後方互換のため、この名前で再エクスポートする）。視覚を足す拡張(vision_res)も
+# 抽出先に入っているので、本番の視覚ONはそちらを使う。
+from fusion import MinimalFusion  # noqa: F401  （再エクスポート）
 
 
 def ln_prop(obs):
