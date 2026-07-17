@@ -13,7 +13,7 @@ torch.set_num_threads(1)
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _HERE)                                              # two_agent_env
-sys.path.insert(0, os.path.join(_HERE, os.pardir, os.pardir, "C"))     # C/paths
+sys.path.insert(0, os.path.join(_HERE, os.pardir, os.pardir, "taro_core"))     # C/paths
 import paths
 paths.setup_brain_path()                                              # C/src/brain, senses ...
 from two_agent_env import TwoAgentMIMo
