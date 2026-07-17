@@ -12,7 +12,7 @@ warnings.filterwarnings("ignore")
 import numpy as np, torch, torch.nn as nn
 torch.set_num_threads(1)
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # = Taro/C
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), os.pardir, "taro_core"))  # = Taro/taro_core（脳/pathsの移設先）
 import paths
 paths.setup_brain_path()
 

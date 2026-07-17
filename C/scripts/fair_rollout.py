@@ -17,10 +17,11 @@ warnings.filterwarnings("ignore")
 import numpy as np, torch, torch.nn as nn
 torch.set_num_threads(1)
 
-_BRIDGE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # = Taro/C
+# 脳/感覚/tests は taro_core へ移設済み（doc/移行記録_taro_core化_2026-07-17.md）
+_CORE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), os.pardir, "taro_core")
 for sub in ("wrapper", "senses", "brain"):
-    sys.path.insert(0, os.path.join(_BRIDGE, "src", sub))
-sys.path.insert(0, os.path.join(_BRIDGE, "tests"))
+    sys.path.insert(0, os.path.join(_CORE, "src", sub))
+sys.path.insert(0, os.path.join(_CORE, "tests"))
 import gymnasium as gym
 import mimoEnv  # noqa
 from hybrid_env import HybridEnv
