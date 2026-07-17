@@ -1,9 +1,9 @@
 """
 D1：触覚で相手を知覚する（視覚なし）。2体MIMo(two_agent_env)で、太郎A が
 固有感覚(自分)＋触覚(相手Bから受ける力) を知覚し、Cの自己モデル(GRU)で符号化する。
-＝「Cの脳(C/src)＋Dの触覚環境(D/scripts)」を繋ぐ最初の一歩。相手を"触れて感じる"ことを確認。
+＝「太郎の脳(taro_core)＋Dの触覚環境(D/scripts)」を繋ぐ最初の一歩。相手を"触れて感じる"ことを確認。
 
-置き場所：D/scripts（D固有）。脳は C/src を import（Cは土台・不変）。
+置き場所：D/scripts（D固有）。脳は taro_core を import（脳は全目標共通の土台・不変）。
 使い方: python d1_touch.py [seed]
 """
 import os, sys, warnings
@@ -13,9 +13,9 @@ torch.set_num_threads(1)
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _HERE)                                              # two_agent_env
-sys.path.insert(0, os.path.join(_HERE, os.pardir, os.pardir, "taro_core"))     # C/paths
+sys.path.insert(0, os.path.join(_HERE, os.pardir, os.pardir, "taro_core"))     # taro_core/paths
 import paths
-paths.setup_brain_path()                                              # C/src/brain, senses ...
+paths.setup_brain_path()                                              # taro_core/src/brain, senses ...
 from two_agent_env import TwoAgentMIMo
 from taro_brain_motor import TaroBrainWithMotor
 from sensory_encoders import ProprioceptionEncoder, TouchEncoder
