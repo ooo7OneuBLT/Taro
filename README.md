@@ -110,22 +110,25 @@ Taro/
   README.md          ← このファイル
   コード構成.md       ← 各スクリプト・モジュールの役割
   関連研究.md         ← 先行研究との対応まとめ
-  A/                  ← 目標A（オウム返し）の全作業。完了
-    config/          ← ハイパラ・本能定義
-    src/             ← ソースコード
-    archive/         ← 脳スナップショット（成長アーカイブ、.gitignore対象）
-    logs/            ← 自動ログ・学習曲線（.gitignore対象）
-    docs/            ← 計画書・設計メモ・研究日誌・版管理
-  B/                  ← 目標B（初語）の全作業。進行中
-    config/          ← ハイパラ・本能定義・スケジュール
-    src/             ← ソースコード（脳＝taro/brain、環境＝environment）
-    model/           ← 学習済みモデル
-    archive/         ← 脳スナップショット（.gitignore対象）
-    logs/            ← 自動ログ（.gitignore対象）
-    docs/            ← 研究日誌・版管理・人間模倣からの逸脱リスト
+  MIMo/               ← 太郎の「体」（物理エンジン。外部依存＝別研究者の成果）
+  taro_core/          ← 太郎そのもの＝「脳」（脳・感覚・内臓）＋場所案内板paths。C/D共通の土台
+    src/             ← 脳(brain)・感覚(senses)・内臓(body)・ラッパ(wrapper)
+    tests/           ← 脳の動作テスト
+    paths.py         ← 場所の一元管理（MIMo・脳の在り処）
+  A/                  ← 目標A（オウム返し）の全作業。完了（Aは独自の脳コピーを持つ）
+  B/                  ← 目標B（初語）の全作業。進行中（Bも独自の脳コピー）
+    config/ src/ model/ archive/ logs/ docs/
+  C/                  ← 目標C（自己内部モデル）。脳はtaro_coreへ移設済。scripts/logs/models/docs
+  D/                  ← 目標D（他者理解）。進行中。scripts/docs/logs
+  world/  (予定)       ← 2体環境など「世界」の共有土台（太郎の一部ではないのでtaro_coreと兄弟）
   replayViewer/       ← シミュレーション内部状態の可視化ツール
-  doc/                ← プロジェクト全体のロードマップ等
+  doc/                ← プロジェクト全体のロードマップ・移行記録等
 ```
+
+> **体・脳・世界の3分割**：太郎の「体」は `MIMo/`、「脳」は `taro_core/`、住む「世界」は
+> `world/`（予定）と分けています。太郎自身（`taro_core`）は世界を知らず、各目標フォルダ（`D/`等）が
+> 「太郎を世界に置いて動かす」実験係になります＝エージェントと環境の分離。
+> 脳をCフォルダから`taro_core`へ切り出した経緯は [doc/移行記録_taro_core化_2026-07-17.md](doc/移行記録_taro_core化_2026-07-17.md) を参照。
 
 ## 開発体制
 
