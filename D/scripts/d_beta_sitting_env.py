@@ -51,10 +51,30 @@ _BETA_RANGE = 2.0
 class BetaSittingEnv(MIMoV2DummyEnv):
     """座位で安定したアルファ（全関節自由）＋左右に動く操り人形ベータ。"""
 
-    # ★較正済み(2026-07-17)：アルファの目の位置[0.082,±0.025,0.467]・視線方向+xを実測。
-    # 旧値z=0.35は目の高さ(0.467)より0.117m低く、まっすぐ前を見ると視野の端（狭いfovyでは
-    # すぐ外れる）だった。ベータの高さを目の高さ付近に上げ、視線のほぼ正面に来るよう修正。
-    BETA_HOME = np.array([0.3, 0.0, 0.45])
+    # ★較正済み(2026-07-18)：ユーザーが対話ビューア（d_viewer_quicktest.py）でベータを直接
+    # ドラッグして「しっくりくる」位置を目視で決定＝直感的なUnity風の配置（口頭較正でなく
+    # 実際に置いて確認）。保存値：目からの相対位置[前方1.249, 横-0.004, 高さ+0.051]・距離1.25m。
+    # BETA_HOME は「ベータの実際の絶対位置（静止時）」そのものを表す（＝この値を見れば
+    # そのまま実世界の座標として読める）。内部実装の都合（下記オフセット）はここでは
+    # 一切考慮しなくてよい設計にしてある。
+    BETA_HOME = np.array([1.322, -0.020, 0.341])
+    # ★実装上の注意（2026-07-17に発見・2026-07-18に整理）：attach_body されたベータ自身の
+    # 体(mimo_location)は、元シーン由来の pos=[0,0,0.4] を内蔵したまま複製される。
+    # つまり「フレームの位置 + [0,0,0.4] = ベータの実際の絶対位置」（実測で確認済み、旧
+    # z=0.45指定→実測0.85 のズレの正体）。BETA_HOMEを「見たままの絶対位置」として使える
+    # ようにするため、フレームを組み立てる _initialize_simulation 側でこのオフセットを
+    # 引く（= フレーム位置 = BETA_HOME - _BETA_LOCAL_OFFSET）。BETA_HOME自身にオフセットを
+    # 混ぜ込むと「BETA_HOME[2]が実際の高さを意味しない」という紛らわしい状態になるため、
+    # オフセット補正はこの1箇所（フレーム組み立て時）だけに閉じ込める。
+    _BETA_LOCAL_OFFSET = np.array([0.0, 0.0, 0.4])
+    # ★同時に較正(2026-07-18)：ベータは元の太郎の体をそのまま複製しており、回転させない限り
+    # 太郎と同じ「+X方向を向く」姿勢を引き継ぐ。ベータがアルファより+X側（前方）に置かれた
+    # ため、顔がアルファから離れる方向を向き、背中を向けてしまっていた（ユーザー指摘）。
+    # ベータには回転の関節が無い（平行移動3自由度のみ、d_beta_env.pyの設計）ため、対話的な
+    # 回転はできず、生成時に固定で180度（Z軸まわり）回転させる。回転はZ軸まわりなのでZ方向の
+    # 上記オフセット計算には影響しない。X/Y方向の関節軸もこの回転でワールド座標上は反転する
+    # ため、`set_beta_target`側でその分の符号反転を行う（下記）。
+    BETA_QUAT = np.array([0.0, 0.0, 0.0, 1.0])  # MuJoCo quat=(w,x,y,z)。180°/Z軸。
 
     def __init__(self, **kwargs):
         # SITTING_POSITIONは旧MIMoモデル(selfbody_scene.xml)用の辞書で、本番シーン(V2・
@@ -127,7 +147,8 @@ class BetaSittingEnv(MIMoV2DummyEnv):
         # ベータ（親）を複製・剛体化して生やす（d_beta_env.pyで確立した手順）。
         spec_beta = mujoco.MjSpec.from_file(self.fullpath)
         fr = spec.worldbody.add_frame()
-        fr.pos = list(self.BETA_HOME)
+        fr.pos = list(self.BETA_HOME - self._BETA_LOCAL_OFFSET)  # オフセット補正はここ1箇所
+        fr.quat = list(self.BETA_QUAT)
         beta_root = fr.attach_body(spec_beta.body("mimo_location"), BETA, "")
 
         for a in list(spec.actuators):
@@ -186,6 +207,11 @@ class BetaSittingEnv(MIMoV2DummyEnv):
 
     def set_beta_target(self, xyz):
         rel = np.asarray(xyz, dtype=np.float64) - self.BETA_HOME
+        # ★180度(Z軸)回転により、関節のローカルX/Y軸はワールド座標上で反転している
+        # （Z軸まわりの回転はZ軸自身には影響しない）。符号を戻して従来通り
+        # 「ワールド座標のx,yをそのまま指定できる」インターフェースを保つ。
+        rel[0] *= -1.0
+        rel[1] *= -1.0
         self.data.ctrl[self.carer_actuators] = np.clip(rel, -_BETA_RANGE, _BETA_RANGE)
 
     @property
