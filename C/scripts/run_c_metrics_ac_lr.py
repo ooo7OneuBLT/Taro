@@ -65,6 +65,12 @@ _EFFORT = float(os.environ.get("C_EFFORT", "0"))
 # 【taro-C5】学習済みモデルから継続学習する（脳をリセットしない方針）。C_LOADMODEL=<pt path>。
 # 形が合う層だけロード（転移学習）。既定なし＝従来どおりゼロから学習。
 _LOADMODEL = os.environ.get("C_LOADMODEL", "")
+# 【taro-C5】体の月齢（成長モジュール）。0〜24。空=デフォルト18ヶ月児。envのage引数に渡すと
+# MIMoが adjust_mimo_to_age で体格・体重・筋力を実乳児データに合わせて自動調整（構造=関節数は不変）。
+_AGE = os.environ.get("C_AGE", "")
+# 【taro-C5】①活性化ダイナミクス（筋の一次遅れ＝力が瞬時に変わらずじわっと立ち上がる）。
+# 1でSmoothTorqueModelを使う（境界ジャーク半減）。既定0＝従来の瞬時トルク。
+_SMOOTH = os.environ.get("C_SMOOTH", "0") == "1"
 _INVPROBE = os.environ.get("C_INVPROBE", "0") == "1"  # 1=逆モデルStage1診断（学習後に1回）
 _INVEXEC = os.environ.get("C_INVEXEC", "0") == "1"  # 1=逆モデルStage1.5＝推論a*の実行テスト
 _GOALBABBLE = os.environ.get("C_GOALBABBLE", "0") == "1"  # 1=Goal Babbling(目標指向の探索)
@@ -156,7 +162,14 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
             csv.writer(fp).writerow(["train_step", "recover_corr", "infer_over_random",
                                      "star_over_random", "model_err_star"])
 
-    env = HybridEnv(gym.make(_ENV_ID, vision_params=None, touch_params=_touch_params()))
+    _age_kw = {"age": float(_AGE)} if _AGE else {}  # 【taro-C5】月齢指定で成長モジュール適用
+    _act_kw = {}
+    if _SMOOTH:  # 【taro-C5】①活性化ダイナミクス
+        sys.path.insert(0, os.path.join(_CORE, "src", "body"))
+        from smooth_actuation import SmoothTorqueModel
+        _act_kw = {"actuation_model": SmoothTorqueModel}
+    env = HybridEnv(gym.make(_ENV_ID, vision_params=None, touch_params=_touch_params(),
+                             **_age_kw, **_act_kw))
     # 触覚の次元数は「センサ点の総数」＝モデル構築時点で確定しており、reset不要で取れる。
     # ここで touch_dim を知るために env.reset() を足すと**乱数を1回余計に消費して学習の
     # 乱数列がずれる**（落とし穴チェック項3）。触覚なし条件が従来のCと比較不能になるので厳禁。
@@ -616,14 +629,17 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
         pe_fast = 0.9 * pe_fast + 0.1 * pe.item()   # 次ステップの切替判断に使う（因果的に過去の驚き）
         pe_slow = 0.99 * pe_slow + 0.01 * pe.item()
         # 内発的動機。progress＝学習進度（誤差が減っていれば正）／predict＝従来の予測しやすさ。
-        rew = (pe_slow - pe_fast) if _REWARD == "progress" else brain.sensorimotor_reward(pe.item())
+        # rew_task＝タスクの出来そのもの（努力コストを引く前）。NE（探索）にはこちらを見せる。
+        rew_task = (pe_slow - pe_fast) if _REWARD == "progress" else brain.sensorimotor_reward(pe.item())
         # 【taro-C5】努力コスト：活性化²の筋力重み付き平均（∈[0,1]）を報酬から引く。＝大きな力ほど
         # 損→自分で加減する（Selinger 2015等の代謝最小化。⚠️二乗・λ・重みは近似＝感度確認対象）。既定OFF。
+        rew = rew_task
         if _EFFORT:
             effort = float((a.detach() ** 2 * eff_w).sum())
-            rew = rew - _EFFORT * effort
+            rew = rew_task - _EFFORT * effort
             eff_accum.append(effort)
         act_accum.append(float(a.detach().abs().mean().item()))
+        # 方策の学習（ドーパミン）は努力コスト込みの報酬rewを見る＝「疲れは損」を学ぶ。
         pl = learner.learn_action([lp], dop.compute_rpe(rew))
         hl = homeo.homeostatic_loss(sv); homeo.observe(sv)
         learner.update(pe + hl + kl + rc, pl)
@@ -633,7 +649,11 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
             cere_opt.zero_grad(); closs.backward(); cere_opt.step()
             cereb.observe(e_c)  # 馴染み度の基準を更新（自己正規化）
         dev_clock.tick()  # ③発達年齢を進める（覚醒中の学習1回）。consolidate側では進めない。
-        ne.observe_reward(rew); ne.release_ne()
+        # 【taro-C5・NE decoupling】NE（探索）にはタスク報酬rew_taskだけを見せる（努力コスト抜き）。
+        # 理由：LC-NEの利得信号(Aston-Jones & Cohen 2005)は「タスクの成否」を追うもので、代謝コストは
+        # 別系統。努力コストで下がった報酬をNEに見せると「失敗した→探索せよ」と誤読し探索を暴走させ、
+        # 大振幅ノイズが努力コストを打ち消す自滅ループになる（実測：noise0.095→0.5）。rew_taskで断つ。
+        ne.observe_reward(rew_task); ne.release_ne()
         if term:
             reach_goal = None  # エピソード終了→リーチも終了
         if _MATURE:
