@@ -59,8 +59,12 @@ from d_supine_env import SupineMimoEnv
 from mimoActuation.actuation import SpringDamperModel
 from smooth_actuation import SmoothTorqueModel
 
-CKPT = os.path.join(_HERE, os.pardir, os.pardir, "C", "models", "c_pred_abs_seed0.pt")
+# 既定は目標Cの学習済みモデル。C5_CKPT環境変数で別モデル（例：新生児＋努力コストで再学習した版）に差替可。
+CKPT = os.environ.get("C5_CKPT",
+                      os.path.join(_HERE, os.pardir, os.pardir, "C", "models", "c_pred_abs_seed0.pt"))
 K = 100
+# 体の月齢（成長モジュール）。C5_AGE=0 で新生児。空=18ヶ月児（従来）。
+AGE = float(os.environ["C5_AGE"]) if os.environ.get("C5_AGE") else None
 
 
 def load_matching(module, sd, tag):
@@ -72,11 +76,14 @@ def load_matching(module, sd, tag):
     print(f"  [{tag}] ロード{len(matched)}層/作り直し{len(skipped)}層 {note}")
 
 
-def build(mode_actuation):
+def build(mode_actuation, age=None):
+    """age（月齢0〜24）を渡すと、MIMoの成長モジュールが体をその月齢に自動調整する
+    （env内部で adjust_mimo_to_age を呼ぶ＝mimo_env.py）。既定 None＝18ヶ月児（従来）。"""
     seed = 0
     torch.manual_seed(seed); np.random.seed(seed)
     act_model = SmoothTorqueModel if mode_actuation == "on" else SpringDamperModel
-    env = HybridEnv(SupineMimoEnv(vision_params=None, actuation_model=act_model))
+    _kw = {"age": age} if age is not None else {}
+    env = HybridEnv(SupineMimoEnv(vision_params=None, actuation_model=act_model, **_kw))
     obs, _ = env.reset(seed=seed)
     n_act = env.action_space.shape[0]
     fusion = MinimalFusion(touch_dim=0)
@@ -156,7 +163,7 @@ class JerkMeter:
 
 
 def run_view(mode_actuation, babble):
-    env, brain, fusion, emb_proj, cereb, n_act = build(mode_actuation)
+    env, brain, fusion, emb_proj, cereb, n_act = build(mode_actuation, age=AGE)
     policy = make_policy(brain, fusion, emb_proj, cereb, n_act, babble)
     m, d = env.unwrapped.model, env.unwrapped.data
     dofs = actuated_dofs(m)
@@ -186,7 +193,7 @@ def run_view(mode_actuation, babble):
 
 
 def run_measure(mode_actuation, n, babble):
-    env, brain, fusion, emb_proj, cereb, n_act = build(mode_actuation)
+    env, brain, fusion, emb_proj, cereb, n_act = build(mode_actuation, age=AGE)
     policy = make_policy(brain, fusion, emb_proj, cereb, n_act, babble)
     m, d = env.unwrapped.model, env.unwrapped.data
     dofs = actuated_dofs(m)
