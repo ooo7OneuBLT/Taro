@@ -5,8 +5,9 @@
 ので軽い。スペースで一時停止／←→で1コマずつ送り戻し。ループ再生。
 
 使い方（体・モデルは環境変数で d_c5_motor_quality と共通）:
-  C5_CKPT=<pt> C5_AGE=0 python d_c5_replay_viewer.py on [ticks]
-    on/off = 活性化ダイナミクス、ticks = 記録するティック数（既定20＝20秒ぶん）
+  C5_CKPT=<pt> C5_AGE=0 python d_c5_replay_viewer.py on [ticks] [babble]
+    on/off = 活性化ダイナミクス、ticks = 記録するティック数（既定20＝20秒ぶん）、
+    末尾に babble を付けると運動性喃語(探索運動)込みで記録する（既定は決定的）。
 """
 import os
 import sys
@@ -32,17 +33,20 @@ from test_phase8_motor_learning import rescale_action
 
 def main():
     actuation = sys.argv[1] if len(sys.argv) > 1 else "on"
-    ticks = int(sys.argv[2]) if len(sys.argv) > 2 else 20
+    rest = sys.argv[2:]
+    babble = "babble" in rest                       # 末尾にbabbleで運動性喃語(探索運動)込み
+    nums = [int(x) for x in rest if x.isdigit()]
+    ticks = nums[0] if nums else 20
 
     # ── フェーズ1：早送りで脳を動かし、姿勢を記録 ──
     env, brain, fusion, emb_proj, cereb, n_act = mq.build(actuation, age=mq.AGE)
-    policy = mq.make_policy(brain, fusion, emb_proj, cereb, n_act, babble=False)
+    policy = mq.make_policy(brain, fusion, emb_proj, cereb, n_act, babble=babble)
     m, d = env.unwrapped.model, env.unwrapped.data
     real_dt = m.opt.timestep * env.unwrapped.frame_skip  # 1 env.step の実時間相当(秒)
     obs, _ = env.reset(seed=0)
     hidden = brain.init_motor_hidden(); prev_a = torch.zeros(n_act)
     qpos_buf = []
-    print(f"記録中（{ticks}ティック=約{ticks}秒ぶんを早送りで生成）...")
+    print(f"記録中（{ticks}ティック=約{ticks}秒ぶん・{'運動性喃語込み' if babble else '決定的'}を早送りで生成）...")
     for tick in range(ticks):
         a, hidden = policy(obs, prev_a, hidden)
         ctrl = rescale_action(a, env.action_space)

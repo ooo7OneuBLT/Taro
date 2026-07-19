@@ -57,7 +57,8 @@ from test_phase8_motor_learning import CombinedParams, rescale_action
 from d_beta_sitting_env import BetaSittingEnv
 from d1_carer_vision_env import lean_vision_params
 
-CKPT_PATH = os.path.join(_HERE, os.pardir, os.pardir, "C", "models", "c_pred_abs_seed0.pt")
+CKPT_PATH = os.environ.get("D_CKPT",
+                           os.path.join(_HERE, os.pardir, os.pardir, "C", "models", "c_pred_abs_seed0.pt"))
 OUT = os.path.abspath(os.path.join(_HERE, os.pardir, "logs", "video"))
 mse = torch.nn.functional.mse_loss
 K = 100
