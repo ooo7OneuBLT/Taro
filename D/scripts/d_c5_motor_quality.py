@@ -23,6 +23,12 @@
   python d_c5_motor_quality.py measure off [n]   # 測る（ヘッドレス, n=60ティック既定, 従来）
   python d_c5_motor_quality.py measure on  [n]   # 測る（活性化ダイナミクス）
   末尾に babble を付けると探索ノイズ(運動性喃語)込みで動かす（既定は決定的な方策平均）。
+
+  【taro-C6 Step1】環境変数 C5_CTRL_M で制御の刻みを変える（既定=100=従来の1秒保持）：
+    C5_CTRL_M=10 python d_c5_motor_quality.py view off      # 0.1秒ごとに感覚を見て出し直す＝速い連続制御
+    C5_CTRL_M=10 python d_c5_motor_quality.py measure off 200
+  ＝再学習なしで"実行だけ"速い制御に変え、jerkが下がるか（＝速い制御はなめらかにするか）を
+  学習の交絡なしで測る（C4未実施の角度）。C5_CKPTで測るモデルを差替（推奨=c5_progress_seed0.pt）。
 """
 import os
 import sys
@@ -63,6 +69,10 @@ from smooth_actuation import SmoothTorqueModel
 CKPT = os.environ.get("C5_CKPT",
                       os.path.join(_HERE, os.pardir, os.pardir, "C", "models", "c_pred_abs_seed0.pt"))
 K = 100
+# 【taro-C6 Step1】制御の刻み。C5_CTRL_M=10 で「毎10tick(0.1秒)ごとに感覚を見て行動を出し直す」
+# ＝速い連続制御（閉ループ）。既定=K=100＝従来の1秒保持と完全に同一。再学習せず"実行だけ"変える
+# ＝「速い制御は運動をなめらかにするか」を学習の交絡なしで測る（C4未実施の角度）。
+CTRL_M = int(os.environ.get("C5_CTRL_M", str(K)))
 # 体の月齢（成長モジュール）。C5_AGE=0 で新生児。空=18ヶ月児（従来）。
 AGE = float(os.environ["C5_AGE"]) if os.environ.get("C5_AGE") else None
 
@@ -172,20 +182,23 @@ def run_view(mode_actuation, babble):
 
     obs, _ = env.reset(seed=0)
     hidden = brain.init_motor_hidden(); prev_a = torch.zeros(n_act)
+    _ctrl_note = f"制御刻み={CTRL_M}tick({'速い連続制御' if CTRL_M < K else '1秒保持'})"
     print(f"\nビューア起動。仰向けの太郎が学習済みの脳で動きます（活性化ダイナミクス={mode_actuation.upper()}"
-          f"／{'喃語込み' if babble else '決定的'}）。スペース=一時停止、左History=巻き戻し。")
-    tick = 0
+          f"／{'喃語込み' if babble else '決定的'}／{_ctrl_note}）。スペース=一時停止、左History=巻き戻し。")
+    tick = 0; ctrl = None
     with mujoco.viewer.launch_passive(m, d) as viewer:
         while viewer.is_running():
-            a, hidden = policy(obs, prev_a, hidden)
-            ctrl = rescale_action(a, env.action_space)
             for k in range(K):
+                if k % CTRL_M == 0:   # 制御の刻みごとに、今の感覚を見て行動を出し直す（閉ループ）
+                    a, hidden = policy(obs, prev_a, hidden)
+                    ctrl = rescale_action(a, env.action_space)
+                    prev_a = a
                 obs, r, te, tr, info = env.step(ctrl)
-                meter.observe(d.qacc.copy(), is_boundary=(k == 0))
+                meter.observe(d.qacc.copy(), is_boundary=(k % CTRL_M == 0))
                 viewer.sync()
                 if te or tr:
                     break
-            prev_a = a; tick += 1
+            tick += 1
             if tick % 20 == 0:
                 s = meter.summary()
                 print(f"  tick {tick}: mean|jerk|={s['mean']:.1f} 境界={s['boundary']:.1f} "
@@ -203,28 +216,102 @@ def run_measure(mode_actuation, n, babble):
     obs, _ = env.reset(seed=0)
     hidden = brain.init_motor_hidden(); prev_a = torch.zeros(n_act)
     action_jumps = []
+    _ctrl_note = f"制御刻み={CTRL_M}tick({'速い連続制御' if CTRL_M < K else '1秒保持'})"
     print(f"\n測定開始（{n}ティック・活性化ダイナミクス={mode_actuation.upper()}"
-          f"／{'喃語込み' if babble else '決定的'}）")
+          f"／{'喃語込み' if babble else '決定的'}／{_ctrl_note}）")
+    ctrl = None
     for tick in range(n):
-        a, hidden = policy(obs, prev_a, hidden)
-        action_jumps.append(float(np.abs((a - prev_a).numpy()).mean()))
-        ctrl = rescale_action(a, env.action_space)
         for k in range(K):
+            if k % CTRL_M == 0:   # 制御の刻みごとに今の感覚を見て出し直す（閉ループ）
+                a, hidden = policy(obs, prev_a, hidden)
+                action_jumps.append(float(np.abs((a - prev_a).numpy()).mean()))
+                ctrl = rescale_action(a, env.action_space)
+                prev_a = a
             obs, r, te, tr, info = env.step(ctrl)
-            meter.observe(d.qacc.copy(), is_boundary=(k == 0))
+            meter.observe(d.qacc.copy(), is_boundary=(k % CTRL_M == 0))
             if te or tr:
                 obs, _ = env.reset()
                 hidden = brain.init_motor_hidden()
                 break
-        prev_a = a
     s = meter.summary()
-    print(f"\n===== 結果（{mode_actuation.upper()}）=====")
+    print(f"\n===== 結果（活性化={mode_actuation.upper()}／{_ctrl_note}）=====")
     print(f"mean|jerk|      = {s['mean']:.2f}   (小さいほどなめらか)")
     print(f"  境界ジャーク  = {s['boundary']:.2f}  (ティック切替の瞬間)")
     print(f"  内部ジャーク  = {s['interior']:.2f}  (行動保持中)")
     print(f"  最大ジャーク  = {s['max']:.2f}")
-    print(f"per-tick 行動ジャンプ = {np.mean(action_jumps):.3f}  (毎秒どれだけ行動が跳ぶか)")
+    print(f"行動ジャンプ = {np.mean(action_jumps):.3f}  (1判断ごとに行動がどれだけ跳ぶか)")
     return s
+
+
+def run_eyeview(mode_actuation, n, babble):
+    """【運動性喃語×egomotion】仰向け・新生児・相手なし・視覚ありで自発運動を動かし、
+    第三者視点＋一人称(眼球)視界を録画する。＝C5の運動が"視界を揺らさないか(egomotion)"を、
+    姿勢/体/相手の交絡なしで目視するための動画。脳は視覚を使わない（＝眼球カメラを"見るだけ"）。"""
+    import cv2
+    env, brain, fusion, emb_proj, cereb, n_act = build(mode_actuation, age=AGE)
+    policy = make_policy(brain, fusion, emb_proj, cereb, n_act, babble)
+    m, d = env.unwrapped.model, env.unwrapped.data
+    # オフスクリーン描画のフレームバッファを広げる（既定500pxだと640×480が入らない）
+    m.vis.global_.offwidth = max(int(m.vis.global_.offwidth), 640)
+    m.vis.global_.offheight = max(int(m.vis.global_.offheight), 480)
+
+    third_ren = mujoco.Renderer(m, height=480, width=640)
+    third_cam = mujoco.MjvCamera(); mujoco.mjv_defaultFreeCamera(m, third_cam)
+    third_cam.distance *= 1.3
+    try:
+        eye_cid = int(m.camera("eye_left").id)
+    except Exception:
+        print("⚠️ eye_left カメラが見つからず一人称は録画できません（第三者のみ）"); eye_cid = None
+    eye_ren = eye_cam = None
+    if eye_cid is not None:
+        eye_ren = mujoco.Renderer(m, height=64, width=64)
+        eye_cam = mujoco.MjvCamera(); eye_cam.type = mujoco.mjtCamera.mjCAMERA_FIXED
+        eye_cam.fixedcamid = eye_cid
+
+    obs, _ = env.reset(seed=0)
+    hidden = brain.init_motor_hidden(); prev_a = torch.zeros(n_act)
+    third_frames, eye_frames = [], []
+    SUB = 2  # 物理2ステップに1コマ録画（秒内の揺れが見える解像度）
+    ctrl = None; step_i = 0
+    _age = "新生児(0m)" if AGE == 0 else (f"{int(AGE)}m" if AGE is not None else "18m既定")
+    print(f"\n録画開始（{n}ティック・仰向け・体={_age}・視覚あり(眼球)・相手なし・"
+          f"{'喃語(運動性喃語)込み' if babble else '決定的'}／制御刻み={CTRL_M}tick）")
+    for tick in range(n):
+        for k in range(K):
+            if k % CTRL_M == 0:
+                a, hidden = policy(obs, prev_a, hidden)
+                ctrl = rescale_action(a, env.action_space); prev_a = a
+            obs, r, te, tr, info = env.step(ctrl)
+            if step_i % SUB == 0:
+                third_ren.update_scene(d, camera=third_cam)
+                third_frames.append(third_ren.render().copy())
+                if eye_ren is not None:
+                    eye_ren.update_scene(d, camera=eye_cam)
+                    eye_frames.append(cv2.resize(eye_ren.render().copy(), (240, 240),
+                                                 interpolation=cv2.INTER_NEAREST))
+            step_i += 1
+            if te or tr:
+                obs, _ = env.reset(); hidden = brain.init_motor_hidden(); prev_a = torch.zeros(n_act)
+                break
+
+    out_dir = os.path.join(_HERE, os.pardir, "logs", "video")
+    os.makedirs(out_dir, exist_ok=True)
+    tag = f"c5eye_age{int(AGE) if AGE is not None else 'def'}_m{CTRL_M}_{'babble' if babble else 'det'}"
+
+    def _write(frames, name, size, fps=50):
+        p = os.path.join(out_dir, f"{tag}_{name}.mp4")
+        vw = cv2.VideoWriter(p, cv2.VideoWriter_fourcc(*"mp4v"), fps, size)
+        for f in frames:
+            vw.write(cv2.cvtColor(f, cv2.COLOR_RGB2BGR))
+        vw.release(); return p
+
+    p3 = _write(third_frames, "third", (640, 480))
+    print("第三者視点mp4:", p3)
+    if eye_frames:
+        pe = _write(eye_frames, "eye", (240, 240))
+        print("一人称(眼球)mp4:", pe)
+    print("→ 一人称が激しく揺れるほど、運動が視界(egomotion)を汚している＝C6が要る兆候。")
+    return p3
 
 
 if __name__ == "__main__":
@@ -238,5 +325,7 @@ if __name__ == "__main__":
           f"{'喃語込み' if babble else '決定的'} ===")
     if mode == "measure":
         run_measure(actuation, n, babble)
+    elif mode == "eyeview":
+        run_eyeview(actuation, n if nums else 15, babble)
     else:
         run_view(actuation, babble)
