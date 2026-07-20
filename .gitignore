@@ -5,6 +5,7 @@ B/archive/
 # ログデータ（実験ごとに大量に増える）→ 別途保存
 A/logs/
 B/logs/
+E/logs/
 
 # リプレイビューア用に書き出したトレース（大量・生成物）
 replayViewer/data/
@@ -62,3 +63,4 @@ venv_build.log
 
 # ローカル専用のMCP設定（公開しない）
 .mcp.json
+研究の原則.md

@@ -67,11 +67,22 @@ class LeanMimoEnv(MIMoV2DummyEnv):
     TwoMimoEnv と同じ「_initialize_simulation を置き換える」形に揃えた。
     """
 
+    def _edit_spec(self, spec):
+        """モデルを compile する前にスペックを編集するフック（既定は何もしない）。
+
+        サブクラスが**XMLファイルを新規に作らずに**物体を足せるようにするためのもの
+        （例：目標E1のベビーサークルの柱）。MjSpec は compile 前なら body/geom を
+        追加できるので、**MIMo同梱のXMLを一切変更せずに**シーンを拡張できる
+        （MIMoはジャンクションの共有物なので汚したくない）。
+        """
+        pass
+
     def _initialize_simulation(self):
         spec = mujoco.MjSpec.from_file(self.fullpath)
         # self.vision_params は MIMoEnv.__init__ の中で super().__init__() より前に
         # 代入される（mimo_env.py:328 vs :358）ので、ここで既に参照できる。
         self.n_textures_stripped = strip_textures(spec) if self.vision_params is None else 0
+        self._edit_spec(spec)          # ← サブクラスの拡張点（既定は無操作）
         self.model = spec.compile()
         self.model.vis.global_.offwidth = self.width
         self.model.vis.global_.offheight = self.height
