@@ -41,7 +41,7 @@ import mimoEnv  # noqa: F401,E402
 import d_c5_motor_quality as mq  # noqa: E402
 import e_target as et  # noqa: E402
 import e_toy_env as te  # noqa: E402
-from e_hand_in_view import eye_angles, EYES, HANDS  # noqa: E402
+from e_hand_in_view import hand_in_view  # noqa: E402
 
 
 def cohens_d(a, b):
@@ -99,13 +99,7 @@ def main():
         rec["pe_prop"].append(float(err[:prop_dim].mean()))
         rec["pe_vis"].append(float(err[prop_dim:].mean()))
         # 手が両目の視野内にあるか
-        inview = False
-        for h in HANDS:
-            ang = eye_angles(m, d, np.array(d.body(h).xpos, dtype=float))
-            if all(ang[c] <= half_fov for c in EYES):
-                inview = True
-                break
-        rec["hand"].append(inview)
+        rec["hand"].append(bool(hand_in_view(m, d)))
         v = np.asarray(raw.get_vision_obs()["eye_left"], dtype=float)
         rec["visdiff"].append(0.0 if prev_vis is None
                               else float(np.abs(v - prev_vis).mean()))

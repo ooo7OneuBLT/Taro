@@ -202,6 +202,116 @@ def _box_inertia(mass, half):
     return np.array([i, i, i])
 
 
+# ============================================================================
+# 新生児体型 v2（2026-07-21 確定）
+# ----------------------------------------------------------------------------
+# mimoGrowth の age=0 は「大きさは新生児だが四肢の比率が成人」だった（逸脱リスト
+# 2026-07-20 その4）。加えて頭が球なので、頭囲34cmでも真上から見た頭が15%小さい。
+# → ①頭を体軸方向に楕円化（頭囲を保ったまま見かけを人間に）②四肢・手足を縮小。
+# 【確定の根拠】主にViewerでの目視（ユーザー＋育児経験者）。四肢を縮める向きと大きさは、
+#   新生児は頭でっかちで四肢が短いという観察に一致。⚠️各係数そのものは目視で決めた恣意値
+#   （文献で裏取りしたのは足長7.58cm・下肢19.6cm・上肢20.96cmだが、後2つは測定定義が
+#    成人的で新生児に不整合と判明＝当てにしない）。詳細は逸脱リスト 2026-07-21。
+# 【確定寸法】身長37.0cm 頭囲34.0cm（不変） 頭12.55 胴14.65 腕12.16 脚13.02 足7.5 手2.4cm
+#   頭/身長 0.339（人間0.25より頭でっかち＝見た目重視の選択）。
+#   ⚠️身長37cmは新生児49.9cmの74%＝**絶対サイズは小さい**。比率（見た目）を優先した結果。
+# 各値: グループ名 -> (環境変数, 既定係数)
+NEWBORN_SHAPE = {
+    "leg":       ("E_LEG_SCALE", 0.45),
+    "leg_thick": ("E_LEG_THICK", 0.60),
+    "arm":       ("E_ARM_SCALE", 0.62),
+    "arm_thick": ("E_ARM_THICK", 0.62),
+    "trunk_len": ("E_TRUNK_LEN", 0.74),
+    "foot":      ("E_FOOT_SCALE", 0.72),
+    "hand":      ("E_HAND_SCALE", 0.70),
+    # 既定で使わない微調整用（1.0）。目視で必要になったら環境変数で振る。
+    "trunk_width": ("E_TRUNK_WIDTH", 1.0),
+    "foot_width":  ("E_FOOT_WIDTH", 1.0),
+}
+HEAD_ELONG = 1.16   # 頭を体軸方向に 12.5/10.8 倍＝球→楕円（頭囲は不変）
+
+
+def _body_scale_custom(age, scales):
+    """体の部位ごとに geom の寸法を係数倍する custom 辞書を作る。
+
+    mimoGrowth の `custom` は `{(geom名, index): 値}` でスキーマを直接上書きする。
+    左側だけ指定すれば右側は自動でミラーされる（右を渡すと警告されて無視される）。
+
+    ⚠️【2026-07-21 修正・重要】**どの index が「長さ」かは部位で違う**。
+    MIMoのcapsuleは `size=[radius, half_length]` だが、**bodyの位置は
+    スキーマ上どちらを参照するかが部位ごとに異なる**（`SCHEMA_V2["bodies"]`）：
+
+        lower_body.pos = (lb.size[0] + cb.size[0]) × 0.752      ← radius
+        upper_body.pos = (cb.size[0] + ub1.size[0]) × 0.867     ← radius
+        chest.pos      = ub3.size[0] × 2.195                    ← radius
+        lower_leg.pos  = −(upper_leg1.size[0]×2 + size[1])      ← 両方
+
+    ＝**胴体は「横向きのcapsuleを体軸方向に積んだ」構造**で、体軸方向の厚みは
+    `radius`（index 0）、左右の幅が `half_length`（index 1）。
+    当初 index 1 だけを変えていたため、**体幹長がまったく変わらなかった**
+    （19.8cmのまま。「効かない」と誤って結論しかけた）。
+
+    そのため部位ごとに「どの index を、何倍するか」を明示する。
+      trunk_len   : 胴の radius   → 体幹が短くなる（同時に胴が細くなる）
+      trunk_width : 胴の half_len → 胴が横に広くなる（細さの補償に使う）
+      leg / arm   : half_len（+脚は radius も体軸に効くが、細くなるので既定は触らない）
+    """
+    from mimoGrowth.growth import get_growth_params
+    # (グループ名, [geom名...], 変えるindex)  idx=None は「全indexを一律」＝相似縮小
+    _FOOT = ["geom:left_foot1", "geom:left_foot2", "geom:left_foot3",
+             "geom:left_toes1", "geom:left_toes2",
+             "geom:left_big_toe1", "geom:left_big_toe2"]
+    # 手＝掌ブロック＋全指のgeom。相似縮小（全indexを一律）。
+    # ⚠️指のknuckle/middle/distalは連鎖するので、掌だけでなく指も含めないと
+    #   「掌は小さいが指は元のまま」というちぐはぐになる。
+    _HAND = [n for n in (
+        "geom:left_hand1", "geom:left_hand2", "geom:left_hand3", "geom:left_hand4",
+        "geom:left_ffknuckle1", "geom:left_ffmiddle1", "geom:left_ffdistal1",
+        "geom:left_mfknuckle1", "geom:left_mfmiddle1", "geom:left_mfdistal1",
+        "geom:left_rfknuckle1", "geom:left_rfmiddle1", "geom:left_rfdistal1",
+        "geom:left_lfmetacarpal1", "geom:left_lfmetacarpal2",
+        "geom:left_lfknuckle1", "geom:left_lfmiddle1", "geom:left_lfdistal1",
+        "geom:left_thbase1", "geom:left_thhub1", "geom:left_thdistal1")]
+    groups = {
+        "leg":         (["geom:left_upper_leg1", "geom:left_lower_leg1",
+                         "geom:left_lower_leg2"], 1),
+        "leg_thick":   (["geom:left_upper_leg1", "geom:left_lower_leg1",
+                         "geom:left_lower_leg2"], 0),   # ⚠️脚長にも効く（bodyのposが参照）
+        "arm":         (["left_uarm1", "left_larm"], 1),
+        "arm_thick":   (["left_uarm1", "left_larm"], 0),   # ⚠️前腕→手の距離にも効く
+        "trunk_len":   (["lb", "cb", "ub1", "ub2", "ub3"], 0),   # ← 体軸方向
+        "trunk_width": (["lb", "cb", "ub1", "ub2", "ub3"], 1),   # ← 左右の幅
+        # 足＝全indexを一律に縮める（相似）。実測 8.36cm に対し人間の新生児は
+        # 7.58±0.44cm（n=500, foot length は在胎週数の推定に使われる標準指標）
+        "foot":        (_FOOT, None),
+        "foot_width":  (_FOOT, 1),   # 甲の広さ（どのindexが幅かは足の向きで変わるので要目視）
+        "hand":        (_HAND, None),   # 手全体を相似縮小（掌＋指）
+    }
+    base = get_growth_params(age, "v2")["geoms"]
+    custom, note = {}, []
+    for grp, (names, idx) in groups.items():
+        k = float(scales.get(grp, 1.0))
+        if abs(k - 1.0) < 1e-9:
+            continue
+        n = 0
+        for nm in names:
+            size = base.get(nm, {}).get("size")
+            if size is None:
+                continue
+            idxs = range(len(size)) if idx is None else ([idx] if len(size) > idx else [])
+            for j in idxs:
+                if float(size[j]) <= 0:
+                    continue          # 0 は「使っていない次元」なので触らない
+                # 同じ (geom, index) を複数グループが指す場合は掛け合わせる
+                cur = custom.get((nm, j), float(size[j]))
+                custom[(nm, j)] = cur * k
+                n += 1
+        note.append(f"{grp}x{k:.2f}(×{n})")
+    if note:
+        print("[body] 体型補正: " + " ".join(note) + " [逸脱リスト参照]")
+    return custom
+
+
 class ToySupineEnv(SupineMimoEnv):
     """仰向け＋手の届く所におもちゃ（押すと動く対象）。
 
@@ -285,6 +395,30 @@ class ToySupineEnv(SupineMimoEnv):
         #   （これを見ずに移動量だけ見ると置き直しを"触れて動いた"と誤認する）。
         self.n_respawn = 0
         self.respawned_this_step = False
+        # --- 体型の補正（2026-07-20）------------------------------------------
+        # 【なぜ要るか】Viewerを見た第三者（育児経験者）の「手足が長すぎる、赤ちゃんは
+        # もっと頭でっかち」という指摘を実測したところ、**下肢が新生児の127%**だった：
+        #     太郎 age=0 : 上肢 19.1cm / 下肢 24.9cm （上肢/下肢 = 0.77）
+        #     人間の新生児: 上肢 20.96cm / 下肢 19.60cm（上肢/下肢 = 1.07）
+        #     ＝ 人間の新生児は**腕のほうが脚より長い**。太郎は逆転している。
+        #     出典: Segmental Limb Length Measurements in Term Neonates From
+        #           Southern India, Indian Pediatrics 2024（n=950, 満期産）
+        # mimoGrowth は年齢で「大きさ」は変えるが、新生児特有の短い脚を再現していない
+        # （上肢/下肢比は age=0 で 0.77、age=24 で 0.71 とほぼ動かない）。
+        # → geom の**長さだけ**を係数で縮める。半径は変えない＝相対的に太くなり、
+        #   結果として新生児らしい「ずんぐり」に近づく。
+        # ⚠️これは**逸脱の解消**であって、創発を作るための細工ではない。根拠は上の実測値。
+        #   検証用に必ず 1.0（無補正）へ戻せること。
+        # 既定値＝2026-07-21 に Viewer で目視確定した「新生児体型v2」（NEWBORN_SHAPE）。
+        # 環境変数を渡さなければこの体型になる。1.0 に戻したいときは各変数へ "1.0" を渡す。
+        # E_SHAPE=0 で補正を完全に切る（＝素のmimoGrowth体型に戻す＝アブレーション）。
+        _sc = ({k: 1.0 for k in NEWBORN_SHAPE} if os.environ.get("E_SHAPE", "1") != "1"
+               else {k: float(os.environ.get(env, str(default)))
+                     for k, (env, default) in NEWBORN_SHAPE.items()})
+        self._head_elong = (1.0 if os.environ.get("E_SHAPE", "1") != "1"
+                            else float(os.environ.get("E_HEAD_ELONG", str(HEAD_ELONG))))
+        if any(abs(v - 1.0) > 1e-9 for v in _sc.values()) and kwargs.get("age") is not None:
+            kwargs["custom_measurements"] = _body_scale_custom(float(kwargs["age"]), _sc)
         super().__init__(**kwargs)
 
         self._arm_body = f"{toy_side}_upper_arm"
@@ -364,6 +498,41 @@ class ToySupineEnv(SupineMimoEnv):
         except Exception as e:      # MjSpecのtexture APIはバージョン差があるので落とさない
             print(f"[E1] skyboxの単色化をスキップ（{type(e).__name__}: {e}）")
 
+    def _elongate_head(self, spec):
+        """頭のgeomを球→楕円体にして、**体軸方向にだけ**伸ばす。
+
+        【なぜ要るか】MIMoの頭は球で、直径は頭囲(34cm)から計算される＝10.8cm。
+        しかし**人間の頭は楕円**で、頭囲34cmでも頭頂〜顎は約12.5cmある。
+        ＝ MIMoは頭囲が正しいのに、**真上から見た頭は15%小さい**。
+        この差を四肢を縮めて埋めようとすると身長が犠牲になり（右案で36.5cm＝
+        新生児の73%）、身長を優先すると頭囲が壊れる。**球のままでは
+        頭囲・身長・見かけの3つを同時に満たす解が無い**。
+
+        【何をするか】左右方向（＝頭囲を決める軸）は変えず、
+        MIMoローカルの z（頭頂方向＝仰向けでは体軸方向）だけを ratio 倍する。
+          球   [r, 0, 0]        頭囲 2πr        真上から見た長さ 2r
+          楕円 [r, r, r*ratio]  頭囲 2πr（不変） 真上から見た長さ 2r*ratio
+        ratio = 12.5/10.8 ≒ 1.16 で人間の新生児に一致する。
+
+        ⚠️目のカメラ位置は head の geom size から計算されるが、その計算は
+        成長モジュール（このフックより前）で終わっている。z方向にだけ伸ばすので
+        目が頭に埋もれることは無いはずだが、**視界の画像で必ず確認すること**。
+        """
+        ratio = getattr(self, "_head_elong", 1.0)
+        if abs(ratio - 1.0) < 1e-9:
+            return
+        for g in spec.geoms:
+            if g.name != "head":
+                continue
+            r = float(np.asarray(g.size).ravel()[0])
+            g.type = mujoco.mjtGeom.mjGEOM_ELLIPSOID
+            g.size = [r, r, r * ratio]
+            print(f"[body] 頭を楕円化: 半径{r*100:.2f}cm → "
+                  f"[{r*100:.2f}, {r*100:.2f}, {r*ratio*100:.2f}]cm "
+                  f"（頭囲は不変、真上から見た長さ {2*r*ratio*100:.2f}cm）")
+            return
+        print("[body] ⚠️頭のgeomが見つからず、楕円化をスキップした")
+
     def _edit_spec(self, spec):
         """モデル構築前に、ベビーサークルの柱をワールドへ追加する（LeanMimoEnvのフック）。
 
@@ -371,6 +540,7 @@ class ToySupineEnv(SupineMimoEnv):
         シーンを拡張できる＝MIMo同梱のXML（共有物）を汚さない。
         柱は静的（freejointなし）なので、太郎が当たっても動かない＝壁として働く。
         """
+        self._elongate_head(spec)
         if self._plain:
             self._make_visually_plain(spec)
         if not self._fence:

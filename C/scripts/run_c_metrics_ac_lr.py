@@ -114,6 +114,28 @@ _TOUCH_MODE = os.environ.get("C_TOUCH_MODE", "target")
 # C_LEAN=0 で従来の素のモデルに戻せる（アブレーション/描画品質が要るとき用）。
 _LEAN = os.environ.get("C_LEAN", "1") == "1"
 _ENV_ID = "TaroSupine-v0" if _SUPINE else ("TaroBenchV2Lean-v0" if _LEAN else "MIMoBenchV2-v0")
+# 【目標E1・2026-07-20】C_E1=1 で E/scripts/e_toy_env.py の ToySupineEnv を使う。
+#   仰向け＋柵（＝Ferrari 2007 のnest相当の支持）＋視覚的に貧しい環境（＝White 1966）。
+#   おもちゃ・柵・見た目は e_toy_env 側の環境変数（E_TOY_OBJ / E_FENCE / E_PLAIN）で切る。
+# 【段階1（いまここ）】視覚は**入力にだけ**入れ、予測対象は固有感覚のまま＝C5と同条件で
+#   自己モデルを建て直す。理由＝目標C(自己モデル)→目標E(運動発達)の発達順を飛ばさないため。
+#   視覚を足したことで pc_latent など6層が作り直しになったので、まず土台を戻す。
+# 【段階2（次）】C_E1_TARGET=1 で視覚を**予測対象**にも入れる（E/scripts/e_target.py）。
+#   そこで初めて「自分の手を見る」が報酬を生みうる状態になる。
+_E1 = os.environ.get("C_E1", "0") == "1"
+_E1_VISION = os.environ.get("C_E1_VISION", "1") == "1"      # E1での視覚入力（0でアブレーション）
+# 予測対象に何を入れるか。3条件を比較するための切替：
+#   "0"      … 固有感覚のみ（従来＝対照条件A）
+#   "vision" … 固有感覚 + 視覚（条件B。"1" も同じ扱い＝後方互換）
+#   "all"    … 固有感覚 + 内受容 + 前庭 + 触覚 + 視覚（条件C＝**全感覚**）
+# 【条件Cを作る理由】2026-07-20 の実測で「**予測対象に入っていない感覚は内部表現 z から
+# 捨てられる**」と判明した（視覚を入力にだけ入れた段階1のモデルは、画面を真っ黒にしても
+# z が 0.00% しか変わらなかった）。同じ理屈で触覚・内受容・前庭も捨てられているはずで、
+# 人間の脳が一部の感覚だけ予測しているとは考えにくい＝**全感覚を予測するのが人間模倣**。
+# BとCを比べると「視覚だけ入れる」という選り好み自体の是非が分かる。
+_E1_TGT = os.environ.get("C_E1_TARGET", "0").lower()
+_E1_TARGET = _E1_TGT in ("1", "vision", "all")
+_E1_TARGET_ALL = _E1_TGT == "all"
 
 
 def _touch_params():
@@ -122,7 +144,24 @@ def _touch_params():
     from d_supine_env import infant_touch_params
     return infant_touch_params(2.0)
 CSV_COLUMNS = ["life_min", "train_step", "classify", "margin", "corr", "persist",
-               "agency", "mag_ratio", "real_min"]
+               "agency", "mag_ratio", "real_min", "hand_in_view"]
+
+
+def hand_in_view_rate(model, data):
+    """★E1の主指標：手が視野に入っているか（1tickの判定）。
+
+    判定の実体は `E/scripts/e_hand_in_view.py` の `hand_in_view()` に**一本化**してある
+    （測定スクリプトと学習ループで基準がズレると比較不能になるため）。
+    - **左右どちらかの眼**で視野内なら「見ている」とみなす（2026-07-20 変更。
+      切り出し動画の目視で「右目には大きく映っているのに左目には映っていない」場面が
+      多いと分かったため。人間側の観察研究も両眼視は問わない）
+    - `E_HV_MODE=both` で旧基準（両目とも）に戻せる＝アブレーション用
+    ⚠️人間側に比較できる実測値は存在しないので、判定は**太郎の中での前後比較**で行う。
+    """
+    # ⚠️import失敗を握りつぶさない。黙って0.0を返すと「手が一度も視野に入らなかった」という
+    #   結果が静かに出て、E1の結論を誤らせる（＝今日9件出したバグと同じ構造の事故）。
+    from e_hand_in_view import hand_in_view
+    return float(hand_in_view(model, data))
 
 
 # MinimalFusion は taro_core/src/senses/fusion.py へ抽出済み（doc/移行記録_taro_core化_2026-07-17.md）。
@@ -132,16 +171,98 @@ CSV_COLUMNS = ["life_min", "train_step", "classify", "margin", "corr", "persist"
 from fusion import MinimalFusion  # noqa: F401  （再エクスポート）
 
 
+_TGT_FUSION = None      # 正解側の**凍結**融合層（run内で設定）。C_E1_TARGET=1 のとき視覚に使う
+_PROP_DIM = None        # 固有感覚の次元数（予測対象の先頭ブロックの長さ）。run内で設定
+_BLOCKS = None          # 予測対象のブロック境界 [(start, end, 名前), ...]。ln_prop が構築
+# 各ブロックの重み λ。★段階1では全部 1.0（＝感覚ごとに平等）から動かさない。
+# 段階2で振って比較する予定（doc/やることリスト.md）。C_LAM_V は視覚ブロック専用の指定。
+_LAM_V = float(os.environ.get("C_LAM_V", "1.0"))
+
+
+def block_pe(pred, target):
+    """★予測誤差＝**ブロックごとに平均してから足す**（次元数の影響を除く）。
+
+    【なぜ（2026-07-20・段階1）】
+    従来は連結したベクトル全体を1回で平均していたので、**寄与が次元数比で決まっていた**：
+      固有感覚621 + 視覚64 → 視覚の寄与はわずか 9.3%
+    これは「視覚が重要でない」という判断ではなく、**次元数という無関係な量**が
+    勝手に重みを決めてしまっている状態。同じ罠を目標D0とE1で計3回踏んでいる。
+
+    → **各ブロックの平均を取ってから足す**と、寄与は次元数によらず λ_v で決まる。
+      λ_v=1.0 なら 50:50。**これは「重み付け」ではなく無関係な量の影響を除く操作**なので
+      恣意的ではない。根拠＝Ohata & Tani 2020（`1/(2Rp)`, `1/(2Rv)` で次元数で割る）、
+      Idei et al. 2025（固有感覚28 vs 視覚32,256＝1,150倍差を正規化のみで処理）、
+      Ichiwara & Ogata 2022（各項を `1/(H·W·C)` で正規化）、MoPoE-VAE（次元比でスケール）。
+      [参考文献リスト §目標E-17](../../doc/参考文献リスト.md)
+
+    ⚠️(1+λ_v) で割るのは**全体のスケールを保つ**ため。割らないと視覚を足したときだけ
+      誤差が約2倍になり、他の損失（KL・恒常性）との比が変わって「視覚を足した効果」と
+      「学習率が実質変わった効果」が混ざる（＝交絡）。
+    ⚠️次元を無理に揃える案は**採らない**。どの文献もやっておらず、1,150倍差でも
+      正規化だけで扱えている実例がある。
+    """
+    if not _BLOCKS or len(_BLOCKS) <= 1:
+        return mse(pred, target)                     # 従来と完全に同一（固有感覚のみの条件A）
+    tot, wsum = 0.0, 0.0
+    for (s, e, nm) in _BLOCKS:
+        lam = _LAM_V if nm == "vision" else 1.0      # 段階1では視覚も1.0＝全ブロック平等
+        tot = tot + lam * mse(pred[..., s:e], target[..., s:e])
+        wsum += lam
+    return tot / max(wsum, 1e-9)
+
+
 def ln_prop(obs):
     """予測対象。既定は固有感覚のみ（従来のC）。
 
     C_TOUCH=1 かつ C_TOUCH_MODE=target のときだけ触覚を予測対象に加える。
     C_TOUCH_MODE=input なら触覚は fusion の入力にだけ入り、予測対象は固有感覚のまま。
+
+    【★C_E1_TARGET=1（目標E1・段階2）】視覚エンコーダの出力64次元を予測対象に**足す**。
+    これが hand regard（自分の手を見る）の実験の本体：予測対象に入っていないものは
+    progress報酬を生まないので、視覚を入れて初めて「手を見ると得をする」状態になる。
+    ★2つの設計判断（詳細は E/scripts/e_target.py）：
+      (1) **凍結した別インスタンス**のエンコーダを使う（RND式）。予測側と正解側が同じ
+          学習中のエンコーダだと「出力を平坦にすれば当たる」抜け道で崩壊する（目標Cで実際に踏んだ）。
+      (2) **固有感覚と視覚を別々に layer_norm** してから連結する。全体を一度に正規化すると
+          621次元が平均・分散を支配して64次元が埋もれる（D0・E1で3回踏んだ希釈の罠）。
+    ⚠️それでもMSEへの寄与は次元数比のまま（64/685=9.3%）。重み付けは**恣意的になる**ので
+      今はしない。まず等重みで回し、足りなければ精度(precision)の議論として扱う。
     """
+    ln = torch.nn.functional.layer_norm
     v = to_tensor(obs["observation"])
     if _TOUCH and _TOUCH_MODE == "target":
         v = torch.cat([v, to_tensor(obs["touch"])])
-    return torch.nn.functional.layer_norm(v, v.shape).detach()
+    parts = [ln(v, v.shape).detach()]
+    names = ["prop"]
+    f = _TGT_FUSION
+    if _E1_TARGET and f is not None:
+        with torch.no_grad():                   # 正解側は勾配を流さない（RND式）
+            # 条件C＝固有感覚 + 前庭 + 触覚 + 視覚。
+            # ★内受容は入れない（2026-07-20 の文献調査による判断）：
+            #   人間は内受容の予測誤差を**自律反射**（心拍・血管）で解消するが、太郎には
+            #   その出力が無い＝**誤差を減らす手段が構造的に存在しない**ので、予測対象に
+            #   入れても progress報酬（＝予測が上達した分）が生まれない。
+            #   加えてE1の interoception は定数 [0.3,0,0,0.3] で中身が無い（逸脱リスト参照）。
+            #   ⚠️内受容は既に homeostasis.py で**報酬系**に使われており、予測対象にも
+            #   入れると同じ信号が二重に効く。
+            if _E1_TARGET_ALL:
+                for nm, enc, key in (("vest", getattr(f, "vestibular", None), "vestibular"),
+                                     ("touch", getattr(f, "touch", None), "touch")):
+                    if enc is None or key not in obs:
+                        continue
+                    e = enc(to_tensor(obs[key]))
+                    parts.append(ln(e, e.shape)); names.append(nm)
+            if getattr(f, "vision", None) is not None and "eye_left" in obs:
+                e = f.vision(obs["eye_left"], obs["eye_right"])
+                parts.append(ln(e, e.shape)); names.append("vision")
+    global _BLOCKS
+    if _BLOCKS is None or len(_BLOCKS) != len(parts):
+        _BLOCKS = []
+        o = 0
+        for nm, p in zip(names, parts):
+            _BLOCKS.append((o, o + int(p.shape[-1]), nm))
+            o += int(p.shape[-1])
+    return torch.cat(parts, dim=-1).detach() if len(parts) > 1 else parts[0]
 
 
 def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
@@ -168,15 +289,29 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
         sys.path.insert(0, os.path.join(_CORE, "src", "body"))
         from smooth_actuation import SmoothTorqueModel
         _act_kw = {"actuation_model": SmoothTorqueModel}
-    env = HybridEnv(gym.make(_ENV_ID, vision_params=None, touch_params=_touch_params(),
-                             **_age_kw, **_act_kw))
+    _vres = 0
+    if _E1:      # 目標E1：おもちゃ環境（ToySupineEnv）。視覚は既定ONで**入力にだけ**入る
+        sys.path.insert(0, os.path.join(_BRIDGE, os.pardir, "E", "scripts"))
+        from e_toy_env import ToySupineEnv, infant_vision_params, VISION_RES
+        _vp = infant_vision_params() if _E1_VISION else None
+        _vres = VISION_RES if _E1_VISION else 0
+        env = HybridEnv(ToySupineEnv(vision_params=_vp, touch_params=_touch_params(),
+                                     **_age_kw, **_act_kw))
+        print(f"[E1] 環境=ToySupineEnv／視覚={'ON' if _E1_VISION else 'OFF'}"
+              f"／視覚を予測対象に={'YES(段階2)' if _E1_TARGET else 'NO(段階1)'}")
+    else:
+        env = HybridEnv(gym.make(_ENV_ID, vision_params=None, touch_params=_touch_params(),
+                                 **_age_kw, **_act_kw))
     # 触覚の次元数は「センサ点の総数」＝モデル構築時点で確定しており、reset不要で取れる。
     # ここで touch_dim を知るために env.reset() を足すと**乱数を1回余計に消費して学習の
     # 乱数列がずれる**（落とし穴チェック項3）。触覚なし条件が従来のCと比較不能になるので厳禁。
     # 観測空間はenv構築時に確定しているのでresetなしで読める。
     # 注意：get_sensor_count()は「センサ点の数」(1202)で、観測は1点あたり力の3成分＝3606。
     touch_dim = int(env.observation_space["touch"].shape[0]) if _TOUCH else 0
-    fusion = MinimalFusion(touch_dim); target_fusion = MinimalFusion(touch_dim).freeze()
+    fusion = MinimalFusion(touch_dim, vision_res=_vres)
+    target_fusion = MinimalFusion(touch_dim, vision_res=_vres).freeze()
+    global _TGT_FUSION
+    _TGT_FUSION = target_fusion      # ln_prop が視覚を予測対象に足すのに使う（C_E1_TARGET=1）
     n_act = env.action_space.shape[0]
     # 【バグ修正・2026-07-15】最初のresetに必ずseedを渡す。
     # 環境の乱数(`env.unwrapped.np_random`)は gym が別に管理しており、torch.manual_seed も
@@ -187,7 +322,15 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
     obs, _ = env.reset(seed=seed)
     sdim = fusion.encode(obs).shape[0]; prop_dim = to_tensor(obs["observation"]).shape[0]
     # nat_headが吐く次元＝予測対象の次元。touch_mode=input なら触覚は予測対象に入らない。
-    out_dim = prop_dim + (touch_dim if _TOUCH_MODE == "target" else 0)
+    # 予測ヘッドの出力次元＝予測対象の次元。実際に ln_prop を1回通して**測る**
+    # （手計算だと視覚64次元の足し忘れ等でズレる。ここは合わせないと学習が壊れる）。
+    global _PROP_DIM
+    _PROP_DIM = prop_dim          # ★ブロック分割の境目（固有感覚の次元数）
+    out_dim = int(ln_prop(obs).shape[0])
+    if _E1_TARGET:
+        _bd = "／".join(f"{nm}:{e-s_}" for (s_, e, nm) in (_BLOCKS or []))
+        print(f"[E1] 予測対象={_E1_TGT} → 全{out_dim}次元  内訳 {_bd}")
+        print(f"     ★誤差はブロックごとに平均してから足す（次元数の影響を除く。λ_v={_LAM_V}）")
     brain = TaroBrainWithMotor(vocab_size=3, sensory_dim=sdim, n_actuators=n_act)
     emb_dim = brain.sensory_proj.out_features  # GRUの入力次元(=64)
 
@@ -524,8 +667,11 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
         ag, magr = agency_probe()
         life_min = step * K * DT / 60.0
         real_min = (time.time() - t0) / 60.0
+        # ★E1の主指標：直近区間で手が視野に入っていた割合（段階1では記録のみ・報酬に不使用）
+        _hv = (100.0 * hv["hit"] / hv["tot"]) if hv["tot"] else float("nan")
         log_row([f"{life_min:.1f}", step, f"{cl:.2f}", f"{mg:.2f}", f"{co:.4f}",
-                 f"{pr:.2f}", f"{ag:.2f}", f"{magr:.1f}", f"{real_min:.1f}"])
+                 f"{pr:.2f}", f"{ag:.2f}", f"{magr:.1f}", f"{real_min:.1f}", f"{_hv:.2f}"])
+        hv["hit"] = 0; hv["tot"] = 0        # 区間ごとにリセット＝推移が見える
         noise = 0.05 + ne.get_ne_level() * 0.45
         cereb_tag = f" cereb=on(err={cereb.err_ema.item():.2f})" if _CEREB else " cereb=off"
         # 【taro-C5】|行動|＝力の出し具合（0.86が全力偏重。低下＝加減を学習。0付近＝フリーズ警告）。
@@ -543,6 +689,8 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
     # Goal Babbling 用の目標バッファ＝Self-Priorの最小版（過去に経験した固有感覚の分布）。
     goal_buf = []
     pe_fast, pe_slow = 1.0, 1.0  # 予測誤差の速い/遅い走行平均（"いつもより驚いたか"の自己正規化用）
+    hv = {"hit": 0, "tot": 0}    # ★E1：手が視野内だったtickの数（checkpointごとにリセット）
+    mj = env.unwrapped           # モデル/データへの参照（hand_in_view_rate 用）
     reach_goal, reach_prev_dist = None, 0.0  # 閉ループreaching訓練：保持中の目標と直前の距離
 
     def consolidate(n_batches=200, bs=128):
@@ -560,7 +708,7 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
             out, _ = brain.motor_gru(emb, hb)  # out (bs,1,hidden)
             z, kl, rc = brain.pc_latent.infer(hb[-1], out[:, 0], CF[idx])
             pred = CLP[idx] + nat_head(torch.cat([z, AA[idx]], dim=-1))
-            loss = mse(pred, NLP[idx]) + kl + rc
+            loss = block_pe(pred, NLP[idx]) + kl + rc   # ★学習ループと同じ基準
             learner.optimizer.zero_grad(); loss.backward()
             torch.nn.utils.clip_grad_norm_(learner.brain.parameters(), learner.grad_clip)
             learner.optimizer.step()
@@ -625,7 +773,10 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
             buf["a"].append(a.detach()); buf["cf"].append(cf.detach())
             buf["clp"].append(clp.detach()); buf["nlp"].append(nlp.detach())
             buf["h"].append(state["hidden"].detach())
-        pe = mse(pred, nlp)
+        if _E1:      # ★E1：手が視野に入っているかを毎tick数える（記録のみ。報酬には効かない）
+            hv["hit"] += hand_in_view_rate(mj.model, mj.data)
+            hv["tot"] += 1
+        pe = block_pe(pred, nlp)   # ★次元数の影響を除く（段階1）
         pe_fast = 0.9 * pe_fast + 0.1 * pe.item()   # 次ステップの切替判断に使う（因果的に過去の驚き）
         pe_slow = 0.99 * pe_slow + 0.01 * pe.item()
         # 内発的動機。progress＝学習進度（誤差が減っていれば正）／predict＝従来の予測しやすさ。

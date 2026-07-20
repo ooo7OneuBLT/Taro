@@ -47,6 +47,38 @@ import e_toy_env as te  # noqa: E402
 
 EYES = ("eye_left", "eye_right")
 HANDS = ("left_hand", "right_hand")
+VISION_FOVY_HALF = te.VISION_FOVY / 2.0     # 視野の半角[度]（fovyは全画角）
+
+
+def hand_in_view(model, data, half_fov=None, mode=None):
+    """★E1の主指標の判定：手が視野に入っているか（左右どちらかの眼でよい）。
+
+    【なぜ"どちらかの眼"か（2026-07-20 変更）】
+    第1版は「**両目とも**の視野内」を条件にしていたが、切り出し動画を目視したところ、
+    **右目には手が大きく映っているのに左目にはほとんど映っていない**場面が多く、
+    そうした場面が全部カウントから漏れていた。
+    人間側の観察研究は「手を見ている」を**目視で判定**しており、両眼視かどうかは問わない。
+    ＝両目を要求するほうが恣意的だったので、**片目でも視野内なら"見ている"**とする。
+    ⚠️mode="both" で旧基準に戻せる（アブレーション用。E_HV_MODE 環境変数でも切替可）。
+    ⚠️遮蔽（体に隠れて実際には見えない）は考慮しない幾何的な上限値。
+
+    Returns: 1.0（どちらかの手が視野内） / 0.0
+    """
+    import os as _os
+    if half_fov is None:
+        half_fov = VISION_FOVY_HALF
+    if mode is None:
+        mode = _os.environ.get("E_HV_MODE", "any")
+    for h in HANDS:
+        try:
+            p = np.array(data.body(h).xpos, dtype=float)
+        except Exception:
+            return 0.0
+        ang = eye_angles(model, data, p)
+        inside = [ang[c] <= half_fov for c in EYES]
+        if (any(inside) if mode == "any" else all(inside)):
+            return 1.0
+    return 0.0
 
 
 def eye_angles(model, data, target_pos):
