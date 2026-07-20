@@ -75,6 +75,10 @@ K = 100
 CTRL_M = int(os.environ.get("C5_CTRL_M", str(K)))
 # 体の月齢（成長モジュール）。C5_AGE=0 で新生児。空=18ヶ月児（従来）。
 AGE = float(os.environ["C5_AGE"]) if os.environ.get("C5_AGE") else None
+# 【目標E1】おもちゃ（押すと動く随伴対象）のある仰向け環境で見る/測る。E_TOY=1でopt-in。
+# 既定OFF＝従来のD/C5と1バイトも変わらない。おもちゃは観測にも行動にも入らない（予測対象は
+# 固有感覚のまま）ので、**C5の学習済みモデルをそのまま実行できる**＝再学習なしで目視できる。
+E_TOY = os.environ.get("E_TOY", "0") == "1"
 
 
 def load_matching(module, sd, tag):
@@ -93,10 +97,32 @@ def build(mode_actuation, age=None):
     torch.manual_seed(seed); np.random.seed(seed)
     act_model = SmoothTorqueModel if mode_actuation == "on" else SpringDamperModel
     _kw = {"age": age} if age is not None else {}
-    env = HybridEnv(SupineMimoEnv(vision_params=None, actuation_model=act_model, **_kw))
+    # 【2026-07-20 修正・重要】E1では**視覚と触覚を実際に脳へ繋ぐ**。
+    # それまでは vision_params=None / touch_dim=0 で、太郎は内受容+固有感覚+前庭覚の
+    # 3つだけ（sdim=192）で動いていた＝「視覚を入力に足した」という以前の記述は**誤り**で、
+    # 環境側にパラメータを用意しただけで build から渡していなかった。
+    # ⚠️sdimが192→320に変わるので、C5のチェックポイントは**一部の層が作り直しになる**
+    #   （load_matching が形の合う層だけ読む）。E1は「視覚を使って自分の手を学ぶ」段階なので、
+    #   視覚なしで学んだ重みをそのまま持ち越すほうが不自然、という判断で許容する。
+    #   E_VISION=0 / E_TOUCH=0 で個別に切れる（アブレーション用）。E_TOY=0 なら従来と完全同一。
+    _use_vision = E_TOY and os.environ.get("E_VISION", "1") == "1"
+    _use_touch = E_TOY and os.environ.get("E_TOUCH", "1") == "1"
+    if E_TOY:   # 目標E1：おもちゃ入りの仰向け環境（E/scripts/e_toy_env.py）
+        sys.path.insert(0, os.path.join(_HERE, os.pardir, os.pardir, "E", "scripts"))
+        from e_toy_env import ToySupineEnv, infant_vision_params, VISION_RES
+        _vp = infant_vision_params() if _use_vision else None
+        env = HybridEnv(ToySupineEnv(vision_params=_vp, actuation_model=act_model, **_kw))
+        print("[E1] おもちゃ環境（ToySupineEnv）で実行")
+    else:
+        env = HybridEnv(SupineMimoEnv(vision_params=None, actuation_model=act_model, **_kw))
     obs, _ = env.reset(seed=seed)
     n_act = env.action_space.shape[0]
-    fusion = MinimalFusion(touch_dim=0)
+    _touch_dim = int(np.asarray(obs["touch"]).shape[0]) if (_use_touch and "touch" in obs) else 0
+    _vres = VISION_RES if _use_vision else 0
+    fusion = MinimalFusion(touch_dim=_touch_dim, vision_res=_vres)
+    if E_TOY:
+        print(f"[E1] 感覚: 視覚={'ON(' + str(_vres) + 'px)' if _vres else 'OFF'}"
+              f"／触覚={'ON(' + str(_touch_dim) + '次元)' if _touch_dim else 'OFF'}")
     sdim = fusion.encode(obs).shape[0]
     prop_dim = to_tensor(obs["observation"]).shape[0]
     print(f"融合次元 sdim={sdim}／固有感覚 prop_dim={prop_dim}／行動 n_act={n_act}")
@@ -173,6 +199,34 @@ class JerkMeter:
 
 
 def run_view(mode_actuation, babble):
+    """ライブビューア。C5_REALTIME=1 で**等倍速**（既定は計算任せ＝早送り）。
+
+    等倍速でないと「人間の赤ちゃんと比べて速すぎ/遅すぎ」が判断できず目視の意味が薄れる。
+    一時停止＝スペース、巻き戻し＝左パネルのHistory（MuJoCoビューアの標準機能）。
+    """
+    import time
+    # 再生速度。1.0=等倍速、0=待たない（最速＝学習を早く進めたいとき）。
+    # 実行中にキーで変えられる（等速だと学習の進みを見るのに時間がかかりすぎるため）：
+    #   .（>） 2倍速く   ,（<） 2倍遅く   0 等倍に戻す   M 最速（待たない）
+    speed = [1.0 if os.environ.get("C5_REALTIME", "0") == "1" else 0.0]
+
+    def _key_cb(keycode):
+        try:
+            ch = chr(keycode)
+        except ValueError:
+            return
+        if ch in ".>":
+            speed[0] = min(speed[0] * 2 if speed[0] > 0 else 64.0, 64.0)
+        elif ch in ",<":
+            speed[0] = max(speed[0] / 2 if speed[0] > 0 else 1.0, 0.0625)
+        elif ch == "0":
+            speed[0] = 1.0
+        elif ch in "mM":
+            speed[0] = 0.0
+        else:
+            return
+        print(f"  [speed] x{speed[0]:.4g}" if speed[0] > 0 else "  [speed] MAX (no wait)",
+              flush=True)
     env, brain, fusion, emb_proj, cereb, n_act = build(mode_actuation, age=AGE)
     policy = make_policy(brain, fusion, emb_proj, cereb, n_act, babble)
     m, d = env.unwrapped.model, env.unwrapped.data
@@ -185,8 +239,49 @@ def run_view(mode_actuation, babble):
     _ctrl_note = f"制御刻み={CTRL_M}tick({'速い連続制御' if CTRL_M < K else '1秒保持'})"
     print(f"\nビューア起動。仰向けの太郎が学習済みの脳で動きます（活性化ダイナミクス={mode_actuation.upper()}"
           f"／{'喃語込み' if babble else '決定的'}／{_ctrl_note}）。スペース=一時停止、左History=巻き戻し。")
+    print("  キー操作: . = 速く / , = 遅く / 0 = 等倍 / M = 最速（待たない）")
+
+    def _show_speed(viewer, eff=0.0):
+        """現在の再生倍率を**画面右上のUI**に出す。
+
+        第1版はシーン内にラベルgeomを浮かせたが、3D空間の物体として描かれるので
+        カメラを動かすと位置がずれ、見づらかった。ビューアのオーバーレイ(mjr_overlay)は
+        passive viewer から直接触れないため、**ウィンドウのタイトル**に出す方式にする
+        （常に画面上部に見え、カメラ操作の影響を受けない）。
+        """
+        # ★「要求倍率」と「実効倍率」を**両方**出す。第1版は要求だけを出していたが、
+        #   実測で x2 以上は計算が追いつかず頭打ち（1物理ステップの計算6.46ms > sim 10ms/倍率）
+        #   と判明した＝x64と表示しながら実際は約1.5倍速だった。要求だけの表示は嘘になる。
+        req = (f"x{speed[0]:.4g}" if speed[0] > 0 else "MAX")
+        txt = f"speed {req} (real x{eff:.1f})"
+        if getattr(viewer, "_last_speed_txt", None) == txt:
+            return
+        viewer._last_speed_txt = txt
+        try:
+            # set_figures はビューアの右上に固定表示されるオーバーレイ（3D空間ではないので
+            # カメラを動かしてもずれない）。mjvFigure のタイトルを速度表示に使う。
+            fig = mujoco.MjvFigure()
+            mujoco.mjv_defaultFigure(fig)
+            fig.title = txt
+            fig.flg_legend = 0
+            fig.flg_ticklabel[:] = [0, 0]          # 配列フィールドは[:]で代入する
+            fig.figurergba[:] = [0.0, 0.0, 0.0, 0.4]
+            vp = viewer.viewport
+            w = max(int(vp.width * 0.22), 180)
+            h = 46
+            rect = mujoco.MjrRect(int(vp.width - w - 10), int(vp.height - h - 10), w, h)
+            viewer.set_figures([(rect, fig)])
+        except Exception as e:
+            print(f"  [{txt}] (overlay unavailable: {type(e).__name__})", flush=True)
+
     tick = 0; ctrl = None
-    with mujoco.viewer.launch_passive(m, d) as viewer:
+    # 画面の更新は60Hzで十分（人間の目に見える上限）。第1版は**毎物理ステップ**（等倍で100Hz、
+    # 倍速時はもっと）描画していて、それ自体が倍速を頭打ちにする原因の一つだった。
+    SYNC_DT = 1.0 / 60.0
+    with mujoco.viewer.launch_passive(m, d, key_callback=_key_cb) as viewer:
+        t_wall = time.perf_counter()   # 次に物理を進めてよい実時刻（sleepの累積誤差を防ぐ）
+        t_draw = 0.0
+        eff_t0, eff_sim, eff = time.perf_counter(), 0.0, 0.0
         while viewer.is_running():
             for k in range(K):
                 if k % CTRL_M == 0:   # 制御の刻みごとに、今の感覚を見て行動を出し直す（閉ループ）
@@ -195,7 +290,26 @@ def run_view(mode_actuation, babble):
                     prev_a = a
                 obs, r, te, tr, info = env.step(ctrl)
                 meter.observe(d.qacc.copy(), is_boundary=(k % CTRL_M == 0))
-                viewer.sync()
+                now = time.perf_counter()
+                eff_sim += dt_env
+                if now - eff_t0 >= 0.5:       # 実効倍率＝直近0.5秒の「sim時間/実時間」
+                    eff = eff_sim / (now - eff_t0)
+                    eff_t0, eff_sim = now, 0.0
+                if now - t_draw >= SYNC_DT:
+                    _show_speed(viewer, eff)
+                    viewer.sync()
+                    t_draw = now
+                if speed[0] > 0:
+                    # 目標時刻を積み上げて追従する。第1版の「毎回 sleep(dt/speed)」は
+                    # Windowsのsleep分解能(~1-15ms)ぶん必ず遅れ、その誤差が積もっていた。
+                    t_wall += dt_env / speed[0]
+                    lag = t_wall - time.perf_counter()
+                    if lag > 0:
+                        time.sleep(lag)
+                    elif lag < -0.25:         # 大きく遅れたら追いつくのを諦めて基準を引き直す
+                        t_wall = time.perf_counter()
+                else:
+                    t_wall = now
                 if te or tr:
                     break
             tick += 1
@@ -257,7 +371,11 @@ def run_eyeview(mode_actuation, n, babble):
 
     third_ren = mujoco.Renderer(m, height=480, width=640)
     third_cam = mujoco.MjvCamera(); mujoco.mjv_defaultFreeCamera(m, third_cam)
-    third_cam.distance *= 1.3
+    # E1（おもちゃ）は「手とおもちゃの位置関係」を見るのが目的なので寄る＋太郎を追う。
+    # 既定の引きだと太郎が豆粒でおもちゃが見えない（実際に一度そうなった）。
+    third_cam.distance *= 0.32 if E_TOY else 1.3
+    if E_TOY:
+        third_cam.elevation = -35.0
     try:
         eye_cid = int(m.camera("eye_left").id)
     except Exception:
@@ -283,6 +401,8 @@ def run_eyeview(mode_actuation, n, babble):
                 ctrl = rescale_action(a, env.action_space); prev_a = a
             obs, r, te, tr, info = env.step(ctrl)
             if step_i % SUB == 0:
+                if E_TOY:   # 太郎は暴れて移動するのでカメラを体に追従させる
+                    third_cam.lookat[:] = d.body("upper_body").xpos
                 third_ren.update_scene(d, camera=third_cam)
                 third_frames.append(third_ren.render().copy())
                 if eye_ren is not None:
@@ -294,9 +414,18 @@ def run_eyeview(mode_actuation, n, babble):
                 obs, _ = env.reset(); hidden = brain.init_motor_hidden(); prev_a = torch.zeros(n_act)
                 break
 
-    out_dir = os.path.join(_HERE, os.pardir, "logs", "video")
+    # 【重要】E1（おもちゃ環境）の動画は**別名・別フォルダ**に出す。
+    # 同名で出すと従来のC5動画（おもちゃ無し）を上書きしてしまう（実際に一度やらかした）。
+    # ログは消さず分類して保存する、という運用に合わせる。
+    _age_tag = int(AGE) if AGE is not None else "def"
+    _bab = "babble" if babble else "det"
+    if E_TOY:
+        out_dir = os.path.join(_HERE, os.pardir, os.pardir, "E", "logs", "video")
+        tag = f"e1toy_age{_age_tag}_m{CTRL_M}_{_bab}"
+    else:
+        out_dir = os.path.join(_HERE, os.pardir, "logs", "video")
+        tag = f"c5eye_age{_age_tag}_m{CTRL_M}_{_bab}"
     os.makedirs(out_dir, exist_ok=True)
-    tag = f"c5eye_age{int(AGE) if AGE is not None else 'def'}_m{CTRL_M}_{'babble' if babble else 'det'}"
 
     def _write(frames, name, size, fps=50):
         p = os.path.join(out_dir, f"{tag}_{name}.mp4")
@@ -307,6 +436,17 @@ def run_eyeview(mode_actuation, n, babble):
 
     p3 = _write(third_frames, "third", (640, 480))
     print("第三者視点mp4:", p3)
+    # 静止画シート（等間隔に抜いた6コマ）。動画を再生せずに配置・接触を一目で確認するため。
+    try:
+        idx = np.linspace(0, len(third_frames) - 1, 6).astype(int)
+        rows = [np.hstack([third_frames[i] for i in idx[:3]]),
+                np.hstack([third_frames[i] for i in idx[3:]])]
+        sheet = np.vstack(rows)
+        sp = os.path.join(out_dir, f"{tag}_sheet.png")
+        cv2.imwrite(sp, cv2.cvtColor(sheet, cv2.COLOR_RGB2BGR))
+        print("第三者視点シートpng:", sp)
+    except Exception as e:
+        print(f"[警告] シート画像の保存に失敗: {type(e).__name__}: {e}")
     if eye_frames:
         pe = _write(eye_frames, "eye", (240, 240))
         print("一人称(眼球)mp4:", pe)
