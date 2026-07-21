@@ -546,8 +546,15 @@ def run_eyeview(mode_actuation, n, babble):
     third_cam = mujoco.MjvCamera(); mujoco.mjv_defaultFreeCamera(m, third_cam)
     # E1（おもちゃ）は「手とおもちゃの位置関係」を見るのが目的なので寄る＋太郎を追う。
     # 既定の引きだと太郎が豆粒でおもちゃが見えない（実際に一度そうなった）。
-    third_cam.distance *= 0.32 if E_TOY else 1.3
-    if E_TOY:
+    # 【E_EYEVIEW_WIDE=1】新生児体型v2(E_TOY=1)のまま、全身シナジーを見たいときは引きに戻す
+    # （2026-07-23：柵で全身が隠れて判断不能と判明、既定の接写と切り替え可能にした）。
+    _wide_env = os.environ.get("E_EYEVIEW_WIDE", "0")
+    _wide = _wide_env not in ("0", "")
+    if _wide_env not in ("0", "1", ""):   # 数値指定なら倍率として使う（例: E_EYEVIEW_WIDE=0.6）
+        third_cam.distance *= float(_wide_env)
+    else:
+        third_cam.distance *= (1.3 if (not E_TOY or _wide) else 0.32)
+    if E_TOY and not _wide:
         third_cam.elevation = -35.0
     try:
         eye_cid = int(m.camera("eye_left").id)
