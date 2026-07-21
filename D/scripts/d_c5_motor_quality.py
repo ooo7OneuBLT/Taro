@@ -64,6 +64,7 @@ from test_phase8_motor_learning import rescale_action
 from d_supine_env import SupineMimoEnv
 from mimoActuation.actuation import SpringDamperModel
 from smooth_actuation import SmoothTorqueModel
+from colored_noise import ColoredNoiseGenerator
 
 # 既定は目標Cの学習済みモデル。C5_CKPT環境変数で別モデル（例：新生児＋努力コストで再学習した版）に差替可。
 CKPT = os.environ.get("C5_CKPT",
@@ -79,6 +80,22 @@ AGE = float(os.environ["C5_AGE"]) if os.environ.get("C5_AGE") else None
 # 既定OFF＝従来のD/C5と1バイトも変わらない。おもちゃは観測にも行動にも入らない（予測対象は
 # 固有感覚のまま）ので、**C5の学習済みモデルをそのまま実行できる**＝再学習なしで目視できる。
 E_TOY = os.environ.get("E_TOY", "0") == "1"
+
+# 【目標E ①②④】運動性喃語の生成方式。既定は従来と完全同一（白色・w_mean=1.0・1秒ホールド）。
+# 詳細は E/docs/研究日誌.md 続き10（4原因の仕分けと実装雛形）。
+E_NOISE = os.environ.get("E_NOISE", "white")               # "white"(従来)|"colored"(②色付き1/f^β)
+E_BETA = float(os.environ.get("E_BETA", "0.8"))            # ②色付き度。0.7(8週相当)〜0.9(30週相当)
+E_WMEAN = float(os.environ.get("E_WMEAN", "1.0"))          # ①meanの重み。1.0=従来／小=精密制御器を退ける
+E4_CONTINUOUS = os.environ.get("E4_CONTINUOUS", "0") == "1"  # ④物理step刻みでノイズ更新（1秒ホールド解消）
+# 【目標E ① 本丸への着手】mean（関節指令の中心値）の作り方を変える。研究日誌 続き11で
+# 「境界jerk(ガクガク)の89%はmean（精密制御器）の1秒ごとの段差」と実測確定したことへの対処。
+# 予備A（E_INTERP）：精密制御器のmeanを境界間で線形補間して段差を消す＝境界jerkの"理論下限"を測る
+#   物差し（精密制御器は残すので①の本質は解かない、下限測定用の使い捨て。continuous時のみ有効）。
+# 本命B-min（E_WMEAN<1）：mean =(1-w)×低周波生成器 + w×精密制御器。w=0で精密制御器を完全に外し
+#   素朴な自発運動だけにする。1本のツマミwで①をアブレーションでき、そのまま本番の骨格になる。
+E_INTERP = os.environ.get("E_INTERP", "0") == "1"          # 予備A：境界間でmeanを線形補間（下限測定）
+E_GENBETA = float(os.environ.get("E_GENBETA", "0.95"))    # B-min生成器の色付き度（高=低周波=ゆっくり）
+E_GENAMP = float(os.environ.get("E_GENAMP", "0.3"))       # B-min生成器の振幅（関節指令[-1,1]に対する）
 
 
 def load_matching(module, sd, tag):
@@ -152,25 +169,56 @@ def actuated_dofs(model):
     return np.array(sorted(set(dofs)), dtype=int)
 
 
-def make_policy(brain, fusion, emb_proj, cereb, n_act, babble):
-    """1ティックぶんの決定的（または喃語込み）行動を返すクロージャ。"""
-    ne_level = 0.095  # 学習後期のNE水準（ログ実測値）。babble時のノイズ幅に使う。
+def make_policy(brain, fusion, emb_proj, cereb, n_act, babble,
+                 noise_mode="white", beta=0.8, noise_seed=None, w_mean=1.0,
+                 continuous=False):
+    """1ティックぶんの決定的（または喃語込み）行動を返すクロージャ。
 
-    def policy(obs, prev_a, hidden):
-        sv = fusion.encode(obs); cf = sv.detach()
-        emb = emb_proj(torch.cat([sv, prev_a], dim=-1)).unsqueeze(0).unsqueeze(0)
-        out, nh = brain.motor_gru(emb, hidden)
-        z, _, _ = brain.pc_latent.infer(hidden[-1, 0], out[0, -1], cf)
-        z = z.detach()
-        policy_m = torch.tanh(brain.motor_head(z))            # ★ACTION_SCALEなし＝Cで学習した素の方策
-        w_c, cere_a, _ = cereb.gate(z, policy_m)
-        mean = (1.0 - w_c) * policy_m + w_c * cere_a
+    noise_mode="white"（既定）＝従来通り毎tickの独立ガウス（自己相関≈0、実測0.034＝
+      e_efference_check.pyで測定、E/docs/研究日誌.md 2026-07-21）。呼び出し側の挙動は
+      1バイトも変えない。
+    noise_mode="colored"＝1/f^βの色付きノイズ（colored_noise.py、baby noise由来）。
+      分散(std)の式は従来と同一＝探索の"激しさ"は変えず、時間的な"粘り"だけ加える。
+      beta: 0.7(生後8週相当)〜0.9(生後30週相当)。既定0.8はその中間の暫定値
+      （発達に応じたβスケジュールは、学習進捗を追う仕組みができてから対応する）。
+
+    w_mean（既定1.0＝従来と完全同一）：babble時のmean（方策+小脳の決定的出力）の重み。
+      [ARBITRARY・工学的対処 — 文献根拠なし、doc/人間模倣からの逸脱リスト.md参照]
+      背景：meanは目標Cで「感覚フィードバックに正確に反応する」よう学習した閉ループ制御の
+      出力で、実測で強い負の自己相関(-0.180、過修正)を持つ。一方、新生児期は皮質脊髄路が
+      未髄鞘化で、そうした閉ループ精密制御の行動的証拠がない（Pediatric Neurology Briefs、
+      corticospinal tract in newborns）。このズレを、meanの重みを下げてノイズを主役にする
+      ことで緩和する狙いだが、「新生児のGeneral Movementsを生成する具体的アルゴリズム」は
+      2026年時点の文献でも未解明（"in our ongoing work", Infants' spontaneous movements
+      explore arm dynamics, Commun Biol 2026）のため、w_meanの値そのものに文献根拠はない。
+    """
+    ne_level = 0.095  # 学習後期のNE水準（ログ実測値）。babble時のノイズ幅に使う。
+    cn = ColoredNoiseGenerator(n_act, seed=noise_seed) if noise_mode == "colored" else None
+    cache = {}  # 【目標E ④連続化】mean/std/hiddenをCTRL_Mごとにキャッシュする箱
+
+    def policy(obs, prev_a, hidden, recompute=True):
+        """recompute=True（既定＝従来と完全同一）で毎回meanを計算。continuous時は呼び出し側が
+        CTRL_Mの境界だけrecompute=Trueにし、間の物理stepはrecompute=Falseで**meanは再計算せず
+        ノイズだけ毎step更新**する（④＝1秒ホールドの離散をなくす。脳の判断頻度は変えない）。"""
+        if recompute or "mean" not in cache:
+            sv = fusion.encode(obs); cf = sv.detach()
+            emb = emb_proj(torch.cat([sv, prev_a], dim=-1)).unsqueeze(0).unsqueeze(0)
+            out, nh = brain.motor_gru(emb, hidden)
+            z, _, _ = brain.pc_latent.infer(hidden[-1, 0], out[0, -1], cf)
+            z = z.detach()
+            policy_m = torch.tanh(brain.motor_head(z))        # ★ACTION_SCALEなし＝Cで学習した素の方策
+            w_c, cere_a, _ = cereb.gate(z, policy_m)
+            cache["mean"] = ((1.0 - w_c) * policy_m + w_c * cere_a).detach()
+            cache["std"] = ((0.05 + ne_level * 0.45) * (1.0 - w_c)).detach()
+            cache["hidden"] = nh.detach()
+        mean, std, nh = cache["mean"], cache["std"], cache["hidden"]
         if babble:
-            std = (0.05 + ne_level * 0.45) * (1.0 - w_c)
-            a = torch.clamp(torch.distributions.Normal(mean, std).sample(), -1, 1)
+            noise = (torch.as_tensor(cn.sample(beta), dtype=mean.dtype) if cn is not None
+                     else torch.randn_like(mean))
+            a = torch.clamp(w_mean * mean + std * noise, -1, 1)
         else:
             a = torch.clamp(mean, -1, 1)
-        return a.detach(), nh.detach()
+        return a.detach(), nh
 
     return policy
 
@@ -228,7 +276,8 @@ def run_view(mode_actuation, babble):
         print(f"  [speed] x{speed[0]:.4g}" if speed[0] > 0 else "  [speed] MAX (no wait)",
               flush=True)
     env, brain, fusion, emb_proj, cereb, n_act = build(mode_actuation, age=AGE)
-    policy = make_policy(brain, fusion, emb_proj, cereb, n_act, babble)
+    policy = make_policy(brain, fusion, emb_proj, cereb, n_act, babble,
+                         noise_mode=E_NOISE, beta=E_BETA, w_mean=E_WMEAN, continuous=E4_CONTINUOUS)
     m, d = env.unwrapped.model, env.unwrapped.data
     dofs = actuated_dofs(m)
     dt_env = m.opt.timestep * env.unwrapped.frame_skip
@@ -321,7 +370,8 @@ def run_view(mode_actuation, babble):
 
 def run_measure(mode_actuation, n, babble):
     env, brain, fusion, emb_proj, cereb, n_act = build(mode_actuation, age=AGE)
-    policy = make_policy(brain, fusion, emb_proj, cereb, n_act, babble)
+    policy = make_policy(brain, fusion, emb_proj, cereb, n_act, babble,
+                         noise_mode=E_NOISE, beta=E_BETA, w_mean=E_WMEAN, continuous=E4_CONTINUOUS)
     m, d = env.unwrapped.model, env.unwrapped.data
     dofs = actuated_dofs(m)
     dt_env = m.opt.timestep * env.unwrapped.frame_skip
@@ -336,13 +386,22 @@ def run_measure(mode_actuation, n, babble):
     ctrl = None
     for tick in range(n):
         for k in range(K):
-            if k % CTRL_M == 0:   # 制御の刻みごとに今の感覚を見て出し直す（閉ループ）
+            boundary = (k % CTRL_M == 0)   # 脳が感覚を見て判断を出し直す刻み（＝mean更新の刻み）
+            if E4_CONTINUOUS:
+                # ④：meanは境界でだけ更新し、探索ノイズは毎物理stepで更新して命令を出し直す
+                # ＝1秒ホールドの階段（躍度の不連続）を消す。脳の判断頻度は変えない。
+                a, hidden = policy(obs, prev_a, hidden, recompute=boundary)
+                ctrl = rescale_action(a, env.action_space)
+                if boundary:
+                    action_jumps.append(float(np.abs((a - prev_a).numpy()).mean()))
+                    prev_a = a
+            elif boundary:   # 従来：1秒に1回だけ命令を出し、その間は保持
                 a, hidden = policy(obs, prev_a, hidden)
                 action_jumps.append(float(np.abs((a - prev_a).numpy()).mean()))
                 ctrl = rescale_action(a, env.action_space)
                 prev_a = a
             obs, r, te, tr, info = env.step(ctrl)
-            meter.observe(d.qacc.copy(), is_boundary=(k % CTRL_M == 0))
+            meter.observe(d.qacc.copy(), is_boundary=boundary)
             if te or tr:
                 obs, _ = env.reset()
                 hidden = brain.init_motor_hidden()
@@ -363,7 +422,8 @@ def run_eyeview(mode_actuation, n, babble):
     姿勢/体/相手の交絡なしで目視するための動画。脳は視覚を使わない（＝眼球カメラを"見るだけ"）。"""
     import cv2
     env, brain, fusion, emb_proj, cereb, n_act = build(mode_actuation, age=AGE)
-    policy = make_policy(brain, fusion, emb_proj, cereb, n_act, babble)
+    policy = make_policy(brain, fusion, emb_proj, cereb, n_act, babble,
+                         noise_mode=E_NOISE, beta=E_BETA, w_mean=E_WMEAN, continuous=E4_CONTINUOUS)
     m, d = env.unwrapped.model, env.unwrapped.data
     # オフスクリーン描画のフレームバッファを広げる（既定500pxだと640×480が入らない）
     m.vis.global_.offwidth = max(int(m.vis.global_.offwidth), 640)
@@ -396,7 +456,13 @@ def run_eyeview(mode_actuation, n, babble):
           f"{'喃語(運動性喃語)込み' if babble else '決定的'}／制御刻み={CTRL_M}tick）")
     for tick in range(n):
         for k in range(K):
-            if k % CTRL_M == 0:
+            boundary = (k % CTRL_M == 0)
+            if E4_CONTINUOUS:   # ④/B-min：meanは境界のみ、ノイズは毎物理stepで更新して命令を出し直す
+                a, hidden = policy(obs, prev_a, hidden, recompute=boundary)
+                ctrl = rescale_action(a, env.action_space)
+                if boundary:
+                    prev_a = a
+            elif boundary:
                 a, hidden = policy(obs, prev_a, hidden)
                 ctrl = rescale_action(a, env.action_space); prev_a = a
             obs, r, te, tr, info = env.step(ctrl)
