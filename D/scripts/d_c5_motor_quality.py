@@ -194,13 +194,21 @@ def make_policy(brain, fusion, emb_proj, cereb, n_act, babble,
     """
     ne_level = 0.095  # 学習後期のNE水準（ログ実測値）。babble時のノイズ幅に使う。
     cn = ColoredNoiseGenerator(n_act, seed=noise_seed) if noise_mode == "colored" else None
+    # 【目標E ①本命B-min】素朴な自発運動の生成器＝低周波・自己相関の高い色付きノイズ。
+    # w_mean<1 のとき (1-w_mean)×gen が meanに混ざる。E_GENAMPが0なら生成器を作らない（軽量化）。
+    # ColoredNoiseGeneratorが探索ノイズと同じ系列にならないよう seedをずらす。
+    gen = (ColoredNoiseGenerator(n_act, seed=(noise_seed + 1 if noise_seed is not None else 12345))
+           if E_GENAMP > 0.0 and w_mean < 1.0 else None)
     cache = {}  # 【目標E ④連続化】mean/std/hiddenをCTRL_Mごとにキャッシュする箱
 
-    def policy(obs, prev_a, hidden, recompute=True):
+    def policy(obs, prev_a, hidden, recompute=True, frac=0.0):
         """recompute=True（既定＝従来と完全同一）で毎回meanを計算。continuous時は呼び出し側が
         CTRL_Mの境界だけrecompute=Trueにし、間の物理stepはrecompute=Falseで**meanは再計算せず
-        ノイズだけ毎step更新**する（④＝1秒ホールドの離散をなくす。脳の判断頻度は変えない）。"""
+        ノイズだけ毎step更新**する（④＝1秒ホールドの離散をなくす。脳の判断頻度は変えない）。
+        frac：境界からの相対位置[0,1]。E_INTERP時のみ使用（前のmeanと今のmeanを線形補間）。"""
         if recompute or "mean" not in cache:
+            if "mean" in cache:
+                cache["prev_mean"] = cache["mean"]   # 予備A補間用：前ブロックのmeanを保存
             sv = fusion.encode(obs); cf = sv.detach()
             emb = emb_proj(torch.cat([sv, prev_a], dim=-1)).unsqueeze(0).unsqueeze(0)
             out, nh = brain.motor_gru(emb, hidden)
@@ -211,13 +219,28 @@ def make_policy(brain, fusion, emb_proj, cereb, n_act, babble,
             cache["mean"] = ((1.0 - w_c) * policy_m + w_c * cere_a).detach()
             cache["std"] = ((0.05 + ne_level * 0.45) * (1.0 - w_c)).detach()
             cache["hidden"] = nh.detach()
+            if "prev_mean" not in cache:
+                cache["prev_mean"] = cache["mean"]   # 最初のブロックは補間不能→現在値で埋める
         mean, std, nh = cache["mean"], cache["std"], cache["hidden"]
-        if babble:
-            noise = (torch.as_tensor(cn.sample(beta), dtype=mean.dtype) if cn is not None
-                     else torch.randn_like(mean))
-            a = torch.clamp(w_mean * mean + std * noise, -1, 1)
+        # 【予備A】E_INTERP時は前meanと今meanを frac で線形補間して段差を消す。
+        # E_INTERP=0の既定では frac がどんな値でも mean は使わない＝従来と1バイト差なし。
+        if E_INTERP:
+            mean_used = (1.0 - frac) * cache["prev_mean"] + frac * mean
         else:
-            a = torch.clamp(mean, -1, 1)
+            mean_used = mean
+        if babble:
+            noise = (torch.as_tensor(cn.sample(beta), dtype=mean_used.dtype) if cn is not None
+                     else torch.randn_like(mean_used))
+            # 【B-min】gen>0 & w_mean<1 のときのみ生成器が動く。既定 w_mean=1.0 では gen=None＝
+            # composed = mean_used ＝ 従来と1バイト差なし。
+            if gen is not None:
+                gen_out = torch.as_tensor(gen.sample(E_GENBETA), dtype=mean_used.dtype) * E_GENAMP
+                composed = (1.0 - w_mean) * gen_out + w_mean * mean_used
+            else:
+                composed = w_mean * mean_used
+            a = torch.clamp(composed + std * noise, -1, 1)
+        else:
+            a = torch.clamp(mean_used, -1, 1)
         return a.detach(), nh
 
     return policy
@@ -390,7 +413,9 @@ def run_measure(mode_actuation, n, babble):
             if E4_CONTINUOUS:
                 # ④：meanは境界でだけ更新し、探索ノイズは毎物理stepで更新して命令を出し直す
                 # ＝1秒ホールドの階段（躍度の不連続）を消す。脳の判断頻度は変えない。
-                a, hidden = policy(obs, prev_a, hidden, recompute=boundary)
+                # frac：予備A（E_INTERP）が境界間で前meanと今meanを線形補間するのに使う。
+                frac = (k % CTRL_M) / CTRL_M
+                a, hidden = policy(obs, prev_a, hidden, recompute=boundary, frac=frac)
                 ctrl = rescale_action(a, env.action_space)
                 if boundary:
                     action_jumps.append(float(np.abs((a - prev_a).numpy()).mean()))
@@ -458,7 +483,8 @@ def run_eyeview(mode_actuation, n, babble):
         for k in range(K):
             boundary = (k % CTRL_M == 0)
             if E4_CONTINUOUS:   # ④/B-min：meanは境界のみ、ノイズは毎物理stepで更新して命令を出し直す
-                a, hidden = policy(obs, prev_a, hidden, recompute=boundary)
+                frac = (k % CTRL_M) / CTRL_M   # 予備A補間用
+                a, hidden = policy(obs, prev_a, hidden, recompute=boundary, frac=frac)
                 ctrl = rescale_action(a, env.action_space)
                 if boundary:
                     prev_a = a
