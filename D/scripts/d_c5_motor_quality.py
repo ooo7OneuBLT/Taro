@@ -96,6 +96,21 @@ E4_CONTINUOUS = os.environ.get("E4_CONTINUOUS", "0") == "1"  # ④物理step刻�
 E_INTERP = os.environ.get("E_INTERP", "0") == "1"          # 予備A：境界間でmeanを線形補間（下限測定）
 E_GENBETA = float(os.environ.get("E_GENBETA", "0.95"))    # B-min生成器の色付き度（高=低周波=ゆっくり）
 E_GENAMP = float(os.environ.get("E_GENAMP", "0.3"))       # B-min生成器の振幅（関節指令[-1,1]に対する）
+# 【目標E ③シナジー（粗い多関節協調）】既定OFF、E_SYNERGY=1で有効。研究日誌続き15。
+# 文献の範囲に忠実な2部位のみ実装：
+#   脚（hip_flex/abduction, knee, foot_flexion）：Dominici et al. 2011 [Tier1]が
+#     新生児は生得の粗いシナジー2個を持つと報告（stepping時の脚筋）。原著の実測負荷係数は
+#     未取得なため、「左右が逆位相で粗く協調する」という定性的性質のみ反映[ARBITRARY・簡略化]。
+#   腕（shoulder_horizontal/abduction, elbow, wrist_flexion）：Physiopedia他の臨床知見[Tier2]
+#     「肩+肘+手首の伸展が同時に起きる」を反映。左右は独立（アーム間の協調は文献未確認）。
+# 体幹・手指は対象外（文献なし、今まで通り独立）。実装は「グループの先頭関節の生成値に、
+# 残りの関節が追従する」簡易版（新規の生成器を増やさず既存gen_npを流用）。
+E_SYNERGY = os.environ.get("E_SYNERGY", "0") == "1"
+E_SYN_W = float(os.environ.get("E_SYN_W", "0.6"))          # 追従の強さ。[ARBITRARY]
+_LEG_R = [72, 73, 75, 76]   # right: hip_flex, hip_abduction, knee, foot_flexion
+_LEG_L = [81, 82, 84, 85]   # left: 同上
+_ARM_R = [14, 15, 17, 19]   # right: shoulder_horizontal, shoulder_abduction, elbow, wrist_flexion
+_ARM_L = [43, 44, 46, 48]   # left: 同上
 # 【E_GEN_UPDATE_M】B-min生成器を M物理stepごとに新サンプル・間は線形補間で滑らかに接続する。
 # 既定=1（毎step更新＝100Hz）。10なら10Hz更新＝人間の運動指令に近い低頻度化。連続時のみ有効。
 # [仮説Y：経験的テスト、文献根拠なし＝逸脱リストに記録]
@@ -256,6 +271,19 @@ def make_policy(brain, fusion, emb_proj, cereb, n_act, babble,
                     gfrac = (cache["gen_step"] % E_GEN_UPDATE_M) / E_GEN_UPDATE_M
                     gen_np = (1.0 - gfrac) * cache["gen_prev"] + gfrac * cache["gen_curr"]
                     cache["gen_step"] += 1
+                if E_SYNERGY:
+                    gen_np = gen_np.copy()
+                    leg_leader = gen_np[_LEG_R[0]]
+                    for i in _LEG_R:
+                        gen_np[i] = (1 - E_SYN_W) * gen_np[i] + E_SYN_W * leg_leader
+                    for i in _LEG_L:   # 脚は左右逆位相（粗い交互パターン、Dominici 2011）
+                        gen_np[i] = (1 - E_SYN_W) * gen_np[i] + E_SYN_W * (-leg_leader)
+                    arm_r_leader = gen_np[_ARM_R[0]]
+                    for i in _ARM_R[1:]:
+                        gen_np[i] = (1 - E_SYN_W) * gen_np[i] + E_SYN_W * arm_r_leader
+                    arm_l_leader = gen_np[_ARM_L[0]]
+                    for i in _ARM_L[1:]:
+                        gen_np[i] = (1 - E_SYN_W) * gen_np[i] + E_SYN_W * arm_l_leader
                 gen_out = torch.as_tensor(gen_np, dtype=mean_used.dtype) * E_GENAMP
                 composed = (1.0 - w_mean) * gen_out + w_mean * mean_used
             else:
