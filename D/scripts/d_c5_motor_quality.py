@@ -220,6 +220,13 @@ def make_policy(brain, fusion, emb_proj, cereb, n_act, babble,
     # ColoredNoiseGeneratorが探索ノイズと同じ系列にならないよう seedをずらす。
     gen = (ColoredNoiseGenerator(n_act, seed=(noise_seed + 1 if noise_seed is not None else 12345))
            if E_GENAMP > 0.0 and w_mean < 1.0 else None)
+    # 【③シナジー・ちゃんとした版】各グループ専用の独立した1次元共通信号。全関節がこれに
+    # "対等に"乗る（前版は既存90関節の1つを"リーダー"に流用しており、そのリーダー関節だけ
+    # 特別扱いになる歪みがあった。今版はグループ内のどの関節も同じ扱い）。
+    _syn_gens = ({"leg": ColoredNoiseGenerator(1, seed=(noise_seed + 2 if noise_seed is not None else 22222)),
+                  "arm_r": ColoredNoiseGenerator(1, seed=(noise_seed + 3 if noise_seed is not None else 33333)),
+                  "arm_l": ColoredNoiseGenerator(1, seed=(noise_seed + 4 if noise_seed is not None else 44444))}
+                 if E_SYNERGY and gen is not None else None)
     cache = {}  # 【目標E ④連続化】mean/std/hiddenをCTRL_Mごとにキャッシュする箱
 
     def policy(obs, prev_a, hidden, recompute=True, frac=0.0):
@@ -257,33 +264,37 @@ def make_policy(brain, fusion, emb_proj, cereb, n_act, babble,
             if gen is not None:
                 # 【仮説Y】E_GEN_UPDATE_M > 1 なら生成器を低頻度化＋線形補間で滑らかに繋ぐ。
                 # 100Hzのままだと「ぴくぴく」に見える(90関節独立)。10なら10Hz更新。
-                if E_GEN_UPDATE_M <= 1:
-                    gen_np = gen.sample(E_GENBETA)
-                else:
-                    if "gen_step" not in cache:
-                        cache["gen_step"] = 0
-                        cache["gen_prev"] = None
-                        cache["gen_curr"] = None
-                    if cache["gen_step"] % E_GEN_UPDATE_M == 0:
-                        cache["gen_prev"] = (cache["gen_curr"] if cache["gen_curr"] is not None
-                                             else gen.sample(E_GENBETA))
-                        cache["gen_curr"] = gen.sample(E_GENBETA)
-                    gfrac = (cache["gen_step"] % E_GEN_UPDATE_M) / E_GEN_UPDATE_M
-                    gen_np = (1.0 - gfrac) * cache["gen_prev"] + gfrac * cache["gen_curr"]
-                    cache["gen_step"] += 1
-                if E_SYNERGY:
+                # ヘルパー化：gen本体と③シナジー専用生成器の両方に同じ低頻度化を適用するため。
+                def _sample_lowfreq(g, key, beta):
+                    if E_GEN_UPDATE_M <= 1:
+                        return g.sample(beta)
+                    if key not in cache:
+                        cache[key] = {"step": 0, "prev": None, "curr": None}
+                    c = cache[key]
+                    if c["step"] % E_GEN_UPDATE_M == 0:
+                        c["prev"] = c["curr"] if c["curr"] is not None else g.sample(beta)
+                        c["curr"] = g.sample(beta)
+                    gfrac = (c["step"] % E_GEN_UPDATE_M) / E_GEN_UPDATE_M
+                    out = (1.0 - gfrac) * c["prev"] + gfrac * c["curr"]
+                    c["step"] += 1
+                    return out
+
+                gen_np = _sample_lowfreq(gen, "gen", E_GENBETA)
+                if _syn_gens is not None:
+                    # 【③シナジー・ちゃんとした版】各グループ専用の独立信号に、グループ内の
+                    # 全関節が"対等に"（誰も特別扱いされず）乗る。前版のリーダー方式の歪みを解消。
                     gen_np = gen_np.copy()
-                    leg_leader = gen_np[_LEG_R[0]]
+                    leg_s = float(_sample_lowfreq(_syn_gens["leg"], "syn_leg", E_GENBETA)[0])
                     for i in _LEG_R:
-                        gen_np[i] = (1 - E_SYN_W) * gen_np[i] + E_SYN_W * leg_leader
+                        gen_np[i] = (1 - E_SYN_W) * gen_np[i] + E_SYN_W * leg_s
                     for i in _LEG_L:   # 脚は左右逆位相（粗い交互パターン、Dominici 2011）
-                        gen_np[i] = (1 - E_SYN_W) * gen_np[i] + E_SYN_W * (-leg_leader)
-                    arm_r_leader = gen_np[_ARM_R[0]]
-                    for i in _ARM_R[1:]:
-                        gen_np[i] = (1 - E_SYN_W) * gen_np[i] + E_SYN_W * arm_r_leader
-                    arm_l_leader = gen_np[_ARM_L[0]]
-                    for i in _ARM_L[1:]:
-                        gen_np[i] = (1 - E_SYN_W) * gen_np[i] + E_SYN_W * arm_l_leader
+                        gen_np[i] = (1 - E_SYN_W) * gen_np[i] + E_SYN_W * (-leg_s)
+                    arm_r_s = float(_sample_lowfreq(_syn_gens["arm_r"], "syn_arm_r", E_GENBETA)[0])
+                    for i in _ARM_R:
+                        gen_np[i] = (1 - E_SYN_W) * gen_np[i] + E_SYN_W * arm_r_s
+                    arm_l_s = float(_sample_lowfreq(_syn_gens["arm_l"], "syn_arm_l", E_GENBETA)[0])
+                    for i in _ARM_L:
+                        gen_np[i] = (1 - E_SYN_W) * gen_np[i] + E_SYN_W * arm_l_s
                 gen_out = torch.as_tensor(gen_np, dtype=mean_used.dtype) * E_GENAMP
                 composed = (1.0 - w_mean) * gen_out + w_mean * mean_used
             else:
