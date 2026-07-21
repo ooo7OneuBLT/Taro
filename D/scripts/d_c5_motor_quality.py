@@ -96,6 +96,12 @@ E4_CONTINUOUS = os.environ.get("E4_CONTINUOUS", "0") == "1"  # ④物理step刻�
 E_INTERP = os.environ.get("E_INTERP", "0") == "1"          # 予備A：境界間でmeanを線形補間（下限測定）
 E_GENBETA = float(os.environ.get("E_GENBETA", "0.95"))    # B-min生成器の色付き度（高=低周波=ゆっくり）
 E_GENAMP = float(os.environ.get("E_GENAMP", "0.3"))       # B-min生成器の振幅（関節指令[-1,1]に対する）
+# 【E_GEN_UPDATE_M】B-min生成器を M物理stepごとに新サンプル・間は線形補間で滑らかに接続する。
+# 既定=1（毎step更新＝100Hz）。10なら10Hz更新＝人間の運動指令に近い低頻度化。連続時のみ有効。
+# [仮説Y：経験的テスト、文献根拠なし＝逸脱リストに記録]
+E_GEN_UPDATE_M = int(os.environ.get("E_GEN_UPDATE_M", "1"))
+# 【E_TRACE】run_measureで関節指令の時系列を .npz に保存する（グラフ用）。パスを指定すると保存。
+E_TRACE = os.environ.get("E_TRACE", "")                    # 例: "/path/to/trace.npz"
 
 
 def load_matching(module, sd, tag):
@@ -234,7 +240,23 @@ def make_policy(brain, fusion, emb_proj, cereb, n_act, babble,
             # 【B-min】gen>0 & w_mean<1 のときのみ生成器が動く。既定 w_mean=1.0 では gen=None＝
             # composed = mean_used ＝ 従来と1バイト差なし。
             if gen is not None:
-                gen_out = torch.as_tensor(gen.sample(E_GENBETA), dtype=mean_used.dtype) * E_GENAMP
+                # 【仮説Y】E_GEN_UPDATE_M > 1 なら生成器を低頻度化＋線形補間で滑らかに繋ぐ。
+                # 100Hzのままだと「ぴくぴく」に見える(90関節独立)。10なら10Hz更新。
+                if E_GEN_UPDATE_M <= 1:
+                    gen_np = gen.sample(E_GENBETA)
+                else:
+                    if "gen_step" not in cache:
+                        cache["gen_step"] = 0
+                        cache["gen_prev"] = None
+                        cache["gen_curr"] = None
+                    if cache["gen_step"] % E_GEN_UPDATE_M == 0:
+                        cache["gen_prev"] = (cache["gen_curr"] if cache["gen_curr"] is not None
+                                             else gen.sample(E_GENBETA))
+                        cache["gen_curr"] = gen.sample(E_GENBETA)
+                    gfrac = (cache["gen_step"] % E_GEN_UPDATE_M) / E_GEN_UPDATE_M
+                    gen_np = (1.0 - gfrac) * cache["gen_prev"] + gfrac * cache["gen_curr"]
+                    cache["gen_step"] += 1
+                gen_out = torch.as_tensor(gen_np, dtype=mean_used.dtype) * E_GENAMP
                 composed = (1.0 - w_mean) * gen_out + w_mean * mean_used
             else:
                 composed = w_mean * mean_used
@@ -356,12 +378,19 @@ def run_view(mode_actuation, babble):
         eff_t0, eff_sim, eff = time.perf_counter(), 0.0, 0.0
         while viewer.is_running():
             for k in range(K):
-                if k % CTRL_M == 0:   # 制御の刻みごとに、今の感覚を見て行動を出し直す（閉ループ）
+                boundary = (k % CTRL_M == 0)
+                if E4_CONTINUOUS:   # ④/B-min：命令を毎物理stepで更新（連続再生）
+                    frac = (k % CTRL_M) / CTRL_M
+                    a, hidden = policy(obs, prev_a, hidden, recompute=boundary, frac=frac)
+                    ctrl = rescale_action(a, env.action_space)
+                    if boundary:
+                        prev_a = a
+                elif boundary:   # 従来：1秒に1回だけ命令を出す
                     a, hidden = policy(obs, prev_a, hidden)
                     ctrl = rescale_action(a, env.action_space)
                     prev_a = a
                 obs, r, te, tr, info = env.step(ctrl)
-                meter.observe(d.qacc.copy(), is_boundary=(k % CTRL_M == 0))
+                meter.observe(d.qacc.copy(), is_boundary=boundary)
                 now = time.perf_counter()
                 eff_sim += dt_env
                 if now - eff_t0 >= 0.5:       # 実効倍率＝直近0.5秒の「sim時間/実時間」
@@ -403,6 +432,9 @@ def run_measure(mode_actuation, n, babble):
     obs, _ = env.reset(seed=0)
     hidden = brain.init_motor_hidden(); prev_a = torch.zeros(n_act)
     action_jumps = []
+    trace_actions = [] if E_TRACE else None   # 【グラフ用】毎物理stepの行動指令を保存
+    trace_qpos = [] if E_TRACE else None      # 【グラフ用】毎物理stepの関節位置(qpos)も保存
+                                              # ＝人間新生児の"観察された動き"と公平に比較するため
     _ctrl_note = f"制御刻み={CTRL_M}tick({'速い連続制御' if CTRL_M < K else '1秒保持'})"
     print(f"\n測定開始（{n}ティック・活性化ダイナミクス={mode_actuation.upper()}"
           f"／{'喃語込み' if babble else '決定的'}／{_ctrl_note}）")
@@ -425,12 +457,29 @@ def run_measure(mode_actuation, n, babble):
                 action_jumps.append(float(np.abs((a - prev_a).numpy()).mean()))
                 ctrl = rescale_action(a, env.action_space)
                 prev_a = a
+            if trace_actions is not None:
+                trace_actions.append(a.detach().cpu().numpy().copy())
             obs, r, te, tr, info = env.step(ctrl)
+            if trace_qpos is not None:
+                trace_qpos.append(d.qpos.copy())
             meter.observe(d.qacc.copy(), is_boundary=boundary)
             if te or tr:
                 obs, _ = env.reset()
                 hidden = brain.init_motor_hidden()
                 break
+    if E_TRACE and trace_actions:
+        actuator_names = [m.actuator(i).name for i in range(m.nu)]
+        joint_names = [m.joint(i).name for i in range(m.njnt)]
+        jnt_qposadr = np.array([m.jnt_qposadr[i] for i in range(m.njnt)])
+        np.savez(E_TRACE,
+                 actions=np.array(trace_actions),
+                 qpos=np.array(trace_qpos),
+                 actuator_names=actuator_names,
+                 joint_names=joint_names,
+                 jnt_qposadr=jnt_qposadr)
+        print(f"[E_TRACE] 行動指令+関節位置の時系列を保存: {E_TRACE}")
+        print(f"          actions.shape={np.array(trace_actions).shape} "
+              f"qpos.shape={np.array(trace_qpos).shape}")
     s = meter.summary()
     print(f"\n===== 結果（活性化={mode_actuation.upper()}／{_ctrl_note}）=====")
     print(f"mean|jerk|      = {s['mean']:.2f}   (小さいほどなめらか)")
