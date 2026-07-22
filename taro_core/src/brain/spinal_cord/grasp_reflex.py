@@ -19,6 +19,15 @@ w_meanが0(writhing)のとき反射は最大、w_meanが上がる(fidgety〜E1)�
 GENAMPのような根拠ゼロの独立パラメータとは異なる。
 
 【恣意的な部分】TOUCH_THRESHOLD・GRASP_TARGETの具体的な数値に文献根拠なし[Tier3・ARBITRARY]。
+
+【トリガー範囲の訂正、2026-07-23続き7】当初は手のひら+全指+親指を接触判定に含めていたが、
+文献で「反射は手のひら刺激への空間的特異性を示す」「注目すべきは、親指はこの反射の対象外」
+と判明[Tier1]（ScienceDirect Topics "Palmar Grasp Reflex"、PMC3384944）。
+  - トリガー(接触判定) = 手のひら(hand)のみ。指は含めない。
+  - 反応(曲げる指)     = 4指(ff/mf/rf/lf)のみ。親指(thumb)は除外。
+機序：手のひらの腱刺激→正中神経・尺骨神経経由の脊髄反射。「掴み続ける(clinging)」は
+指の腱への軽い牽引(traction)への固有感覚反応という2段階構造だが、太郎では簡略化し
+1段階（接触→屈曲）のみ実装[Tier3・簡略化]。
 """
 import numpy as np
 
@@ -27,26 +36,24 @@ GRASP_TARGET = 0.9       # [Tier3・ARBITRARY] 指を曲げる方向への目標
 
 
 class GraspReflex:
-    """model から手・指のbody idとアクチュエータidxを名前ベースで検索し、
+    """model から手のひらのbody id・4指(親指除く)のアクチュエータidxを名前ベースで検索し、
     毎stepの触覚出力から「握る」命令を計算する。"""
 
     def __init__(self, model):
-        self.touch_bodies = {"right": [], "left": []}
+        self.touch_bodies = {"right": [], "left": []}   # トリガー＝手のひらのみ
         for i in range(model.nbody):
             name = model.body(i).name
             for side in ("right", "left"):
-                if name.startswith(f"{side}_hand") or name.startswith(f"{side}_ff") or \
-                   name.startswith(f"{side}_mf") or name.startswith(f"{side}_rf") or \
-                   name.startswith(f"{side}_lf") or name.startswith(f"{side}_th"):
+                if name == f"{side}_hand":
                     self.touch_bodies[side].append(i)
 
-        self.flex_actuators = {"right": [], "left": []}
+        self.flex_actuators = {"right": [], "left": []}   # 反応＝4指のみ、親指は除外
         for i in range(model.nu):
             name = model.actuator(i).name  # 例: "act:right_ff_knuckle"
             for side in ("right", "left"):
                 if f"act:{side}_" in name and any(
                         f"_{finger}_{joint}" in name
-                        for finger in ("ff", "mf", "rf", "lf", "thumb")
+                        for finger in ("ff", "mf", "rf", "lf")   # thumbは対象外[Tier1]
                         for joint in ("knuckle", "middle", "distal")):
                     self.flex_actuators[side].append(i)
 
