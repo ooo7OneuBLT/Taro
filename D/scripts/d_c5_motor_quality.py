@@ -120,7 +120,30 @@ E_GEN_UPDATE_M = int(os.environ.get("E_GEN_UPDATE_M", "1"))
 E_TRACE = os.environ.get("E_TRACE", "")                    # 例: "/path/to/trace.npz"
 
 
+# 【運動野リファクタ、2026-07-23】旧チェックポイント（motor_head/pc_latent/motor_gruが
+# TaroBrainWithMotorの直属だった頃に保存）のキーを、MotorCortexへの移動後の新キーに
+# 読み替える対応表。これが無いと精密制御器の学習済み重みが「作り直し」扱いになり、
+# 訓練前のランダム状態に初期化されてしまう。
+_OLD_TO_NEW_KEY_PREFIX = {
+    "motor_gru.": "motor_cortex.motor_gru.",
+    "pc_latent.": "motor_cortex.pc_latent.",
+    "motor_head.": "motor_cortex.motor_head.",
+}
+
+
+def _migrate_old_keys(sd):
+    out = {}
+    for k, v in sd.items():
+        for old, new in _OLD_TO_NEW_KEY_PREFIX.items():
+            if k.startswith(old):
+                k = new + k[len(old):]
+                break
+        out[k] = v
+    return out
+
+
 def load_matching(module, sd, tag):
+    sd = _migrate_old_keys(sd)
     own = module.state_dict()
     matched = {k: v for k, v in sd.items() if k in own and own[k].shape == v.shape}
     skipped = [k for k in own if k not in matched]

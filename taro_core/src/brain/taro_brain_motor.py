@@ -25,7 +25,7 @@ import torch
 import torch.nn as nn
 
 from taro_brain import TaroBrain
-from predictive_coding_latent import PredictiveCodingLatent
+from motor_cortex import MotorCortex
 from hippocampus import MotorHippocampus
 
 
@@ -44,13 +44,15 @@ class TaroBrainWithMotor(TaroBrain):
         # 感覚融合ベクトル(320次元) → GRU入力次元(embedding_dim)に変換
         self.sensory_proj = nn.Linear(sensory_dim, embedding_dim)
 
-        # 運動専用のGRU。音声用self.gruとは重みを共有しない（別々の神経集団に対応）。
-        # パラメータ数は約74,000（触覚エンコーダ1個=約330万の1/44）で計算コストは軽微。
-        self.motor_gru = nn.GRU(embedding_dim, hidden_dim, self.num_layers, batch_first=True)
-
-        # 確率的な潜在変数＋推論時のその場調整（PV-RNNに着想、詳細はpredictive_coding_latent.py）
+        # 【運動野】motor_gru・pc_latent・motor_head を motor_cortex.py にまとめた
+        # （2026-07-23、解剖学的名称でのファイル分け）。外部コード(d_c5_motor_quality.py等
+        # 25ファイル)は brain.motor_head 等の従来のアクセス方法のまま使えるよう、
+        # 下の @property で self.motor_cortex.X に転送する（属性アクセスは互換、
+        # state_dictキーだけ "motor_cortex.motor_head.weight" のように変わる＝
+        # 旧チェックポイントは load_matching 側でキー読み替えが必要、C/scripts/参照）。
         self.latent_dim = 32
-        self.pc_latent = PredictiveCodingLatent(hidden_dim, sensory_dim, latent_dim=self.latent_dim)
+        self.motor_cortex = MotorCortex(embedding_dim, hidden_dim, self.num_layers,
+                                         self.latent_dim, sensory_dim, n_actuators)
 
         # 感覚運動予測ループ：次に来る感覚を予測する。
         # 【人間模倣】予測は「今の状態z」だけでなく「これからする運動命令の写し
@@ -62,9 +64,6 @@ class TaroBrainWithMotor(TaroBrain):
         # だけで、順モデルの要件（行動条件づけ）を満たしていなかった（詳細は
         # docs/人間模倣からの逸脱リスト.md B6）。
         self.sensorimotor_prediction_head = nn.Linear(self.latent_dim + n_actuators, sensory_dim)
-
-        # 運動性喃語：関節への命令を出す（潜在変数zから）
-        self.motor_head = nn.Linear(self.latent_dim, n_actuators)
 
         # ─── 目標C1/C2で実証した改良自己モデル（step_motorの旧アーキを更新した版）───
         self.proprio_dim = proprio_dim
@@ -98,6 +97,22 @@ class TaroBrainWithMotor(TaroBrain):
         """残差予測：現在の視覚embedding + Δ(z, 行動) = 次の視覚embeddingの予測。
         predict_proprioと全く同じ形（対象が視覚か固有感覚かだけの違い）。"""
         return current_vision + self.vision_forward_head(torch.cat([z, action], dim=-1))
+
+    # 【後方互換property、2026-07-23】motor_gru/pc_latent/motor_headはmotor_cortex.py
+    # (MotorCortex)へ移した。外部25ファイルが brain.motor_head 等で直接アクセスしている
+    # ため、属性アクセスだけは従来通り使えるよう転送する（state_dictキーは変わるので
+    # チェックポイント側はload_matchingでの読み替えが別途必要）。
+    @property
+    def motor_gru(self):
+        return self.motor_cortex.motor_gru
+
+    @property
+    def pc_latent(self):
+        return self.motor_cortex.pc_latent
+
+    @property
+    def motor_head(self):
+        return self.motor_cortex.motor_head
 
     def init_motor_hidden(self):
         return torch.zeros(self.num_layers, 1, self.hidden_dim)
