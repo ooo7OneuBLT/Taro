@@ -108,6 +108,15 @@ E_GENAMP = float(os.environ.get("E_GENAMP", "0.3"))       # B-min生成器の振
 # 残りの関節が追従する」簡易版（新規の生成器を増やさず既存gen_npを流用）。
 E_SYNERGY = os.environ.get("E_SYNERGY", "0") == "1"
 E_SYN_W = float(os.environ.get("E_SYN_W", "0.6"))          # 追従の強さ。[ARBITRARY]
+# 【writhing→fidgety移行スケジュール、既定OFF】E_DEV_SCHEDULE=1で有効。研究日誌続き16、
+# developmental_schedule.py参照。C5_AGE(体の月齢)に応じてE_WMEAN/E_SYN_Wを上書きする
+# （皮質脊髄路の成熟+CPGの多筋協調洗練、Frontiers論文の同一"感受性の窓"に基づく）。
+E_DEV_SCHEDULE = os.environ.get("E_DEV_SCHEDULE", "0") == "1"
+if E_DEV_SCHEDULE:
+    from developmental_schedule import schedule_w_mean, schedule_syn_w
+    E_WMEAN = schedule_w_mean(AGE)
+    E_SYN_W = schedule_syn_w(AGE, baseline=E_SYN_W)
+    print(f"[dev_schedule] age={AGE}mo → E_WMEAN={E_WMEAN:.3f} E_SYN_W={E_SYN_W:.3f}")
 _LEG_R = [72, 73, 75, 76]   # right: hip_flex, hip_abduction, knee, foot_flexion
 _LEG_L = [81, 82, 84, 85]   # left: 同上
 _ARM_R = [14, 15, 17, 19]   # right: shoulder_horizontal, shoulder_abduction, elbow, wrist_flexion
