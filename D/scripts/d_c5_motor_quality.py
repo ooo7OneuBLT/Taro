@@ -64,7 +64,8 @@ from test_phase8_motor_learning import rescale_action
 from d_supine_env import SupineMimoEnv
 from mimoActuation.actuation import SpringDamperModel
 from smooth_actuation import SmoothTorqueModel
-from colored_noise import ColoredNoiseGenerator
+from spinal_cord.cpg import CPG, ColoredNoiseGenerator
+from corticospinal import project as corticospinal_project
 
 # 既定は目標Cの学習済みモデル。C5_CKPT環境変数で別モデル（例：新生児＋努力コストで再学習した版）に差替可。
 CKPT = os.environ.get("C5_CKPT",
@@ -215,18 +216,12 @@ def make_policy(brain, fusion, emb_proj, cereb, n_act, babble,
     """
     ne_level = 0.095  # 学習後期のNE水準（ログ実測値）。babble時のノイズ幅に使う。
     cn = ColoredNoiseGenerator(n_act, seed=noise_seed) if noise_mode == "colored" else None
-    # 【目標E ①本命B-min】素朴な自発運動の生成器＝低周波・自己相関の高い色付きノイズ。
-    # w_mean<1 のとき (1-w_mean)×gen が meanに混ざる。E_GENAMPが0なら生成器を作らない（軽量化）。
-    # ColoredNoiseGeneratorが探索ノイズと同じ系列にならないよう seedをずらす。
-    gen = (ColoredNoiseGenerator(n_act, seed=(noise_seed + 1 if noise_seed is not None else 12345))
+    # 【目標E ①本命B-min＝脊髄CPG相当】自発運動の生成器（spinal_cord/cpg.py::CPG）。
+    # w_mean<1 のとき皮質脊髄路(corticospinal.py)経由でmeanに混ざる。E_GENAMPが0なら
+    # 生成しない（軽量化）。探索ノイズ(cn)と系列が被らないよう seed をずらす。
+    cpg = (CPG(n_act, leg_r=_LEG_R, leg_l=_LEG_L, arm_r=_ARM_R, arm_l=_ARM_L,
+               seed=(noise_seed + 1 if noise_seed is not None else 12345))
            if E_GENAMP > 0.0 and w_mean < 1.0 else None)
-    # 【③シナジー・ちゃんとした版】各グループ専用の独立した1次元共通信号。全関節がこれに
-    # "対等に"乗る（前版は既存90関節の1つを"リーダー"に流用しており、そのリーダー関節だけ
-    # 特別扱いになる歪みがあった。今版はグループ内のどの関節も同じ扱い）。
-    _syn_gens = ({"leg": ColoredNoiseGenerator(1, seed=(noise_seed + 2 if noise_seed is not None else 22222)),
-                  "arm_r": ColoredNoiseGenerator(1, seed=(noise_seed + 3 if noise_seed is not None else 33333)),
-                  "arm_l": ColoredNoiseGenerator(1, seed=(noise_seed + 4 if noise_seed is not None else 44444))}
-                 if E_SYNERGY and gen is not None else None)
     cache = {}  # 【目標E ④連続化】mean/std/hiddenをCTRL_Mごとにキャッシュする箱
 
     def policy(obs, prev_a, hidden, recompute=True, frac=0.0):
@@ -259,44 +254,30 @@ def make_policy(brain, fusion, emb_proj, cereb, n_act, babble,
         if babble:
             noise = (torch.as_tensor(cn.sample(beta), dtype=mean_used.dtype) if cn is not None
                      else torch.randn_like(mean_used))
-            # 【B-min】gen>0 & w_mean<1 のときのみ生成器が動く。既定 w_mean=1.0 では gen=None＝
+            # 【B-min＝脊髄CPG】cpg>0 & w_mean<1 のときのみ動く。既定 w_mean=1.0 では cpg=None＝
             # composed = mean_used ＝ 従来と1バイト差なし。
-            if gen is not None:
-                # 【仮説Y】E_GEN_UPDATE_M > 1 なら生成器を低頻度化＋線形補間で滑らかに繋ぐ。
+            if cpg is not None:
+                # 【仮説Y】E_GEN_UPDATE_M > 1 ならCPGを低頻度化＋線形補間で滑らかに繋ぐ。
                 # 100Hzのままだと「ぴくぴく」に見える(90関節独立)。10なら10Hz更新。
-                # ヘルパー化：gen本体と③シナジー専用生成器の両方に同じ低頻度化を適用するため。
-                def _sample_lowfreq(g, key, beta):
+                def _sample_lowfreq(fn, key, beta):
                     if E_GEN_UPDATE_M <= 1:
-                        return g.sample(beta)
+                        return fn(beta)
                     if key not in cache:
                         cache[key] = {"step": 0, "prev": None, "curr": None}
                     c = cache[key]
                     if c["step"] % E_GEN_UPDATE_M == 0:
-                        c["prev"] = c["curr"] if c["curr"] is not None else g.sample(beta)
-                        c["curr"] = g.sample(beta)
+                        c["prev"] = c["curr"] if c["curr"] is not None else fn(beta)
+                        c["curr"] = fn(beta)
                     gfrac = (c["step"] % E_GEN_UPDATE_M) / E_GEN_UPDATE_M
                     out = (1.0 - gfrac) * c["prev"] + gfrac * c["curr"]
                     c["step"] += 1
                     return out
 
-                gen_np = _sample_lowfreq(gen, "gen", E_GENBETA)
-                if _syn_gens is not None:
-                    # 【③シナジー・ちゃんとした版】各グループ専用の独立信号に、グループ内の
-                    # 全関節が"対等に"（誰も特別扱いされず）乗る。前版のリーダー方式の歪みを解消。
-                    gen_np = gen_np.copy()
-                    leg_s = float(_sample_lowfreq(_syn_gens["leg"], "syn_leg", E_GENBETA)[0])
-                    for i in _LEG_R:
-                        gen_np[i] = (1 - E_SYN_W) * gen_np[i] + E_SYN_W * leg_s
-                    for i in _LEG_L:   # 脚は左右逆位相（粗い交互パターン、Dominici 2011）
-                        gen_np[i] = (1 - E_SYN_W) * gen_np[i] + E_SYN_W * (-leg_s)
-                    arm_r_s = float(_sample_lowfreq(_syn_gens["arm_r"], "syn_arm_r", E_GENBETA)[0])
-                    for i in _ARM_R:
-                        gen_np[i] = (1 - E_SYN_W) * gen_np[i] + E_SYN_W * arm_r_s
-                    arm_l_s = float(_sample_lowfreq(_syn_gens["arm_l"], "syn_arm_l", E_GENBETA)[0])
-                    for i in _ARM_L:
-                        gen_np[i] = (1 - E_SYN_W) * gen_np[i] + E_SYN_W * arm_l_s
+                gen_np = _sample_lowfreq(
+                    lambda b: cpg.sample(b, synergy=E_SYNERGY, syn_w=E_SYN_W), "gen", E_GENBETA)
                 gen_out = torch.as_tensor(gen_np, dtype=mean_used.dtype) * E_GENAMP
-                composed = (1.0 - w_mean) * gen_out + w_mean * mean_used
+                # 【皮質脊髄路】運動野(mean)と脊髄CPG(gen_out)をw_meanで混合（corticospinal.py）。
+                composed = corticospinal_project(mean_used, gen_out, w_mean)
             else:
                 composed = w_mean * mean_used
             a = torch.clamp(composed + std * noise, -1, 1)
@@ -554,6 +535,11 @@ def run_eyeview(mode_actuation, n, babble):
         third_cam.distance *= float(_wide_env)
     else:
         third_cam.distance *= (1.3 if (not E_TOY or _wide) else 0.32)
+    # 【E_EYEVIEW_TOP=1】真上から見下ろす（柵は縦の格子なので、真上なら遮られない）。
+    # 2026-07-23：距離調整だけでは柵が視界を塞ぐ問題を解消できなかったため追加。
+    if os.environ.get("E_EYEVIEW_TOP", "0") == "1":
+        third_cam.elevation = -89.0
+        third_cam.distance = 1.1
     if E_TOY and not _wide:
         third_cam.elevation = -35.0
     try:
