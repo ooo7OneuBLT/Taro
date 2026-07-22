@@ -80,6 +80,25 @@ class TaroBrainWithMotor(TaroBrain):
         # 海馬：睡眠リプレイで自己モデルを定着させる（C2で実証）。言語用海馬と同じCLS原理。
         self.hippocampus = MotorHippocampus()
 
+        # ─── 目標E（egomotion割引）：視覚版の順モデル ───
+        # forward_model_head（固有感覚版）と全く同じ形。予測対象を視覚エンコーダの
+        # 出力（fusion.pyのVisionEncoder、64次元embedding）に変える。
+        # 【人間模倣】遠心性コピー説（von Holst & Mittelstaedt 1950）に基づく、
+        # 「行動→視覚の結果」を予測する順モデル。太郎の実際の自己運動（首の回転）に
+        # ついては、遠心性コピーがこの種の視覚変化の打ち消しに十分という文献あり
+        # （V6野、neck efference copy）。予測誤差＝自分の動きで説明できない視覚変化
+        # ＝egomotion割引の信号（この誤差自体をラベルとして使うのではなく、誤差が
+        # 大きいこと自体が「他者・外界」の手がかりになる、という設計）。
+        self.vision_dim = 64  # fusion.py: VisionEncoder(embedding_dim=64, ...)
+        self.vision_forward_head = nn.Sequential(
+            nn.Linear(self.latent_dim + n_actuators, hidden_dim), nn.SiLU(),
+            nn.LayerNorm(hidden_dim), nn.Linear(hidden_dim, self.vision_dim))
+
+    def predict_vision(self, z, action, current_vision):
+        """残差予測：現在の視覚embedding + Δ(z, 行動) = 次の視覚embeddingの予測。
+        predict_proprioと全く同じ形（対象が視覚か固有感覚かだけの違い）。"""
+        return current_vision + self.vision_forward_head(torch.cat([z, action], dim=-1))
+
     def init_motor_hidden(self):
         return torch.zeros(self.num_layers, 1, self.hidden_dim)
 
