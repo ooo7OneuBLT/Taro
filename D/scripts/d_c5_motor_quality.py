@@ -65,6 +65,7 @@ from d_supine_env import SupineMimoEnv
 from mimoActuation.actuation import SpringDamperModel
 from smooth_actuation import SmoothTorqueModel
 from spinal_cord.cpg import CPG, ColoredNoiseGenerator
+from spinal_cord.grasp_reflex import GraspReflex
 from corticospinal import project as corticospinal_project
 
 # 既定は目標Cの学習済みモデル。C5_CKPT環境変数で別モデル（例：新生児＋努力コストで再学習した版）に差替可。
@@ -121,6 +122,9 @@ _LEG_R = [72, 73, 75, 76]   # right: hip_flex, hip_abduction, knee, foot_flexion
 _LEG_L = [81, 82, 84, 85]   # left: 同上
 _ARM_R = [14, 15, 17, 19]   # right: shoulder_horizontal, shoulder_abduction, elbow, wrist_flexion
 _ARM_L = [43, 44, 46, 48]   # left: 同上
+# 【把握反射】既定OFF、E_GRASP_REFLEX=1で有効。研究日誌続き17、spinal_cord/grasp_reflex.py参照。
+# 強さは 1-E_WMEAN に連動（新しい独立スケジュールを作らず、皮質脊髄路の成熟による抑制を再利用）。
+E_GRASP_REFLEX = os.environ.get("E_GRASP_REFLEX", "0") == "1"
 # 【E_GEN_UPDATE_M】B-min生成器を M物理stepごとに新サンプル・間は線形補間で滑らかに接続する。
 # 既定=1（毎step更新＝100Hz）。10なら10Hz更新＝人間の運動指令に近い低頻度化。連続時のみ有効。
 # [仮説Y：経験的テスト、文献根拠なし＝逸脱リストに記録]
@@ -480,6 +484,7 @@ def run_measure(mode_actuation, n, babble):
     dofs = actuated_dofs(m)
     dt_env = m.opt.timestep * env.unwrapped.frame_skip
     meter = JerkMeter(dofs, dt_env)
+    grasp_reflex = GraspReflex(m) if E_GRASP_REFLEX else None
 
     obs, _ = env.reset(seed=0)
     hidden = brain.init_motor_hidden(); prev_a = torch.zeros(n_act)
@@ -500,12 +505,20 @@ def run_measure(mode_actuation, n, babble):
                 # frac：予備A（E_INTERP）が境界間で前meanと今meanを線形補間するのに使う。
                 frac = (k % CTRL_M) / CTRL_M
                 a, hidden = policy(obs, prev_a, hidden, recompute=boundary, frac=frac)
+                if grasp_reflex is not None:   # 【把握反射】強さ=1-w_mean（既存スケジュール逆連動）
+                    a = torch.as_tensor(grasp_reflex.apply(
+                        a.numpy(), env.unwrapped.touch.sensor_outputs, max(0.0, 1.0 - E_WMEAN)),
+                        dtype=a.dtype)
                 ctrl = rescale_action(a, env.action_space)
                 if boundary:
                     action_jumps.append(float(np.abs((a - prev_a).numpy()).mean()))
                     prev_a = a
             elif boundary:   # 従来：1秒に1回だけ命令を出し、その間は保持
                 a, hidden = policy(obs, prev_a, hidden)
+                if grasp_reflex is not None:
+                    a = torch.as_tensor(grasp_reflex.apply(
+                        a.numpy(), env.unwrapped.touch.sensor_outputs, max(0.0, 1.0 - E_WMEAN)),
+                        dtype=a.dtype)
                 action_jumps.append(float(np.abs((a - prev_a).numpy()).mean()))
                 ctrl = rescale_action(a, env.action_space)
                 prev_a = a
