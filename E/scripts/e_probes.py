@@ -41,7 +41,14 @@ class ProbeContext:
         self.target_fusion = target_fusion
         self.nat_head = nat_head
         self.env = env
+        # rescale_action は policy 出力 [-1,1] を env の action_space に線形写像するだけの純関数。
+        # 拮抗筋モードでは policy(n_joint) を先に brain.to_env_action で n_env_act に写像する
+        # 必要があるので、probe が env.step 前に必ず呼ぶラッパを提供する（拮抗筋OFFなら
+        # to_env_action は恒等＝従来と1バイト差なし）。
+        def _to_env_ctrl(policy_action):
+            return rescale_action(brain.to_env_action(policy_action), env.action_space)
         self.rescale_action = rescale_action
+        self._to_env_ctrl = _to_env_ctrl
         self.zc = zc
         self.act_mean = act_mean
         self.step_k = step_k
@@ -69,7 +76,7 @@ def evaluate(ctx):
         z, _, _, hn = zc(sv, state["prev_a"], cf, state["hidden"]); z = z.detach()
         a = torch.clamp(act_mean(z), -1.0, 1.0).detach()
         pd = nat_head(torch.cat([z, a], dim=-1)).detach()
-        state["obs"], term = step_k(rescale_action(a, env.action_space))
+        state["obs"], term = step_k(ctx._to_env_ctrl(a))
         nlp = ln_prop(state["obs"])
         self_err.append(mse(clp + pd, nlp).item()); ep.append(mse(clp, nlp).item())
         pdel.append(pd.numpy()); adel.append((nlp - clp).numpy())
@@ -108,7 +115,7 @@ def agency_probe(ctx, n=30):
         z, _, _, hn = zc(sv, state["prev_a"], cf, state["hidden"]); z = z.detach()
         a = torch.clamp(act_mean(z), -1.0, 1.0).detach()
         pred = nat_head(torch.cat([z, a], dim=-1)).detach()
-        state["obs"], term = step_k(rescale_action(a, env.action_space))
+        state["obs"], term = step_k(ctx._to_env_ctrl(a))
         nlp = ln_prop(state["obs"])
         self_errs.append(mse(clp + pred, nlp).item())
         self_mag.append((nlp - clp).abs().mean().item())
@@ -122,7 +129,7 @@ def agency_probe(ctx, n=30):
         a_self = torch.clamp(act_mean(z), -1.0, 1.0).detach()
         a_ext = self_acts[perm[k]]
         pred = nat_head(torch.cat([z, a_self], dim=-1)).detach()
-        state["obs"], term = step_k(rescale_action(a_ext, env.action_space))
+        state["obs"], term = step_k(ctx._to_env_ctrl(a_ext))
         nlp = ln_prop(state["obs"])
         ext_errs.append(mse(clp + pred, nlp).item())
         ext_mag.append((nlp - clp).abs().mean().item())
@@ -153,7 +160,7 @@ def inverse_probe(ctx, n=60, n_steps=40, n_restarts=3, lr_inf=0.1):
         clp = ln_prop(state["obs"])
         z, _, _, hn = zc(sv, state["prev_a"], cf, state["hidden"]); z = z.detach()
         a_real = torch.clamp(act_mean(z), -1.0, 1.0).detach()
-        state["obs"], term = step_k(rescale_action(a_real, env.action_space))
+        state["obs"], term = step_k(ctx._to_env_ctrl(a_real))
         target = (ln_prop(state["obs"]) - clp).detach()  # 望む変化＝実際の次感覚−今
 
         def ferr(a):
@@ -203,7 +210,7 @@ def inverse_exec_probe(ctx, n=40, n_steps=40, n_restarts=3, lr_inf=0.1):
 
     def real_rollout(a, qpos, qvel):
         mj.set_state(qpos.copy(), qvel.copy())
-        o, _ = step_k(rescale_action(a, env.action_space))
+        o, _ = step_k(ctx._to_env_ctrl(a))
         return ln_prop(o)
 
     for _ in range(n):
@@ -237,7 +244,7 @@ def inverse_exec_probe(ctx, n=40, n_steps=40, n_restarts=3, lr_inf=0.1):
         d_floor.append(mse(g2, g).item())
         mi_model.append(best_e)
         # 実トラジェクトリを a_real で1歩進める（他プローブと同様に状態を歩かせる）
-        state["obs"], term = step_k(rescale_action(a_real, env.action_space))
+        state["obs"], term = step_k(ctx._to_env_ctrl(a_real))
         state["hidden"] = hn.detach(); state["prev_a"] = a_real
         if term:
             reset_state()
@@ -270,7 +277,7 @@ def closed_loop_probe(ctx, goal_buf, n=30, max_reach=10):
 
     def const_rollout(a, nsteps, qpos, qvel):
         mj.set_state(qpos.copy(), qvel.copy())
-        ra = rescale_action(a, env.action_space); o = state["obs"]
+        ra = ctx._to_env_ctrl(a); o = state["obs"]
         for _ in range(nsteps):
             o, _, te, tr, _ = env.step(ra)
             if te or tr:
@@ -283,7 +290,7 @@ def closed_loop_probe(ctx, goal_buf, n=30, max_reach=10):
         o = state["obs"]; prev_d = mse(clp_now, g).item(); nstep = 0
         for _ in range(max_reach):
             a = infer_goal_action(z_now, clp_now, torch.clamp(act_mean(z_now), -1.0, 1.0), g)
-            ra = rescale_action(a, env.action_space)
+            ra = ctx._to_env_ctrl(a)
             for _ in range(k_inner):
                 o, _, te, tr, _ = env.step(ra)
                 if te or tr:
@@ -312,7 +319,7 @@ def closed_loop_probe(ctx, goal_buf, n=30, max_reach=10):
         do.append(mse(o_open, g).item()); dc.append(mse(o_closed, g).item())
         dr.append(mse(o_rand, g).item()); dn.append(mse(clp0, g).item()); steps.append(nstep)
         mj.set_state(qpos, qvel)  # 実トラジェクトリを1リーチぶん進める
-        state["obs"], term = step_k(rescale_action(a_open, env.action_space))
+        state["obs"], term = step_k(ctx._to_env_ctrl(a_open))
         state["hidden"] = hn0.detach(); state["prev_a"] = a_open
         if term:
             reset_state()

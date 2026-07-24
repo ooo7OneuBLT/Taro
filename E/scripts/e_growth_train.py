@@ -103,6 +103,12 @@ _SMOOTH = os.environ.get("E_SMOOTH", "0") == "1"
 # ＝各筋を独立にexplore()の出力で駆動する最小版[Tier3・簡略化]。シナジーは90-actuator index
 # 前提なので自動でOFFにする。
 _MUSCLE = os.environ.get("E_MUSCLE", "0") == "1"
+# 【拮抗筋co-activation】E_ANTAGONIST=1 で拮抗筋モード（要 E_MUSCLE=1）。脳は「関節レベルの
+# 指令」(n_joint次元, [-1,1]) を出し、脊髄CPG(cpg.py の antagonist_map)が2本の筋
+# (n_muscle=2*n_joint, [0,1])に写像する。共収縮の度合いは E_COACTIVATION（既定0.3、
+# [Tier3・ARBITRARY]、Hadders-Algra 1992 は存在確認[Tier1]だが数値は非公開）。
+_ANTAGONIST = os.environ.get("E_ANTAGONIST", "0") == "1"
+_COACTIVATION = float(os.environ.get("E_COACTIVATION", "0.3"))
 _INVPROBE = os.environ.get("E_INVPROBE", "0") == "1"  # 1=逆モデルStage1診断（学習後に1回）
 _INVEXEC = os.environ.get("E_INVEXEC", "0") == "1"  # 1=逆モデルStage1.5＝推論a*の実行テスト
 _GOALBABBLE = os.environ.get("E_GOALBABBLE", "0") == "1"  # 1=Goal Babbling(目標指向の探索)
@@ -351,7 +357,10 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
     target_fusion = MinimalFusion(touch_dim, vision_res=_vres, proprio_dim=_prop_dim).freeze()
     global _TGT_FUSION
     _TGT_FUSION = target_fusion      # ln_prop が視覚を予測対象に足すのに使う（E_E1_TARGET=1）
-    n_act = env.action_space.shape[0]
+    n_env_act = env.action_space.shape[0]
+    # 拮抗筋モード：脳・CPG・prev_a・log_probはすべて n_joint 次元、環境には to_env_action で
+    # 2*n_joint に写像して渡す。既定は n_act == n_env_act で従来と一致。
+    n_act = n_env_act // 2 if (_MUSCLE and _ANTAGONIST) else n_env_act
     # 【バグ修正・2026-07-15】最初のresetに必ずseedを渡す。
     # 環境の乱数(`env.unwrapped.np_random`)は gym が別に管理しており、torch.manual_seed も
     # np.random.seed も効かない。仰向け環境は reset のたびに np_random で初期姿勢を揺らす
@@ -382,9 +391,11 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
         _arm_r = _ARM_R if not _MUSCLE else ()
         _arm_l = _ARM_L if not _MUSCLE else ()
         brain.enable_spinal_babble(n_act, leg_r=_leg_r, leg_l=_leg_l, arm_r=_arm_r, arm_l=_arm_l,
-                                   beta=_E_BETA, synergy=_use_syn, syn_w=_E_SYN_W, seed=seed)
+                                   beta=_E_BETA, synergy=_use_syn, syn_w=_E_SYN_W, seed=seed,
+                                   antagonist=(_MUSCLE and _ANTAGONIST), co_activation=_COACTIVATION)
         print(f"[脊髄CPG] 色付き探索ON: β={_E_BETA} synergy={_use_syn} syn_w={_E_SYN_W}"
-              f"{' (筋肉モードのためsyn強制OFF)' if _MUSCLE and _E_SYNERGY else ''}", flush=True)
+              f"{' (筋肉モードのためsyn強制OFF)' if _MUSCLE and _E_SYNERGY else ''}"
+              f"{' 【拮抗筋モードON】coactivation=' + str(_COACTIVATION) if _MUSCLE and _ANTAGONIST else ''}", flush=True)
     emb_dim = brain.sensory_proj.out_features  # GRUの入力次元(=64)
 
     # D-a: [感覚, 前回行動] → GRU入力。brain.sensory_proj の代わりに使う自前の射影。
@@ -572,7 +583,10 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
         if len(goal_buf) > 2000:
             goal_buf.pop(0)
         pred = clp + nat_head(torch.cat([z, a.detach()], dim=-1))
-        state["obs"], term = step_k(rescale_action(a, env.action_space)); nlp = ln_prop(state["obs"])
+        # 拮抗筋モード：a(n_joint) → to_env_action で n_env_act次元の筋活性化へ写像してから env に送る。
+        # 拮抗筋OFFなら a_env==a（従来と1バイト差なし）。
+        a_env = brain.to_env_action(a)
+        state["obs"], term = step_k(rescale_action(a_env, env.action_space)); nlp = ln_prop(state["obs"])
         if _CLTRAIN and reach_goal is not None:
             nd = mse(nlp, reach_goal).item()
             if nd >= reach_prev_dist:

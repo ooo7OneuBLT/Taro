@@ -89,3 +89,37 @@ class CPG:
         for i in self._arm_l:
             gen_np[i] = (1 - syn_w) * gen_np[i] + syn_w * arm_l_s
         return gen_np
+
+
+def antagonist_map(motor_cmd, co_activation=0.3):
+    """関節あたりの運動指令 motor_cmd(n_joint次元, [-1, 1]) を、拮抗筋2本ペアの
+    活性化(2*n_joint次元, [0, 1])に写像する。MIMoの MuscleModel は
+    先頭 n_joint 次元が負方向筋(neg=曲げる側)、後半 n_joint 次元が正方向筋(pos=伸ばす側)。
+
+    【なぜ】人間の1関節は「曲げる筋」と「伸ばす筋」の2本の別々の筋肉で動く。両方を同時に
+    力ませることを共収縮(co-activation)といい、新生児期に強く見られる主要パターン
+    [Tier1、Hadders-Algra et al. 1992 "Developmental course of general movements in early
+    infancy. II. EMG correlates"、健常乳児22名EMG+ビデオ]。文献要点：
+      - co-activationの存在は確定（新生児期に主要パターン）
+      - writhing→fidgety移行後も**残り続ける**主要パターン（＝消える設計は文献に反する）
+      - 発達で①burst持続が短くなる ②振幅減衰 ③tonic背景活動が下がる（数値は非公開）
+
+    【写像の意味】
+      motor_cmd[i] = 0（動かない指令）＆ co_activation=0.3 → neg=0.3, pos=0.3
+        ＝両方軽く力ませて関節を穏やかに固める（スティフネス上昇）
+      motor_cmd[i] = +0.5（伸ばす指令）＆ co_activation=0.3 → neg=0.3, pos=0.8
+        ＝曲げる筋も残しつつ伸ばす（硬さを保ちながら動く）
+      motor_cmd[i] = +0.5 ＆ co_activation=0 → neg=0, pos=0.5（従来の独立駆動と等価）
+      motor_cmd[i] = 0 ＆ co_activation=0.9 → neg=0.9, pos=0.9（関節ロック）
+
+    【co_activation の値】新生児のCIの実測値は文献に見つからず [Tier3・ARBITRARY]。
+    暫定 0.3 でスタート、目視・数値を見ながら調整する（把握反射TARGET=0.9等と同じ扱い）。
+    月齢連動は将来やることリスト（消さない設計、Hadders-Algra文献に忠実）。
+    """
+    n = motor_cmd.shape[0]
+    neg = np.clip(co_activation + np.maximum(-motor_cmd, 0.0), 0.0, 1.0)
+    pos = np.clip(co_activation + np.maximum(+motor_cmd, 0.0), 0.0, 1.0)
+    out = np.empty(2 * n, dtype=np.float32)
+    out[:n] = neg
+    out[n:] = pos
+    return out

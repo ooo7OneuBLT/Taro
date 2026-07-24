@@ -80,11 +80,13 @@ class TaroBrainWithMotor(TaroBrain):
         self.hippocampus = MotorHippocampus()
 
         # 脊髄CPG（運動性喃語の探索ノイズ源）。既定は未初期化＝explore()は白色ガウス＝従来と一致。
-        # enable_spinal_babble() で色付きノイズ＋シナジーを太郎の中で有効化する。
+        # enable_spinal_babble() で色付きノイズ＋シナジー・拮抗筋モードを太郎の中で有効化する。
         self.spinal_cpg = None
         self._babble_beta = 0.8
         self._babble_synergy = False
         self._babble_syn_w = 0.6
+        self._babble_antagonist = False
+        self._babble_coactivation = 0.3
 
         # ─── 目標E（egomotion割引）：視覚版の順モデル ───
         # forward_model_head（固有感覚版）と全く同じ形。予測対象を視覚エンコーダの
@@ -271,19 +273,28 @@ class TaroBrainWithMotor(TaroBrain):
         return (1.0 - w) * pm + w * cere_a
 
     def enable_spinal_babble(self, n_act, leg_r=(), leg_l=(), arm_r=(), arm_l=(),
-                             beta=0.8, synergy=False, syn_w=0.6, seed=None):
+                             beta=0.8, synergy=False, syn_w=0.6, seed=None,
+                             antagonist=False, co_activation=0.3):
         """脊髄CPG（運動性喃語の探索ノイズ源）を太郎の中で有効化する。以後 explore() は
         白色ガウスでなく、色付きノイズ（1/f^β）＋粗いシナジーで探索する。
 
         【なぜ太郎の中か】運動性喃語＝どう探索するかは太郎の身体機能（脊髄・脳幹の自律回路）。
         学習スクリプトや測定器が毎回組み立てるものではない。βやシナジーの有無は本来は発達段階
         （体の月齢）で太郎自身が決めるべきで、その配線は次段階（developmental_schedule）。今は
-        呼び出し側が渡した値を太郎が保持する。leg/arm の関節indexはMIMo身体の配列（身体依存）。"""
+        呼び出し側が渡した値を太郎が保持する。leg/arm の関節indexはMIMo身体の配列（身体依存）。
+
+        antagonist=True で拮抗筋モード。n_act は関節数（例：MIMo身体で90）を渡す。CPGが
+        90次元の運動指令を生成し、explore() 側で antagonist_map によって180次元(拮抗筋2本
+        ペアの活性化, [0,1])に写像する。co_activation は共収縮の度合い（0=独立駆動と等価、
+        0.3=軽く固める、0.9=関節ロック）。詳細は spinal_cord/cpg.py の antagonist_map。
+        """
         from spinal_cord.cpg import CPG
         self.spinal_cpg = CPG(n_act, leg_r, leg_l, arm_r, arm_l, seed=seed)
         self._babble_beta = beta
         self._babble_synergy = synergy
         self._babble_syn_w = syn_w
+        self._babble_antagonist = antagonist
+        self._babble_coactivation = co_activation
 
     def explore(self, mean, std):
         """探索：mean を中心に std のゆらぎでサンプルし、(行動, log_prob) を返す。
@@ -305,6 +316,22 @@ class TaroBrainWithMotor(TaroBrain):
             noise = torch.as_tensor(noise, dtype=mean.dtype)
             a = torch.clamp(mean + std * noise, -1.0, 1.0)
         return a, dist.log_prob(a).sum()
+
+    def to_env_action(self, policy_action):
+        """脳が出した「関節レベルの指令」を、環境が受け取る形（筋レベル等）に変換する。
+
+        既定（拮抗筋モードOFF）は恒等関数＝policy_action をそのまま返す（従来と一致）。
+        拮抗筋モードON＝enable_spinal_babble(antagonist=True) 済みのとき：
+          policy_action は n_joint 次元 [-1,1]（関節レベルの指令）
+          → antagonist_map で 2*n_joint 次元 [0,1] の筋活性化に写像して返す。
+        呼び出し側は explore() の返す a を prev_a・log_prob等の内部処理に使い、
+        to_env_action(a) の返す a_env を rescale_action → env.step に渡す。"""
+        if not self._babble_antagonist:
+            return policy_action
+        from spinal_cord.cpg import antagonist_map
+        a_np = policy_action.detach().numpy() if isinstance(policy_action, torch.Tensor) else policy_action
+        a_env = antagonist_map(a_np, self._babble_coactivation)
+        return torch.as_tensor(a_env, dtype=torch.float32)
 
     def consolidate(self, learner, n_batches=200, batch_size=128):
         """睡眠リプレイ：海馬に貯めた経験を再生し、順モデル（自己内部モデル）を定着させる。
