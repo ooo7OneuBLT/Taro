@@ -334,13 +334,19 @@ class ToySupineEnv(SupineMimoEnv):
                  fence_post_w=FENCE_POST_W, fence_post_t=FENCE_POST_T,
                  fence_n_long=FENCE_N_LONG, fence_n_short=FENCE_N_SHORT,
                  fence_height=FENCE_HEIGHT, newborn_neck=None, newborn_limbs=None,
-                 vor=None, **kwargs):
+                 vor=None, orient=None, **kwargs):
         # VOR（前庭動眼反射）。眼球を方策から切り離し、頭の動きを打ち消して視線を安定させる。
         # E_VOR=0 でOFF（アブレーション）。根拠と簡略化は e_vor.py 参照。
         if vor is None:
             vor = os.environ.get("E_VOR", "1") == "1"
         self._use_vor = vor
         self._vor = None
+        # 視線誘導反射（動きの大きい方向に首・目が向く）。設計確定・未検証のため既定OFF。
+        # E_ORIENT=1 でON。根拠と簡略化は e_orienting.py 参照。
+        if orient is None:
+            orient = os.environ.get("E_ORIENT", "0") == "1"
+        self._use_orient = orient
+        self._orienting = None
         # 既定は環境変数から（E_NECK=0 / E_LIMBS=0 でアブレーション）。引数指定が優先。
         if newborn_neck is None:
             newborn_neck = os.environ.get("E_NECK", "1") == "1"
@@ -360,6 +366,12 @@ class ToySupineEnv(SupineMimoEnv):
         # E_PLAIN=1（既定）＝視覚的に貧しくする。E_PLAIN=0 で従来の見た目（市松床・青い柵）。
         # ⚠️_edit_spec は super().__init__() の中で呼ばれるので super() より前に代入する。
         self._plain = os.environ.get("E_PLAIN", "1") == "1"
+        # 【目標E フェーズ1】E_STATIC_TEX=1 で「動かない模様のあるもの」を視界に足す：
+        #   ①模様(市松)付きの天井を太郎の真上に追加、②柵にも同じ市松テクスチャを貼る。
+        # 狙い＝「自分の首を動かす→見え方が変わる」の学習教材を作る（おもちゃ=動くもの と違い、
+        # これは動かないので"自分の動きだけで視覚が変わる"という条件を壊さない）。既定OFF。
+        # 2026-07-21：フェーズ1で視界がのっぺりしすぎ(58%が変化なし・空か柵のみ)と目視で判明した対処。
+        self._static_tex = os.environ.get("E_STATIC_TEX", "0") == "1"
         # 身体の補正。**必ずON/OFFできるようにする**＝E1で「dampingが創発したのか、
         # 身体を弱めただけか」を切り分けるアブレーションに使う（これが無いと結果を解釈できない）。
         #   newborn_neck  : 首がすわっていない（head lag）の再現。⚠️恣意的（e_infant_neck.py）
@@ -460,6 +472,11 @@ class ToySupineEnv(SupineMimoEnv):
             self._vor = VOR(self.model, self.data)
             print(f"[vor] enabled: gain={self._vor.gain} on {len(self._vor.units)} eye actuators "
                   f"(policy output to eyes is ignored)")
+        if self._use_orient:
+            from e_orienting import OrientingReflex
+            self._orienting = OrientingReflex(self.model)
+            print(f"[orient] enabled: neck={list(self._orienting.neck_idx.keys())} "
+                  f"eye_h={len(self._orienting.eye_idx['h'])} eye_v={len(self._orienting.eye_idx['v'])}")
 
     # ------------------------------------------------------------------
     def _make_visually_plain(self, spec):
@@ -497,6 +514,38 @@ class ToySupineEnv(SupineMimoEnv):
                     t.rgb2 = list(PLAIN_RGBA[:3])
         except Exception as e:      # MjSpecのtexture APIはバージョン差があるので落とさない
             print(f"[E1] skyboxの単色化をスキップ（{type(e).__name__}: {e}）")
+
+    def _add_static_texture(self, spec):
+        """【目標E フェーズ1】動かない模様のあるもの（天井＋柵の市松）を足す。
+
+        フェーズ1で「自分の首を動かす→視覚が変わる」を学ぶには、視界に空間的な模様が要る。
+        2026-07-21の目視で、E_PLAIN=1の環境は視界の58%が変化なし（空か柵の単色のみ）と判明。
+        対処として、太郎の真上に市松模様の天井を置き、柵にも同じ市松を貼る。
+        ⚠️これは"動かないもの"なので、自己運動と視覚の関係を素直に学べる（おもちゃ=動くものと違う）。
+        """
+        # 市松テクスチャと、それを参照する材質を1つずつ定義する（MjSpecなのでXML不要）。
+        tex = spec.add_texture()
+        tex.name = "e_static_checker_tex"
+        tex.type = mujoco.mjtTexture.mjTEXTURE_2D
+        tex.builtin = mujoco.mjtBuiltin.mjBUILTIN_CHECKER
+        tex.width = 128
+        tex.height = 128
+        tex.rgb1 = [0.15, 0.20, 0.35]
+        tex.rgb2 = [0.75, 0.80, 0.55]   # 高コントラストの2色（学習しやすい明確なエッジ）
+        mat = spec.add_material()
+        mat.name = "e_static_checker"
+        mat.textures[mujoco.mjtTextureRole.mjTEXROLE_RGB] = "e_static_checker_tex"
+        mat.texrepeat = [4, 4]          # 面内で模様を4×4回繰り返す＝細かいエッジを増やす
+        # 太郎の真上に天井（薄い箱）を置く。仰向けの太郎が最も長く見ている方向。
+        # 高さは柵より少し高い位置。視界(fovy≈上方向)に必ず入る大きさにする。
+        ceil = spec.worldbody.add_geom()
+        ceil.name = "e_static_ceiling"
+        ceil.type = mujoco.mjtGeom.mjGEOM_BOX
+        ceil.size = [self._fence_half_x + 0.1, self._fence_half_y + 0.1, 0.005]
+        ceil.pos = [0.0, 0.0, self._fence_height + 0.15]
+        ceil.material = "e_static_checker"
+        ceil.contype = 0     # 物理的な衝突はさせない（見えるだけ）＝太郎が触れても動かない・当たらない
+        ceil.conaffinity = 0
 
     def _elongate_head(self, spec):
         """頭のgeomを球→楕円体にして、**体軸方向にだけ**伸ばす。
@@ -543,6 +592,8 @@ class ToySupineEnv(SupineMimoEnv):
         self._elongate_head(spec)
         if self._plain:
             self._make_visually_plain(spec)
+        if self._static_tex:
+            self._add_static_texture(spec)
         if not self._fence:
             return
         a, b = self._fence_half_x, self._fence_half_y
@@ -568,8 +619,12 @@ class ToySupineEnv(SupineMimoEnv):
             # ⚠️バグ修正：MjSpecで足したgeomは**デフォルトクラスの material="matgeom"（茶色の
             #   テクスチャ）を継承する**ため、rgbaを指定しても茶色に描かれていた（目視で発覚）。
             #   material を空にしないと rgba が効かない。
-            g.material = ""
-            g.rgba = list(PLAIN_RGBA if self._plain else FENCE_RGBA_RICH)
+            if self._static_tex:
+                # フェーズ1：柵にも市松テクスチャを貼る（首を振ると縦棒＋模様が動いて見える）
+                g.material = "e_static_checker"
+            else:
+                g.material = ""
+                g.rgba = list(PLAIN_RGBA if self._plain else FENCE_RGBA_RICH)
             g.condim = 3
 
     def _place(self, qadr, pos):
@@ -671,6 +726,8 @@ class ToySupineEnv(SupineMimoEnv):
         self._spawn_toy()                  # 落ち着いた後の肩位置を見て配置
         self._glow_until = -1e9            # 点灯の余韻を持ち越さない
         self._vision_cache = None          # data.time が巻き戻るのでキャッシュを捨てる
+        if self._orienting is not None:
+            self._orienting.reset()        # 前エピソードの画像を持ち越さない
         if self._toy:
             self.model.geom_rgba[self._toy_gadr] = TOY_RGBA_OFF
             self.toy_lit = False
@@ -687,6 +744,9 @@ class ToySupineEnv(SupineMimoEnv):
         if self._vor is not None:
             # 方策の眼球出力を捨て、VORの指令に差し替える（皮質は反射弓に介入しない）
             action = self._vor.override(action, self.model, self.data, self.dt)
+        if self._orienting is not None:
+            # 前回描画された画像から計算済みの方向を、首・（VOR後の）目に加算する
+            action = self._orienting.apply(action)
         return super().step(action)
 
     def get_vision_obs(self):
@@ -747,6 +807,9 @@ class ToySupineEnv(SupineMimoEnv):
         self.vision.sensor_outputs = imgs
         self._vision_cache = imgs
         self._vision_t = now
+        if self._orienting is not None and "eye_left" in imgs:
+            # 新しく描画された画像でだけ方向を更新する（キャッシュ流用時は呼ばれない＝重複計算を防ぐ）
+            self._orienting.update(imgs["eye_left"])
         return imgs
 
     def _update_glow(self):

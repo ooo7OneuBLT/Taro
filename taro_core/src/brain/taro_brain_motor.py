@@ -79,6 +79,13 @@ class TaroBrainWithMotor(TaroBrain):
         # 海馬：睡眠リプレイで自己モデルを定着させる（C2で実証）。言語用海馬と同じCLS原理。
         self.hippocampus = MotorHippocampus()
 
+        # 脊髄CPG（運動性喃語の探索ノイズ源）。既定は未初期化＝explore()は白色ガウス＝従来と一致。
+        # enable_spinal_babble() で色付きノイズ＋シナジーを太郎の中で有効化する。
+        self.spinal_cpg = None
+        self._babble_beta = 0.8
+        self._babble_synergy = False
+        self._babble_syn_w = 0.6
+
         # ─── 目標E（egomotion割引）：視覚版の順モデル ───
         # forward_model_head（固有感覚版）と全く同じ形。予測対象を視覚エンコーダの
         # 出力（fusion.pyのVisionEncoder、64次元embedding）に変える。
@@ -228,6 +235,76 @@ class TaroBrainWithMotor(TaroBrain):
     def predict_proprio(self, z, action, current_proprio):
         """残差予測：現在の固有感覚 + Δ(z, 行動) = 次の固有感覚の予測。"""
         return current_proprio + self.forward_model_head(torch.cat([z, action], dim=-1))
+
+    # ─── 行動生成を太郎の中に一元化（2026-07-23）───
+    # 【なぜ】これまで行動生成（運動野の精密制御→小脳の自動化ブレンド→探索サンプリング→
+    # log_prob）は各目標の学習スクリプト側に書かれ、測定器も独自に再実装していた。運動性喃語
+    # （＝どう探索するか）は太郎の身体機能であってスクリプトの機能ではない、という指摘を受け、
+    # 行動生成の窓口を太郎の中に集約する。学習ループ・測定器は motor_drive → explore を
+    # 呼ぶだけ。色付きノイズ・シナジー（脊髄CPG, spinal_cord/cpg.py）の統合は次段階でここに
+    # 入れる（今は白色ガウス＝従来と数値完全一致）。
+    def motor_drive(self, z, ne_level, cerebellum=None, min_std=0.05, max_std=0.5):
+        """運動野の精密制御（motor_head）＋小脳の自動化ブレンドで、行動の中心(mean)と
+        探索のゆらぎ幅(std)を作る。方策勾配の分散が知覚学習の幹へ漏れないよう z を detach
+        する（従来と同一）。
+
+        戻り値: (mean, std, cereb_w, cereb_err)
+          cereb_w   … 小脳の自動化ブレンド率（小脳OFFなら None）
+          cereb_err … 小脳のゲート誤差＝小脳の学習(observe)に使う（小脳OFFなら None）
+        """
+        policy_m = torch.tanh(self.motor_head(z.detach()))
+        std = min_std + ne_level * (max_std - min_std)
+        if cerebellum is None:
+            return policy_m, std, None, None
+        # 馴染んだ状態ほど小脳の滑らかな出力で置換＋探索ノイズ減（結晶化）。
+        w_c, cere_a, e_c = cerebellum.gate(z.detach(), policy_m)
+        mean = (1.0 - w_c) * policy_m + w_c * cere_a
+        return mean, std * (1.0 - w_c), w_c, e_c
+
+    def act_deterministic(self, z, cerebellum=None):
+        """決定的な行動平均（評価・agency用、ノイズなし）。小脳ONなら自動化ブレンドを適用。
+        motor_drive の探索抜き版（測定器はこれを呼ぶ）。"""
+        pm = torch.tanh(self.motor_head(z))
+        if cerebellum is None:
+            return pm
+        w, cere_a, _ = cerebellum.gate(z, pm)
+        return (1.0 - w) * pm + w * cere_a
+
+    def enable_spinal_babble(self, n_act, leg_r=(), leg_l=(), arm_r=(), arm_l=(),
+                             beta=0.8, synergy=False, syn_w=0.6, seed=None):
+        """脊髄CPG（運動性喃語の探索ノイズ源）を太郎の中で有効化する。以後 explore() は
+        白色ガウスでなく、色付きノイズ（1/f^β）＋粗いシナジーで探索する。
+
+        【なぜ太郎の中か】運動性喃語＝どう探索するかは太郎の身体機能（脊髄・脳幹の自律回路）。
+        学習スクリプトや測定器が毎回組み立てるものではない。βやシナジーの有無は本来は発達段階
+        （体の月齢）で太郎自身が決めるべきで、その配線は次段階（developmental_schedule）。今は
+        呼び出し側が渡した値を太郎が保持する。leg/arm の関節indexはMIMo身体の配列（身体依存）。"""
+        from spinal_cord.cpg import CPG
+        self.spinal_cpg = CPG(n_act, leg_r, leg_l, arm_r, arm_l, seed=seed)
+        self._babble_beta = beta
+        self._babble_synergy = synergy
+        self._babble_syn_w = syn_w
+
+    def explore(self, mean, std):
+        """探索：mean を中心に std のゆらぎでサンプルし、(行動, log_prob) を返す。
+        ゆらぎの性質（白色か色付きか・シナジーの有無）を太郎自身が持つ（脊髄CPG）。
+
+        - 脊髄CPG未初期化（既定）＝白色ガウス＝従来と数値完全一致。
+        - enable_spinal_babble 済み＝色付きノイズ（1/f^β）＋シナジー。a = mean + std×色付き。
+          色付きノイズは cpg.py で各時点が標準化されており周辺分布は N(0,1) なので、
+          log_prob を Normal(mean, std) で計算するのは周辺尤度として正確（時間相関は分散を
+          増やすが方策勾配にバイアスは生じない）。
+        log_prob はクランプ後の値から計算（範囲外行動への誤った信用割り当てを防ぐ、発話側の
+        運動選択 cortex.py と同型の扱い）。"""
+        dist = torch.distributions.Normal(mean, std)
+        if self.spinal_cpg is None:
+            a = torch.clamp(dist.sample(), -1.0, 1.0)
+        else:
+            noise = self.spinal_cpg.sample(self._babble_beta, synergy=self._babble_synergy,
+                                           syn_w=self._babble_syn_w)
+            noise = torch.as_tensor(noise, dtype=mean.dtype)
+            a = torch.clamp(mean + std * noise, -1.0, 1.0)
+        return a, dist.log_prob(a).sum()
 
     def consolidate(self, learner, n_batches=200, batch_size=128):
         """睡眠リプレイ：海馬に貯めた経験を再生し、順モデル（自己内部モデル）を定着させる。

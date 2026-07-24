@@ -41,7 +41,12 @@ C/archive/
 D/archive/
 C/models/
 D/models/
+E/models/
 MIMo/
+
+# MuJoCoの実行時ログ（生成物）
+MUJOCO_LOG.TXT
+**/MUJOCO_LOG.TXT
 .venv/
 
 # C/docs は相談準備・ロードマップ等の非公開資料を含む。
@@ -64,3 +69,6 @@ venv_build.log
 # ローカル専用のMCP設定（公開しない）
 .mcp.json
 研究の原則.md
+
+# ローカル専用の作業メモ（公開しない）
+doc/_private/

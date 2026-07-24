@@ -23,6 +23,8 @@ import torch
 from insula import Insula
 from sensory_encoders import ProprioceptionEncoder, VestibularEncoder, TouchEncoder
 from vision_encoder import VisionEncoder
+import semicircular_canals
+import otolith_organs
 
 
 def to_tensor(x):
@@ -37,9 +39,12 @@ class MinimalFusion:
     - vision_res>0 : 視覚を足す（vision_res＝眼球カメラの一辺の画素数＝低視力なら小さく）。
     """
 
-    def __init__(self, touch_dim=0, vision_res=0):
+    def __init__(self, touch_dim=0, vision_res=0, proprio_dim=621):
+        # proprio_dim：MIMoの observation の次元数。既定621（SpringDamperModel、90関節）だが、
+        # MuscleModel（拮抗筋2本/関節）や関節数が変わる身体では違うので、呼び出し側から実測値を
+        # 渡せるようにしておく（渡さなければ従来と完全に同一）。
         self.insula = Insula(state_dim=4, embedding_dim=64)
-        self.proprio = ProprioceptionEncoder(input_dim=621)
+        self.proprio = ProprioceptionEncoder(input_dim=proprio_dim)
         self.vestibular = VestibularEncoder(input_dim=6)
         self.touch = TouchEncoder(input_dim=touch_dim, hidden_dim=256, embedding_dim=64) if touch_dim else None
         # 視覚は vision_res>0 のときだけ有効。VisionEncoder は画像サイズに依存するので、
@@ -55,9 +60,15 @@ class MinimalFusion:
         return itertools.chain(*ms)
 
     def encode(self, obs):
+        # 前庭覚を臓器レベルで分ける：耳石器(直線加速度)＋三半規管(角速度)。
+        # MIMoの並び(加速度3+角速度3)を維持して連結＝数値は従来と1バイトも変わらない。
+        vestibular_raw = np.concatenate([
+            otolith_organs.read(obs["vestibular"]),
+            semicircular_canals.read(obs["vestibular"]),
+        ])
         parts = [self.insula(to_tensor(obs["interoception"])),
                  self.proprio(to_tensor(obs["observation"])),
-                 self.vestibular(to_tensor(obs["vestibular"]))]
+                 self.vestibular(to_tensor(vestibular_raw))]
         if self.touch is not None:
             parts.append(self.touch(to_tensor(obs["touch"])))
         if self.vision is not None:
