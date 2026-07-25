@@ -88,7 +88,10 @@ def body_kwargs_from_env(age, verbose=True):
     kw = {"head_elongation": head_elongation_from_env(),
           "limb_scale": limb_scale_from_env(),
           "limb_fix": limb_fix_enabled(),
-          "distal_mass": distal_mass_from_env()}
+          "distal_mass": distal_mass_from_env(),
+          "flexion": os.environ.get("E_FLEXION", "0") == "1",
+          "flexion_stiffness": (float(os.environ["E_FLEX_STIFF"])
+                                if os.environ.get("E_FLEX_STIFF") else None)}
     custom = body_scale_custom_from_env(age, verbose=verbose)
     if custom:
         kw["custom_measurements"] = custom

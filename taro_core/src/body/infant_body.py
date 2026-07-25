@@ -412,8 +412,79 @@ def apply_distal_mass(model, scale=1.0, verbose=True):
               f"({n}body) [SENSITIVITY: 新生児の体節質量比は実測が存在しない]")
 
 
+# 【生理的屈曲（physiological flexion）・2026-07-25】
+# 新生児は放っておいても股・膝・肘が曲がっている（屈曲拘縮）。一次文献の実測値：
+#   股関節 -32度  Ishida et al. 1997, Rev Bras Ortop 32(1):37-45
+#                 （n=80、満期産・生後0-4日、受動ROM、オープンアクセスで全文取得）[Tier1]
+#   膝     -21度  Broughton, Wright & Menelaus 1993, J Pediatr Orthop 13(2):263-4
+#                 （n=57、縦断。出生時21.4度→3ヶ月10.7度→6ヶ月3.3度）[Tier1]
+#   肘     -14度  Watanabe et al. 1979（n=62。Norkin & White 教科書 Table 16-2 経由）[二次]
+#
+# 実測（補正なし・MuscleModel）：股 +1.6度 / 膝 -1.5度 / 肘 -14.4度
+# ＝股と膝がほぼ伸びた姿勢で落ち着いており、人間の新生児と大きく違う。
+#
+# 【実装機構の判断】生理的屈曲は**受動的な組織特性**（屈筋トーン・関節包の張力）であって、
+# 筋の能動的な姿勢保持ではない。後者は 2026-07-25 に2つの[Tier1]で否定されている
+# （仰臥位は姿勢筋の需要が最小／固める方向は人間でも病的サイン＝cramped-synchronised）。
+# → jnt_stiffness（関節のバネ）＋ qpos_spring（バネの中立位置）で表現する。
+#   Ishida 1997 自身が「新生児の受動ROMの主因は屈筋トーンと子宮内姿勢による
+#   **軟部組織の抵抗**」と書いており、この機構に対応する。
+# ⚠️MuscleModel は jnt_stiffness=0 で、筋の受動力 fp(lce) で代替している。
+#   fp を強める案（fpmax）は**スカラーで全身の筋に一律に効く**ので関節ごとに調整できない。
+#   だから jnt_stiffness を 0 から立てる。fp は触らない。
+FLEXION_TARGETS = {"hip1": -32.0, "knee": -21.0, "elbow": -14.0}
+# バネの強さ。⚠️新生児の関節の受動剛性(N·m/rad)の文献値は**存在しない**（調査済み）。
+# この値は「目標角度に落ち着く点を実測から逆算し、達成できる中で可動範囲が最大になる点」
+# として選んだ [Tier2・実測から逆算]。実測（e_flexion_probe.py）：
+#   stiffness  股eq/ROM      膝eq/ROM      肘eq/ROM
+#   0          +1.6/96.7     -1.5/99.8     -14.4/148.8
+#   1         -26.0/84.8    -19.9/72.9     -13.8/77.4
+#   2 ←採用   -30.0/71.2    -19.2/59.1     -13.8/63.5   ＝3関節すべて目標±3度
+#   4         -30.4/52.0    -20.5/46.6     -14.0/45.0   ＝可動範囲が落ちる
+#   32        -31.8/14.5    -21.0/14.7     -14.0/7.9    ＝ほぼ動かない（異常の方向）
+# 参考：人間の股関節の excursion は 75.5±13.0度（Chen et al. 2021, n=9, 3-4ヶ月児）で、
+#       補正なしの96.7度より stiffness=2 の71.2度のほうが近い。
+#       ⚠️ただし対象月齢も測り方も同じとは保証できないので「オーダーが合う」までの主張。
+FLEXION_STIFFNESS = 2.0
+# 生理的屈曲は発達で解消する（膝：出生21.4度→3ヶ月10.7度→6ヶ月3.3度）。
+# ⚠️この月齢まで一定に保ち、それ以降は触らない[Tier3・簡略化]。
+# 間の推移を線形補間する案は、3点しか実測が無いので今は入れない（恣意性を増やさない）。
+FLEXION_UNTIL_MO = 3.0
+
+
+def apply_physiological_flexion(model, age=0.0, stiffness=None, verbose=True):
+    """新生児の生理的屈曲を、関節のバネ（stiffness + 中立位置）で表現する。
+
+    age が FLEXION_UNTIL_MO 以上なら何もしない（＝発達で解消する）。
+    ⚠️`jnt_range` は変えない。バネだけで目標角に落ち着くので、range を狭めると
+      初期姿勢が範囲外になって**リセット時に関節が跳ねる**（実測で確認済み）。
+    """
+    import numpy as np   # このファイルの他の関数と同じくローカルにimportする
+    if float(age) >= FLEXION_UNTIL_MO:
+        if verbose:
+            print(f"[flexion] age={age}mo >= {FLEXION_UNTIL_MO}mo: no correction")
+        return dict(n=0)
+    k = FLEXION_STIFFNESS if stiffness is None else float(stiffness)
+    n, applied = 0, []
+    for base, target in FLEXION_TARGETS.items():
+        for side in ("right_", "left_"):
+            try:
+                j = model.joint("robot:" + side + base)
+            except Exception:
+                continue
+            model.qpos_spring[int(model.jnt_qposadr[j.id])] = np.radians(target)
+            model.jnt_stiffness[j.id] = k
+            n += 1
+        applied.append(f"{base}{target:+.0f}")
+    if verbose:
+        print(f"[flexion] age={age}mo: {n} joints, stiffness={k} "
+              f"({' '.join(applied)}) [Tier1: 目標角は実測／Tier2: stiffnessは逆算]")
+    return dict(n=n, stiffness=k)
+
+
 def apply_runtime_corrections(model, data, age, neck=True, limbs=True, head_mass=True,
-                              limb_scale=1.0, distal_mass=1.0):
+                              limb_scale=1.0, distal_mass=1.0, flexion=False,
+                              flexion_stiffness=None):
     """モデル構築後に上書きする補正（筋力＝アクチュエータのgear）。
 
     - **首の筋力**（`infant_neck`）：MIMoは gear を geom の体積から計算するため、
@@ -439,3 +510,7 @@ def apply_runtime_corrections(model, data, age, neck=True, limbs=True, head_mass
         # この補正の目標値に根拠が無いことが2026-07-25の文献調査で判明したため、
         # 「結論がこの仮定に依存していないか」を振って確かめられるようにしてある。
         apply_limb_inversion_fix(model, data, float(age), scale=float(limb_scale))
+    # 生理的屈曲は筋力補正の後（gear と独立なので順序は結果に影響しないが、
+    # 「筋力→姿勢」の順で読めるようにここに置く）。既定OFF＝目視で確認してから既定ONにする。
+    if flexion:
+        apply_physiological_flexion(model, float(age), stiffness=flexion_stiffness)

@@ -395,23 +395,33 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
     # 体型の定義は core（`taro_core/src/body/infant_body.py`）へ移設済み。ここは
     # 環境変数の読み取り（`e_body_config.py`）を経由して受け取るだけ。
     # ⚠️E_SHAPE=0 で補正を切れる（＝素のmimoGrowth体型＝アブレーション／過去実験の再現）。
+    # ⚠️★【2026-07-25 配線の修正】ここは以前 `body_scale_custom_from_env` と
+    #   `head_elongation_from_env` を**個別に呼んでいた**ため、あとから
+    #   `e_body_config.body_kwargs_from_env`（身体設定の唯一の入口）に足された引数が
+    #   **この学習ループには一切届いていなかった**。実害：
+    #     ・`distal_mass`（末端の質量）… 感度分析4条件のモデルの重みが完全一致（＝無効）
+    #     ・`limb_scale`（四肢の筋力）… 同じく、振った条件が同一モデルだった（＝無効）
+    #     ・`flexion`（生理的屈曲）… Viewerに届かず、ユーザーの目視「膝が曲がっていない」で発覚
+    #   ＝「身体の設定が散らばる」問題を core と e_body_config で解決したのに、
+    #     **この呼び出し側だけが古い経路のまま取り残されていた**。
+    #   → ★入口を使う形に統一する。以後、身体の引数が増えてもここは直さなくてよい。
+    #   ⚠️条件を振る実験をしたら **同じシードの2条件でモデルの重みが違うことを必ず確認する**
+    #     （E/scripts/e_condition_check.py。チェックリスト項43）。
     if _AGE is not None:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        from e_body_config import body_scale_custom_from_env, shape_enabled
-        from e_body_config import head_elongation_from_env
-        if shape_enabled():
-            _custom = body_scale_custom_from_env(float(_AGE))
-            if _custom:
-                _age_kw["custom_measurements"] = _custom
-            # ★頭の楕円化（MIMoの頭は球で、真上から見た長さが人間より15%短い）。
-            #   おもちゃ環境（ToySupineEnv）は自前で楕円化するので渡さない。
-            _he = head_elongation_from_env()
-            if abs(_he - 1.0) > 1e-9 and _SUPINE:
-                _age_kw["head_elongation"] = _he
-        else:
-            # ⚠️旧版はこの print が `_he != 1.0 and _SUPINE` の else に付いていたため、
-            #   おもちゃ環境では補正が効いているのに「補正OFF」と**誤表示**していた。
+        from e_body_config import body_kwargs_from_env, shape_enabled
+        _bk = body_kwargs_from_env(float(_AGE))
+        if not shape_enabled():
+            # E_SHAPE=0＝素のmimoGrowth体型（アブレーション／過去実験の再現）。
+            # ⚠️旧版はこの print が別の条件の else に付いていたため、おもちゃ環境では
+            #   補正が効いているのに「補正OFF」と**誤表示**していた。
+            _bk.pop("custom_measurements", None)
+            _bk["head_elongation"] = 1.0
             print("[body] 体型補正OFF（E_SHAPE=0）＝素のmimoGrowth体型", flush=True)
+        if not _SUPINE:
+            # おもちゃ環境（ToySupineEnv）は自前で楕円化するので渡さない（二重適用を防ぐ）。
+            _bk["head_elongation"] = 1.0
+        _age_kw.update(_bk)
     _act_kw = {}
     if _MUSCLE:   # 【筋肉モデル】拮抗筋2本/関節・活性化ダイナミクス・引くだけ
         from mimoActuation.muscle import MuscleModel
@@ -1076,7 +1086,18 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
                            "reward": _REWARD, "ne_relative": _NE_REL, "env_id": _ENV_ID,
                            "effort": _EFFORT, "loadmodel": os.path.basename(_LOADMODEL) if _LOADMODEL else "",
                            "fusion": "MinimalFusion(interoception+proprio621+vestibular"
-                                     + ("+touch)" if _TOUCH else ")")}}
+                                     + ("+touch)" if _TOUCH else ")"),
+                           # ★【2026-07-25 追加】身体・探索の設定を記録する。
+                           #   これが無かったため、感度分析のモデルが同一だと分かっても
+                           #   「どの設定で保存されたか」を後から確認できなかった
+                           #   （e_condition_check.py の config diff が none になる）。
+                           #   ⚠️条件を振る実験では、ここに条件が反映されていることを確認する。
+                           "age": _AGE, "muscle": _MUSCLE, "antagonist": _ANTAGONIST,
+                           "noise": _E_NOISE, "beta": _E_BETA,
+                           "synergy": _E_SYNERGY, "syn_w": _E_SYN_W,
+                           "body_kwargs": {k: v for k, v in _age_kw.items()
+                                           if k != "custom_measurements"},
+                           "shape_custom": bool(_age_kw.get("custom_measurements"))}}
         if fusion.touch is not None:
             blob["fusion_touch"] = fusion.touch.state_dict()
         torch.save(blob, mp)

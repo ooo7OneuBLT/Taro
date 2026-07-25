@@ -59,7 +59,7 @@ class SupineMimoEnv(LeanMimoEnv):
 
     def __init__(self, settle_steps=100, jitter=0.01, head_elongation=1.0,
                  body_corrections=True, limb_scale=1.0, limb_fix=True,
-                 distal_mass=1.0, **kwargs):
+                 distal_mass=1.0, flexion=False, flexion_stiffness=None, **kwargs):
         self._settle_steps = settle_steps
         self._jitter = jitter
         # 【2026-07-25】頭の楕円化。MIMoの頭は球で、頭囲は正しいが真上から見た長さが
@@ -79,6 +79,12 @@ class SupineMimoEnv(LeanMimoEnv):
         # 手足の質量の倍率（感度分析用。サイズは変えない）。
         # 新生児の体節質量比は実測が存在しないので、振って頑健性を確かめる。
         self._distal_mass = float(distal_mass)
+        # 【生理的屈曲・2026-07-25】新生児は放っておいても股・膝・肘が曲がっている
+        # （屈曲拘縮）。関節のバネ（stiffness + 中立位置）で表現する。実体は
+        # taro_core の infant_body.apply_physiological_flexion（身体は太郎そのもの）。
+        # 既定OFF＝Viewerでの目視を通してから既定ONにする。
+        self._flexion = bool(flexion)
+        self._flexion_stiffness = flexion_stiffness
         super().__init__(**kwargs)
 
         # --- 仰向けにする（roll_over.py の supine と同じ式）---
@@ -101,7 +107,9 @@ class SupineMimoEnv(LeanMimoEnv):
             apply_runtime_corrections(self.model, self.data, kwargs["age"],
                                       limbs=self._limb_fix,
                                       limb_scale=self._limb_scale,
-                                      distal_mass=self._distal_mass)
+                                      distal_mass=self._distal_mass,
+                                      flexion=self._flexion,
+                                      flexion_stiffness=self._flexion_stiffness)
 
         # 【2026-07-25】床のころがり摩擦（感度分析用）。既定は触らない。
         # ★MIMoの床は friction=[1.0, 0.005, 0.0001]・condim=3 ＝「すべり摩擦しか
