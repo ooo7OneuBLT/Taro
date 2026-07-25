@@ -23,6 +23,7 @@ import torch
 from insula import Insula
 from sensory_encoders import ProprioceptionEncoder, VestibularEncoder, TouchEncoder
 from vision_encoder import VisionEncoder
+from somatosensory_cortex import SomatosensoryCortex
 import semicircular_canals
 import otolith_organs
 
@@ -39,14 +40,23 @@ class MinimalFusion:
     - vision_res>0 : 視覚を足す（vision_res＝眼球カメラの一辺の画素数＝低視力なら小さく）。
     """
 
-    def __init__(self, touch_dim=0, vision_res=0, proprio_dim=621):
+    def __init__(self, touch_dim=0, vision_res=0, proprio_dim=621,
+                 somatosensory_layout=None):
         # proprio_dim：MIMoの observation の次元数。既定621（SpringDamperModel、90関節）だが、
         # MuscleModel（拮抗筋2本/関節）や関節数が変わる身体では違うので、呼び出し側から実測値を
         # 渡せるようにしておく（渡さなければ従来と完全に同一）。
+        # somatosensory_layout：build_sensor_layout の戻り値の1つめ(部位別インデックス表)。
+        # 渡されると、触覚エンコーダは1枚の巨大変換層でなく SomatosensoryCortex(=視床VPL+S1
+        # 相当の部位別集約→統合)を使う。この場合 touch_dim は指定不要(layoutから決まる)。
         self.insula = Insula(state_dim=4, embedding_dim=64)
         self.proprio = ProprioceptionEncoder(input_dim=proprio_dim)
         self.vestibular = VestibularEncoder(input_dim=6)
-        self.touch = TouchEncoder(input_dim=touch_dim, hidden_dim=256, embedding_dim=64) if touch_dim else None
+        if somatosensory_layout is not None:
+            self.touch = SomatosensoryCortex(somatosensory_layout, embedding_dim=64)
+        elif touch_dim:
+            self.touch = TouchEncoder(input_dim=touch_dim, hidden_dim=256, embedding_dim=64)
+        else:
+            self.touch = None
         # 視覚は vision_res>0 のときだけ有効。VisionEncoder は画像サイズに依存するので、
         # 低視力（低解像度）なら小さい image_size を渡す＝CNNの計算も軽くなる。
         self.vision = VisionEncoder(embedding_dim=64, image_size=vision_res) if vision_res else None

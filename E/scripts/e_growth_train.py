@@ -147,6 +147,22 @@ _TOUCH = os.environ.get("E_TOUCH", "0") == "1"
 # → **触覚を予測対象にすること自体が誤り**の可能性。触覚は「予測するもの」ではなく
 #   「予測に使う手がかり」ではないか、を測るための切替。
 _TOUCH_MODE = os.environ.get("E_TOUCH_MODE", "target")
+# 【体性感覚系(触覚)の脳内経路化・2026-07-24】E_SOMATOSENSORY=1 で従来の TouchEncoder
+# (1枚の巨大変換層)を SomatosensoryCortex(部位別集約=視床VPL相当+統合=S1相当)に差し替える。
+# ★同時に「B案」(予測は生の触覚でなく触覚embedで行う)も自動有効化：ln_prop が触覚を
+# 予測対象に足す場合、target_fusion.touch(obs["touch"])のembed(64次元)を対象にする。
+# 根拠は taro_core/src/senses/somatosensory_cortex.py の冒頭docstring参照(視床VPL・S1・
+# 予測符号化階層の文献)。既定OFF＝従来と1バイト差なし。
+_SOMATOSENSORY = os.environ.get("E_SOMATOSENSORY", "0") == "1"
+# 【Viewer】E_VIEW=1 で学習せずリアルタイムViewer再生。E_LOADMODELでチェックポイントを指定する
+# 必要がある(白紙脳の再生は無意味)。E_REALTIME=1で等倍速、既定=最速。
+# E4_CONTINUOUS=1 で連続制御(1秒ホールドを解消、動きが滑らかになる)。既定OFFで従来の学習と
+# 同じ挙動(1秒に1回の判断→100tick同じ命令保持)。連続制御ONにすると訓練と挙動は違うが、
+# 動きは人間らしく滑らかに見える。目視の目的次第で使い分ける。
+_VIEW = os.environ.get("E_VIEW", "0") == "1"
+_REALTIME = os.environ.get("E_REALTIME", "0") == "1"
+_E4_CONTINUOUS = os.environ.get("E4_CONTINUOUS", "0") == "1"
+_CTRL_M = int(os.environ.get("E_CTRL_M", "100"))  # 連続制御の刻み(既定100=1秒ホールド、10=100Hzで再生成)
 # 省メモリ版（絵を落とす。物理は不変・視覚ONなら自動で素に戻る）。詳細は D/scripts/mimo_lean.py。
 # 1本 2.64GB→0.28GB＝同時実行 6本→約22本。既定ON（仰向けは常に省メモリ版の上に載る）。
 # E_LEAN=0 で従来の素のモデルに戻せる（アブレーション/描画品質が要るとき用）。
@@ -268,11 +284,23 @@ def ln_prop(obs):
     """
     ln = torch.nn.functional.layer_norm
     v = to_tensor(obs["observation"])
-    if _TOUCH and _TOUCH_MODE == "target":
+    # 【B案：触覚は生でなくembedを予測】E_SOMATOSENSORY=1 のときは、生の触覚を予測対象に
+    # 足すのでなく、後で target_fusion.touch(...) の64次元embedをブロックとして足す。
+    # ここでは生の触覚を prop に混ぜない（S1相当のembedはfor loop側で追加される）。
+    if _TOUCH and _TOUCH_MODE == "target" and not _SOMATOSENSORY:
         v = torch.cat([v, to_tensor(obs["touch"])])
     parts = [ln(v, v.shape).detach()]
     names = ["prop"]
     f = _TGT_FUSION
+    # 【B案：触覚embedを予測対象に足す】E_SOMATOSENSORY=1 かつ E_TOUCH_MODE=target のとき、
+    # target_fusion(凍結)の SomatosensoryCortex を通して 64次元embedを作り、独立ブロックとして
+    # 予測対象に加える。生の触覚を予測対象にしないため、予測ヘッドの出力次元と誤差計算量が
+    # 劇的に減る(生1968次元→embed 64次元)。RND式で凍結側を使うので崩壊対策あり。
+    if _SOMATOSENSORY and _TOUCH and _TOUCH_MODE == "target" and f is not None:
+        if getattr(f, "touch", None) is not None and "touch" in obs:
+            with torch.no_grad():
+                e = f.touch(to_tensor(obs["touch"]))
+            parts.append(ln(e, e.shape)); names.append("touch_embed")
     if _E1_TARGET and f is not None:
         with torch.no_grad():                   # 正解側は勾配を流さない（RND式）
             # 条件C＝固有感覚 + 前庭 + 触覚 + 視覚。
@@ -353,8 +381,21 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
     # 固有感覚(observation)の次元は身体・アクチュエータで変わる（SpringDamper=621, MuscleModel=801）。
     # env.observation_space から実測してfusionに渡す（reset前に読めるので乱数列も汚さない）。
     _prop_dim = int(env.observation_space["observation"].shape[0])
-    fusion = MinimalFusion(touch_dim, vision_res=_vres, proprio_dim=_prop_dim)
-    target_fusion = MinimalFusion(touch_dim, vision_res=_vres, proprio_dim=_prop_dim).freeze()
+    # 【体性感覚系の脳内経路化】E_SOMATOSENSORY=1 のとき、触覚センサの部位別配置(視床VPL相当)を
+    # 環境から取り出してMinimalFusionに渡す。SomatosensoryCortexが1枚の巨大変換層を置き換える。
+    _soma_layout = None
+    if _SOMATOSENSORY and _TOUCH:
+        from somatosensory_cortex import build_sensor_layout
+        _soma_layout, _soma_total = build_sensor_layout(env.unwrapped.model, env.unwrapped.touch)
+        assert _soma_total == touch_dim, f"soma_layout total {_soma_total} != touch_dim {touch_dim}"
+        print(f"[体性感覚系] SomatosensoryCortex を有効化：部位数={len(_soma_layout)}, "
+              f"触覚総次元={touch_dim}", flush=True)
+    fusion = MinimalFusion(touch_dim, vision_res=_vres, proprio_dim=_prop_dim,
+                            somatosensory_layout=_soma_layout)
+    target_fusion = MinimalFusion(touch_dim, vision_res=_vres, proprio_dim=_prop_dim,
+                                   somatosensory_layout=_soma_layout).freeze()
+    if _SOMATOSENSORY and _TOUCH and fusion.touch is not None:
+        print(fusion.touch.summary(), flush=True)
     global _TGT_FUSION
     _TGT_FUSION = target_fusion      # ln_prop が視覚を予測対象に足すのに使う（E_E1_TARGET=1）
     n_env_act = env.action_space.shape[0]
@@ -435,6 +476,13 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
     state = {"obs": obs, "hidden": brain.init_motor_hidden(),
              "prev_a": torch.zeros(n_act)}
     t0 = time.time()
+
+    # 【Viewer】E_VIEW=1のときは学習せず、リアルタイム再生に入る（E_LOADMODEL済み前提）。
+    # 連続制御（E4_CONTINUOUS=1）で1秒ホールドを解消できる（動きが滑らかに）。既定OFFなら
+    # 学習と同じ1秒ホールドで再生（学習挙動をそのまま見る）。d_c5_motor_quality.pyのrun_viewを
+    # e_growth_train用に適応した最小版：探索なし・報酬計算なし・純粋な再生のみ。
+    # ★ヘルパー zc/act_mean/step_k/reset_state はまだ下で定義されるので、そこまで進んでから
+    # 分岐する（現状 return はコード後半のヘルパー定義後に置く）。
     eff_accum, act_accum = [], []  # 【taro-C5】努力コストと|行動|の記録（フリーズ監視用）
     # 【taro-C5】努力コストの重み：筋力(最大トルク)が大きい筋ほど動かすとコストが高い（代謝の
     # 標準：活性化²×筋サイズ）。activation は正規化された行動 a∈[-1,1] を使う（cost()はトルク単位を
@@ -477,6 +525,101 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
             ((nat_head(torch.cat([z, torch.tanh(raw)], dim=-1)) - target) ** 2).mean().backward()
             opt.step()
         return torch.tanh(raw).detach()
+
+    # 【Viewer】E_VIEW=1のときは学習せず、共通の motor_viewer.run_viewer に委譲する
+    # （速度オーバーレイ・キー操作・実時間追従などが揃っている、共通測定器）。
+    # 学習済みチェックポイント(E_LOADMODEL)を見る目的なので、探索なしの決定的な行動(act_mean)。
+    if _VIEW:
+        sys.path.insert(0, os.path.join(_CORE, "tools"))
+        from motor_viewer import run_viewer
+
+        def _policy_fn(obs, prev_a, hidden, *, recompute, frac):
+            # 連続制御の frac は今の学習済みモデルには使わない(policyはboundaryでのみ再計算、
+            # 間は同じctrl保持)。将来 policyが frac を扱う場合はここで使う。
+            if not recompute:
+                return prev_a, hidden   # 再計算しない：呼び出し側で prev_a=action がctrlに使われる
+            sv = fusion.encode(obs); cf = target_fusion.encode(obs).detach()
+            z, _kl, _rc, hn = zc(sv, prev_a, cf, hidden)
+            z = z.detach()
+            a = torch.clamp(act_mean(z), -1.0, 1.0).detach()
+            return a, hn.detach()
+
+        banner = f"E_LOADMODEL={os.path.basename(_LOADMODEL) if _LOADMODEL else '(白紙)'}"
+        run_viewer(env, brain, _policy_fn, rescale_action,
+                   K=K, n_act=n_act, banner=banner)
+        return  # 再生モードは学習・保存・録画に進まない
+
+    # 【姿勢の測定・2026-07-25】E_MEASURE_POSTURE=1 で、学習せず**学習済みモデルの姿勢**を測る。
+    # 【なぜ必要か】制御頻度プローブ(e_ctrl_freq_probe.py)で「学習なしのノイズだけだと
+    #   K100で36%・K10で65%の時間うつぶせになる」と判明した（Viewerでユーザーが
+    #   「すぐうつぶせになる」と目視→測定器に体幹回転を追加して確認）。
+    #   実際の新生児は寝返りできない（4-6ヶ月から）ので明確な逸脱。
+    #   ★では**学習済みモデル(+58.8)はどうなのか**＝「仰向けで学習した」が成立しているのか、
+    #   という +58.8 の解釈そのものに関わる問いなので、同じ物差しで測る。
+    # 探索なし・決定的な行動（act_mean）で回す＝Viewerと同じ条件。
+    if os.environ.get("E_MEASURE_POSTURE", "0") == "1":
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import mujoco   # このファイルの他所では使っていないのでここでimportする
+        from e_ctrl_freq_probe import _trunk_rotation_deg, _head_tilt_deg, _hand_dist
+
+        n_meas = int(os.environ.get("E_MEASURE_STEPS", "6000"))
+        _m, _d = env.unwrapped.model, env.unwrapped.data
+        _dt = _m.opt.timestep * env.unwrapped.frame_skip
+        _dofs = [_m.jnt_dofadr[i] for i in range(_m.njnt)
+                 if _m.jnt_type[i] == mujoco.mjtJoint.mjJNT_HINGE]
+        _act_model = getattr(env.unwrapped, "actuation_model", None)
+
+        obs, _ = env.reset(seed=seed)
+        R0 = _d.body("upper_body").xmat.reshape(3, 3).copy()
+        hidden = brain.init_motor_hidden()
+        prev_a = torch.zeros(n_act)
+        rots, qvels, jerks, tilts, hands, acts, coact, f_tot, f_net = [], [], [], [], [], [], [], [], []
+        prev_qacc = None
+
+        for _tick in range(max(1, n_meas // K)):
+            # Viewer(_VIEW)の _policy_fn と同じ処理＝探索なしの決定的な行動。
+            # （_policy_fn は _VIEW ブロック内のローカル定義なのでここからは見えない）
+            _sv = fusion.encode(obs); _cf = target_fusion.encode(obs).detach()
+            _z, _kl, _rc, hidden = zc(_sv, prev_a, _cf, hidden)
+            a = torch.clamp(act_mean(_z.detach()), -1.0, 1.0).detach()
+            hidden = hidden.detach()
+            prev_a = a
+            a_env = brain.to_env_action(a) if hasattr(brain, "to_env_action") else a
+            ctrl = rescale_action(a_env, env.action_space)
+            acts.append(float(np.abs(np.asarray(a, dtype=np.float64)).mean()))
+            for _k in range(K):
+                obs, _r, _te, _tr, _info = env.step(ctrl)
+                qacc = _d.qacc[_dofs].copy()
+                if prev_qacc is not None:
+                    jerks.append(float(np.abs((qacc - prev_qacc) / _dt).mean()))
+                prev_qacc = qacc
+                qvels.append(float(np.abs(_d.qvel[_dofs]).mean()))
+                rots.append(_trunk_rotation_deg(_d, R0))
+                tilts.append(_head_tilt_deg(_m, _d))
+                hands.append(_hand_dist(_m, _d))
+                if _act_model is not None and hasattr(_act_model, "muscle_activations"):
+                    ma = np.asarray(_act_model.muscle_activations, dtype=np.float64)
+                    mf = np.abs(np.asarray(_act_model.muscle_forces, dtype=np.float64))
+                    nj = len(ma) // 2
+                    coact.append(float(np.minimum(ma[:nj], ma[nj:]).mean()))
+                    f_tot.append(float(mf.mean()))
+                    f_net.append(float(np.abs(mf[:nj] - mf[nj:]).mean()))
+                if _te or _tr:
+                    obs, _ = env.reset(); prev_qacc = None
+                    break
+
+        rots_a = np.asarray(rots)
+        eff = (np.mean(f_net) / np.mean(f_tot)) if f_tot and np.mean(f_tot) > 1e-12 else float("nan")
+        print(f"\n=== 姿勢の測定（学習済みモデル） K={K} step={len(qvels)} ===")
+        print(f"  model={os.path.basename(_LOADMODEL) if _LOADMODEL else '(白紙)'}")
+        print(f"  |qvel|={np.mean(qvels):.4f}  jerk={np.mean(jerks) if jerks else float('nan'):.1f}  "
+              f"|act|={np.mean(acts) if acts else float('nan'):.3f}")
+        print(f"  同時活性化={np.mean(coact) if coact else float('nan'):.4f}  力の効率={eff:.3f}")
+        print(f"  頭の傾き={np.nanmean(tilts):.1f}度  手-体幹={np.nanmean(hands):.3f}m")
+        print(f"  ★体幹の回転={np.nanmean(rots_a):.1f}度(最大{np.nanmax(rots_a):.1f})  "
+              f"仰向けでない時間={float(np.mean(rots_a > 90.0))*100:.1f}%")
+        print("  （比較：学習なしノイズだけの実測＝K100でうつ伏せ36.2%、K10で65.0%）")
+        return  # 測定モードは学習・保存・録画に進まない
 
     # 【測定器の分離・2026-07-23】evaluate/agency_probe/inverse_probe/inverse_exec_probe/
     # closed_loop_probe は e_probes.py へ切り出した（太郎の外から測る道具＝学習ループ本体から独立）。
