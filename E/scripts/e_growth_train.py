@@ -740,6 +740,36 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
         print(f"  ★体幹の回転={np.nanmean(rots_a):.1f}度(最大{np.nanmax(rots_a):.1f})  "
               f"仰向けでない時間={float(np.mean(rots_a > 90.0))*100:.1f}%")
         print("  （比較：学習なしノイズだけの実測＝K100でうつ伏せ36.2%、K10で65.0%）")
+
+        # ★「一度うつ伏せになって戻れない」のか「行ったり来たり」なのかを数える。
+        # 【なぜ要るか、2026-07-25・ユーザー指摘】
+        #   「赤ちゃんも実際ひっくり返ることはあるんじゃない？一回うつぶせになると戻れないから
+        #     親が戻してるんじゃないかな」＝**うつ伏せ%が高い＝悪い、という前提そのものへの疑い**。
+        #   人間の発達では 寝返り（仰向け→うつ伏せ）が生後4〜6ヶ月、うつ伏せ→仰向けに戻る
+        #   「寝返り返り」はさらに後。＝新生児は**うつ伏せになれないし、なったら戻れない**。
+        #   だから区別が要る：
+        #     ①一度きりで戻らない → 太郎の動きは人間に近く、**親が戻す仕組みが無い**のが逸脱（環境側）
+        #     ②行ったり来たり     → 新生児にできない**寝返り返り**をしている（もっと重い逸脱）
+        _prone = rots_a > 90.0
+        _trans = int(np.sum(_prone[1:] != _prone[:-1]))       # 仰向け⇄うつ伏せの切り替わり回数
+        _to_prone = int(np.sum(_prone[1:] & ~_prone[:-1]))    # 仰向け→うつ伏せ
+        _to_supine = int(np.sum(~_prone[1:] & _prone[:-1]))   # うつ伏せ→仰向け（＝寝返り返り）
+        _first = int(np.argmax(_prone)) if _prone.any() else -1
+        print(f"  ★姿勢の切り替わり: 計{_trans}回 (仰向け->うつ伏せ {_to_prone}回 / "
+              f"うつ伏せ->仰向け {_to_supine}回)  初めてうつ伏せになったtick={_first}")
+        if _to_supine == 0 and _to_prone <= 1:
+            print("     -> [一度きり] 人間の新生児と同じ「戻れない」挙動。"
+                  "戻す親が居ないことが環境側の逸脱。")
+        elif _to_supine > 0:
+            print(f"     -> [行ったり来たり] うつ伏せから自力で{_to_supine}回戻っている＝"
+                  "新生児にできない「寝返り返り」。運動側の逸脱。")
+        if os.environ.get("E_MEASURE_TRACE", "0") == "1":
+            _tp = os.path.join(LOG_DIR, f"posture_trace_seed{seed}_{stamp}.csv")
+            with open(_tp, "w", newline="", encoding="utf-8") as _fp:
+                _w = csv.writer(_fp); _w.writerow(["tick", "trunk_rot_deg", "is_prone"])
+                for _i, _v in enumerate(rots_a):
+                    _w.writerow([_i, f"{_v:.2f}", int(_v > 90.0)])
+            print(f"  姿勢の時系列: {_tp}")
         print("  ── 部位別の |関節角速度|（どこが動いているか）──")
         _rank = sorted(((np.mean(v), g, len(_grp_idx[g])) for g, v in _grp_qvel.items() if v),
                        reverse=True)
