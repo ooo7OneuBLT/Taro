@@ -23,6 +23,16 @@ run_c_metrics_seed.py との違いは2点だけ（共有クラスは触らない
 出力は logs/E/ に ac_metrics_seed{seed}_{日時}.csv。使い方: python e_growth_train.py <seed> [n_train]
 """
 import os, sys, csv, time, datetime, warnings
+
+# ★Windowsのcp932で表示できない文字が1つでもあると print が例外を投げ、**学習が途中で落ちる**。
+# 2026-07-25 だけで3回踏んだ（絵文字／上付き2／棒グラフの █）。表示できない文字は「?」に
+# 置き換えて**落とさない**。⚠️これは表示だけの保険で、ログの内容を変える意図はない。
+# → 検証の落とし穴チェックリスト 項35。
+try:
+    sys.stdout.reconfigure(errors="replace")
+    sys.stderr.reconfigure(errors="replace")
+except Exception:
+    pass
 warnings.filterwarnings("ignore")
 import numpy as np, torch, torch.nn as nn
 torch.set_num_threads(1)
@@ -772,7 +782,7 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
         # 下がる＝行動を変えなくなった。⚠️下がりすぎ（≒0）は「固まった」＝失敗のサイン。
         # ⚠️タグはASCIIのみ（Windowsのcp932で出力できない文字を混ぜると print が例外を投げ、
         #   学習が途中で落ちる。上付き2・絵文字で実際に2回踏んだ）。
-        if _CAPS and caps_accum:
+        if caps_accum:
             act_tag += f" da2={np.mean(caps_accum[-200:]):.4f}(lam={_CAPS})"
         print(f"[AC seed{seed} rew={_REWARD} ne={'rel' if _NE_REL else 'abs'} touch={_TOUCH_MODE if _TOUCH else 'off'}] life={life_min:.0f}min | classify={cl:.1f}% margin={mg:+.1f}% "
               f"corr={co:.3f} persist={pr:.1f}% agency={ag:.1f}%(mag {magr:.0f}%) | "
@@ -896,10 +906,14 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
         # 「さっきと違うことを急にするのは損」＝行動の急変にペナルティ。
         # ★state["prev_a"] は902行で更新されるので、ここでは**1つ前の行動**を指す。
         # ⚠️effort_cost（大きさ）とは別物で、こちらは変化量に効く＝ゆっくり大きく動くのは咎めない。
+        # ★λ=0（CAPS OFF）でも**必ず記録する**。理由：OFF側の値が無いと
+        #   「λが弱くて効かなかった」のか「元からこの値なのか」を切り分けられない。
+        #   実際に最初その設計にしてしまい、λ=0.01 の da2 が増えていく現象を
+        #   評価できなかった（2026-07-25）。＝対照条件の測定値を捨てない。
+        smooth = smoothness_cost(a.detach(), state["prev_a"].detach())
+        caps_accum.append(smooth)
         if _CAPS:
-            smooth = smoothness_cost(a.detach(), state["prev_a"].detach())
             rew = rew - _CAPS * smooth
-            caps_accum.append(smooth)
         act_accum.append(float(a.detach().abs().mean().item()))
         # 方策の学習（ドーパミン）は努力コスト込みの報酬rewを見る＝「疲れは損」を学ぶ。
         pl = learner.learn_action([lp], dop.compute_rpe(rew))
