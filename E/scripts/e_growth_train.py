@@ -1022,6 +1022,17 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
 if __name__ == "__main__":
     seed = int(sys.argv[1])
     n_train = int(sys.argv[2]) if len(sys.argv) > 2 else 3600
-    K = int(os.environ.get("E_K", "100"))
+    # 【★2026-07-25 既定を 100 → 10 に変更】上位（脳）が運動指令を出す間隔。
+    # K=100 は 1Hz＝**人間の最遅神経発火（α運動ニューロン7Hz）の1/7以下**で生物学的に
+    # 成立しない。K=10 は 10Hz で皮質μ律動に対応する（設計メモ §3）。
+    # ⚠️「同じ学習回数なら K=100 のほうが margin は高い」（51.5 vs 45.4）。
+    #   それでも K=10 を既定にするのは**人間に近いから**であって性能のためではない。
+    #   経験量（sim時間）を揃えると K=10 が圧勝する（45.4 vs 26.6）。
+    # ⚠️既定を変える理由：同じ日に「報酬の既定が predict のままで、それに気づかず
+    #   学習していた」という失敗をしている（追記2）。**正しい設定を既定にする**。
+    K = int(os.environ.get("E_K", "10"))
+    if K >= 100:
+        print(f"[!] E_K={K}（{100/K:.0f}Hz）＝人間の最遅神経発火7Hzより遅い。"
+              f"比較・再現目的でなければ K=10 を使うこと。", flush=True)
     ckpt = int(os.environ.get("E_CKPT", "600"))  # 【taro-C5】評価/ログ間隔（短い実験用に小さくできる）
     run(seed, n_train=n_train, K=K, ckpt=ckpt)
