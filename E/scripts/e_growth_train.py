@@ -42,7 +42,7 @@ from dopamine import Dopamine
 from locus_coeruleus import LocusCoeruleus
 from developmental_clock import DevelopmentalClock
 from cerebellum_motor import MotorCerebellum
-from learning_progress import LearningProgress
+from learning_progress import LearningProgress, smoothness_cost
 from homeostatic_scaling import HomeostaticScaling
 from test_phase8_motor_learning import CombinedParams, rescale_action, to_tensor
 from sensory_encoders import ProprioceptionEncoder, VestibularEncoder, TouchEncoder
@@ -77,6 +77,11 @@ _CEREB = os.environ.get("E_CEREBELLUM", "1") == "1"  # 0で無効化可
 # 生理の正確な代謝式ではない）＝感度確認の対象。フリーズ（motor collapse, 逸脱リストB1）と背中
 # 合わせなので、|行動|の低下と自己モデル(margin/agency)の生存を必ず併せて確認する。
 _EFFORT = float(os.environ.get("E_EFFORT", "0"))
+# 【階層化・変更②】action smoothing（CAPS）＝行動の急変にペナルティ。既定OFF(0)。
+# 制御頻度を上げる（E_K=10）と探索ノイズが高周波化して力積が打ち消し合うのを防ぐ。
+# 実装は core（brain/learning_progress.py::smoothness_cost）。ここは実験の設定だけ。
+# ⚠️λ は [Tier3・ARBITRARY]＝必ず複数値で振る。強すぎると動きが縮んで固まる。
+_CAPS = float(os.environ.get("E_CAPS", "0"))
 # 【taro-C5】学習済みモデルから継続学習する（脳をリセットしない方針）。E_LOADMODEL=<pt path>。
 # 形が合う層だけロード（転移学習）。既定なし＝従来どおりゼロから学習。
 _LOADMODEL = os.environ.get("E_LOADMODEL", "")
@@ -541,6 +546,9 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
     # ★ヘルパー zc/act_mean/step_k/reset_state はまだ下で定義されるので、そこまで進んでから
     # 分岐する（現状 return はコード後半のヘルパー定義後に置く）。
     eff_accum, act_accum = [], []  # 【taro-C5】努力コストと|行動|の記録（フリーズ監視用）
+    # 【階層化・変更②】‖a_t − a_{t-1}‖² の記録＝**CAPSが効いているかの直接証拠**
+    # （設計メモ §7「②の効果」）。値が下がる＝行動を変えなくなった＝「何もしない」を選べている。
+    caps_accum = []
     # 【taro-C5】努力コストの重み：筋力(最大トルク)が大きい筋ほど動かすとコストが高い（代謝の
     # 標準：活性化²×筋サイズ）。activation は正規化された行動 a∈[-1,1] を使う（cost()はトルク単位を
     # 二乗し実質トルク³で桁が狂うため不採用）。重みは合計1に正規化＝effort∈[0,1]で扱いやすい。
@@ -760,6 +768,12 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
             act_tag = f" |act|={np.mean(act_accum[-200:]):.3f}"
             if _EFFORT and eff_accum:
                 act_tag += f" effort={np.mean(eff_accum[-200:]):.3f}(λ={_EFFORT})"
+        # 【階層化・変更②】CAPSが効いているかの直接証拠＝‖a_t−a_{t-1}‖² の推移。
+        # 下がる＝行動を変えなくなった。⚠️下がりすぎ（≒0）は「固まった」＝失敗のサイン。
+        # ⚠️タグはASCIIのみ（Windowsのcp932で出力できない文字を混ぜると print が例外を投げ、
+        #   学習が途中で落ちる。上付き2・絵文字で実際に2回踏んだ）。
+        if _CAPS and caps_accum:
+            act_tag += f" da2={np.mean(caps_accum[-200:]):.4f}(lam={_CAPS})"
         print(f"[AC seed{seed} rew={_REWARD} ne={'rel' if _NE_REL else 'abs'} touch={_TOUCH_MODE if _TOUCH else 'off'}] life={life_min:.0f}min | classify={cl:.1f}% margin={mg:+.1f}% "
               f"corr={co:.3f} persist={pr:.1f}% agency={ag:.1f}%(mag {magr:.0f}%) | "
               f"noise={noise:.3f}(mat={ne.maturation:.2f}){cereb_tag}{act_tag} real={real_min:.0f}min", flush=True)
@@ -878,6 +892,14 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
             effort = float((a.detach() ** 2 * eff_w).sum())
             rew = rew_task - _EFFORT * effort
             eff_accum.append(effort)
+        # 【階層化・変更②】action smoothing（CAPS, Mysore et al. 2021）：
+        # 「さっきと違うことを急にするのは損」＝行動の急変にペナルティ。
+        # ★state["prev_a"] は902行で更新されるので、ここでは**1つ前の行動**を指す。
+        # ⚠️effort_cost（大きさ）とは別物で、こちらは変化量に効く＝ゆっくり大きく動くのは咎めない。
+        if _CAPS:
+            smooth = smoothness_cost(a.detach(), state["prev_a"].detach())
+            rew = rew - _CAPS * smooth
+            caps_accum.append(smooth)
         act_accum.append(float(a.detach().abs().mean().item()))
         # 方策の学習（ドーパミン）は努力コスト込みの報酬rewを見る＝「疲れは損」を学ぶ。
         pl = learner.learn_action([lp], dop.compute_rpe(rew))
