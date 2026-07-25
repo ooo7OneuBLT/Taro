@@ -42,6 +42,7 @@ from dopamine import Dopamine
 from locus_coeruleus import LocusCoeruleus
 from developmental_clock import DevelopmentalClock
 from cerebellum_motor import MotorCerebellum
+from learning_progress import LearningProgress
 from homeostatic_scaling import HomeostaticScaling
 from test_phase8_motor_learning import CombinedParams, rescale_action, to_tensor
 from sensory_encoders import ProprioceptionEncoder, VestibularEncoder, TouchEncoder
@@ -734,22 +735,33 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
               f"noise={noise:.3f}(mat={ne.maturation:.2f}){cereb_tag}{act_tag} real={real_min:.0f}min", flush=True)
 
     # 経験バッファ（睡眠中リプレイ用）。各ステップの予測に必要な材料を貯める。
-    buf = {k: [] for k in ("sv", "prev_a", "a", "cf", "clp", "nlp", "h")}
+    # 【★2026-07-25】睡眠リプレイのバッファを太郎の海馬（core: brain/hippocampus.py の
+    # MotorHippocampus）に一元化。**旧実装は独自のdictで、core にある FIFO容量上限(3600)も
+    # clear() も無く、学習全期間ぶん無制限に増え続けていた**＝「直近の覚醒経験を再生する」
+    # という睡眠リプレイの意味から外れた劣化コピーだった（構造監査で発覚）。
+    # 海馬はバッファに徹し、定着（重み更新）のロジックは下の consolidate が持つ、という
+    # 分担は core の設計どおり。
+    hippo = brain.hippocampus
     # Goal Babbling 用の目標バッファ＝Self-Priorの最小版（過去に経験した固有感覚の分布）。
     goal_buf = []
-    pe_fast, pe_slow = 1.0, 1.0  # 予測誤差の速い/遅い走行平均（"いつもより驚いたか"の自己正規化用）
+    # 予測誤差の速い/遅い走行平均＝学習進度の材料（"いつもより驚いたか"の自己正規化にも使う）。
+    # 【2026-07-25】太郎の中（core）へ一元化。時定数(0.9/0.99)も core が持つ。
+    _lp = LearningProgress()
+    pe_fast, pe_slow = _lp.pe_fast, _lp.pe_slow
     hv = {"hit": 0, "tot": 0}    # ★E1：手が視野内だったtickの数（checkpointごとにリセット）
     mj = env.unwrapped           # モデル/データへの参照（hand_in_view_rate 用）
     reach_goal, reach_prev_dist = None, 0.0  # 閉ループreaching訓練：保持中の目標と直前の距離
 
     def consolidate(n_batches=200, bs=128):
         """睡眠中の記憶定着：貯めた経験をバッチで再生し、自己モデル(予測経路)を復習で固める。"""
-        N = len(buf["sv"])
+        _eps = hippo.replay()
+        N = len(_eps)
         if N < bs:
             return
-        SV = torch.stack(buf["sv"]); PA = torch.stack(buf["prev_a"]); AA = torch.stack(buf["a"])
-        CF = torch.stack(buf["cf"]); CLP = torch.stack(buf["clp"]); NLP = torch.stack(buf["nlp"])
-        H = torch.cat(buf["h"], dim=1)  # (layers, N, hidden)
+        SV = torch.stack([e[0] for e in _eps]); PA = torch.stack([e[1] for e in _eps])
+        AA = torch.stack([e[2] for e in _eps]); CF = torch.stack([e[3] for e in _eps])
+        CLP = torch.stack([e[4] for e in _eps]); NLP = torch.stack([e[5] for e in _eps])
+        H = torch.cat([e[6] for e in _eps], dim=1)  # (layers, N, hidden)
         for _ in range(n_batches):
             idx = torch.randint(0, N, (bs,))
             hb = H[:, idx].contiguous()
@@ -816,19 +828,19 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
             else:
                 reach_prev_dist = nd
         if _REPLAY:
-            buf["sv"].append(sv.detach()); buf["prev_a"].append(state["prev_a"].detach())
-            buf["a"].append(a.detach()); buf["cf"].append(cf.detach())
-            buf["clp"].append(clp.detach()); buf["nlp"].append(nlp.detach())
-            buf["h"].append(state["hidden"].detach())
+            hippo.record(sv.detach(), state["prev_a"].detach(), a.detach(), cf.detach(),
+                         clp.detach(), nlp.detach(), state["hidden"].detach())
         if _E1:      # ★E1：手が視野に入っているかを毎tick数える（記録のみ。報酬には効かない）
             hv["hit"] += hand_in_view_rate(mj.model, mj.data)
             hv["tot"] += 1
         pe = block_pe(pred, nlp)   # ★次元数の影響を除く（段階1）
-        pe_fast = 0.9 * pe_fast + 0.1 * pe.item()   # 次ステップの切替判断に使う（因果的に過去の驚き）
-        pe_slow = 0.99 * pe_slow + 0.01 * pe.item()
+        # 【2026-07-25】学習進度を太郎の中（core: brain/learning_progress.py）へ一元化。
+        # 旧実装は同じ式・同じ時定数(0.9/0.99)を3ファイルにコピペ＝数値は完全に同一。
+        _progress = _lp.update(pe.item())
+        pe_fast, pe_slow = _lp.pe_fast, _lp.pe_slow   # 既存の参照箇所のために同期
         # 内発的動機。progress＝学習進度（誤差が減っていれば正）／predict＝従来の予測しやすさ。
         # rew_task＝タスクの出来そのもの（努力コストを引く前）。NE（探索）にはこちらを見せる。
-        rew_task = (pe_slow - pe_fast) if _REWARD == "progress" else brain.sensorimotor_reward(pe.item())
+        rew_task = _progress if _REWARD == "progress" else brain.sensorimotor_reward(pe.item())
         # 【taro-C5】努力コスト：活性化²の筋力重み付き平均（∈[0,1]）を報酬から引く。＝大きな力ほど
         # 損→自分で加減する（Selinger 2015等の代謝最小化。⚠️二乗・λ・重みは近似＝感度確認対象）。既定OFF。
         rew = rew_task

@@ -116,17 +116,23 @@ def main():
     print(f"proprio={prop_dim} touch={touch_dim} sensory_dim={sdim} na={env.na}", flush=True)
 
     ckpt = 600  # 覚醒600ステップごとに「睡眠」＝リプレイで定着（Cのreplay_on設定に一致）
-    buf = {k: [] for k in ("sv", "prev_a", "a", "cf", "clp", "nlp", "h")}
+    # 【★2026-07-25】睡眠リプレイのバッファを太郎の海馬（core: brain/hippocampus.py の
+    # MotorHippocampus）に一元化。**旧実装は独自のdictで、core にある FIFO容量上限(3600)も
+    # clear() も無く、学習全期間ぶん無制限に増え続けていた**＝「直近の覚醒経験を再生する」
+    # という睡眠リプレイの意味から外れた劣化コピーだった（構造監査で発覚）。
+    hippo = brain.hippocampus
 
     def consolidate(n_batches=200, bs=128):
         """睡眠中の記憶定着：貯めた経験をバッチ再生し自己モデルを固める（Cのconsolidateと同一）。
         ＝margin頭打ち(+11)を破って+48へ到達させる本命機構（taro-C2 睡眠リプレイ）。"""
-        N = len(buf["sv"])
+        _eps = hippo.replay()
+        N = len(_eps)
         if N < bs:
             return
-        SV = torch.stack(buf["sv"]); PA = torch.stack(buf["prev_a"]); AA = torch.stack(buf["a"])
-        CF = torch.stack(buf["cf"]); CLP = torch.stack(buf["clp"]); NLP = torch.stack(buf["nlp"])
-        H = torch.cat(buf["h"], dim=1)  # (layers, N, hidden)
+        SV = torch.stack([e[0] for e in _eps]); PA = torch.stack([e[1] for e in _eps])
+        AA = torch.stack([e[2] for e in _eps]); CF = torch.stack([e[3] for e in _eps])
+        CLP = torch.stack([e[4] for e in _eps]); NLP = torch.stack([e[5] for e in _eps])
+        H = torch.cat([e[6] for e in _eps], dim=1)  # (layers, N, hidden)
         for _ in range(n_batches):
             idx = torch.randint(0, N, (bs,))
             hb = H[:, idx].contiguous()
@@ -152,10 +158,8 @@ def main():
         hl = homeo.homeostatic_loss(sv); homeo.observe(sv)
         learner.update(pe + hl + kl + rc, pl)
         ne.observe_reward(rew); ne.release_ne()
-        buf["sv"].append(sv.detach()); buf["prev_a"].append(prev_a.detach())
-        buf["a"].append(a.detach()); buf["cf"].append(cf.detach())
-        buf["clp"].append(clp.detach()); buf["nlp"].append(nlp.detach())
-        buf["h"].append(hidden.detach())
+        hippo.record(sv.detach(), prev_a.detach(), a.detach(), cf.detach(),
+                     clp.detach(), nlp.detach(), hidden.detach())
         hidden = hn.detach(); prev_a = a.detach()
         if (i + 1) % ckpt == 0:
             consolidate()  # 睡眠：この間の経験を再生して定着

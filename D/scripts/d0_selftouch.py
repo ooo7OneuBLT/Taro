@@ -58,6 +58,7 @@ from dopamine import Dopamine
 from locus_coeruleus import LocusCoeruleus
 from homeostatic_scaling import HomeostaticScaling
 from cerebellum_motor import MotorCerebellum
+from learning_progress import LearningProgress
 from test_phase8_motor_learning import CombinedParams, rescale_action, to_tensor
 from sensory_encoders import ProprioceptionEncoder, TouchEncoder
 from insula import Insula
@@ -220,8 +221,10 @@ def run(seed=0, n_train=3600, ckpt=600, n_eval=60):
         return (classify, margin, corr, persist, float(np.mean(tsum)),
                 hand_hits / max(N, 1) * 100, float(np.mean(sat)) * 100)
 
-    # 予測誤差の速い/遅い走行平均＝学習進度の材料（Cのrunnerと同じ係数）
-    pe_fast, pe_slow = 1.0, 1.0
+    # 予測誤差の速い/遅い走行平均＝学習進度の材料。
+    # 【2026-07-25】太郎の中（core: brain/learning_progress.py）へ一元化。時定数もcoreが持つ。
+    _lp = LearningProgress()
+    pe_fast, pe_slow = _lp.pe_fast, _lp.pe_slow
     # 診断用：チェックポイント間の内発報酬・小脳の自動化重みを貯める
     # （飽和が28%→70%へ上がる原因が「動機の枯渇(報酬→0で無方向に漂流)」か
     #  「小脳が飽和行動を自動化して正のフィードバック」かを切り分けるため）
@@ -229,27 +232,36 @@ def run(seed=0, n_train=3600, ckpt=600, n_eval=60):
     n_reset = [0]   # チェックポイント間でエピソードが何回切れたか（細切れ人生の監視）
 
     def intrinsic_reward(pe_value):
-        """内発的動機。progress＝学習進度（誤差が減っていれば正）／predict＝旧来の予測しやすさ。"""
+        """内発的動機。progress＝学習進度（誤差が減っていれば正）／predict＝旧来の予測しやすさ。
+
+        【2026-07-25】学習進度を太郎の中（core: brain/learning_progress.py）へ一元化。
+        旧実装は同じ式・同じ時定数(0.9/0.99)を3ファイルにコピペしていた＝数値は完全に同一。
+        """
         nonlocal pe_fast, pe_slow
-        pe_fast = 0.9 * pe_fast + 0.1 * pe_value      # 直近の誤差
-        pe_slow = 0.99 * pe_slow + 0.01 * pe_value    # 長期の誤差
+        progress = _lp.update(pe_value)
+        pe_fast, pe_slow = _lp.pe_fast, _lp.pe_slow   # 既存の参照箇所のために同期
         if _REWARD == "predict":
             return brain.sensorimotor_reward(pe_value)      # 1/(1+誤差)＝暗い部屋へ行く旧動機
         # 学習進度＝「長期の誤差」−「直近の誤差」。減っていれば正＝"今学べている"＝報酬。
         # 動きを消すと誤差は下がりきって進度0＝退屈になるので、暗い部屋に留まれない。
-        # 生の差分をそのまま使う（恣意的な定数・正規化を持ち込まない。Oudeyerの定式化どおり）。
-        return pe_slow - pe_fast
+        return progress
 
-    buf = {k: [] for k in ("sv", "prev_a", "a", "cf", "clp", "nlp", "h")}
+    # 【★2026-07-25】睡眠リプレイのバッファを太郎の海馬（core: brain/hippocampus.py の
+    # MotorHippocampus）に一元化。**旧実装は独自のdictで、core にある FIFO容量上限(3600)も
+    # clear() も無く、学習全期間ぶん無制限に増え続けていた**＝「直近の覚醒経験を再生する」
+    # という睡眠リプレイの意味から外れた劣化コピーだった（構造監査で発覚）。
+    hippo = brain.hippocampus
 
     def consolidate(n_batches=200, bs=128):
         """睡眠リプレイ（Cと同一）。自己モデル確立の本命機構。"""
-        N = len(buf["sv"])
+        _eps = hippo.replay()
+        N = len(_eps)
         if N < bs:
             return
-        SV = torch.stack(buf["sv"]); PA = torch.stack(buf["prev_a"]); AA = torch.stack(buf["a"])
-        CF = torch.stack(buf["cf"]); CLP = torch.stack(buf["clp"]); NLP = torch.stack(buf["nlp"])
-        H = torch.cat(buf["h"], dim=1)
+        SV = torch.stack([e[0] for e in _eps]); PA = torch.stack([e[1] for e in _eps])
+        AA = torch.stack([e[2] for e in _eps]); CF = torch.stack([e[3] for e in _eps])
+        CLP = torch.stack([e[4] for e in _eps]); NLP = torch.stack([e[5] for e in _eps])
+        H = torch.cat([e[6] for e in _eps], dim=1)
         for _ in range(n_batches):
             idx = torch.randint(0, N, (bs,))
             hb = H[:, idx].contiguous()
@@ -273,9 +285,8 @@ def run(seed=0, n_train=3600, ckpt=600, n_eval=60):
         a = torch.clamp(dist.sample(), -1.0, 1.0); lp = dist.log_prob(a).sum()
         pred = clp + nat_head(torch.cat([z, a.detach()], dim=-1))
         state["obs"], term = step_k(rescale_action(a, env.action_space)); nlp = ln_sens(state["obs"])
-        buf["sv"].append(sv.detach()); buf["prev_a"].append(state["prev_a"].detach())
-        buf["a"].append(a.detach()); buf["cf"].append(cf.detach())
-        buf["clp"].append(clp.detach()); buf["nlp"].append(nlp.detach()); buf["h"].append(state["hidden"].detach())
+        hippo.record(sv.detach(), state["prev_a"].detach(), a.detach(), cf.detach(),
+                     clp.detach(), nlp.detach(), state["hidden"].detach())
         pe = mse(pred, nlp); rew = intrinsic_reward(pe.item())
         rew_hist.append(float(rew)); cw_hist.append(float(w_c))
         pl = learner.learn_action([lp], dop.compute_rpe(rew))

@@ -277,10 +277,12 @@ def make_policy(brain, fusion, emb_proj, cereb, n_act, babble,
             out, nh = brain.motor_gru(emb, hidden)
             z, _, _ = brain.pc_latent.infer(hidden[-1, 0], out[0, -1], cf)
             z = z.detach()
-            policy_m = torch.tanh(brain.motor_head(z))        # ★ACTION_SCALEなし＝Cで学習した素の方策
-            w_c, cere_a, _ = cereb.gate(z, policy_m)
-            cache["mean"] = ((1.0 - w_c) * policy_m + w_c * cere_a).detach()
-            cache["std"] = ((0.05 + ne_level * 0.45) * (1.0 - w_c)).detach()
+            # 【2026-07-25】太郎の motor_drive を呼ぶだけに変更（core へ一元化）。
+            # 旧実装は同じ式を手書きしていた＝**数値は完全に同一**。
+            # ★ACTION_SCALEなし＝Cで学習した素の方策、という性質も変わらない。
+            _mean, _std, _, _ = brain.motor_drive(z, ne_level, cerebellum=cereb)
+            cache["mean"] = _mean.detach()
+            cache["std"] = _std.detach()
             cache["hidden"] = nh.detach()
             if "prev_mean" not in cache:
                 cache["prev_mean"] = cache["mean"]   # 最初のブロックは補間不能→現在値で埋める

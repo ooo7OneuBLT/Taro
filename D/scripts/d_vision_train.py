@@ -127,7 +127,11 @@ def main():
     load_matching(cereb, blob["cereb"], "小脳")
     cere_opt = torch.optim.Adam(cereb.parameters(), lr=0.005)
     hidden = brain.init_motor_hidden(); prev_a = torch.zeros(n_act)
-    buf = {k: [] for k in ("sv", "prev_a", "a", "cf", "clp", "nlp", "h")}
+    # 【★2026-07-25】睡眠リプレイのバッファを太郎の海馬（core: brain/hippocampus.py の
+    # MotorHippocampus）に一元化。**旧実装は独自のdictで、core にある FIFO容量上限(3600)も
+    # clear() も無く、学習全期間ぶん無制限に増え続けていた**＝「直近の覚醒経験を再生する」
+    # という睡眠リプレイの意味から外れた劣化コピーだった（構造監査で発覚）。
+    hippo = brain.hippocampus
 
     def zc(sv, pa, cf, h):
         emb = emb_proj(torch.cat([sv, pa], dim=-1)).unsqueeze(0).unsqueeze(0)
@@ -144,12 +148,14 @@ def main():
         return o, term
 
     def consolidate(n_batches=100, bs=128):
-        N = len(buf["sv"])
+        _eps = hippo.replay()
+        N = len(_eps)
         if N < bs:
             return
-        SV = torch.stack(buf["sv"]); PA = torch.stack(buf["prev_a"]); AA = torch.stack(buf["a"])
-        CF = torch.stack(buf["cf"]); CLP = torch.stack(buf["clp"]); NLP = torch.stack(buf["nlp"])
-        H = torch.cat(buf["h"], dim=1)
+        SV = torch.stack([e[0] for e in _eps]); PA = torch.stack([e[1] for e in _eps])
+        AA = torch.stack([e[2] for e in _eps]); CF = torch.stack([e[3] for e in _eps])
+        CLP = torch.stack([e[4] for e in _eps]); NLP = torch.stack([e[5] for e in _eps])
+        H = torch.cat([e[6] for e in _eps], dim=1)
         for _ in range(n_batches):
             idx = torch.randint(0, N, (bs,))
             hb = H[:, idx].contiguous()
@@ -197,10 +203,8 @@ def main():
         pred = clp + nat_head(torch.cat([z, a.detach()], dim=-1))
 
         obs, term = step_k(rescale_action(a, env.action_space)); nlp = ln_prop(obs)
-        buf["sv"].append(sv.detach()); buf["prev_a"].append(prev_a.detach())
-        buf["a"].append(a.detach()); buf["cf"].append(cf.detach())
-        buf["clp"].append(clp.detach()); buf["nlp"].append(nlp.detach())
-        buf["h"].append(hidden.detach())
+        hippo.record(sv.detach(), prev_a.detach(), a.detach(), cf.detach(),
+                     clp.detach(), nlp.detach(), hidden.detach())
 
         pe = mse(pred, nlp)
         rew = brain.sensorimotor_reward(pe.item())

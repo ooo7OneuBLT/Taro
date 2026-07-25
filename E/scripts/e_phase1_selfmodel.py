@@ -156,10 +156,10 @@ def main():
         z, kl_loss, recon_loss = brain.pc_latent.infer(hidden[-1, 0], out[0, -1], cf)
 
         # babble方策：w_mean=0.3・白色雑音（2026-07-21確定）
-        policy_m = torch.tanh(brain.motor_head(z.detach()))
-        w_c, cere_a, _ = cereb.gate(z.detach(), policy_m)
-        mean = (1.0 - w_c) * policy_m + w_c * cere_a
-        std = (0.05 + NE_LEVEL * 0.45) * (1.0 - w_c)
+        # 【2026-07-25】太郎の motor_drive を呼ぶだけに変更（core へ一元化）。
+        # 旧実装は同じ式を手書きしていた＝**数値は完全に同一**
+        # （手書きの std=0.05+ne*0.45 は core の既定 min_std=0.05／max_std=0.5 と一致）。
+        mean, std, _w_c, _ = brain.motor_drive(z, NE_LEVEL, cerebellum=cereb)
         noise = torch.randn_like(mean)
         a = torch.clamp(W_MEAN * mean + std * noise, -1, 1)
 
