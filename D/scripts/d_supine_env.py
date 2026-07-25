@@ -57,7 +57,7 @@ class SupineMimoEnv(LeanMimoEnv):
     """
 
     def __init__(self, settle_steps=100, jitter=0.01, head_elongation=1.0,
-                 body_corrections=True, **kwargs):
+                 body_corrections=True, limb_scale=1.0, limb_fix=True, **kwargs):
         self._settle_steps = settle_steps
         self._jitter = jitter
         # 【2026-07-25】頭の楕円化。MIMoの頭は球で、頭囲は正しいが真上から見た長さが
@@ -67,6 +67,13 @@ class SupineMimoEnv(LeanMimoEnv):
         # 処理の実体は taro_core の infant_body.elongate_head（＝太郎の身体そのもの）。
         self._head_elongation = float(head_elongation)
         self._body_corrections = bool(body_corrections)
+        # 四肢の筋力補正の感度分析用の係数（1.0＝補正そのまま）。この補正の目標値には
+        # 根拠が無いことが分かっているので、振って結論の頑健性を確かめる。
+        self._limb_scale = float(limb_scale)
+        # limb_fix=False で四肢の筋力補正を完全に切る（＝素のmimoGrowth）。
+        # 文献（実測の除脂肪量・二乗三乗則）が示唆するのはこちらの姿なので、
+        # アブレーションとして必ず回せるようにしてある。
+        self._limb_fix = bool(limb_fix)
         super().__init__(**kwargs)
 
         # --- 仰向けにする（roll_over.py の supine と同じ式）---
@@ -86,7 +93,9 @@ class SupineMimoEnv(LeanMimoEnv):
             if _b not in _sys.path:
                 _sys.path.insert(0, _b)
             from infant_body import apply_runtime_corrections
-            apply_runtime_corrections(self.model, self.data, kwargs["age"])
+            apply_runtime_corrections(self.model, self.data, kwargs["age"],
+                                      limbs=self._limb_fix,
+                                      limb_scale=self._limb_scale)
 
         for _ in range(self._settle_steps):
             mujoco.mj_step(self.model, self.data)

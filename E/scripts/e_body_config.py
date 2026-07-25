@@ -85,8 +85,36 @@ def body_kwargs_from_env(age, verbose=True):
     **呼び出し側にも同じ形で残っていた**。入口を1つにすれば取りこぼしが起きない。
     ⚠️新しく環境を作るコードを書くときは、必ずこの関数を使うこと。
     """
-    kw = {"head_elongation": head_elongation_from_env()}
+    kw = {"head_elongation": head_elongation_from_env(),
+          "limb_scale": limb_scale_from_env(),
+          "limb_fix": limb_fix_enabled()}
     custom = body_scale_custom_from_env(age, verbose=verbose)
     if custom:
         kw["custom_measurements"] = custom
     return kw
+
+
+def limb_scale_from_env():
+    """四肢の筋力補正にさらに掛ける係数（感度分析用）。既定1.0＝補正そのまま。
+
+    【なぜ振る必要があるか、2026-07-25】四肢の筋力補正の目標値
+    （「18ヶ月児と同じ相対強度」）には**根拠が無い**と文献調査で判明した。
+    しかも新生児の関節トルクの直接測定は**文献に存在しない**（原理的に測れない）。
+    ＝値は決められないので、代わりに「**値の不確実性が結論を左右するか**」を確かめる。
+    ⚠️通常の実験と目的が逆＝**差が出ないことを確かめたい**。差が出たら
+    「太郎の結論は根拠のない仮定に乗っている」という弱点の発見になる。
+    詳細は `taro_core/src/body/infant_limbs.py` の冒頭。
+
+    E_LIMB_SCALE=2.0 なら補正が半分戻る（＝新生児がより強い）。
+    ⚠️補正を完全に切るのは E_LIMB_FIX=0（別扱い。scale では0にしない）。
+    """
+    return float(os.environ.get("E_LIMB_SCALE", "1.0"))
+
+
+def limb_fix_enabled():
+    """E_LIMB_FIX=0 で四肢の筋力補正を完全に切る（＝素のmimoGrowth＝新生児が3.5倍強い）。
+
+    ★文献（実測の除脂肪量・二乗三乗則）が示唆するのは**こちら**の姿なので、
+    アブレーションとして必ず含める。
+    """
+    return os.environ.get("E_LIMB_FIX", "1") == "1"

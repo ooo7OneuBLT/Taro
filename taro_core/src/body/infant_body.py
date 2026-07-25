@@ -346,7 +346,8 @@ def apply_head_mass(model, age=0.0, fraction=None, verbose=True):
               f"[Tier1: 人間の新生児の体節質量比]")
 
 
-def apply_runtime_corrections(model, data, age, neck=True, limbs=True, head_mass=True):
+def apply_runtime_corrections(model, data, age, neck=True, limbs=True, head_mass=True,
+                              limb_scale=1.0):
     """モデル構築後に上書きする補正（筋力＝アクチュエータのgear）。
 
     - **首の筋力**（`infant_neck`）：MIMoは gear を geom の体積から計算するため、
@@ -365,4 +366,7 @@ def apply_runtime_corrections(model, data, age, neck=True, limbs=True, head_mass
         apply_newborn_neck(model, data, float(age))
     if limbs:
         from infant_limbs import apply_limb_inversion_fix
-        apply_limb_inversion_fix(model, data, float(age))
+        # limb_scale＝四肢の筋力補正の感度分析用の係数（1.0＝補正そのまま）。
+        # この補正の目標値に根拠が無いことが2026-07-25の文献調査で判明したため、
+        # 「結論がこの仮定に依存していないか」を振って確かめられるようにしてある。
+        apply_limb_inversion_fix(model, data, float(age), scale=float(limb_scale))
