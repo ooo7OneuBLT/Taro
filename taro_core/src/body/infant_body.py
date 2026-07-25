@@ -7,20 +7,35 @@
 体型は**太郎そのもの**であって環境の性質ではないので core へ移した。
 方針：[[feedback-core-vs-experiment-placement]]（本実装は core、実験は目標フォルダ）。
 
-【この体型が確定した経緯（2026-07-21「新生児体型v2」）】
+【経緯：v2（目視で決定）→ v3（実測で決定）】
 mimoGrowth の age=0 は「大きさは新生児だが四肢の比率が成人」だった（人間模倣からの逸脱リスト
 2026-07-20 その4）。加えて頭が球なので、頭囲34cmでも真上から見た頭が15%小さい。
 → ①頭を体軸方向に楕円化（頭囲を保ったまま見かけを人間に）②四肢・手足を縮小。
 
-**確定の根拠**：主にViewerでの目視（ユーザー＋育児経験者）。四肢を縮める向きと大きさは、
-新生児は頭でっかちで四肢が短いという観察に一致。
-⚠️**各係数そのものは目視で決めた恣意値**[Tier3・ARBITRARY]（文献で裏取りしたのは
-足長7.58cmのみ。下肢19.6cm・上肢20.96cmは測定定義が成人的で新生児に不整合と判明＝
-当てにしない）。詳細は `doc/人間模倣からの逸脱リスト.md` 2026-07-21。
+- **v2（2026-07-21）**：Viewerでの目視だけで係数を決めた。質量も絶対サイズも一度も
+  測っていなかった。
+- **★v3（2026-07-25）**：測定器（`E/scripts/e_body_measure.py`）を新設して初めて実測。
+  v2の実態は**身長35.6cm（人間の71%）・体重1.44kg（41%）・2.8頭身**（人間の新生児は
+  4.2頭身）で、**アニメの赤ちゃんの比率**だった。`E/scripts/e_body_fit.py` で
+  人間の実測値に合わせて探索し直した。
 
-**確定寸法**：身長37.0cm 頭囲34.0cm（不変） 頭12.55 胴14.65 腕12.16 脚13.02 足7.5 手2.4cm
-　頭/身長 0.339（人間0.25より頭でっかち＝見た目重視の選択）。
-⚠️身長37cmは新生児49.9cmの74%＝**絶対サイズは小さい**。比率（見た目）を優先した結果。
+**v3の寸法**（`e_body_measure.py` で再現できる）：
+| | 太郎v3 | 人間の新生児 | v2（旧） |
+|---|---|---|---|
+| 身長 | 49.3cm | 49.9cm | 35.6cm |
+| 体重 | 3.54kg | 3.50kg | 1.44kg |
+| 頭身 | 3.9 | 4.2 | **2.8** |
+| 頭の質量比 | **25.0%** | **25.0%** | **49.5%** |
+| 下肢/身長 | 38.9% | 39.2% | 29% |
+
+★**縮めるのは脚だけ**で、腕・胴・太さはむしろ伸ばす／太くするのが正しかった。
+素のmimoGrowthの脚長19.2cmは人間19.6cmとほぼ一致しており、v2の0.45倍は過剰だった。
+★頭の質量は**密度で**合わせる（`apply_head_mass`）。大きさ（頭囲34cm）は既に合っているので、
+サイズを変えると頭身が壊れる＝**見た目を変えずに質量だけ人間に一致させる**。
+
+⚠️文献で裏取りできたのは足長7.58cmのみ。下肢19.6cm・上肢20.96cmは測定定義が
+成人的で新生児に不整合＝**当てにしない**（実際、上肢をこの値に合わせると腕が伸びすぎて
+手が腰を越え、目視で新生児に見えなくなる）。詳細は `doc/人間模倣からの逸脱リスト.md`。
 
 【使い方】
     from infant_body import body_scale_custom, NEWBORN_SHAPE_DEFAULTS
@@ -33,22 +48,43 @@ mimoGrowth の age=0 は「大きさは新生児だが四肢の比率が成人�
 """
 
 # 部位グループ -> 既定の係数。1.0 は「触らない」。
-# ⚠️[Tier3・ARBITRARY] 目視で決めた値。文献で裏取りできたのは足長のみ。
+#
+# 【★2026-07-25 改訂・v3】旧v2（leg 0.45 / arm 0.62 / trunk_len 0.74 / 太さ 0.60）は
+# **目視だけで決めて数値を一度も測っていなかった**。測定器（`E/scripts/e_body_measure.py`）
+# を作って初めて実測したところ、身長35.6cm（人間の71%）・体重1.44kg（41%）・
+# **2.8頭身**（人間の新生児は4.2頭身）という壊れた体だった。
+# ＝「赤ちゃんらしく見える」ようにデフォルメされていただけで、実物とは別物。
+#
+# v3は `E/scripts/e_body_fit.py` で人間の実測値に合わせて探索した値：
+#   身長49.3cm（人間49.9）／体重3.54kg（3.50）／頭の質量25.0%（25.0、密度で補正）／**3.9頭身**（4.2）／下肢/身長 38.9%（39.2）
+# ★**縮めるのは脚だけ**で、腕・胴・太さはむしろ伸ばす／太くするのが正しかった
+# （素のmimoGrowthの脚長19.2cmは人間19.6cmとほぼ一致しており、0.45倍は過剰だった）。
+#
+# ⚠️上肢/下肢比だけは人間（1.07）に対して0.86と外れる。太郎の「上肢」は
+# 肩bodyの中心→手bodyの中心の距離で、人間の計測値（肩峰〜手首）と**測る場所が違う**。
+# 比に合わせると腕が伸びすぎて手が腰を越える（目視で確認）ため、見た目を優先した。
+# ⚠️[Tier2] 個々の係数そのものは実測に合わせた結果であって文献値ではない。
 NEWBORN_SHAPE_DEFAULTS = {
-    "leg":        0.45,
-    "leg_thick":  0.60,
-    "arm":        0.62,
-    "arm_thick":  0.62,
-    "trunk_len":  0.74,
+    "leg":        0.801,
+    "leg_thick":  1.19,
+    "arm":        1.00,
+    "arm_thick":  1.19,
+    "trunk_len":  1.03,
     "foot":       0.72,
     "hand":       0.70,
-    # 既定で使わない微調整用（1.0）。目視で必要になったら呼び出し側で振る。
-    "trunk_width": 1.0,
-    "foot_width":  1.0,
+    "trunk_width": 1.19,
+    "foot_width":  1.19,
 }
 
 # 頭を体軸方向に 12.5/10.8 倍＝球→楕円（頭囲は不変）。
 HEAD_ELONGATION = 1.16
+
+# 頭が全体重に占める割合。人間の新生児は約25%（成人は約8%）＝**発達の主役**。
+# ⚠️[Tier1] 出典は新生児の体節質量比の標準値。首がすわらない（head lag）ことも、
+# 仰向けから転がりやすいことも、この「頭の重さ」が物理的な原因になっている。
+HEAD_MASS_FRACTION = 0.25
+# 何ヶ月まで頭の質量を補正するか。首の筋力補正（4ヶ月で解除）と揃えてある[Tier3]。
+HEAD_MASS_UNTIL_MO = 4.0
 
 # 足＝相似縮小するgeom群（左側だけ指定すれば右側は自動でミラーされる）
 _FOOT_GEOMS = [
@@ -260,7 +296,57 @@ def build_body_kwargs(age, scales=None, head_elongation=None):
     return kwargs
 
 
-def apply_runtime_corrections(model, data, age, neck=True, limbs=True):
+def apply_head_mass(model, age=0.0, fraction=None, verbose=True):
+    """頭の**密度**を上げて、全体重に占める頭の割合を人間の新生児に合わせる。
+
+    【なぜ必要か、2026-07-25】頭の**大きさ**（頭囲34cm）は人間と合っているのに、
+    質量は全体重の20.5%しかなかった（人間25%）＝MIMoの頭は人間より密度が低い。
+    大きさが合っているので**サイズを変えて合わせてはいけない**（頭身が崩れる）。
+    密度＝質量だけを上げる＝**見た目を1ミリも変えずに質量を人間に一致させる**。
+
+    ⚠️慣性テンソルも同じ倍率でスケールする（形は変わらないので質量に比例する）。
+    これを忘れると「重いのに回りやすい」物理的にありえない頭になる。
+
+    ⚠️必ず首・四肢の筋力補正**より先に**呼ぶこと。首の補正は「頭を持ち上げられるか」を
+    頭の質量から計算するので、後から頭を重くすると首の補正が古い前提のままになる。
+
+    ⚠️★**新生児期（age < HEAD_MASS_UNTIL_MO）だけに適用する**。四肢の筋力補正は
+    「18ヶ月児と比べて発達の向きが逆転していないか」を見るために**18ヶ月の基準モデルを
+    別に構築する**ので、月齢で止めないと**基準モデルの頭まで25%に書き換えてしまい、
+    基準そのものが歪む**（2026-07-25、実測ログで発覚：18ヶ月モデルの頭 1.846kg が
+    0.865kg に書き換えられていた）。首の補正が4ヶ月で解除されるのと同じ形にしてある。
+    ⚠️人間の頭の質量比は新生児25%→成人8%と月齢で下がるが、その中間の文献値を
+    持っていないので**新生児期だけ合わせて以降は触らない**[Tier3・簡略化]。
+
+    Args:
+        age: 月齢。これが HEAD_MASS_UNTIL_MO 以上なら何もしない。
+        fraction: 目標の割合。None なら HEAD_MASS_FRACTION（0.25）。
+    """
+    import numpy as np
+    if float(age) >= HEAD_MASS_UNTIL_MO:
+        return
+    frac = HEAD_MASS_FRACTION if fraction is None else float(fraction)
+    hid = int(model.body("head").id)
+    # 太郎の身体だけを数える（床・柵・おもちゃを含めない）
+    skip = ("floor", "wall", "fence", "object", "toy", "target", "world")
+    ids = [i for i in range(1, model.nbody)
+           if not any(k in model.body(i).name for k in skip)]
+    total = float(sum(model.body_mass[i] for i in ids))
+    head = float(model.body_mass[hid])
+    others = total - head
+    if others <= 0 or not (0.0 < frac < 1.0):
+        return
+    new_head = others * frac / (1.0 - frac)
+    k = new_head / head if head > 0 else 1.0
+    model.body_mass[hid] = new_head
+    model.body_inertia[hid] = np.asarray(model.body_inertia[hid]) * k
+    if verbose:
+        print(f"[head] 頭の質量 {head:.3f}kg -> {new_head:.3f}kg "
+              f"(全体の {head/total*100:.1f}% -> {frac*100:.1f}%, 密度 x{k:.2f}) "
+              f"[Tier1: 人間の新生児の体節質量比]")
+
+
+def apply_runtime_corrections(model, data, age, neck=True, limbs=True, head_mass=True):
     """モデル構築後に上書きする補正（筋力＝アクチュエータのgear）。
 
     - **首の筋力**（`infant_neck`）：MIMoは gear を geom の体積から計算するため、
@@ -271,6 +357,9 @@ def apply_runtime_corrections(model, data, age, neck=True, limbs=True):
 
     ⚠️MIMo本体は書き換えない（Git管理外で再現性が失われるため）＝実行時に上書きする。
     """
+    # ★頭の質量は首・四肢より先。首の補正が頭の質量を前提に計算するため。
+    if head_mass:
+        apply_head_mass(model, float(age))
     if neck:
         from infant_neck import apply_newborn_neck
         apply_newborn_neck(model, data, float(age))

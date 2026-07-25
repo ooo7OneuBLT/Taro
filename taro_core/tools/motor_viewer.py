@@ -37,8 +37,25 @@ import numpy as np
 import torch
 
 
-def _make_key_callback(speed_ref):
+def _make_key_callback(speed_ref, reset_ref=None):
+    """キー操作。★BACKSPACE（MuJoCo組み込みのリセット）を横取りする。
+
+    【なぜ必要か、2026-07-25】MuJoCoのpassive viewerはBACKSPACEで `mj_resetData` を
+    呼ぶ。これは**環境のresetではなくモデルの基準姿勢への復帰**で、太郎の場合は
+    `hip.pos=[0,0,0.2]`＋MIMoの既定姿勢＝**床から55cmの空中**に戻る（実測、
+    `E/scripts/e_spawn_check.py`）。そこから落下して着地するので、
+    「リセットすると空中にスポーンして手足が激しく跳ねる」ように見えていた。
+    ＝**Viewerだけのアーティファクト**（学習では `env.reset()` が使われ、
+    出発点は接地状態＝浮き -0.85cm）。目視で運動を評価する太郎の運用では、
+    これを放置すると**落下の跳ね返りを「太郎の運動」と誤読する**。
+    """
     def _cb(keycode):
+        # BACKSPACE(259) は MuJoCo組み込みのリセットが同時に走るので、
+        # こちらでフラグを立ててメインループで env.reset() し直す（＝上書きする）。
+        if reset_ref is not None and (keycode == 259 or keycode in (ord("r"), ord("R"))):
+            reset_ref[0] = True
+            print("  [reset] 環境をリセット（接地状態から再開）", flush=True)
+            return
         try:
             ch = chr(keycode)
         except ValueError:
@@ -107,12 +124,14 @@ def run_viewer(env, brain, policy_fn, rescale_action, *,
         n_act = env.action_space.shape[0]
 
     speed = [1.0 if realtime else 0.0]
-    key_cb = _make_key_callback(speed)
+    want_reset = [False]
+    key_cb = _make_key_callback(speed, want_reset)
 
     _ctrl_desc = f"連続制御(ctrl_m={ctrl_m})" if continuous else f"1秒ホールド(K={K})"
     print(f"\n[Viewer] {banner}  制御刻み={_ctrl_desc}  再生={'等倍' if realtime else '最速'}",
           flush=True)
-    print("  キー操作: . = 速く / , = 遅く / 0 = 等倍 / M = 最速（待たない）", flush=True)
+    print("  キー操作: . = 速く / , = 遅く / 0 = 等倍 / M = 最速（待たない）"
+          " / R or BackSpace = リセット", flush=True)
 
     obs, _ = env.reset(seed=0)
     hidden = brain.init_motor_hidden()
@@ -162,7 +181,10 @@ def run_viewer(env, brain, policy_fn, rescale_action, *,
                         t_wall = time.perf_counter()
                 else:
                     t_wall = now
-                if te or tr:
+                # ★キーでのリセット要求は、MuJoCo組み込みの mj_resetData（＝空中に戻る）を
+                #   env.reset()（＝接地状態）で上書きする。上のコールバックのコメント参照。
+                if te or tr or want_reset[0]:
+                    want_reset[0] = False
                     obs, _ = env.reset()
                     hidden = brain.init_motor_hidden()
                     prev_a = torch.zeros(n_act)

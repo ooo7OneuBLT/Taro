@@ -66,3 +66,27 @@ def body_scale_custom_from_env(age, verbose=True):
     if not any(abs(v - 1.0) > 1e-9 for v in scales.values()):
         return None
     return body_scale_custom(float(age), scales, verbose=verbose)
+
+
+def body_kwargs_from_env(age, verbose=True):
+    """★環境を作るときに渡す身体の設定を**まとめて**返す唯一の入口。
+
+    使い方:
+        env = SupineMimoEnv(age=0.0, **body_kwargs_from_env(0.0))
+
+    【なぜ1つにまとめたか、2026-07-25】体型（`custom_measurements`）と頭の楕円化
+    （`head_elongation`）は別々の関数で、**呼ぶ側が両方を思い出す必要があった**。
+    実際に取りこぼしが起きていた：
+      - `e_ctrl_freq_probe.py` の測定側 … 体型だけ渡して**頭は球のまま**
+      - 同 Viewerモード … **どちらも渡さず素の体**（Viewerで見ている太郎と、
+        学習している太郎が別の身体だった）
+      - `e_body_measure.py` … 頭を渡しておらず、日誌に載せた数値が後日再現しなかった
+    ＝「身体の設定が散らばる」問題（体型をcoreへ集約した理由そのもの）が、
+    **呼び出し側にも同じ形で残っていた**。入口を1つにすれば取りこぼしが起きない。
+    ⚠️新しく環境を作るコードを書くときは、必ずこの関数を使うこと。
+    """
+    kw = {"head_elongation": head_elongation_from_env()}
+    custom = body_scale_custom_from_env(age, verbose=verbose)
+    if custom:
+        kw["custom_measurements"] = custom
+    return kw

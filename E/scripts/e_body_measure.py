@@ -37,7 +37,7 @@ import numpy as np
 import mujoco
 from d_supine_env import SupineMimoEnv
 from mimoActuation.muscle import MuscleModel
-from infant_body import NEWBORN_SHAPE_DEFAULTS, body_scale_custom
+from infant_body import NEWBORN_SHAPE_DEFAULTS, HEAD_ELONGATION, body_scale_custom
 
 # 人間の新生児の基準値
 HUMAN = {"height_cm": 49.9, "mass_kg": 3.5, "head_frac": 0.25, "arm_leg_ratio": 1.07}
@@ -59,16 +59,27 @@ def _segment_length(model, data, a, b):
         return float("nan")
 
 
-def measure(scales=None, verbose=False):
+def measure(scales=None, verbose=False, head_elong=None):
     """指定した体型係数で身体を作り、寸法と質量を測る。
 
     ★姿勢に依存しないよう `qpos0`（モデルの基準姿勢）に固定してから測る。
+
+    Args:
+        head_elong: 頭の楕円化率。**None なら実運用と同じ既定値**（HEAD_ELONGATION=1.16）。
+            1.0 を渡すと球のまま＝アブレーション。
+            ⚠️【2026-07-25 に発見したバグ】この引数が無かったため、測定器は
+            `SupineMimoEnv` の既定（head_elongation=1.0＝球）で測っていた。
+            一方 **学習で走る太郎は楕円**（`e_body_config.head_elongation_from_env`
+            が 1.16 を渡す）＝**測定器と実物が違う体だった**。そのため日誌に載せた
+            「脚0.70+太さ1.3+頭楕円＝身長49.8cm」を後日まったく再現できなかった。
+            [[feedback-bug-to-checklist]]「動かないときはまず計測器を疑う」の実例。
     """
     kw = {}
     if scales is not None:
         custom = body_scale_custom(0.0, scales, verbose=verbose)
         if custom:
             kw["custom_measurements"] = custom
+    kw["head_elongation"] = HEAD_ELONGATION if head_elong is None else float(head_elong)
     env = SupineMimoEnv(actuation_model=MuscleModel, vision_params=None, age=0.0, **kw)
     m, d = env.unwrapped.model, env.unwrapped.data
 
@@ -99,8 +110,16 @@ def measure(scales=None, verbose=False):
     arm = _segment_length(m, d, "right_upper_arm", "right_hand")
     leg = _segment_length(m, d, "right_upper_leg", "right_foot")
 
+    # 頭の長さ（体軸方向）＝「何頭身か」を出すため。人間の新生児は約4頭身（頭/身長0.25）で、
+    # 成人の約7.5頭身と大きく違う。★「赤ちゃんらしい見た目」の主因はここなので、
+    # 見た目の議論をするときは必ずこの数字を見る（印象だけで決めると頭を盛りすぎる）。
+    _hg = [g for g in range(m.ngeom) if m.geom_bodyid[g] == m.body("head").id]
+    head_len_cm = 2 * max(float(np.max(m.geom_size[g])) for g in _hg) * 100 if _hg else float("nan")
+
     res = {
         "height_cm": height_cm,
+        "head_len_cm": head_len_cm,
+        "head_ratio": head_len_cm / height_cm if height_cm else float("nan"),
         "mass_kg": mass_total,
         "head_frac": head_mass / mass_total if mass_total else float("nan"),
         "arm_cm": arm * 100, "leg_cm": leg * 100,

@@ -168,14 +168,13 @@ def run_condition(name, act_center, act_amp, K, desc):
     print(f"\n=== {name} ===  {desc}")
     print(f"  中心={act_center} ゆらぎ={act_amp} K={K}  → {n_tick}tick × K{K} = {n_tick*K}物理step")
 
-    # 【2026-07-25】体型補正を通す（E_SHAPE=0 で切れる）。core の体型定義を
-    # e_body_config 経由で受け取る＝環境によらず同じ体型になる。
-    from e_body_config import body_scale_custom_from_env
-    _kw = {}
-    _custom = body_scale_custom_from_env(AGE)
-    if _custom:
-        _kw["custom_measurements"] = _custom
-    env = SupineMimoEnv(actuation_model=MuscleModel, vision_params=None, age=AGE, **_kw)
+    # 【2026-07-25】体型補正と頭の楕円化を通す（E_SHAPE=0 で切れる）。core の身体定義を
+    # e_body_config の唯一の入口から受け取る＝環境によらず同じ体になる。
+    # ⚠️当初は体型だけ渡して**頭の楕円化を渡し忘れていた**（＝学習中の太郎と違う体を
+    #   測っていた）。だから入口を1つにまとめてある。
+    from e_body_config import body_kwargs_from_env
+    env = SupineMimoEnv(actuation_model=MuscleModel, vision_params=None, age=AGE,
+                        **body_kwargs_from_env(AGE))
     m, d = env.unwrapped.model, env.unwrapped.data
     n_act = env.action_space.shape[0]          # 180
     n_joint = n_act // 2                       # 90（拮抗筋ペアは i と i+n_joint）
@@ -327,7 +326,11 @@ def view_condition(name, act_center, act_amp, K, desc):
     import torch
     from motor_viewer import run_viewer
 
-    env = SupineMimoEnv(actuation_model=MuscleModel, vision_params=None, age=AGE)
+    # ★Viewerも測定側とまったく同じ身体で作る（かつて素の体で表示していて、
+    #   「Viewerで見ている太郎」と「学習している太郎」が別の身体だった）。
+    from e_body_config import body_kwargs_from_env
+    env = SupineMimoEnv(actuation_model=MuscleModel, vision_params=None, age=AGE,
+                        **body_kwargs_from_env(AGE))
     n_act = env.action_space.shape[0]
     gen = ColoredNoiseGenerator(n_act, seed=SEED)
 

@@ -388,12 +388,14 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
             _custom = body_scale_custom_from_env(float(_AGE))
             if _custom:
                 _age_kw["custom_measurements"] = _custom
-        # ★頭の楕円化（MIMoの頭は球で、真上から見た長さが人間より15%短い）。
-        #   従来おもちゃ環境にしか無く、学習では頭が球のままだった。
-        _he = head_elongation_from_env()
-        if abs(_he - 1.0) > 1e-9 and _SUPINE:
-            _age_kw["head_elongation"] = _he
+            # ★頭の楕円化（MIMoの頭は球で、真上から見た長さが人間より15%短い）。
+            #   おもちゃ環境（ToySupineEnv）は自前で楕円化するので渡さない。
+            _he = head_elongation_from_env()
+            if abs(_he - 1.0) > 1e-9 and _SUPINE:
+                _age_kw["head_elongation"] = _he
         else:
+            # ⚠️旧版はこの print が `_he != 1.0 and _SUPINE` の else に付いていたため、
+            #   おもちゃ環境では補正が効いているのに「補正OFF」と**誤表示**していた。
             print("[body] 体型補正OFF（E_SHAPE=0）＝素のmimoGrowth体型", flush=True)
     _act_kw = {}
     if _MUSCLE:   # 【筋肉モデル】拮抗筋2本/関節・活性化ダイナミクス・引くだけ
