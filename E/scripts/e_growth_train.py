@@ -584,9 +584,25 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
     # 【Viewer】E_VIEW=1のときは学習せず、共通の motor_viewer.run_viewer に委譲する
     # （速度オーバーレイ・キー操作・実時間追従などが揃っている、共通測定器）。
     # 学習済みチェックポイント(E_LOADMODEL)を見る目的なので、探索なしの決定的な行動(act_mean)。
+    #
+    # ★E_VIEW_EXPLORE=1 で「運動性喃語そのもの」を見る（2026-07-25 追加）。
+    #   既定(=0)は決定的な行動なので**ゆらぎが一切出ない**＝自発運動を目視できない。
+    #   学習ループと同じ `brain.explore(mean, std)` を通すので、色付きノイズ(1/f^β)も
+    #   シナジーも拮抗筋モードも**太郎の中の実装がそのまま効く**。
+    #   ⚠️`E/scripts/e_ctrl_freq_probe.py` のViewerは脳を通らないダミー方策で、
+    #     振幅も比較用の固定値（筋活性化 0.3±0.3）＝**本物より3倍以上激しい**。
+    #     運動の激しさを評価するときは必ずこちら（本物）を見ること。
     if _VIEW:
         sys.path.insert(0, os.path.join(_CORE, "tools"))
         from motor_viewer import run_viewer
+
+        _VIEW_EXPLORE = os.environ.get("E_VIEW_EXPLORE", "0") == "1"
+        # 学習中の std は `0.05 + ne*0.45`（motor_drive）。学習初期は ne≈0.275 なので
+        # std≈0.174 になる＝既定値の由来。E_VIEW_STD で振れば振幅の比較ができる。
+        _VIEW_STD = float(os.environ.get("E_VIEW_STD", "0.174"))
+        if _VIEW_EXPLORE:
+            print(f"[Viewer] 運動性喃語ON（探索）: std={_VIEW_STD} "
+                  f"（学習初期の実効値≒0.174／noise=neで変動）", flush=True)
 
         def _policy_fn(obs, prev_a, hidden, *, recompute, frac):
             # 連続制御の frac は今の学習済みモデルには使わない(policyはboundaryでのみ再計算、
@@ -596,7 +612,11 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
             sv = fusion.encode(obs); cf = target_fusion.encode(obs).detach()
             z, _kl, _rc, hn = zc(sv, prev_a, cf, hidden)
             z = z.detach()
-            a = torch.clamp(act_mean(z), -1.0, 1.0).detach()
+            mean = act_mean(z)
+            if _VIEW_EXPLORE:
+                a, _lp = brain.explore(mean, torch.full_like(mean, _VIEW_STD))
+                return a.detach(), hn.detach()
+            a = torch.clamp(mean, -1.0, 1.0).detach()
             return a, hn.detach()
 
         banner = f"E_LOADMODEL={os.path.basename(_LOADMODEL) if _LOADMODEL else '(白紙)'}"

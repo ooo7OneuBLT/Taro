@@ -326,6 +326,17 @@ def view_condition(name, act_center, act_amp, K, desc):
     import torch
     from motor_viewer import run_viewer
 
+    # ★★このViewerで「運動の激しさ」を評価してはいけない（2026-07-25、実際に誤読が起きた）
+    print("\n" + "=" * 78, flush=True)
+    print("  [警告] このViewerは**脳を通らないダミー方策**です。運動性喃語ではありません。", flush=True)
+    print("         振幅は制御頻度を比較するための固定値（筋活性化 0.3±0.3）で、", flush=True)
+    print("         本物（学習初期 0.5±0.087）より**3倍以上激しく**動きます。", flush=True)
+    print("         運動の激しさ・自発運動の質を見るときは本物を使うこと：", flush=True)
+    print("           E_VIEW=1 E_VIEW_EXPLORE=1 E_REALTIME=1 E_MUSCLE=1 E_SUPINE=1 \\", flush=True)
+    print("           E_AGE=0 E_NOISE=colored E_BETA=0.7 python E/scripts/e_growth_train.py 0 1",
+          flush=True)
+    print("=" * 78 + "\n", flush=True)
+
     # ★Viewerも測定側とまったく同じ身体で作る（かつて素の体で表示していて、
     #   「Viewerで見ている太郎」と「学習している太郎」が別の身体だった）。
     from e_body_config import body_kwargs_from_env
