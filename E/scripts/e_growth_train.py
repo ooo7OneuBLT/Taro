@@ -465,7 +465,10 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
         _bd = "／".join(f"{nm}:{e-s_}" for (s_, e, nm) in (_BLOCKS or []))
         print(f"[E1] 予測対象={_E1_TGT} → 全{out_dim}次元  内訳 {_bd}")
         print(f"     ★誤差はブロックごとに平均してから足す（次元数の影響を除く。λ_v={_LAM_V}）")
-    brain = TaroBrainWithMotor(vocab_size=3, sensory_dim=sdim, n_actuators=n_act)
+    # 【★2026-07-25】proprio_dim（予測対象の次元）を渡す＝core の forward_model_head が
+    # この目標に合った出力次元で作られる。従来は目標側で nat_head を別に作っていた。
+    brain = TaroBrainWithMotor(vocab_size=3, sensory_dim=sdim, n_actuators=n_act,
+                               proprio_dim=out_dim)
     # 【運動性喃語（脊髄CPG）】E_NOISE=colored のとき太郎の中で色付き探索を有効化する。
     # 既定 white では呼ばれない＝spinal_cpg=None＝白色ガウス＝従来と数値完全一致。
     if _E_NOISE == "colored":
@@ -484,15 +487,17 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
               f"{' 【拮抗筋モードON】coactivation=' + str(_COACTIVATION) if _MUSCLE and _ANTAGONIST else ''}", flush=True)
     emb_dim = brain.sensory_proj.out_features  # GRUの入力次元(=64)
 
-    # D-a: [感覚, 前回行動] → GRU入力。brain.sensory_proj の代わりに使う自前の射影。
-    emb_proj = nn.Linear(sdim + n_act, emb_dim)
-    # D-b: 非線形MLPの予測ヘッド（[z, 今の行動] → 固有感覚の変化）。
-    # 【パッチ 2026-07-13】中間に LayerNorm を追加。アブレーションで発散の原因が
-    # 「ヘッドが入力を無制限に増幅（pred爆発）」と確定したため（zの膨張は濡れ衣）。
-    # 活性を正規化して出力爆発を防ぐ（深層ネット/世界モデルの標準的な安定化）。
-    nat_head = nn.Sequential(nn.Linear(brain.latent_dim + n_act, 128), nn.SiLU(),
-                             nn.LayerNorm(128), nn.Linear(128, out_dim))
-    learner = TaroLearner(CombinedParams(brain, fusion, emb_proj, nat_head), lr=_LR)
+    # 【★2026-07-25】D-a/D-b の層を**太郎の中（core）のものに一本化**した。
+    # 従来はここで emb_proj / nat_head を別に作っており、core にある
+    # motor_input_proj / forward_model_head は**作られるだけで一度も使われていなかった**
+    # ＝太郎の脳が二重に存在し、実際に動いていたのは目標側という状態だった（構造監査で発覚）。
+    # 構造・初期化とも core 側と完全に同型（Linear / MLP+LayerNorm、hidden=128）。
+    # ⚠️層の名前が変わるので**保存済みチェックポイントは読めなくなる**。既存モデルは
+    #   欠陥のある報酬(predict)・補正なしの体・劣化した睡眠リプレイで学習したもので
+    #   どのみち作り直しなので、学習しなおし前提で進める（ユーザー判断 2026-07-25）。
+    emb_proj = brain.motor_input_proj      # 旧名を別名として残す（参照箇所が多いため）
+    nat_head = brain.forward_model_head
+    learner = TaroLearner(CombinedParams(brain, fusion), lr=_LR)
     dop = Dopamine(); ne = LocusCoeruleus(relative=_NE_REL); homeo = HomeostaticScaling(dim=sdim)
     dev_clock = DevelopmentalClock()  # ③発達年齢（累積学習回数）。sim秒(②)とは別軸。
     # 運動小脳。ON/OFFで乱数列を揃えるため、_CEREBに関わらず常に構築する（使う/学習する
@@ -513,8 +518,13 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
         fusion.insula.load_state_dict(_blob["fusion_insula"])
         fusion.proprio.load_state_dict(_blob["fusion_proprio"])
         fusion.vestibular.load_state_dict(_blob["fusion_vestibular"])
-        _load_matching(emb_proj, _blob["emb_proj"], "emb_proj")
-        _load_matching(nat_head, _blob["nat_head"], "nat_head")
+        # 【2026-07-25】emb_proj/nat_head は brain.motor_input_proj /
+        # brain.forward_model_head になった＝上の _load_matching(brain, ...) に含まれる。
+        # 旧チェックポイント（別名で保存されたもの）は層名が違うので読めない＝学習しなおし。
+        if "emb_proj" in _blob:
+            print("  [注意] 旧形式のチェックポイント（emb_proj/nat_headが別層）です。"
+                  "層の構成が変わったため、その2層は読み込まれません＝学習しなおしになります。",
+                  flush=True)
         if _CEREB and "cereb" in _blob:
             _load_matching(cereb, _blob["cereb"], "小脳")
 
@@ -544,11 +554,9 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
         return o, term
 
     def zc(sv, prev_a, cf, h):
-        # D-a: 感覚と前回行動を結合して射影→GRU
-        emb = emb_proj(torch.cat([sv, prev_a], dim=-1)).unsqueeze(0).unsqueeze(0)
-        out, nh = brain.motor_gru(emb, h)
-        z, kl, rc = brain.pc_latent.infer(h[-1, 0], out[0, -1], cf)
-        return z, kl, rc, nh
+        """【2026-07-25】太郎の infer_latent を呼ぶだけ（core へ一元化）。
+        旧実装は同じ処理（[感覚,前回行動]→射影→GRU→pc_latent）を手書きしていた。"""
+        return brain.infer_latent(sv, prev_a, cf, h)
 
     def reset_state():
         state["obs"], _ = env.reset()
@@ -895,7 +903,8 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
                 "fusion_insula": fusion.insula.state_dict(),
                 "fusion_proprio": fusion.proprio.state_dict(),
                 "fusion_vestibular": fusion.vestibular.state_dict(),
-                "emb_proj": emb_proj.state_dict(), "nat_head": nat_head.state_dict(),
+                # 【2026-07-25】emb_proj/nat_head は brain の一部になったので
+                # "brain" に含まれる（個別保存は不要）。
                 "cereb": cereb.state_dict(),
                 "config": {"sdim": sdim, "prop_dim": prop_dim, "touch_dim": touch_dim,
                            "out_dim": out_dim, "n_act": n_act, "K": K,

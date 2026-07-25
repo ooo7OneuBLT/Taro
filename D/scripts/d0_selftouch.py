@@ -144,11 +144,15 @@ def run(seed=0, n_train=3600, ckpt=600, n_eval=60):
     fusion = SelfTouchFusion(prop_dim, tch_dim); tfusion = SelfTouchFusion(prop_dim, tch_dim).freeze()
     sdim = fusion.encode(obs).shape[0]
     out_dim = prop_dim + tch_dim
-    brain = TaroBrainWithMotor(vocab_size=3, sensory_dim=sdim, n_actuators=n_act)
-    emb_proj = nn.Linear(sdim + n_act, brain.sensory_proj.out_features)
-    nat_head = nn.Sequential(nn.Linear(brain.latent_dim + n_act, 128), nn.SiLU(),
-                             nn.LayerNorm(128), nn.Linear(128, out_dim))
-    learner = TaroLearner(CombinedParams(brain, fusion, emb_proj, nat_head), lr=0.005)
+    brain = TaroBrainWithMotor(vocab_size=3, sensory_dim=sdim, n_actuators=n_act, proprio_dim=out_dim)
+    # 【★2026-07-25】D-a/D-b の層を**太郎の中（core）のものに一本化**した。
+    # 従来はここで別に作っており、core の motor_input_proj / forward_model_head は
+    # 作られるだけで一度も使われていなかった＝脳が二重に存在していた（構造監査で発覚）。
+    # 構造・初期化とも core 側と完全に同型。⚠️層名が変わるので旧チェックポイントは
+    # 読めない＝学習しなおし前提（ユーザー判断 2026-07-25）。
+    emb_proj = brain.motor_input_proj      # 旧名を別名として残す
+    nat_head = brain.forward_model_head
+    learner = TaroLearner(CombinedParams(brain, fusion), lr=0.005)
     dop = Dopamine()
     # 【2026-07-15】NEは relative=True（報酬の絶対値でなく"いつもより良いか"で探索を決める）。
     # 従来の固定閾値(<0.1で探索/>0.3で活用)は旧報酬 1/(1+誤差) の値域専用で、

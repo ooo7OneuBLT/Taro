@@ -332,18 +332,22 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
         _bd = "／".join(f"{nm}:{e-s_}" for (s_, e, nm) in (_BLOCKS or []))
         print(f"[E1] 予測対象={_E1_TGT} → 全{out_dim}次元  内訳 {_bd}")
         print(f"     ★誤差はブロックごとに平均してから足す（次元数の影響を除く。λ_v={_LAM_V}）")
-    brain = TaroBrainWithMotor(vocab_size=3, sensory_dim=sdim, n_actuators=n_act)
+    brain = TaroBrainWithMotor(vocab_size=3, sensory_dim=sdim, n_actuators=n_act, proprio_dim=out_dim)
     emb_dim = brain.sensory_proj.out_features  # GRUの入力次元(=64)
 
     # D-a: [感覚, 前回行動] → GRU入力。brain.sensory_proj の代わりに使う自前の射影。
-    emb_proj = nn.Linear(sdim + n_act, emb_dim)
+    # 【★2026-07-25】D-a/D-b の層を**太郎の中（core）のものに一本化**した。
+    # 従来はここで別に作っており、core の motor_input_proj / forward_model_head は
+    # 作られるだけで一度も使われていなかった＝脳が二重に存在していた（構造監査で発覚）。
+    # 構造・初期化とも core 側と完全に同型。⚠️層名が変わるので旧チェックポイントは
+    # 読めない＝学習しなおし前提（ユーザー判断 2026-07-25）。
+    emb_proj = brain.motor_input_proj      # 旧名を別名として残す
     # D-b: 非線形MLPの予測ヘッド（[z, 今の行動] → 固有感覚の変化）。
     # 【パッチ 2026-07-13】中間に LayerNorm を追加。アブレーションで発散の原因が
     # 「ヘッドが入力を無制限に増幅（pred爆発）」と確定したため（zの膨張は濡れ衣）。
     # 活性を正規化して出力爆発を防ぐ（深層ネット/世界モデルの標準的な安定化）。
-    nat_head = nn.Sequential(nn.Linear(brain.latent_dim + n_act, 128), nn.SiLU(),
-                             nn.LayerNorm(128), nn.Linear(128, out_dim))
-    learner = TaroLearner(CombinedParams(brain, fusion, emb_proj, nat_head), lr=_LR)
+    nat_head = brain.forward_model_head
+    learner = TaroLearner(CombinedParams(brain, fusion), lr=_LR)
     dop = Dopamine(); ne = LocusCoeruleus(relative=_NE_REL); homeo = HomeostaticScaling(dim=sdim)
     dev_clock = DevelopmentalClock()  # ③発達年齢（累積学習回数）。sim秒(②)とは別軸。
     # 運動小脳。ON/OFFで乱数列を揃えるため、_CEREBに関わらず常に構築する（使う/学習する

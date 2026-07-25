@@ -100,11 +100,15 @@ def main():
     prop_dim = to_tensor(obs["observation"]).shape[0]
     print(f"融合次元 sdim={sdim}（視覚64込み）／固有感覚 prop_dim={prop_dim}／行動 n_act={n_act}")
 
-    brain = TaroBrainWithMotor(vocab_size=3, sensory_dim=sdim, n_actuators=n_act)
+    brain = TaroBrainWithMotor(vocab_size=3, sensory_dim=sdim, n_actuators=n_act, proprio_dim=prop_dim)
     emb_dim = brain.sensory_proj.out_features
-    emb_proj = nn.Linear(sdim + n_act, emb_dim)
-    nat_head = nn.Sequential(nn.Linear(brain.latent_dim + n_act, 128), nn.SiLU(),
-                             nn.LayerNorm(128), nn.Linear(128, prop_dim))
+    # 【★2026-07-25】D-a/D-b の層を**太郎の中（core）のものに一本化**した。
+    # 従来はここで別に作っており、core の motor_input_proj / forward_model_head は
+    # 作られるだけで一度も使われていなかった＝脳が二重に存在していた（構造監査で発覚）。
+    # 構造・初期化とも core 側と完全に同型。⚠️層名が変わるので旧チェックポイントは
+    # 読めない＝学習しなおし前提（ユーザー判断 2026-07-25）。
+    emb_proj = brain.motor_input_proj      # 旧名を別名として残す
+    nat_head = brain.forward_model_head
 
     # ── Cの学習済みモデルを引き継ぐ（脳をリセットしない）──
     print(f"\nCの自己モデルを読み込み: {os.path.basename(CKPT_PATH)}")
@@ -119,7 +123,7 @@ def main():
     # target_fusionは正解づくり用（凍結）。学習側と同じ初期値にそろえてからfreezeは既にfusionで
     # 済んでいるので、固有感覚系だけ合わせておく（視覚は両者とも新規ランダムで独立性を保つ）。
 
-    learner = TaroLearner(CombinedParams(brain, fusion, emb_proj, nat_head), lr=0.005)
+    learner = TaroLearner(CombinedParams(brain, fusion), lr=0.005)
     dop = Dopamine(); ne = LocusCoeruleus(); homeo = HomeostaticScaling(dim=sdim)
     # 運動小脳：練習を重ねるほど動きが滑らかに自動化される（＝"首が座る"等の制御の上達に対応）。
     # Cから読み込む（重み形は同じなのでそのままロード＝脳と同じく引き継ぐ）。
