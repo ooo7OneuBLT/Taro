@@ -109,7 +109,10 @@ class SupineMimoEnv(LeanMimoEnv):
                                       limb_scale=self._limb_scale,
                                       distal_mass=self._distal_mass,
                                       flexion=self._flexion,
-                                      flexion_stiffness=self._flexion_stiffness)
+                                      flexion_stiffness=self._flexion_stiffness,
+                                      # ★筋肉モデルでは筋力が fmax にあり、gear は毎ステップ
+                                      #   上書きされる。補正が実効を持つよう渡す（2026-07-25）。
+                                      actuation_model=getattr(self, "actuation_model", None))
 
         # 【2026-07-25】床のころがり摩擦（感度分析用）。既定は触らない。
         # ★MIMoの床は friction=[1.0, 0.005, 0.0001]・condim=3 ＝「すべり摩擦しか

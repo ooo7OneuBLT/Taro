@@ -412,6 +412,62 @@ def apply_distal_mass(model, scale=1.0, verbose=True):
               f"({n}body) [SENSITIVITY: 新生児の体節質量比は実測が存在しない]")
 
 
+# ★★【筋力の読み書き・2026-07-25】★これを間違えていて、首と四肢の筋力補正が
+# **筋肉モデルでは一度も効いていなかった**。
+#
+# 【何が起きていたか】太郎の補正は `model.actuator_gear[aid, 0]` を書き換えていた。
+# ところが MuscleModel は**毎ステップ gear を上書きする**：
+#     muscle.py:331  self.env.model.actuator_gear[self.actuators, 0] = self.joint_torque.copy()
+#     （「gear は単なるスカラー倍率なので、計算したトルクをそこに書いて
+#       action=1 を出す」という設計。XMLとgymインタフェースを共通化するため）
+# ＝★書き換えた値は次のステップで消える。ログには出るが実効ゼロ。
+#
+# 筋力の実体は **actuator_user[:, 1] / [:, 2]（fmax_neg / fmax_pos）** から読まれ、
+# `actuation_model.fmax`（180次元 = 90関節 × neg/pos）に保持される。
+# ⚠️`actuator_user` を後から変えても反映されない（初期化時に一度読むだけ）ので、
+#   `actuation_model.fmax` を直接書き換える。
+#
+# 【症状（これが出たら疑う）】
+#   ・筋力の係数を16倍振っても、学習後のモデルの重みが**完全一致**する
+#   ・`[limbs] median gear scale x0.044` のようなログは出るのに挙動が変わらない
+# → 検証は `E/scripts/e_condition_check.py`（チェックリスト項43）。
+
+def actuator_strength(model, aid, actuation_model=None):
+    """アクチュエータの「筋力」を返す。筋肉モデルなら fmax、それ以外は gear。
+
+    ★筋肉モデルでは neg/pos の2本があるので**大きい方**を返す（関節を動かせる強さの上限）。
+    """
+    import numpy as np
+    f = getattr(actuation_model, "fmax", None)
+    if f is None:
+        return abs(float(model.actuator_gear[aid, 0]))
+    f = np.asarray(f, dtype=float)
+    if f.ndim == 0:                      # キャリブレーションファイルが無いとスカラーになる
+        return float(f)
+    n = int(getattr(actuation_model, "n_actuators", len(f) // 2))
+    return max(float(f[aid]), float(f[aid + n]))
+
+
+def scale_actuator_strength(model, aid, factor, actuation_model=None):
+    """アクチュエータの筋力を factor 倍する。筋肉モデルなら fmax、それ以外は gear。
+
+    ⚠️スカラーの fmax は**全身に一律**なので、その場合は何もしない（関節ごとに
+      調整できないため。黙って全身を変えると別の逸脱になる）。
+    """
+    import numpy as np
+    f = getattr(actuation_model, "fmax", None)
+    if f is None:
+        model.actuator_gear[aid, 0] *= float(factor)
+        return True
+    f = np.asarray(f)
+    if f.ndim == 0:
+        return False                     # 関節ごとに変えられない
+    n = int(getattr(actuation_model, "n_actuators", len(f) // 2))
+    f[aid] *= float(factor)
+    f[aid + n] *= float(factor)
+    return True
+
+
 # 【生理的屈曲（physiological flexion）・2026-07-25】
 # 新生児は放っておいても股・膝・肘が曲がっている（屈曲拘縮）。一次文献の実測値：
 #   股関節 -32度  Ishida et al. 1997, Rev Bras Ortop 32(1):37-45
@@ -484,7 +540,7 @@ def apply_physiological_flexion(model, age=0.0, stiffness=None, verbose=True):
 
 def apply_runtime_corrections(model, data, age, neck=True, limbs=True, head_mass=True,
                               limb_scale=1.0, distal_mass=1.0, flexion=False,
-                              flexion_stiffness=None):
+                              flexion_stiffness=None, actuation_model=None):
     """モデル構築後に上書きする補正（筋力＝アクチュエータのgear）。
 
     - **首の筋力**（`infant_neck`）：MIMoは gear を geom の体積から計算するため、
@@ -503,13 +559,14 @@ def apply_runtime_corrections(model, data, age, neck=True, limbs=True, head_mass
     apply_distal_mass(model, float(distal_mass))
     if neck:
         from infant_neck import apply_newborn_neck
-        apply_newborn_neck(model, data, float(age))
+        apply_newborn_neck(model, data, float(age), actuation_model=actuation_model)
     if limbs:
         from infant_limbs import apply_limb_inversion_fix
         # limb_scale＝四肢の筋力補正の感度分析用の係数（1.0＝補正そのまま）。
         # この補正の目標値に根拠が無いことが2026-07-25の文献調査で判明したため、
         # 「結論がこの仮定に依存していないか」を振って確かめられるようにしてある。
-        apply_limb_inversion_fix(model, data, float(age), scale=float(limb_scale))
+        apply_limb_inversion_fix(model, data, float(age), scale=float(limb_scale),
+                                 actuation_model=actuation_model)
     # 生理的屈曲は筋力補正の後（gear と独立なので順序は結果に影響しないが、
     # 「筋力→姿勢」の順で読めるようにここに置く）。既定OFF＝目視で確認してから既定ONにする。
     if flexion:

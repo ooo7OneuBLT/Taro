@@ -65,11 +65,18 @@ def head_gravity_torque(model, data):
     return float(mass * GRAVITY * arm), float(mass), arm
 
 
-def lift_ratio(model, data):
-    """持ち上げ能力比＝首のトルク ÷ 頭の重力モーメント。<1 なら頭を持ち上げられない。"""
+def lift_ratio(model, data, actuation_model=None):
+    """持ち上げ能力比＝首の筋力 ÷ 頭の重力モーメント。<1 なら頭を持ち上げられない。
+
+    ⚠️★【2026-07-25 修正】筋力を `actuator_gear` から読んでいたが、**MuscleModel は
+    毎ステップ gear を上書きする**（muscle.py:331）ので、gear を読むと
+    「今まさに出力しているトルク」を読んでしまい、筋力の指標にならない。
+    筋肉モデルでは `actuation_model.fmax` を読む（→ infant_body.actuator_strength）。
+    """
     tau, _, _ = head_gravity_torque(model, data)
     aid = [i for i in range(model.nu) if model.actuator(i).name == TILT_ACTUATOR][0]
-    gear = abs(float(model.actuator_gear[aid, 0]))
+    from infant_body import actuator_strength
+    gear = actuator_strength(model, aid, actuation_model)
     return gear / max(tau, 1e-9), gear, tau
 
 
@@ -87,13 +94,13 @@ def target_ratio_for_age(age, birth_ratio=TARGET_RATIO_AT_BIRTH,
 
 
 def apply_newborn_neck(model, data, age, birth_ratio=TARGET_RATIO_AT_BIRTH,
-                       settle_age=HEAD_CONTROL_AGE, verbose=True):
+                       settle_age=HEAD_CONTROL_AGE, verbose=True, actuation_model=None):
     """首(tilt)のgearを、月齢に応じた目標比になるよう補正する。
 
     ⚠️**恣意的な逸脱**。ROM・swivel・tilt_side・他の関節は一切変更しない。
     Returns: (before_ratio, after_ratio) 補正しない場合は after=before。
     """
-    before, gear, tau = lift_ratio(model, data)
+    before, gear, tau = lift_ratio(model, data, actuation_model)
     if age >= settle_age:
         if verbose:
             print(f"[neck] age={age}mo >= {settle_age}mo: no correction (ratio {before:.2f})")
@@ -101,11 +108,15 @@ def apply_newborn_neck(model, data, age, birth_ratio=TARGET_RATIO_AT_BIRTH,
     target = target_ratio_for_age(age, birth_ratio, settle_age, natural_ratio=before)
     aid = [i for i in range(model.nu) if model.actuator(i).name == TILT_ACTUATOR][0]
     new_gear = target * tau
-    sign = np.sign(model.actuator_gear[aid, 0]) or 1.0
-    model.actuator_gear[aid, 0] = sign * new_gear
-    after, _, _ = lift_ratio(model, data)
+    # ★筋力の書き換えは infant_body 経由（筋肉モデルなら fmax、それ以外は gear）。
+    #   ⚠️直接 actuator_gear を書くと MuscleModel では次のステップで消える。
+    from infant_body import scale_actuator_strength
+    factor = new_gear / max(gear, 1e-12)
+    ok = scale_actuator_strength(model, aid, factor, actuation_model)
+    after, _, _ = lift_ratio(model, data, actuation_model)
     if verbose:
+        note = "" if ok else " ⚠️[fmaxがスカラー＝関節ごとに変えられないため未適用]"
         print(f"[neck] age={age}mo: lift ratio {before:.2f} -> {after:.2f} "
-              f"(gear {gear:.3f} -> {new_gear:.3f} N.m, head torque {tau:.3f} N.m) "
-              f"[ARBITRARY: see deviation list]")
+              f"(strength {gear:.3f} -> {new_gear:.3f} N.m, head torque {tau:.3f} N.m)"
+              f"{note} [ARBITRARY: see deviation list]")
     return before, after

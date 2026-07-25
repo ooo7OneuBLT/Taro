@@ -75,7 +75,7 @@ def _descendants(model, bid):
     return ids
 
 
-def actuator_ratios(model, data):
+def actuator_ratios(model, data, actuation_model=None):
     """各アクチュエータの「筋力 ÷ その関節から先の重力モーメント」を返す。"""
     out = {}
     for i in range(model.nu):
@@ -89,8 +89,12 @@ def actuator_ratios(model, data):
         com = sum(model.body(k).mass[0] * data.xipos[k] for k in ids) / mass
         arm = float(np.linalg.norm((com - data.xanchor[jid])[:2]))
         tau = mass * G * arm
-        out[model.actuator(i).name] = (abs(float(model.actuator_gear[i, 0])),
-                                       tau, abs(float(model.actuator_gear[i, 0])) / max(tau, 1e-9))
+        # ⚠️★【2026-07-25 修正】筋力を actuator_gear から読んでいたが、MuscleModel は
+        #   毎ステップ gear を上書きする（muscle.py:331）ので筋力の指標にならない。
+        #   筋肉モデルでは actuation_model.fmax を読む（infant_body.actuator_strength）。
+        from infant_body import actuator_strength
+        _s = actuator_strength(model, i, actuation_model)
+        out[model.actuator(i).name] = (_s, tau, _s / max(tau, 1e-9))
     return out
 
 
@@ -107,7 +111,7 @@ def _reference_ratios(age_ref):
 
 
 def apply_limb_inversion_fix(model, data, age, reference_age=REFERENCE_AGE,
-                             verbose=True, scale=1.0):
+                             verbose=True, scale=1.0, actuation_model=None):
     """四肢のgearを下げ、age の比が reference_age の比を超えないようにする。
 
     首(head_*)・体幹(chest_*)は対象外（前者は別ロジック、後者は逆転していない）。
@@ -127,9 +131,10 @@ def apply_limb_inversion_fix(model, data, age, reference_age=REFERENCE_AGE,
         return dict(n_fixed=0, median_scale=1.0)
 
     ref = _reference_ratios(reference_age)
-    cur = actuator_ratios(model, data)
+    cur = actuator_ratios(model, data, actuation_model)
     scales, before, after = [], [], []
     n = 0
+    _unapplied = 0
     for i in range(model.nu):
         name = model.actuator(i).name
         if name not in cur or name not in ref:
@@ -142,14 +147,19 @@ def apply_limb_inversion_fix(model, data, age, reference_age=REFERENCE_AGE,
             after.append(r_now)
             continue
         s = (r_ref / r_now) * float(scale)   # 逆転量そのもの＝これで割る（×感度分析の係数）
-        model.actuator_gear[i, 0] *= s
+        # ★筋力の書き換えは infant_body 経由（筋肉モデルなら fmax、それ以外は gear）。
+        from infant_body import scale_actuator_strength
+        if not scale_actuator_strength(model, i, s, actuation_model):
+            _unapplied += 1
         scales.append(s)
         after.append(r_now * s)
         n += 1
     if verbose:
         ms = float(np.median(scales)) if scales else 1.0
         _tag = "" if abs(float(scale) - 1.0) < 1e-9 else f" [SENSITIVITY scale=x{scale}]"
-        print(f"[limbs] age={age}mo: fixed {n} actuators, median gear scale x{ms:.3f} "
+        if _unapplied:
+            _tag += f" ⚠️[{_unapplied}件未適用＝fmaxがスカラーで関節ごとに変えられない]"
+        print(f"[limbs] age={age}mo: fixed {n} actuators, median strength scale x{ms:.3f} "
               f"(ratio median {np.median(before):.2f} -> {np.median(after):.2f}) "
               f"[target = same relative strength as age {reference_age:.0f}mo]{_tag}")
     return dict(n_fixed=n, median_scale=float(np.median(scales)) if scales else 1.0,
