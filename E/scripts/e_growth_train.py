@@ -382,10 +382,16 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
     if _AGE is not None:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         from e_body_config import body_scale_custom_from_env, shape_enabled
+        from e_body_config import head_elongation_from_env
         if shape_enabled():
             _custom = body_scale_custom_from_env(float(_AGE))
             if _custom:
                 _age_kw["custom_measurements"] = _custom
+        # ★頭の楕円化（MIMoの頭は球で、真上から見た長さが人間より15%短い）。
+        #   従来おもちゃ環境にしか無く、学習では頭が球のままだった。
+        _he = head_elongation_from_env()
+        if abs(_he - 1.0) > 1e-9 and _SUPINE:
+            _age_kw["head_elongation"] = _he
         else:
             print("[body] 体型補正OFF（E_SHAPE=0）＝素のmimoGrowth体型", flush=True)
     _act_kw = {}

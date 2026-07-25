@@ -56,9 +56,15 @@ class SupineMimoEnv(LeanMimoEnv):
             （同じ初期姿勢を予測するだけで当たる、という汚染を防ぐ＝落とし穴チェック項9の症状）。
     """
 
-    def __init__(self, settle_steps=100, jitter=0.01, **kwargs):
+    def __init__(self, settle_steps=100, jitter=0.01, head_elongation=1.0, **kwargs):
         self._settle_steps = settle_steps
         self._jitter = jitter
+        # 【2026-07-25】頭の楕円化。MIMoの頭は球で、頭囲は正しいが真上から見た長さが
+        # 人間より15%短い（10.8cm、人間12.0cm）。体軸方向にだけ伸ばして人間に合わせる。
+        # ⚠️この処理は従来 e_toy_env.py（おもちゃ環境）にしかなく、**学習に使うこの環境では
+        # 頭が球のまま**だった。体型補正と同じ「身体の設定が環境に散らばっている」問題。
+        # 処理の実体は taro_core の infant_body.elongate_head（＝太郎の身体そのもの）。
+        self._head_elongation = float(head_elongation)
         super().__init__(**kwargs)
 
         # --- 仰向けにする（roll_over.py の supine と同じ式）---
@@ -69,6 +75,18 @@ class SupineMimoEnv(LeanMimoEnv):
         for _ in range(self._settle_steps):
             mujoco.mj_step(self.model, self.data)
         self.init_position = self.data.qpos.copy()
+
+    def _edit_spec(self, spec):
+        """LeanMimoEnv のフック：モデル構築前に spec を編集する。
+        頭の楕円化を taro_core の実装で行う（身体の定義は core、適用は環境側）。"""
+        import os, sys
+        _core = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                             os.pardir, os.pardir, "taro_core")
+        _body = os.path.join(_core, "src", "body")
+        if _body not in sys.path:
+            sys.path.insert(0, _body)
+        from infant_body import elongate_head
+        elongate_head(spec, getattr(self, "_head_elongation", 1.0))
 
     def reset_model(self):
         self.set_state(self.init_qpos, self.init_qvel)

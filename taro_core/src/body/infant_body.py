@@ -99,6 +99,84 @@ _GROUPS = {
 }
 
 
+def elongate_head(spec, ratio):
+    """頭を体軸方向に伸ばして球→楕円にする（頭囲は変えない）。
+
+    【なぜ要るか】MIMoの頭は**球**で、直径は頭囲(34cm)から計算される＝10.8cm。
+    しかし**人間の頭は楕円**で、頭囲34cmでも頭頂〜顎は約12.5cmある。
+    ＝MIMoは頭囲が正しいのに、**真上から見た頭が15%小さい**。
+    この差を四肢を縮めて埋めようとすると身長が犠牲になり、身長を優先すると頭囲が壊れる。
+    **球のままでは頭囲・身長・見かけの3つを同時に満たす解が無い**。
+
+    【何をするか】左右方向（＝頭囲を決める軸）は変えず、MIMoローカルのz（頭頂方向＝
+    仰向けでは体軸方向）だけを ratio 倍する。
+      球   [r, 0, 0]        頭囲 2πr        真上から見た長さ 2r
+      楕円 [r, r, r*ratio]  頭囲 2πr（不変） 真上から見た長さ 2r*ratio
+    ratio = 12.5/10.8 ≒ 1.16 で人間の新生児に一致する。
+
+    【なぜ core にあるか、2026-07-25】この処理は `E/scripts/e_toy_env.py`（おもちゃ環境）
+    にしかなく、**学習に使う仰向け環境では頭が球のまま**だった。実測で
+    頭の長さ10.8cm（人間12.0cm）・頭/身長0.224（人間0.240）とズレ、体型補正で身長を
+    合わせると「新生児に見えない」原因になっていた。体型補正と**同じ構造の問題**
+    （身体の設定が環境に散らばっている）。方針＝[[feedback-core-vs-experiment-placement]]。
+
+    ⚠️目のカメラ位置は head の geom size から計算されるが、その計算は成長モジュール
+    （このフックより前）で終わっている。z方向にだけ伸ばすので目が頭に埋もれることは
+    無いはずだが、**視界の画像で必ず確認すること**。
+
+    Args:
+        spec: MuJoCo の MjSpec（compile 前）。
+        ratio: 体軸方向の伸長率。1.0 なら何もしない。
+    """
+    import mujoco
+    import numpy as np
+    if abs(float(ratio) - 1.0) < 1e-9:
+        return False
+    for g in spec.geoms:
+        if g.name != "head":
+            continue
+        r = float(np.asarray(g.size).ravel()[0])
+        g.type = mujoco.mjtGeom.mjGEOM_ELLIPSOID
+        g.size = [r, r, r * ratio]
+        print(f"[body] 頭を楕円化: 半径{r*100:.2f}cm → "
+              f"[{r*100:.2f}, {r*100:.2f}, {r*ratio*100:.2f}]cm "
+              f"（頭囲は不変、真上から見た長さ {2*r*ratio*100:.2f}cm）")
+        return True
+    print("[body] ⚠️頭のgeomが見つからず、楕円化をスキップした")
+    return False
+
+
+_SCHEMA_BACKUP = None
+
+
+def _restore_growth_schema():
+    """★MIMo側のバグ対策：`mimoGrowth` のスキーマ（グローバル辞書）を元に戻す。
+
+    【バグの中身、2026-07-25 に発見】`MIMo/mimoGrowth/growth.py:167` は
+        schema = SCHEMA_V2 if mimo_version == "v2" else SCHEMA
+        if custom:
+            schema["geoms"][geom_name]["size"][index] = custom_size
+    と書かれており、`schema` は**コピーでなくグローバル辞書への参照**。つまり
+    `custom_measurements` を渡すたびに**グローバルの SCHEMA_V2 が破壊的に書き換わる**。
+    結果、同じプロセスで環境を作り直すと補正が**累積**して体が縮み続ける：
+        1回目 元の値×0.45 → 2回目 (0.45倍された値)×0.45 → 3回目 0.091倍 …
+    実測：同じ設定で身長 35.6cm → 26.8cm → 26.8cm、体重 1.442 → 1.009 → 0.850kg。
+
+    【なぜ MIMo を直さないか】MIMo は `.gitignore` 済み（Git管理外）で、書き換えると
+    再現性が失われる方針。首の筋力補正などと同様に**太郎側で実行時に防御**する。
+
+    毎回スキーマを初期状態へ戻してから custom を適用すれば累積しない。
+    """
+    global _SCHEMA_BACKUP
+    import copy
+    from mimoGrowth.schema.schema import SCHEMA_V2
+    if _SCHEMA_BACKUP is None:
+        _SCHEMA_BACKUP = copy.deepcopy(SCHEMA_V2)   # 初回＝まだ汚れていない状態を保存
+    else:
+        SCHEMA_V2.clear()
+        SCHEMA_V2.update(copy.deepcopy(_SCHEMA_BACKUP))
+
+
 def body_scale_custom(age, scales=None, verbose=True):
     """体の部位ごとに geom の寸法を係数倍する custom 辞書を作る。
 
@@ -117,6 +195,7 @@ def body_scale_custom(age, scales=None, verbose=True):
 
     if scales is None:
         scales = NEWBORN_SHAPE_DEFAULTS
+    _restore_growth_schema()   # ★累積バグ対策（上の説明を参照）
     base = get_growth_params(age, "v2")["geoms"]
     custom, note = {}, []
     for grp, (names, idx) in _GROUPS.items():
