@@ -119,13 +119,31 @@ _INVTRAJ = os.environ.get("E_INVTRAJ", "0") == "1"  # 1=各チェックポイン
 # 内発的動機の切替（既定＝従来の「予測しやすさ」）。Cは触覚なし・margin+51が確立した唯一の
 # "うまくいくと分かっている環境"なので、ここで動機だけを差し替えれば**触覚という交絡なしに
 # 動機の良し悪しだけ**を判定できる（D0では予測対象の89%が触覚で交絡していた）。
-#   predict  : 1/(1+誤差)＝予測しやすい状態を求める（従来）
-#   progress : pe_slow−pe_fast＝学習進度（Oudeyerの好奇心。誤差が"減っている"ことを求める）
-_REWARD = os.environ.get("E_REWARD", "predict")
-# NEを相対化するか（既定＝従来の絶対閾値）。従来は報酬の絶対値に固定閾値(<0.1で探索/>0.3で活用)を
-# 当てるので、値域の違う報酬関数を入れると壊れる（学習進度≒0.04は常に「報酬ゼロ」と誤認される）。
+#   progress : pe_slow−pe_fast＝学習進度（Oudeyerの好奇心。誤差が"減っている"ことを求める）★既定
+#   predict  : 1/(1+誤差)＝予測しやすい状態を求める（旧・⚠️既知の欠陥あり。下記）
+# 【★2026-07-25 既定を predict → progress に変更】
+#   predictは「大きく動くほど感覚変化がノイズを超えて予測しやすい」ため**大行動バイアス**を持つ
+#   （逸脱リストで【最重要・報酬の根本欠陥】と自分で記録済み＝暗い部屋問題の一種）。
+#   にもかかわらず既定が predict のままで、margin+58.8 の学習もそれで回っていた。
+#   実測（age=0・仰向け・白紙7000step・筋肉モデル・同一seed）：
+#     | 報酬 | margin | うつ伏せ% | 体幹回転(最大) | |qvel| | jerk |
+#     | predict  | +58.8 | **57.5%** | 105.8°(最大180.0°) | 0.722 | 2501 |
+#     | progress | +45.9 | **1.1%**  | 52.6°(最大91.9°)   | 0.256 | 1123 |
+#   ＝報酬を1つ変えるだけで**うつ伏せが52分の1**、動きの量1/2.8、jerk 1/2.2。
+#   marginが下がるのは想定内（predictは指標を水増しする）。仰向けを保ったままC5当時(+48)と
+#   同水準を達成＝**こちらが人間的な条件での本来の姿**。
+#   → [検証の落とし穴チェックリスト 項29](../../doc/検証の落とし穴チェックリスト.md)
+#      「良い方を既定値にする」に従い既定を変更。predictは対照実験用にのみ残す。
+_REWARD = os.environ.get("E_REWARD", "progress")
+if _REWARD == "predict":
+    print("⚠️ E_REWARD=predict は【既知の欠陥】があります（大行動バイアス＝"
+          "大きく動くほど得なので暴れる。実測でうつ伏せ57.5%・jerk2501）。"
+          "対照実験でなければ progress を使ってください。", flush=True)
+# NEを相対化するか。★2026-07-25：既定を1に変更（progressと対で使う必要があるため）。
+# 従来は報酬の絶対値に固定閾値(<0.1で探索/>0.3で活用)を当てるので、値域の違う報酬関数を
+# 入れると壊れる（学習進度≒0.04は常に「報酬ゼロ」と誤認される）。
 # relative=Trueは「長期基準線と比べていつもより良いか」で決める＝尺度非依存（D0で必要性が判明）。
-_NE_REL = os.environ.get("E_NE_RELATIVE", "0") == "1"
+_NE_REL = os.environ.get("E_NE_RELATIVE", "1") == "1"
 # 【2026-07-15】姿勢と触覚の切替。どちらも既定OFF＝従来の立位・触覚なしのCと完全に同じ。
 #   E_SUPINE=1 : 仰向けで開始する。録画で判明した通り、既定(立位)のCは**開始3秒で転倒し、
 #     以降ずっと床でもがいている**。margin+51はその状態で出た数字。仮説＝「Cが成功したのは
@@ -350,6 +368,26 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
                                      "star_over_random", "model_err_star"])
 
     _age_kw = {"age": float(_AGE)} if _AGE else {}  # 【taro-C5】月齢指定で成長モジュール適用
+    # 【★2026-07-25】体型補正（新生児プロポーション）を**学習でも**適用する。
+    # 【なぜ今まで効いていなかったか】体型補正は `e_toy_env.py`（おもちゃ環境）の中に
+    #   書かれており、**おもちゃ環境でしか効かなかった**。学習は仰向け環境
+    #   （SupineMimoEnv）を使うので、太郎は**成人プロポーションのまま学習していた**
+    #   （mimoGrowth の age=0 は「大きさは新生児・比率は成人」。上肢/下肢=0.77 に対し
+    #    人間の新生児は 1.07＝腕の方が長い＝**逆転**）。
+    #   Viewerで「足が根元からすごい動く」とユーザーが指摘したのが発覚のきっかけ
+    #   （脚が相対的に長いと、股関節が少し回るだけで足先が大きく振れる）。
+    # 体型の定義は core（`taro_core/src/body/infant_body.py`）へ移設済み。ここは
+    # 環境変数の読み取り（`e_body_config.py`）を経由して受け取るだけ。
+    # ⚠️E_SHAPE=0 で補正を切れる（＝素のmimoGrowth体型＝アブレーション／過去実験の再現）。
+    if _AGE is not None:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from e_body_config import body_scale_custom_from_env, shape_enabled
+        if shape_enabled():
+            _custom = body_scale_custom_from_env(float(_AGE))
+            if _custom:
+                _age_kw["custom_measurements"] = _custom
+        else:
+            print("[body] 体型補正OFF（E_SHAPE=0）＝素のmimoGrowth体型", flush=True)
     _act_kw = {}
     if _MUSCLE:   # 【筋肉モデル】拮抗筋2本/関節・活性化ダイナミクス・引くだけ
         from mimoActuation.muscle import MuscleModel
@@ -565,8 +603,33 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
         n_meas = int(os.environ.get("E_MEASURE_STEPS", "6000"))
         _m, _d = env.unwrapped.model, env.unwrapped.data
         _dt = _m.opt.timestep * env.unwrapped.frame_skip
-        _dofs = [_m.jnt_dofadr[i] for i in range(_m.njnt)
-                 if _m.jnt_type[i] == mujoco.mjtJoint.mjJNT_HINGE]
+        _hinges = [i for i in range(_m.njnt) if _m.jnt_type[i] == mujoco.mjtJoint.mjJNT_HINGE]
+        _dofs = [_m.jnt_dofadr[i] for i in _hinges]
+
+        # 【部位別の測定・2026-07-25】全関節の平均だけでは「どこが動いているか」が見えない。
+        # Viewerでユーザーが「足が根元からすごい動く。何回リセットしても」と指摘して発覚
+        # （[[feedback-watch-dont-just-measure]]＝目視が測定器の穴を見つけた、本日2回目）。
+        # ⚠️MIMoの関節名は紛らわしい：`hip_lean1`等（左右が付かない）は**体幹の曲げ**、
+        #   `right_hip1`等は**脚の付け根（股関節）**。先に体幹側を判定しないと混ざる。
+        def _joint_group(nm):
+            n = nm.replace("robot:", "")
+            if n.startswith(("left_eye", "right_eye")):        return "眼"
+            if n.startswith("head"):                            return "頭/首"
+            if n.startswith("chest") or n.startswith("hip_"):   return "体幹"   # ←先に判定
+            if "shoulder" in n:                                 return "肩"
+            if "elbow" in n:                                    return "肘"
+            if n.startswith(("left_hand", "right_hand")):       return "手首"
+            if any(k in n for k in ("_th_", "_ff_", "_mf_", "_rf_", "_lf_")): return "手指"
+            if any(k in n for k in ("hip1", "hip2", "hip3")):   return "★脚の付け根"
+            if "knee" in n:                                     return "膝"
+            if "foot" in n:                                     return "足首"
+            if "toe" in n:                                      return "つま先"
+            return "その他"
+
+        _grp_idx = {}
+        for _pos, _ji in enumerate(_hinges):
+            _grp_idx.setdefault(_joint_group(_m.jnt(_ji).name), []).append(_pos)
+        _grp_qvel = {g: [] for g in _grp_idx}
         _act_model = getattr(env.unwrapped, "actuation_model", None)
 
         obs, _ = env.reset(seed=seed)
@@ -593,7 +656,10 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
                 if prev_qacc is not None:
                     jerks.append(float(np.abs((qacc - prev_qacc) / _dt).mean()))
                 prev_qacc = qacc
-                qvels.append(float(np.abs(_d.qvel[_dofs]).mean()))
+                _qv = np.abs(_d.qvel[_dofs])
+                qvels.append(float(_qv.mean()))
+                for _g, _ix in _grp_idx.items():
+                    _grp_qvel[_g].append(float(_qv[_ix].mean()))
                 rots.append(_trunk_rotation_deg(_d, R0))
                 tilts.append(_head_tilt_deg(_m, _d))
                 hands.append(_hand_dist(_m, _d))
@@ -619,6 +685,13 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
         print(f"  ★体幹の回転={np.nanmean(rots_a):.1f}度(最大{np.nanmax(rots_a):.1f})  "
               f"仰向けでない時間={float(np.mean(rots_a > 90.0))*100:.1f}%")
         print("  （比較：学習なしノイズだけの実測＝K100でうつ伏せ36.2%、K10で65.0%）")
+        print("  ── 部位別の |関節角速度|（どこが動いているか）──")
+        _rank = sorted(((np.mean(v), g, len(_grp_idx[g])) for g, v in _grp_qvel.items() if v),
+                       reverse=True)
+        _tot = sum(r[0] * r[2] for r in _rank) or 1.0
+        for _v, _g, _n in _rank:
+            _bar = "█" * max(0, min(30, int(_v / (_rank[0][0] or 1) * 30)))
+            print(f"    {_g:12s} {_v:7.4f} ({_n:2d}関節) {_bar}")
         return  # 測定モードは学習・保存・録画に進まない
 
     # 【測定器の分離・2026-07-23】evaluate/agency_probe/inverse_probe/inverse_exec_probe/

@@ -170,9 +170,9 @@ def run(seed=0, n_train=3600, ckpt=600, n_eval=60):
         return z, kl, rc, nh
 
     def act_mean(z):
-        pm = torch.tanh(brain.motor_head(z))
-        w, cere_a, _ = cereb.gate(z, pm)
-        return (1.0 - w) * pm + w * cere_a
+        # 【2026-07-25】太郎の act_deterministic を呼ぶだけに変更（core へ一元化）。
+        # 旧実装は同じ式を手書きしていた＝数値は完全に同一。
+        return brain.act_deterministic(z, cerebellum=cereb)
 
     def step_k(a):
         o, term = state["obs"], False

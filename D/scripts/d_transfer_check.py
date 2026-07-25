@@ -64,9 +64,9 @@ def evaluate(env, fusion, tfusion, brain, emb_proj, nat_head, cereb, n_eval=80):
         return z, kl, rc, nh
 
     def act_mean(z):
-        pm = torch.tanh(brain.motor_head(z))
-        w, cere_a, _ = cereb.gate(z, pm)      # 保存モデルは小脳ONで学習済み
-        return (1.0 - w) * pm + w * cere_a
+        # 【2026-07-25】太郎の act_deterministic を呼ぶだけに変更（core へ一元化）。
+        # 旧実装は同じ式を手書きしていた＝数値は完全に同一。保存モデルは小脳ONで学習済み。
+        return brain.act_deterministic(z, cerebellum=cereb)
 
     def step_k(a):
         o, term = obs, False

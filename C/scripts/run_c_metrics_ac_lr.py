@@ -400,11 +400,9 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
 
     def act_mean(z):
         # 決定的な行動平均（評価・agency用、ノイズなし）。小脳ONなら自動化ブレンドを適用。
-        pm = torch.tanh(brain.motor_head(z))
-        if not _CEREB:
-            return pm
-        w, cere_a, _ = cereb.gate(z, pm)
-        return (1.0 - w) * pm + w * cere_a
+        # 【2026-07-25】太郎の act_deterministic を呼ぶだけに変更（core へ一元化）。
+        # 旧実装は同じ式を手書きしていた＝数値は完全に同一。
+        return brain.act_deterministic(z, cerebellum=(cereb if _CEREB else None))
 
     def infer_goal_action(z, clp, init_mean, g, n_steps=15, lr_inf=0.1):
         # Goal Babbling: 凍結した順モデル(nat_head)を反転し、望む感覚 g に届く行動を推論。
