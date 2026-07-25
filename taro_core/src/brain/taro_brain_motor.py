@@ -274,7 +274,7 @@ class TaroBrainWithMotor(TaroBrain):
 
     def enable_spinal_babble(self, n_act, leg_r=(), leg_l=(), arm_r=(), arm_l=(),
                              beta=0.8, synergy=False, syn_w=0.6, seed=None,
-                             antagonist=False, co_activation=0.3):
+                             antagonist=False, co_activation=0.3, pair_offset=0):
         """脊髄CPG（運動性喃語の探索ノイズ源）を太郎の中で有効化する。以後 explore() は
         白色ガウスでなく、色付きノイズ（1/f^β）＋粗いシナジーで探索する。
 
@@ -289,7 +289,8 @@ class TaroBrainWithMotor(TaroBrain):
         0.3=軽く固める、0.9=関節ロック）。詳細は spinal_cord/cpg.py の antagonist_map。
         """
         from spinal_cord.cpg import CPG
-        self.spinal_cpg = CPG(n_act, leg_r, leg_l, arm_r, arm_l, seed=seed)
+        self.spinal_cpg = CPG(n_act, leg_r, leg_l, arm_r, arm_l, seed=seed,
+                              pair_offset=pair_offset)
         self._babble_beta = beta
         self._babble_synergy = synergy
         self._babble_syn_w = syn_w

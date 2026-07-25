@@ -56,14 +56,43 @@ class ColoredNoiseGenerator:
 
 
 class CPG:
-    """複数関節をまとめて駆動するCPG本体。独立ノイズ＋粗いシナジー（脚・腕）を合成して
+    """複数関節をまとめて駆動するCPG本体。独立ノイズ＋粗い相関（脚・腕）を合成して
     n_act次元の babbling 出力を1回のsample()で返す（呼び出し側は低頻度化キャッシュだけ
     考えればよい構成、2026-07-23の整理でd_c5_motor_quality.pyから抽出）。
 
+    ⚠️★【2026-07-25 名前についての重要な訂正】引数名は歴史的経緯で `synergy` だが、
+    **これは人間の筋シナジーの実装ではない**。
+        人間のシナジー ＝ 脊髄回路が**運動出力そのもの**を制約する（Tier1）
+        ここの実装     ＝ ★**探索ノイズを相関させるだけ**
+                          学習後の方策は全次元を自由に出せる＝決定的な行動には一切効かない
+    ＝「人間にある機構を実装済み」と誤認して寝返り問題の対策に使おうとし、
+      効かない理由を別の場所に探し続けた（→ 検証の落とし穴チェックリスト 項42）。
+    ★正しい実装は「方策の出力を低次元のシナジー空間に通す」（工学の先例 SAR の形）で、
+      これは未実装。やることリストの課題。
+    ⚠️既定は OFF。理由は「効かなかったから」ではなく**人間の機構を再現していないから**
+      （「効かないからOFF」は項38が禁じている工学的判断）。
+
     synergy=False（既定）なら各関節は完全独立＝従来のColoredNoiseGeneratorと1バイト差なし。
+
+    【pair_offset・2026-07-25】筋肉モード（MuscleModel）対応。
+    MuscleModel の行動は 2*n_joint 次元で、**前半が負方向筋（曲げる側）・後半が正方向筋
+    （伸ばす側）**。leg_r 等のindexは関節番号（0..n_joint-1）なので、そのままでは
+    「曲げる側の筋」にしかシナジーが掛からない。pair_offset=n_joint を渡すと、
+    対になる筋 i+offset にも **符号を反転して** 同じシナジーを混ぜる。
+
+    ★符号を反転するのが要点。同符号で入れると「曲げる筋と伸ばす筋を同時に強める」＝
+      **共収縮（関節が固まる）**になり、「脚がまとまって曲がる／伸びる」にならない。
+      新生児の kicking は股・膝・足首がまとまって屈曲し、まとまって伸展する
+      （＝ユーザーが自発運動の動画で観察した「伸ばす・縮めるの繰り返し」）。
+
+    ⚠️これを入れるまで、筋肉モードでは呼び出し側がシナジーを**強制OFF**にしていた
+      （e_growth_train.py の `_use_syn = _E_SYNERGY and not _MUSCLE`）。
+      ＝文献が一致して言う新生児の特徴「まとめてしか動かせない」が、
+      学習に使う設定では一度も効いていなかった。
     """
 
-    def __init__(self, n_act, leg_r=(), leg_l=(), arm_r=(), arm_l=(), seed=None):
+    def __init__(self, n_act, leg_r=(), leg_l=(), arm_r=(), arm_l=(), seed=None,
+                 pair_offset=0):
         self.gen = ColoredNoiseGenerator(n_act, seed=seed)
         s = (lambda k: seed + k) if seed is not None else (lambda k: None)
         self.syn_leg = ColoredNoiseGenerator(1, seed=s(1))
@@ -71,6 +100,18 @@ class CPG:
         self.syn_arm_l = ColoredNoiseGenerator(1, seed=s(3))
         self._leg_r, self._leg_l = list(leg_r), list(leg_l)
         self._arm_r, self._arm_l = list(arm_r), list(arm_l)
+        self._pair_offset = int(pair_offset)
+
+    def _blend(self, gen_np, idx, s, syn_w):
+        """関節indexの集合 idx にシナジー信号 s を syn_w の重みで混ぜる。
+        pair_offset があれば対になる筋（伸ばす側）に -s を混ぜる。"""
+        n = len(gen_np)
+        for i in idx:
+            if i < n:
+                gen_np[i] = (1 - syn_w) * gen_np[i] + syn_w * s
+            j = i + self._pair_offset
+            if self._pair_offset and j < n:
+                gen_np[j] = (1 - syn_w) * gen_np[j] + syn_w * (-s)
 
     def sample(self, beta, synergy=False, syn_w=0.6):
         gen_np = self.gen.sample(beta)
@@ -78,16 +119,11 @@ class CPG:
             return gen_np
         gen_np = gen_np.copy()
         leg_s = float(self.syn_leg.sample(beta)[0])
-        for i in self._leg_r:
-            gen_np[i] = (1 - syn_w) * gen_np[i] + syn_w * leg_s
-        for i in self._leg_l:   # 脚は左右逆位相（粗い交互パターン、Dominici 2011）
-            gen_np[i] = (1 - syn_w) * gen_np[i] + syn_w * (-leg_s)
-        arm_r_s = float(self.syn_arm_r.sample(beta)[0])
-        for i in self._arm_r:
-            gen_np[i] = (1 - syn_w) * gen_np[i] + syn_w * arm_r_s
-        arm_l_s = float(self.syn_arm_l.sample(beta)[0])
-        for i in self._arm_l:
-            gen_np[i] = (1 - syn_w) * gen_np[i] + syn_w * arm_l_s
+        self._blend(gen_np, self._leg_r, leg_s, syn_w)
+        # 脚は左右逆位相（粗い交互パターン、Dominici 2011）
+        self._blend(gen_np, self._leg_l, -leg_s, syn_w)
+        self._blend(gen_np, self._arm_r, float(self.syn_arm_r.sample(beta)[0]), syn_w)
+        self._blend(gen_np, self._arm_l, float(self.syn_arm_l.sample(beta)[0]), syn_w)
         return gen_np
 
 

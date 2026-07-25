@@ -489,18 +489,24 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
     # 【運動性喃語（脊髄CPG）】E_NOISE=colored のとき太郎の中で色付き探索を有効化する。
     # 既定 white では呼ばれない＝spinal_cpg=None＝白色ガウス＝従来と数値完全一致。
     if _E_NOISE == "colored":
-        # 筋肉モードでは _LEG_R/_ARM_R（90-actuator index）が無効なのでシナジーを強制OFF。
-        # 筋肉モードの拮抗筋協調は共収縮が本領で、90関節indexとは設計が別。将来別途[Tier3]。
-        _use_syn = _E_SYNERGY and not _MUSCLE
-        _leg_r = _LEG_R if not _MUSCLE else ()
-        _leg_l = _LEG_L if not _MUSCLE else ()
-        _arm_r = _ARM_R if not _MUSCLE else ()
-        _arm_l = _ARM_L if not _MUSCLE else ()
-        brain.enable_spinal_babble(n_act, leg_r=_leg_r, leg_l=_leg_l, arm_r=_arm_r, arm_l=_arm_l,
+        # 【2026-07-25・シナジーを筋肉モードに配線】従来はここで
+        #   `_use_syn = _E_SYNERGY and not _MUSCLE` として**強制OFF**していた。
+        #   理由は「_LEG_R等が90-actuator indexで、筋肉モードは180次元だから」という
+        #   技術的なもの。しかし学習は常に筋肉モードで回しており、結果として
+        #   ★文献が一致して言う新生児の特徴「まとめてしか動かせない」が
+        #     一度も効いていない状態で全実験をしてきた（本日の目視から発覚）。
+        #   → CPG側に pair_offset を入れて、対になる筋（伸ばす側）に符号反転で
+        #     同じシナジーを混ぜるようにした（詳細は spinal_cord/cpg.py）。
+        # ⚠️拮抗筋モード(_ANTAGONIST)ではCPGが関節次元で動き explore 側で写像するので
+        #   pair_offset は不要（0のまま＝従来の挙動）。
+        _use_syn = bool(_E_SYNERGY)
+        _pair_offset = (n_act // 2) if (_MUSCLE and not _ANTAGONIST) else 0
+        brain.enable_spinal_babble(n_act, leg_r=_LEG_R, leg_l=_LEG_L, arm_r=_ARM_R, arm_l=_ARM_L,
                                    beta=_E_BETA, synergy=_use_syn, syn_w=_E_SYN_W, seed=seed,
-                                   antagonist=(_MUSCLE and _ANTAGONIST), co_activation=_COACTIVATION)
+                                   antagonist=(_MUSCLE and _ANTAGONIST),
+                                   co_activation=_COACTIVATION, pair_offset=_pair_offset)
         print(f"[脊髄CPG] 色付き探索ON: β={_E_BETA} synergy={_use_syn} syn_w={_E_SYN_W}"
-              f"{' (筋肉モードのためsyn強制OFF)' if _MUSCLE and _E_SYNERGY else ''}"
+              f"{f' pair_offset={_pair_offset}(筋肉モードの拮抗筋ペアに符号反転で適用)' if _pair_offset else ''}"
               f"{' 【拮抗筋モードON】coactivation=' + str(_COACTIVATION) if _MUSCLE and _ANTAGONIST else ''}", flush=True)
     emb_dim = brain.sensory_proj.out_features  # GRUの入力次元(=64)
 
@@ -685,6 +691,36 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
         for _pos, _ji in enumerate(_hinges):
             _grp_idx.setdefault(_joint_group(_m.jnt(_ji).name), []).append(_pos)
         _grp_qvel = {g: [] for g in _grp_idx}
+
+        # 【軸別の分解・2026-07-25】ユーザーが新生児の自発運動の動画を見て
+        # 「足は伸ばす・縮めるの繰り返しで、横方向の動きがない」と指摘したのがきっかけ。
+        # ★寝返りは体を長軸まわりに回す動きなので、**回旋と外転**がないと物理的に起きない。
+        #   屈曲/伸展（伸ばす・縮める）だけでは、どれだけ激しくても回転モーメントが立たない。
+        # → 太郎の動きを軸ごとに分けて、学習前後でどこが増えたかを見る。
+        # MIMoの関節軸の意味（直立を基準にした解剖学的な向き）：
+        #   x軸(1,0,0)まわり = 外転/内転・側屈   y軸(0,1,0)まわり = 屈曲/伸展
+        #   z軸(0,0,1)まわり = 回旋（ひねり）
+        # ⚠️主成分で分類する近似（例：shoulder_horizontal は axis=(0,1,-4) で z が支配的
+        #   なので「回旋」に入る）。厳密な解剖学的分類ではない。
+        _AXIS_NAMES = ["外転/内転・側屈(横)", "屈曲/伸展(前後)", "回旋(ひねり)"]
+
+        def _axis_kind(ji):
+            return _AXIS_NAMES[int(np.argmax(np.abs(_m.jnt_axis[ji])))]
+
+        _ax_idx, _trunk_ax, _leg_ax = {}, {}, {}
+        for _pos, _ji in enumerate(_hinges):
+            _nm = _m.jnt(_ji).name
+            _k = _axis_kind(_ji)
+            # 指・つま先・眼は数が多く、寝返りとは無関係なので全身の集計から外す
+            if _joint_group(_nm) not in ("手指", "つま先", "眼"):
+                _ax_idx.setdefault(_k, []).append(_pos)
+            if _joint_group(_nm) == "体幹":
+                _trunk_ax.setdefault(_k, []).append(_pos)
+            if _joint_group(_nm) in ("★脚の付け根", "膝"):
+                _leg_ax.setdefault(_k, []).append(_pos)
+        _ax_qvel = {k: [] for k in _ax_idx}
+        _trunk_qvel = {k: [] for k in _trunk_ax}
+        _leg_qvel = {k: [] for k in _leg_ax}
         _act_model = getattr(env.unwrapped, "actuation_model", None)
 
         obs, _ = env.reset(seed=seed)
@@ -715,6 +751,12 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
                 qvels.append(float(_qv.mean()))
                 for _g, _ix in _grp_idx.items():
                     _grp_qvel[_g].append(float(_qv[_ix].mean()))
+                for _k, _ix in _ax_idx.items():
+                    _ax_qvel[_k].append(float(_qv[_ix].mean()))
+                for _k, _ix in _trunk_ax.items():
+                    _trunk_qvel[_k].append(float(_qv[_ix].mean()))
+                for _k, _ix in _leg_ax.items():
+                    _leg_qvel[_k].append(float(_qv[_ix].mean()))
                 rots.append(_trunk_rotation_deg(_d, R0))
                 tilts.append(_head_tilt_deg(_m, _d))
                 hands.append(_hand_dist(_m, _d))
@@ -739,6 +781,18 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
         print(f"  頭の傾き={np.nanmean(tilts):.1f}度  手-体幹={np.nanmean(hands):.3f}m")
         print(f"  ★体幹の回転={np.nanmean(rots_a):.1f}度(最大{np.nanmax(rots_a):.1f})  "
               f"仰向けでない時間={float(np.mean(rots_a > 90.0))*100:.1f}%")
+        # ★【2026-07-25 閾値の訂正】90度は「うつ伏せ」ではなく**ちょうど側臥位**だった。
+        #   McGraw 1941（満期産児75名・1,840回の観察）＝**新生児は立ち直り反射で
+        #   側臥位までは自発的に転がれる**＝90度超えは正常。異常なのは**真のうつ伏せ**。
+        #   162度は Philipp et al. 2026（MIMoで寝返りを学習させた ICDL 2026 論文）の
+        #   成功判定 rho>=0.95 に相当（rho = 体幹前方軸と重力軸の内積の平均）。
+        #   実測（K=10, 3シード）: >90度 20.7% に対し >162度 7.2%＝**2.9倍の過大評価**。
+        #   → 検証の落とし穴チェックリスト 項41（閾値の意味を文献で確認する）。
+        #   ⚠️両方を併記する（過去のログと比較できるように90度も残す）。
+        print(f"  ★真のうつ伏せ(>162度)={float(np.mean(rots_a > 162.0))*100:.1f}%  "
+              f"(>120度={float(np.mean(rots_a > 120.0))*100:.1f}%  "
+              f">150度={float(np.mean(rots_a > 150.0))*100:.1f}%)"
+              f"  [90度=側臥位＝新生児でも正常／162度=Philipp2026のrho>=0.95相当]")
         print("  （比較：学習なしノイズだけの実測＝K100でうつ伏せ36.2%、K10で65.0%）")
 
         # ★「一度うつ伏せになって戻れない」のか「行ったり来たり」なのかを数える。
@@ -777,6 +831,27 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
         for _v, _g, _n in _rank:
             _bar = "█" * max(0, min(30, int(_v / (_rank[0][0] or 1) * 30)))
             print(f"    {_g:12s} {_v:7.4f} ({_n:2d}関節) {_bar}")
+
+        # 【軸別・2026-07-25】寝返りは「体を長軸まわりに回す」動き。回旋・外転が無ければ
+        # 物理的に起きない。新生児の自発運動は屈曲/伸展が支配的（動画での観察）なので、
+        # 太郎の横方向・回旋の量が人間より多いなら、それが寝返りの原因の候補になる。
+        def _axis_block(title, idx, qv):
+            if not any(qv.values()):
+                return
+            print(f"  -- {title} --")
+            _s = {k: float(np.mean(v)) for k, v in qv.items() if v}
+            _flex = _s.get("屈曲/伸展(前後)", 0.0)
+            for _k in _AXIS_NAMES:
+                if _k not in _s:
+                    continue
+                _bar = "#" * max(0, min(24, int(_s[_k] / (max(_s.values()) or 1) * 24)))
+                _ratio = (_s[_k] / _flex) if _flex > 1e-9 else float("nan")
+                print(f"    {_k:20s} {_s[_k]:7.4f} ({len(idx[_k]):2d}関節) "
+                      f"屈伸比={_ratio:5.2f} {_bar}")
+        print("  ★軸別の |関節角速度|（関節の主軸で分類・指/つま先/眼は除外）")
+        _axis_block("全身", _ax_idx, _ax_qvel)
+        _axis_block("体幹だけ（★寝返りに直結）", _trunk_ax, _trunk_qvel)
+        _axis_block("脚（股関節+膝）", _leg_ax, _leg_qvel)
         return  # 測定モードは学習・保存・録画に進まない
 
     # 【測定器の分離・2026-07-23】evaluate/agency_probe/inverse_probe/inverse_exec_probe/

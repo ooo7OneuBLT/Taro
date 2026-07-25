@@ -25,6 +25,7 @@
 【出典】仰向けの姿勢の作り方は MIMo 同梱の mimoEnv/envs/roll_over.py（STARTING_POSITION="supine"）
 """
 import copy
+import os
 import numpy as np
 import mujoco
 
@@ -101,6 +102,25 @@ class SupineMimoEnv(LeanMimoEnv):
                                       limbs=self._limb_fix,
                                       limb_scale=self._limb_scale,
                                       distal_mass=self._distal_mass)
+
+        # 【2026-07-25】床のころがり摩擦（感度分析用）。既定は触らない。
+        # ★MIMoの床は friction=[1.0, 0.005, 0.0001]・condim=3 ＝「すべり摩擦しか
+        #   計算しない」＝**転がることへの抵抗が事実上ゼロ**。実際の新生児は
+        #   服＋寝具（布と布）の上にいて、転がるとき布が引っかかる。
+        #   太郎が新生児にできない寝返りをする原因の候補として振れるようにした。
+        # ⚠️2026-07-23 に「床摩擦を人工的に上げる補正は入れない」と決めているが、
+        #   それは**対処**への判断。ここは**原因かどうかの検証**のための仕組み。
+        _roll = os.environ.get("E_FLOOR_ROLL")
+        if _roll is not None:
+            _cd = int(os.environ.get("E_FLOOR_CONDIM", "6"))
+            _n = 0
+            for _gi in range(self.model.ngeom):
+                if self.model.body(self.model.geom_bodyid[_gi]).name == "world":
+                    self.model.geom_friction[_gi][1] = float(_roll)
+                    self.model.geom_condim[_gi] = _cd
+                    _n += 1
+            print(f"[floor] roll friction={_roll} condim={_cd} ({_n} geoms) "
+                  f"[SENSITIVITY: 転がり抵抗が原因かの検証]", flush=True)
 
         for _ in range(self._settle_steps):
             mujoco.mj_step(self.model, self.data)
