@@ -57,7 +57,8 @@ class SupineMimoEnv(LeanMimoEnv):
     """
 
     def __init__(self, settle_steps=100, jitter=0.01, head_elongation=1.0,
-                 body_corrections=True, limb_scale=1.0, limb_fix=True, **kwargs):
+                 body_corrections=True, limb_scale=1.0, limb_fix=True,
+                 distal_mass=1.0, **kwargs):
         self._settle_steps = settle_steps
         self._jitter = jitter
         # 【2026-07-25】頭の楕円化。MIMoの頭は球で、頭囲は正しいが真上から見た長さが
@@ -74,6 +75,9 @@ class SupineMimoEnv(LeanMimoEnv):
         # 文献（実測の除脂肪量・二乗三乗則）が示唆するのはこちらの姿なので、
         # アブレーションとして必ず回せるようにしてある。
         self._limb_fix = bool(limb_fix)
+        # 手足の質量の倍率（感度分析用。サイズは変えない）。
+        # 新生児の体節質量比は実測が存在しないので、振って頑健性を確かめる。
+        self._distal_mass = float(distal_mass)
         super().__init__(**kwargs)
 
         # --- 仰向けにする（roll_over.py の supine と同じ式）---
@@ -95,7 +99,8 @@ class SupineMimoEnv(LeanMimoEnv):
             from infant_body import apply_runtime_corrections
             apply_runtime_corrections(self.model, self.data, kwargs["age"],
                                       limbs=self._limb_fix,
-                                      limb_scale=self._limb_scale)
+                                      limb_scale=self._limb_scale,
+                                      distal_mass=self._distal_mass)
 
         for _ in range(self._settle_steps):
             mujoco.mj_step(self.model, self.data)

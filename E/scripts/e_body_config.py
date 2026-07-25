@@ -87,7 +87,8 @@ def body_kwargs_from_env(age, verbose=True):
     """
     kw = {"head_elongation": head_elongation_from_env(),
           "limb_scale": limb_scale_from_env(),
-          "limb_fix": limb_fix_enabled()}
+          "limb_fix": limb_fix_enabled(),
+          "distal_mass": distal_mass_from_env()}
     custom = body_scale_custom_from_env(age, verbose=verbose)
     if custom:
         kw["custom_measurements"] = custom
@@ -118,3 +119,20 @@ def limb_fix_enabled():
     アブレーションとして必ず含める。
     """
     return os.environ.get("E_LIMB_FIX", "1") == "1"
+
+
+def distal_mass_from_env():
+    """手足（末端）の質量の倍率（感度分析用）。既定1.0＝何もしない。
+
+    【なぜ振る必要があるか、2026-07-25】体型v3は身長・体重・頭身・頭の質量比を人間に
+    合わせたが、**四肢の内訳**は末端が成人比で極端に軽い（手 0.09% vs 成人0.60% ＝ 1/7）。
+    原因はMIMoが「密度一定＋幾何体積」で質量を決める設計だから（arXiv:2509.09805 III-B）。
+    ★**新生児の体節質量比は実測が存在しない**ので値は決められない
+    （乳児BSP研究は全て幾何モデル＋密度の仮定。手足は「小さすぎて測れない」と除外されている）。
+    ⇒ 振って結論が変わらないことを確かめる（筋力と同じ扱い）。
+
+    ★**サイズは変えない**（`E_HAND_SCALE` を振るとサイズも変わり、
+    「質量が効いたのか見た目が効いたのか」が交絡する）。
+    E_DISTAL_MASS=6.7 で手が成人の比率に近づく（足は3.4倍相当）。
+    """
+    return float(os.environ.get("E_DISTAL_MASS", "1.0"))

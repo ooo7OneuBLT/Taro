@@ -346,8 +346,62 @@ def apply_head_mass(model, age=0.0, fraction=None, verbose=True):
               f"[Tier1: 人間の新生児の体節質量比]")
 
 
+def apply_distal_mass(model, scale=1.0, verbose=True):
+    """★手・足（末端）の**質量だけ**を倍率で変える（サイズは変えない）＝感度分析用。
+
+    【なぜ要るか、2026-07-25】体型v3は身長・体重・頭身・頭の質量比を人間に合わせたが、
+    **四肢の内訳**を測ると末端が成人比で極端に軽かった：
+        手 0.09%（成人0.60% ＝ **1/7**）／足 0.43%（成人1.45% ＝ **1/3.4**）
+    原因は判明している——MIMoは「**各部位の密度は一定と仮定し、幾何形状の体積から質量を
+    決める**」設計（MIMo論文 arXiv:2509.09805 III-B に明記）で、手を0.70倍に縮小すると
+    質量は 0.70³=0.34倍になる。★MIMoの元データ AnthroKids には**体節ごとの質量が
+    そもそも無い**（全87項目のうち質量は「全身の体重」1つだけ、残りは外形寸法）。
+
+    ⚠️**正しい値は誰も知らない**：新生児の体節質量比は**実測が存在しない**
+    （乳児のBSP研究 Jensen 1986／Schneider & Zernicke 1992／Sun & Jensen 1994 は
+    すべて「幾何モデル＋密度の仮定」による推定。乳児の死体解剖データは無い。
+    しかも PMC2667919 は「**手足は小さすぎて正確な測定ができない**」として除外している）。
+    ⇒ 値は決められないので、**振って結論が変わらないことを確かめる**（筋力と同じ扱い）。
+
+    ★**サイズは変えない**のが重要。`hand` 係数を振るとサイズも変わり、
+    「質量が効いたのか見た目（視野に映る面積）が効いたのか」が**交絡する**。
+    hand regard の実験に効く可能性があるので、そこを分離しておく。
+
+    ⚠️慣性テンソルも同じ倍率でスケールする（`apply_head_mass` と同じ理由）。
+    ⚠️手の指・足の指も含める（`left_hand` から先の子孫すべて）。
+
+    Args:
+        scale: 質量の倍率。1.0 で何もしない。成人の比率に合わせるなら 手≈6.7 / 足≈3.4。
+    """
+    import numpy as np
+    if abs(float(scale) - 1.0) < 1e-9:
+        return
+    roots = ("left_hand", "right_hand", "left_foot", "right_foot")
+    before = after = 0.0
+    n = 0
+    for rname in roots:
+        try:
+            rid = int(model.body(rname).id)
+        except Exception:
+            continue
+        for b in range(model.nbody):          # rid の子孫（自分を含む）
+            p = b
+            while p != 0:
+                if p == rid:
+                    before += float(model.body_mass[b])
+                    model.body_mass[b] = float(model.body_mass[b]) * float(scale)
+                    model.body_inertia[b] = np.asarray(model.body_inertia[b]) * float(scale)
+                    after += float(model.body_mass[b])
+                    n += 1
+                    break
+                p = int(model.body_parentid[p])
+    if verbose:
+        print(f"[distal] 手足の質量 x{scale}: {before*1000:.1f}g -> {after*1000:.1f}g "
+              f"({n}body) [SENSITIVITY: 新生児の体節質量比は実測が存在しない]")
+
+
 def apply_runtime_corrections(model, data, age, neck=True, limbs=True, head_mass=True,
-                              limb_scale=1.0):
+                              limb_scale=1.0, distal_mass=1.0):
     """モデル構築後に上書きする補正（筋力＝アクチュエータのgear）。
 
     - **首の筋力**（`infant_neck`）：MIMoは gear を geom の体積から計算するため、
@@ -361,6 +415,9 @@ def apply_runtime_corrections(model, data, age, neck=True, limbs=True, head_mass
     # ★頭の質量は首・四肢より先。首の補正が頭の質量を前提に計算するため。
     if head_mass:
         apply_head_mass(model, float(age))
+    # ★手足の質量（感度分析用）も筋力補正より先。四肢の補正は「筋力÷その関節から先の
+    #   重力モーメント」を見るので、質量を後から変えると補正が古い前提のままになる。
+    apply_distal_mass(model, float(distal_mass))
     if neck:
         from infant_neck import apply_newborn_neck
         apply_newborn_neck(model, data, float(age))
