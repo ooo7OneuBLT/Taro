@@ -374,11 +374,10 @@ class ToySupineEnv(SupineMimoEnv):
         # 首の補正は「落ち着いた初期姿勢」で重力モーメントを測ってから適用する
         # （姿勢で腕の長さが変わるため）。SupineMimoEnvのsettle後＝ここが適切な位置。
         if self._newborn_neck and self._neck_age is not None:
-            from e_infant_neck import apply_newborn_neck
-            apply_newborn_neck(self.model, self.data, float(self._neck_age))
+            pass   # 【2026-07-25】親クラス(SupineMimoEnv)が core の
+                   # apply_runtime_corrections で適用済み＝ここでの重複を削除
         if self._newborn_limbs and self._neck_age is not None:
-            from e_infant_body import apply_limb_inversion_fix
-            apply_limb_inversion_fix(self.model, self.data, float(self._neck_age))
+            pass   # 【2026-07-25】同上（親クラスが core の実装で適用済み）
         if self._use_vor:
             from e_vor import VOR
             self._vor = VOR(self.model, self.data)

@@ -56,7 +56,8 @@ class SupineMimoEnv(LeanMimoEnv):
             （同じ初期姿勢を予測するだけで当たる、という汚染を防ぐ＝落とし穴チェック項9の症状）。
     """
 
-    def __init__(self, settle_steps=100, jitter=0.01, head_elongation=1.0, **kwargs):
+    def __init__(self, settle_steps=100, jitter=0.01, head_elongation=1.0,
+                 body_corrections=True, **kwargs):
         self._settle_steps = settle_steps
         self._jitter = jitter
         # 【2026-07-25】頭の楕円化。MIMoの頭は球で、頭囲は正しいが真上から見た長さが
@@ -65,12 +66,27 @@ class SupineMimoEnv(LeanMimoEnv):
         # 頭が球のまま**だった。体型補正と同じ「身体の設定が環境に散らばっている」問題。
         # 処理の実体は taro_core の infant_body.elongate_head（＝太郎の身体そのもの）。
         self._head_elongation = float(head_elongation)
+        self._body_corrections = bool(body_corrections)
         super().__init__(**kwargs)
 
         # --- 仰向けにする（roll_over.py の supine と同じ式）---
         self.model.body("hip").pos = [0, 0, 0.2]
         self.model.body("hip").quat = np.array([0, -0.7071068, 0, 0.7071068])
         self.model.body("hip").quat *= np.array([1, -1, 1, 1])   # supine（これが無いとprone＝うつ伏せ）
+
+        # 【2026-07-25】筋力の補正（首・四肢）を太郎の身体定義（core）から適用する。
+        # MIMoは gear を geom の体積から計算するため、頭が大きい新生児ほど首も強くなり
+        # **発達の向きが逆転**する（age=0で持ち上げ能力比4.21倍 > 18ヶ月の3.00倍）。
+        # ⚠️従来この補正は ToySupineEnv（おもちゃ環境）にしかなく、**環境ごとに違う体**
+        # になっていた（実測で3種類以上）。身体は環境の性質ではないので core に集約した。
+        if self._body_corrections and kwargs.get("age") is not None:
+            import os as _os, sys as _sys
+            _b = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
+                               _os.pardir, _os.pardir, "taro_core", "src", "body")
+            if _b not in _sys.path:
+                _sys.path.insert(0, _b)
+            from infant_body import apply_runtime_corrections
+            apply_runtime_corrections(self.model, self.data, kwargs["age"])
 
         for _ in range(self._settle_steps):
             mujoco.mj_step(self.model, self.data)

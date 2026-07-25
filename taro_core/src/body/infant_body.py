@@ -219,3 +219,61 @@ def body_scale_custom(age, scales=None, verbose=True):
     if note and verbose:
         print("[body] 体型補正: " + " ".join(note) + " [逸脱リスト参照]")
     return custom
+
+
+# ============================================================================
+# ★統一の窓口 — 太郎の身体はここ1箇所で決まる（2026-07-25）
+# ----------------------------------------------------------------------------
+# 【なぜ作ったか】体型・頭の楕円化・首の筋力・四肢の筋力が**環境クラスごとにバラバラに
+# 適用**されており、実測で**3種類以上の体**が存在していた：
+#     LeanMimoEnv      : 補正なし
+#     SupineMimoEnv    : 体型は呼び出し側次第・頭の楕円化のみ
+#     ToySupineEnv     : 体型・頭・首・四肢の全部
+# ＝**環境を変えると太郎の体が変わる**状態。ユーザー指摘「正直一個でいいんだけど」。
+# 身体は環境の性質ではなく**太郎そのもの**なので、ここに集約する。
+# 方針：[[feedback-core-vs-experiment-placement]]
+#
+# 【2段階ある理由】MIMoの身体は
+#   ①モデル構築前（geomの寸法・スキーマ）… build_body_kwargs / elongate_head
+#   ②モデル構築後（アクチュエータのgear＝筋力）… apply_runtime_corrections
+# の2段階でしか変えられない。①は環境のコンストラクタ引数、②は構築後の上書き。
+# ============================================================================
+
+def build_body_kwargs(age, scales=None, head_elongation=None):
+    """環境のコンストラクタに渡す身体の設定を作る（モデル構築前の分）。
+
+    Args:
+        age: 体年齢（月）。
+        scales: 部位グループ->係数。None なら NEWBORN_SHAPE_DEFAULTS。
+        head_elongation: 頭の楕円化率。None なら HEAD_ELONGATION。
+
+    Returns:
+        {"custom_measurements": ..., "head_elongation": ...}（不要な項目は入れない）
+    """
+    kwargs = {}
+    custom = body_scale_custom(age, scales)
+    if custom:
+        kwargs["custom_measurements"] = custom
+    he = HEAD_ELONGATION if head_elongation is None else float(head_elongation)
+    if abs(he - 1.0) > 1e-9:
+        kwargs["head_elongation"] = he
+    return kwargs
+
+
+def apply_runtime_corrections(model, data, age, neck=True, limbs=True):
+    """モデル構築後に上書きする補正（筋力＝アクチュエータのgear）。
+
+    - **首の筋力**（`infant_neck`）：MIMoは gear を geom の体積から計算するため、
+      頭が大きい新生児ほど首も強くなり**発達の向きが逆転**する（age=0で持ち上げ能力比
+      4.21倍 > age=18ヶ月の3.00倍）。首がすわっていない（head lag）を再現するため
+      月齢に応じて下げる。⚠️目標比1.0・4ヶ月で解除は恣意的[Tier3]。
+    - **四肢の筋力**（`infant_limbs`）：同じ理由で四肢も発達の向きが逆転しているのを解消。
+
+    ⚠️MIMo本体は書き換えない（Git管理外で再現性が失われるため）＝実行時に上書きする。
+    """
+    if neck:
+        from infant_neck import apply_newborn_neck
+        apply_newborn_neck(model, data, float(age))
+    if limbs:
+        from infant_limbs import apply_limb_inversion_fix
+        apply_limb_inversion_fix(model, data, float(age))
