@@ -117,6 +117,25 @@ def _trunk_rotation_deg(data, R0):
         return float("nan")
 
 
+def _tip_positions(data):
+    """★末端（足先・手先）の位置。体幹からの相対で見る。
+
+    【なぜ追加したか、2026-07-25】角速度は「関節の回転の速さ」であって「見た目の動きの
+    大きさ」ではない。**脚が長ければ同じ角速度でも足先は大きく動く**。
+    Viewerで「足が根元からすごい動く」と指摘されたのに、部位別の角速度では脚は
+    肩より静かだった＝食い違いの原因がこれ（本日3つ目の測定器の穴）。"""
+    try:
+        trunk = data.body("upper_body").xpos
+        return {
+            "右足先": data.body("right_toes").xpos - trunk,
+            "左足先": data.body("left_toes").xpos - trunk,
+            "右手先": data.body("right_hand").xpos - trunk,
+            "左手先": data.body("left_hand").xpos - trunk,
+        }
+    except Exception:
+        return {}
+
+
 def _hand_dist(model, data):
     """両手が体幹からどれだけ離れているか（m）の平均。脱力すると床に落ちて広がる想定。"""
     try:
@@ -149,7 +168,14 @@ def run_condition(name, act_center, act_amp, K, desc):
     print(f"\n=== {name} ===  {desc}")
     print(f"  中心={act_center} ゆらぎ={act_amp} K={K}  → {n_tick}tick × K{K} = {n_tick*K}物理step")
 
-    env = SupineMimoEnv(actuation_model=MuscleModel, vision_params=None, age=AGE)
+    # 【2026-07-25】体型補正を通す（E_SHAPE=0 で切れる）。core の体型定義を
+    # e_body_config 経由で受け取る＝環境によらず同じ体型になる。
+    from e_body_config import body_scale_custom_from_env
+    _kw = {}
+    _custom = body_scale_custom_from_env(AGE)
+    if _custom:
+        _kw["custom_measurements"] = _custom
+    env = SupineMimoEnv(actuation_model=MuscleModel, vision_params=None, age=AGE, **_kw)
     m, d = env.unwrapped.model, env.unwrapped.data
     n_act = env.action_space.shape[0]          # 180
     n_joint = n_act // 2                       # 90（拮抗筋ペアは i と i+n_joint）
@@ -170,6 +196,7 @@ def run_condition(name, act_center, act_amp, K, desc):
     # 初期姿勢（＝仰向け）の体幹の向きを基準に取る。以後ここからの回転量を測る。
     R0 = env.unwrapped.data.body("upper_body").xmat.reshape(3, 3).copy()
     jerks, qvels, tilts, hands, trunk_rots = [], [], [], [], []
+    tip_hist = {}          # 末端（足先・手先）の体幹相対位置の履歴
     qpos_hist = []
     a_hist, coact, f_total, f_net = [], [], [], []
     prev_qacc = None
@@ -215,6 +242,9 @@ def run_condition(name, act_center, act_amp, K, desc):
             tilts.append(_head_tilt_deg(m, d))
             hands.append(_hand_dist(m, d))
             trunk_rots.append(_trunk_rotation_deg(d, R0))   # ★うつぶせ化の検出
+            _tp = _tip_positions(d)
+            for _k, _v in _tp.items():
+                tip_hist.setdefault(_k, []).append(_v.copy())
 
             if renderer is not None and k % 4 == 0:
                 cam.lookat = d.body("upper_body").xpos.copy()
@@ -247,6 +277,11 @@ def run_condition(name, act_center, act_amp, K, desc):
         # 90度を超えた時間の割合＝「仰向けでなくなっていた」割合
         "prone_frac": (float(np.mean(np.asarray(trunk_rots) > 90.0)) if trunk_rots else float("nan")),
     }
+    # ★末端の移動量（1stepあたりの移動距離 m/step）＝「見た目の動きの大きさ」
+    for _k, _v in tip_hist.items():
+        _arr = np.asarray(_v)
+        if len(_arr) > 1:
+            res[f"tip_{_k}"] = float(np.linalg.norm(np.diff(_arr, axis=0), axis=1).mean())
     # 出した力のうち実際に関節を動かせた割合（低いほど打ち消し合っている）
     res["force_efficiency"] = (res["force_net"] / res["force_mean"]
                                if res["force_mean"] and res["force_mean"] > 1e-12 else float("nan"))
@@ -258,6 +293,10 @@ def run_condition(name, act_center, act_amp, K, desc):
     print(f"  頭の傾き={res['head_tilt_deg']:.1f}度  手-体幹={res['hand_dist_m']:.3f}m")
     print(f"  ★体幹の回転={res['trunk_rot_mean_deg']:.1f}度(最大{res['trunk_rot_max_deg']:.1f})  "
           f"仰向けでない時間={res['prone_frac']*100:.1f}%")
+    _tips = {k[4:]: v for k, v in res.items() if k.startswith("tip_")}
+    if _tips:
+        print("  ★末端の動き(m/step、見た目の大きさ): "
+              + "  ".join(f"{k}={v*1000:.2f}mm" for k, v in _tips.items()))
 
     if frames:
         os.makedirs(LOG_DIR, exist_ok=True)
