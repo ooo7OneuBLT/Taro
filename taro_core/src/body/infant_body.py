@@ -506,36 +506,101 @@ FLEXION_STIFFNESS = 2.0
 # ⚠️この月齢まで一定に保ち、それ以降は触らない[Tier3・簡略化]。
 # 間の推移を線形補間する案は、3点しか実測が無いので今は入れない（恣意性を増やさない）。
 FLEXION_UNTIL_MO = 3.0
+# ★実装機構。2026-07-26 に "spring" から "range" へ変更した（理由は
+# apply_physiological_flexion の docstring 参照。バネは曲がった関節を逆に伸ばしていた）。
+#   "range"  ： jnt_range の伸展側に壁を立てる＝「これ以上は伸ばせない」（屈曲拘縮の意味）
+#   "spring" ： 旧実装。qpos_spring + jnt_stiffness で目標角へ引き寄せる（比較用に残す）
+FLEXION_MODE = "range"
 
 
-def apply_physiological_flexion(model, age=0.0, stiffness=None, verbose=True):
-    """新生児の生理的屈曲を、関節のバネ（stiffness + 中立位置）で表現する。
+def apply_physiological_flexion(model, age=0.0, stiffness=None, verbose=True,
+                                mode=None, data=None):
+    """新生児の生理的屈曲を実装する。
 
-    age が FLEXION_UNTIL_MO 以上なら何もしない（＝発達で解消する）。
-    ⚠️`jnt_range` は変えない。バネだけで目標角に落ち着くので、range を狭めると
-      初期姿勢が範囲外になって**リセット時に関節が跳ねる**（実測で確認済み）。
+    ★【2026-07-26 機構の訂正】既定を "spring" から "range" に変えた。
+
+    【なぜ変えたか】ユーザーの目視「膝もひじも曲がってない」から発覚。
+    実測すると、バネ方式は**曲がっている関節を逆に伸ばしていた**：
+
+        関節      屈曲OFF     屈曲ON(バネ)   目標
+        右ひざ     -3.7度     -19.1度       -21度   ✓ 正しく曲がった
+        右ひじ   -114.9度     -15.3度       -14度   ✗ ★曲がっていたのが伸びた
+        右股       -7.4度     -29.6度       -32度   ✓
+
+    原因は**文献の意味の取り違え**。FLEXION_TARGETS の値は「屈曲拘縮」＝
+    **これ以上は伸展できないという限界**であって、「ここに戻る」という目標角ではない。
+      ・拘縮の意味   ： 膝は21度より真っ直ぐに【伸ばせない】＝伸展側の壁
+      ・バネの意味   ： 膝を21度に【引き寄せる】＝両方向から目標へ
+    バネは両方向に効くので、目標より深く曲がった関節を無理に伸ばしてしまう。
+
+    ★正しい実装は逸脱リストに既に書かれていた（「次の候補（未実装）：関節可動域の制約…
+      実装が明確（jnt_range を狭める）」）。実装時にそれを参照していなかった。
+
+    【range 方式が一度却下された理由と、その解決】
+    旧docstring：「range を狭めると初期姿勢が範囲外になってリセット時に関節が跳ねる」
+    → 範囲を狭めるのと同時に **qpos0（リセット時の姿勢）も範囲内へ入れる**ことで解決する。
+
+    Args:
+        mode: "range"（既定・伸展側の壁）／"spring"（旧実装・比較用に残す）
+        data: 渡すと現在の qpos も範囲内に入れる（跳ね防止）
     """
     import numpy as np   # このファイルの他の関数と同じくローカルにimportする
     if float(age) >= FLEXION_UNTIL_MO:
         if verbose:
             print(f"[flexion] age={age}mo >= {FLEXION_UNTIL_MO}mo: no correction")
         return dict(n=0)
-    k = FLEXION_STIFFNESS if stiffness is None else float(stiffness)
-    n, applied = 0, []
+
+    mode = FLEXION_MODE if mode is None else str(mode)
+
+    if mode == "spring":
+        # ⚠️旧実装。曲がった関節を伸ばしてしまうので既定では使わない（上記参照）。
+        k = FLEXION_STIFFNESS if stiffness is None else float(stiffness)
+        n, applied = 0, []
+        for base, target in FLEXION_TARGETS.items():
+            for side in ("right_", "left_"):
+                try:
+                    j = model.joint("robot:" + side + base)
+                except Exception:
+                    continue
+                model.qpos_spring[int(model.jnt_qposadr[j.id])] = np.radians(target)
+                model.jnt_stiffness[j.id] = k
+                n += 1
+            applied.append(f"{base}{target:+.0f}")
+        if verbose:
+            print(f"[flexion/spring] age={age}mo: {n} joints, stiffness={k} "
+                  f"({' '.join(applied)}) ⚠️旧方式（曲がった関節を伸ばす）")
+        return dict(n=n, stiffness=k, mode="spring")
+
+    # --- range 方式（既定）：伸展側に壁を立てる ---
+    n, applied, clamped = 0, [], 0
     for base, target in FLEXION_TARGETS.items():
+        tgt = np.radians(target)
         for side in ("right_", "left_"):
             try:
                 j = model.joint("robot:" + side + base)
             except Exception:
                 continue
-            model.qpos_spring[int(model.jnt_qposadr[j.id])] = np.radians(target)
-            model.jnt_stiffness[j.id] = k
+            jid = int(j.id)
+            qadr = int(model.jnt_qposadr[jid])
+            lo, hi = float(model.jnt_range[jid, 0]), float(model.jnt_range[jid, 1])
+            # 目標が可動域の外なら触らない（体型やモデルが変わった場合の保険）
+            if not (lo < tgt < hi):
+                continue
+            model.jnt_range[jid, 1] = tgt      # 伸展側（正の側）の限界を target に
+            model.jnt_limited[jid] = 1
+            # 跳ね防止：リセット姿勢と現在姿勢を新しい範囲内へ入れる
+            if float(model.qpos0[qadr]) > tgt:
+                model.qpos0[qadr] = tgt
+                clamped += 1
+            if data is not None and float(data.qpos[qadr]) > tgt:
+                data.qpos[qadr] = tgt
             n += 1
         applied.append(f"{base}{target:+.0f}")
     if verbose:
-        print(f"[flexion] age={age}mo: {n} joints, stiffness={k} "
-              f"({' '.join(applied)}) [Tier1: 目標角は実測／Tier2: stiffnessは逆算]")
-    return dict(n=n, stiffness=k)
+        print(f"[flexion/range] age={age}mo: {n} joints, 伸展側の限界を設定 "
+              f"({' '.join(applied)}) qpos0を{clamped}件クランプ "
+              f"[Tier1: 限界角は実測（屈曲拘縮）]")
+    return dict(n=n, mode="range", clamped=clamped)
 
 
 def apply_runtime_corrections(model, data, age, neck=True, limbs=True, head_mass=True,
@@ -570,4 +635,6 @@ def apply_runtime_corrections(model, data, age, neck=True, limbs=True, head_mass
     # 生理的屈曲は筋力補正の後（gear と独立なので順序は結果に影響しないが、
     # 「筋力→姿勢」の順で読めるようにここに置く）。既定OFF＝目視で確認してから既定ONにする。
     if flexion:
-        apply_physiological_flexion(model, float(age), stiffness=flexion_stiffness)
+        # ★data を渡す：range 方式では現在の qpos も新しい範囲内へ入れて跳ねを防ぐ
+        apply_physiological_flexion(model, float(age), stiffness=flexion_stiffness,
+                                    data=data)
