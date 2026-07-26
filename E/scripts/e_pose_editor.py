@@ -179,9 +179,18 @@ def main():
 
     tk.Label(root, text="関節の角度 [度]（左右まとめて）",
              font=("", 11, "bold")).pack(pady=(4, 2))
+    def _on_freeze_toggle(*_):
+        # ★物理を回すときは「角度で固定する」を自動で外す。
+        #   両方ONだと、毎ステップ関節角と速度を強制 → 物理が反力を出す →
+        #   また強制、を繰り返してエネルギーが溜まり**太郎が暴れる**
+        #   （ユーザーの目視「すごい物理を進めると太郎が暴れる」で発覚）。
+        if not state["freeze"].get():
+            state["hold_pose"].set(False)
+
     tk.Checkbutton(root, text="★物理演算を止める（姿勢編集モード。重力も衝突も無し）",
-                   variable=state["freeze"], fg="#a30").pack()
-    tk.Checkbutton(root, text="この角度で固定する（外すと物理に任せる）",
+                   variable=state["freeze"], fg="#a30",
+                   command=_on_freeze_toggle).pack()
+    tk.Checkbutton(root, text="この角度で固定する（★物理ONのまま使うと暴れます）",
                    variable=state["hold_pose"]).pack()
     joint_vars = []
     for jd in joints:
@@ -221,6 +230,17 @@ def main():
              font=("", 10, "bold")).pack(pady=(8, 2))
     pen_label = tk.Label(root, text="", font=("Consolas", 9), justify="left")
     pen_label.pack()
+
+    # ★2026-07-26：測定器（e_visibility）の判定をその場で見せる。
+    #   「見えている」を角度だけで測っていて、柵の向こうのおもちゃを
+    #   「視界内100%」と数えていた（落とし穴 項51）。目で確かめられるようにする。
+    tk.Label(root, text="測定器の判定（3つを突き合わせる）",
+             font=("", 10, "bold")).pack(pady=(8, 2))
+    judge_label = tk.Label(root, text="", font=("Consolas", 9), justify="left")
+    judge_label.pack()
+    mask_var = tk.BooleanVar(value=True)
+    tk.Checkbutton(root, text="一人称視点に、検出した画素を緑で重ねる",
+                   variable=mask_var).pack()
 
     msg = tk.Label(root, text="", fg="#0a7", font=("", 9))
     msg.pack()
@@ -314,6 +334,11 @@ def main():
                                       0.015 * np.sin(2 * np.pi * 2.5 * t), 0.0])
             d.qpos[toy_qadr:toy_qadr + 3] = pos
             d.qvel[toy_dof:toy_dof + 6] = 0.0
+            # ★TOY_MODE="hold"（親が手に持っている）は step のたびに `_rest_pos` へ
+            #   位置を書き戻すので、ここで qpos を書いても**上書きされて効かない**
+            #   （ユーザーの目視「物理をONにするとおもちゃがスライダーで変更できない」）。
+            #   スライダーの値を `_rest_pos` 側にも入れて、親が持つ位置ごと動かす。
+            env.unwrapped._rest_pos = pos.copy()
             # おもちゃの大きさをスライダーに追従させる
             s = float(size_var.get())
             if abs(float(m.geom_size[toy_gadr][0]) - s) > 1e-9:
@@ -402,9 +427,12 @@ def main():
                          f"手 → おもちゃ   {dh:6.1f} cm" + gaze_txt)
                 if _head_w:
                     hw = np.array(_head_w)
+                    warn = ""
+                    if not freeze and state["hold_pose"].get():
+                        warn = "\n★「この角度で固定する」がONのまま物理を回しています＝暴れます"
                     head_label.config(
                         text=f"頭の角速度  平均 {hw.mean():.3f}  最大 {hw.max():.3f} rad/s"
-                             f"（直近3秒。トーンOFFなら 0.01 程度が目安）")
+                             f"（直近3秒。落ち着いていれば 0.01〜0.03 が目安）{warn}")
 
                 # ★太郎の体とおもちゃのめり込みを列挙する（床どうしは除く）
                 pen = []
@@ -430,18 +458,49 @@ def main():
                 # 一人称視点を更新（重いので5tickに1回＝約20Hz相当より粗く）
                 if tick % 20 == 0:
                     try:
+                        # ★視覚は VISION_MIN_DT(0.1秒) のキャッシュを持つ。
+                        #   物理を止めていると data.time が進まないので
+                        #   **キャッシュが永久に切れず、最初の1枚が出続ける**
+                        #   （ユーザーの目視「最初は緑になってたのに途中から
+                        #     緑にならなくなった」で発覚）。毎回捨てて描き直す。
+                        env.unwrapped._vision_t = None
+                        env.unwrapped._vision_cache = None
                         imgs = env.unwrapped.get_vision_obs()
                         if isinstance(imgs, dict) and "eye_left" in imgs:
                             from PIL import Image, ImageTk
+                            import e_visibility as VIS
                             arr = np.asarray(imgs["eye_left"])
                             if arr.dtype != np.uint8:
                                 arr = np.clip(arr, 0, 255).astype(np.uint8)
+
+                            # ★測定器の3つの判定をその場で出す
+                            rep = VIS.report(m, d, toy_bid, arr)
+                            j = f"①角度   {rep['angle']:5.1f}°  " \
+                                f"{'視野内' if rep['in_fov'] else '★視野外'}\n"
+                            j += ("②光線   遮蔽なし\n" if rep["ray_ok"]
+                                  else f"②光線   ★{rep['ray_hit']}に遮られている\n")
+                            if rep["pix_seen"]:
+                                j += (f"③画像   {rep['n_pixels']:4d}画素"
+                                      f"（画面の{rep['frac']*100:.1f}%）  "
+                                      f"中心からのずれ {np.hypot(rep['cx'], rep['cy']):.2f}")
+                            else:
+                                j += "③画像   ★映っていない"
+                            judge_label.config(
+                                text=j,
+                                fg="#070" if rep.get("pix_seen") else "#a00")
+
+                            if mask_var.get():
+                                # 検出した画素を緑で塗って重ねる＝測定器が
+                                # 「どこをおもちゃと認識しているか」を目で見る
+                                msk = VIS.red_mask(arr)
+                                arr = arr.copy()
+                                arr[msk] = [0, 255, 0]
                             im = Image.fromarray(arr).resize((192, 192),
                                                               Image.NEAREST)
                             _eye_imgtk[0] = ImageTk.PhotoImage(im)
                             eye_canvas.config(image=_eye_imgtk[0])
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        judge_label.config(text=f"（判定できない: {e}）", fg="#a60")
                 try:
                     win.update()
                 except tk.TclError:

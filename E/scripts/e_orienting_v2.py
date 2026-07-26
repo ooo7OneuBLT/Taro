@@ -249,7 +249,16 @@ class OrientingReflexV2:
         行動レベルの非対称もパラダイム依存でバラバラと判明したため、
         **対称（1:1）が根拠のない前提を最小にする**という判断。
         """
-        cur = np.asarray(image, dtype=np.float32)
+        # ★2026-07-26修正：画像を [0,1] にそろえてから差を取る。
+        #   それまで uint8（0〜255）のまま差分していたため、動きマップの値が
+        #   輝度スケールに乗ってしまい、`strength` が 50〜140 になっていた。
+        #   発火の閾値 SACCADE_MIN_STRENGTH=0.02 は 0〜1 を想定した値なので、
+        #   **常に2500倍の値が来て必ず発火**していた（6.7秒で32発＝撃ちっぱなし。
+        #   おもちゃが存在しない条件でも同じ数だけ撃っていた）。
+        #   → 落とし穴チェックリスト 項36（指標を作るとき向きと尺度も書く）
+        arr = np.asarray(image)
+        cur = (arr.astype(np.float32) / 255.0 if arr.dtype == np.uint8
+               else arr.astype(np.float32))
         cur_gray = cur.mean(axis=-1) if cur.ndim == 3 else cur
 
         self._frame_buffer.append(cur_gray)
@@ -333,5 +342,8 @@ class OrientingReflexV2:
         cy, cx = (h - 1) / 2.0, (w - 1) / 2.0
         h_dir = (cx_map - cx) / cx
         v_dir = -(cy_map - cy) / cy          # 画像の y は下向きなので反転
-        strength = float(activity.max())
+        # 反応の強さ＝中心バイアス後の動きマップの最大値。
+        # ★画像を [0,1] にそろえたので、これも [0,1] に収まる（_detect_motion 参照）。
+        #   念のため上限で切る（中心バイアスの重みは1以下なので理論上は超えない）。
+        strength = float(min(activity.max(), 1.0))
         return float(h_dir), float(v_dir), strength
