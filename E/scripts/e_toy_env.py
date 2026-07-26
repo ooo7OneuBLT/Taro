@@ -384,7 +384,9 @@ class ToySupineEnv(SupineMimoEnv):
             pass   # 【2026-07-25】同上（親クラスが core の実装で適用済み）
         if self._use_vor:
             from e_vor import VOR
-            self._vor = VOR(self.model, self.data)
+            # ★2026-07-26：月齢を渡す。三半規管の時定数が月齢で変わるため
+            #   （新生児10秒 → 成人20秒）。渡さないと成人の値になる。
+            self._vor = VOR(self.model, self.data, age_months=float(getattr(self, "age", 0.0)))
             print(f"[vor] enabled: gain={self._vor.gain} on {len(self._vor.units)} eye actuators "
                   f"(policy output to eyes is ignored)")
         if self._use_orient:

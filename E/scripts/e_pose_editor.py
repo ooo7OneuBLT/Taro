@@ -117,10 +117,26 @@ def main():
         m.geom_size[_g] = [_s, _s, _s]
 
     # ---------------- パネル ----------------
-    root = tk.Tk()
-    root.title("太郎 姿勢／おもちゃ 編集パネル")
-    root.geometry("470x980+30+10")
-    root.attributes("-topmost", True)
+    win = tk.Tk()
+    win.title("太郎 姿勢／おもちゃ 編集パネル")
+    # 画面より高い窓は下が切れて保存ボタンにも届かなくなる。画面に収まる高さにして、
+    # 中身は縦スクロールできるようにする（項目が増えても収まる）。
+    _h = min(980, win.winfo_screenheight() - 90)
+    win.geometry(f"500x{_h}+30+10")
+    win.attributes("-topmost", True)
+
+    _outer = tk.Frame(win); _outer.pack(fill="both", expand=True)
+    _cv = tk.Canvas(_outer, highlightthickness=0)
+    _sb = tk.Scrollbar(_outer, orient="vertical", command=_cv.yview)
+    _cv.configure(yscrollcommand=_sb.set)
+    _sb.pack(side="right", fill="y")
+    _cv.pack(side="left", fill="both", expand=True)
+    root = tk.Frame(_cv)          # 以降の部品はすべてこの中に置く
+    _wid = _cv.create_window((0, 0), window=root, anchor="nw")
+    root.bind("<Configure>", lambda e: _cv.configure(scrollregion=_cv.bbox("all")))
+    _cv.bind("<Configure>", lambda e: _cv.itemconfigure(_wid, width=e.width))
+    _cv.bind_all("<MouseWheel>",
+                 lambda e: _cv.yview_scroll(int(-e.delta / 120), "units"))
 
     # E_FREEZE=0 で物理ONの状態から始める（姿勢が重力で崩れないかを見るとき）
     _freeze0 = os.environ.get("E_FREEZE", "1") == "1"
@@ -189,6 +205,13 @@ def main():
                    variable=state["babble"]).pack(anchor="w", padx=24)
     tk.Checkbutton(root, text="視線誘導反射を効かせる（問題2：逆効果の疑い）",
                    variable=state["reflex"]).pack(anchor="w", padx=24)
+    # ★問題3：屈筋トーンのバネに減衰がなく、手足が振動して頭が揺れる疑い
+    #   （数値では頭部角速度が 0.011 → 0.094 rad/s と8倍になる。目視は未確認）
+    state["tone"] = tk.BooleanVar(value=True)
+    tk.Checkbutton(root, text="屈筋トーンのバネを効かせる（問題3：振動の疑い）",
+                   variable=state["tone"]).pack(anchor="w", padx=24)
+    head_label = tk.Label(root, text="", font=("Consolas", 9), fg="#a30")
+    head_label.pack()
 
     msg = tk.Label(root, text="", fg="#0a7", font=("", 9))
     msg.pack()
@@ -211,10 +234,32 @@ def main():
             toy_vars[i].set(float(toy_pos0[i]))
         msg.config(text="初期値に戻しました")
 
+    def restore_supine():
+        """体を仰向けの初期位置に戻す（ビューア側の Reset で転がったときの復帰用）。
+
+        ビューアの Reset（Backspace）は MuJoCo が持つ XML の初期値に戻すだけなので、
+        そこから物理が回っておもちゃや柵にぶつかり、仰向けでなくなることがある。
+        こちらは「胴体の位置と向き」「スライダーの関節角」「速度ゼロ」をまとめて戻す。
+        """
+        if root_qpos0 is not None:
+            d.qpos[root_qadr:root_qadr + 7] = root_qpos0
+        for jd, v in zip(joints, joint_vars):
+            ang = np.radians(v.get())
+            for jid, qadr in jd["pair"]:
+                d.qpos[qadr] = ang
+        # おもちゃもスライダーの位置へ戻す（体の下敷きになったまま復帰しないため）
+        d.qpos[toy_qadr:toy_qadr + 3] = [v.get() for v in toy_vars]
+        d.qvel[:] = 0.0
+        d.qacc[:] = 0.0
+        mujoco.mj_forward(m, d)
+        msg.config(text="仰向けに戻しました（速度もゼロにしました）")
+
     bf = tk.Frame(root); bf.pack(pady=10)
-    tk.Button(bf, text="この設定を保存", command=save, width=16,
-              bg="#2a7", fg="white").pack(side="left", padx=6)
-    tk.Button(bf, text="初期値に戻す", command=reset_pose, width=14).pack(side="left")
+    tk.Button(bf, text="この設定を保存", command=save, width=14,
+              bg="#2a7", fg="white").pack(side="left", padx=4)
+    tk.Button(bf, text="仰向けに戻す", command=restore_supine, width=13,
+              bg="#37a", fg="white").pack(side="left", padx=4)
+    tk.Button(bf, text="初期値に戻す", command=reset_pose, width=12).pack(side="left")
 
     tk.Label(root, text="ビューア側: 左ドラッグ=回転 / 右ドラッグ=平行移動 / スクロール=ズーム",
              fg="#666", font=("", 8)).pack(side="bottom", pady=6)
@@ -229,6 +274,12 @@ def main():
     _gen = [ColoredNoiseGenerator(n_act, seed=0)]
     _act = [np.zeros(n_act, dtype=np.float32)]
     _saved_reflex = [env.unwrapped._orienting]
+    # 屈筋トーンのバネを切り替えるために、今の stiffness を覚えておく
+    _tone_joints = [j for j in range(m.njnt) if float(m.jnt_stiffness[j]) > 0.0]
+    _tone_k = {j: float(m.jnt_stiffness[j]) for j in _tone_joints}
+    _tone_on = [True]
+    _head_bid = m.body("head").id
+    _head_w = []
     # 体の根元（胴体の自由関節）の初期位置を覚えておく＝編集中に流れないように
     root_qadr = None
     for j in range(m.njnt):
@@ -270,6 +321,13 @@ def main():
                         d.qpos[qadr] = ang
                         d.qvel[m.jnt_dofadr[jid]] = 0.0
 
+            # ★問題3の切り替え：屈筋トーンのバネを効かせるかどうか
+            want_tone = state["tone"].get()
+            if want_tone != _tone_on[0]:
+                for jid in _tone_joints:
+                    m.jnt_stiffness[jid] = _tone_k[jid] if want_tone else 0.0
+                _tone_on[0] = want_tone
+
             # ★問題の切り替え：反射を効かせるかどうか（環境側の apply を止める）
             rf = env.unwrapped._orienting
             if rf is not None:
@@ -297,8 +355,19 @@ def main():
                     env.step(zero)
             t += dt
             tick += 1
+            # 頭部角速度を記録（問題3を数値でも見る）
+            _head_w.append(float(np.linalg.norm(d.cvel[_head_bid][:3])))
+            if len(_head_w) > 300:
+                _head_w.pop(0)
 
             if tick % 5 == 0:
+                # パネルの窓を閉じたあとにラベルを触ると TclError で落ちる
+                # （閉じるたびに赤いエラーが出ていた）。先に生存を確かめて抜ける。
+                try:
+                    if not win.winfo_exists():
+                        break
+                except Exception:
+                    break
                 toy = d.xpos[toy_bid]
                 de = np.linalg.norm(toy - d.xpos[eye_bid]) * 100
                 ds = np.linalg.norm(toy - d.xpos[sh_bid]) * 100
@@ -322,6 +391,11 @@ def main():
                     text=f"目 → おもちゃ   {de:6.1f} cm\n"
                          f"肩 → おもちゃ   {ds:6.1f} cm  （腕の {ds/(ARM_REACH*100)*100:3.0f}%）\n"
                          f"手 → おもちゃ   {dh:6.1f} cm" + gaze_txt)
+                if _head_w:
+                    hw = np.array(_head_w)
+                    head_label.config(
+                        text=f"頭の角速度  平均 {hw.mean():.3f}  最大 {hw.max():.3f} rad/s"
+                             f"（直近3秒。トーンOFFなら 0.01 程度が目安）")
                 # 一人称視点を更新（重いので5tickに1回＝約20Hz相当より粗く）
                 if tick % 20 == 0:
                     try:
@@ -338,14 +412,14 @@ def main():
                     except Exception:
                         pass
                 try:
-                    root.update()
+                    win.update()
                 except tk.TclError:
                     break
             viewer.sync()
 
     env.close()
     try:
-        root.destroy()
+        win.destroy()
     except Exception:
         pass
 

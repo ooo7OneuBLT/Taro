@@ -26,6 +26,16 @@
 import numpy as np
 from scipy.ndimage import gaussian_filter
 
+# 関節への指令を、身体の駆動方式（筋肉2本／モーター1つ）に合った形で書き込む共通の写像。
+# 反射がこれを飛ばして直接書くと、筋肉モデルでは負の指令が消えて片方向にしか動けなくなる。
+import os as _os, sys as _sys
+_CORE_BRAIN = _os.path.abspath(_os.path.join(
+    _os.path.dirname(_os.path.abspath(__file__)), _os.pardir, _os.pardir,
+    "taro_core", "src", "brain"))
+if _CORE_BRAIN not in _sys.path:
+    _sys.path.insert(0, _CORE_BRAIN)
+from spinal_cord.cpg import write_joint_command as _write_joint_command
+
 # ---- ステップ1（動き検出）------------------------------------------------
 # frame index の 1・5・20 前と現フレームを比べる（10Hzなら 0.1・0.5・2秒 前に対応）
 # [Tier3・ARBITRARY] 人間はフレーム記憶でなく連続的な時間フィルタ。効果のみ近似。
@@ -136,6 +146,7 @@ class OrientingReflexV2:
         self.h_dir = 0.0
         self.v_dir = 0.0
         self.strength = 0.0              # 反応の強さ（0〜1相当）
+        self.n_actuator = int(model.nu)
         # 目・首アクチュエータのインデックス（現行 e_orienting.py と同じ）
         self.neck_idx = {}
         self.eye_idx = {"h": [], "v": []}
@@ -206,16 +217,23 @@ class OrientingReflexV2:
         self._sacc_remaining -= (self.dt if dt is None else float(dt))
         out = np.array(action, dtype=float).copy()
         h, v = self._sacc_h, self._sacc_v
-        if "h" in self.neck_idx:
-            i = self.neck_idx["h"]
-            out[i] = float(np.clip(out[i] + NECK_GAIN * h, -1, 1))
-        if "v" in self.neck_idx:
-            i = self.neck_idx["v"]
-            out[i] = float(np.clip(out[i] + NECK_GAIN * v, -1, 1))
+        # ★2026-07-26：ここで `out[i] = clip(out[i] + gain*h, -1, 1)` と直接書いていたのが誤り。
+        #   MuscleModel では1関節が2本の筋（前半＝負方向筋・後半＝正方向筋）で駆動され、
+        #   各要素は [0, 1] に切り捨てられる。負の指令は消えるので、**首も目も片方向にしか
+        #   動けなかった**（目標が反対側にあると永久に追えない）。VOR で同じ誤りが実測で
+        #   確認され（眼が可動域の下限に張り付いて戻らない）、こちらも同型と判明した。
+        #   共通の写像 write_joint_command を通す。眼球は相反神経支配なので共収縮は0。
+        for key, gain in (("h", NECK_GAIN), ("v", NECK_GAIN)):
+            if key in self.neck_idx:
+                d = h if key == "h" else v
+                _write_joint_command(out, self.neck_idx[key], gain * d,
+                                     self.n_actuator, co_activation=0.0, additive=True)
         for i in self.eye_idx["h"]:
-            out[i] = float(np.clip(out[i] + EYE_GAIN * h, -1, 1))
+            _write_joint_command(out, i, EYE_GAIN * h, self.n_actuator,
+                                 co_activation=0.0, additive=True)
         for i in self.eye_idx["v"]:
-            out[i] = float(np.clip(out[i] + EYE_GAIN * v, -1, 1))
+            _write_joint_command(out, i, EYE_GAIN * v, self.n_actuator,
+                                 co_activation=0.0, additive=True)
         return out
 
     # ------------------------------------------------------------

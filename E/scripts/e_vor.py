@@ -36,6 +36,18 @@
   `simulation_torque() = actuator_gear × control_input`
 ＝ctrl は角度ではなく**最大トルクに対する割合(−1〜1)**。角度を書いたので「最大トルクの0.8倍で
 眼を回し続ける」動作になっていた。
+
+★★★【2026-07-26・上記の理解は半分だけ正しかった】★★★
+「トルクモーター」というのは MuscleModel が**内部でトルクモーターを流用している**という話
+（`muscle.py:345` "We apply our muscle torque by reusing the torque motors in the simulation"）で、
+**外から渡す行動配列の形式とは別物**だった。実際の形式は：
+    MuscleModel … 行動 n_joint×2 次元・各要素 [0, 1]
+                  前半 n_joint = 負方向筋 / 後半 n_joint = 正方向筋
+つまり**符号で向きを表せない**。−1〜1 を1本の筋に書いていたので負の指令が消え、
+**眼は片方向（下）にしか動けなかった**。実測で左目の上下角が1秒で下限 −47度に張り付き、
+重力を切っても同じだった（`e_eye_drift_probe.py`）。
+→ 現在は `taro_core/src/brain/spinal_cord/cpg.py` の `write_joint_command` を通している。
+   ★中の実装の説明と、呼び出し側との約束を取り違えたのが原因（落とし穴 項50）。
 → 本版は**速度フィードバック**でトルクを作る：
      ω_desired = −gain × ω_head(当該軸)      ← VORの本体
      ctrl = clip( Kv × (ω_desired − ω_eye) , −1, 1 )
@@ -51,6 +63,17 @@
 import numpy as np
 
 VOR_GAIN = 1.03            # 1〜4ヶ月児の実測値（Finocchio et al. 1991。成人は0.59）
+# ★★★【2026-07-26・以下のスイープ表と診断はすべて無効】★★★
+#   この測定は**眼が片方向にしか動けない状態**で行われた。反射が MuscleModel の形式で
+#   行動を書いていなかったため、負の指令が clip(action, 0, 1) で消えていた
+#   （落とし穴チェックリスト 項50、研究日誌 2026-07-26 続き7）。
+#   ・「どのKvでも実効利得は 0.55〜0.64 で頭打ち」   → 無効。測り直すこと
+#   ・「原因はトルク飽和（29.7%のtickで |ctrl|≥1）」 → ★誤診の可能性が高い。
+#       飽和ではなく、**指令の半分が捨てられていた**だけかもしれない
+#   ・「眼筋を強化して1.03に合わせるのは対症療法だから採らない」
+#       → この判断の土台（飽和の数字）が消えた。利得を測り直してから再検討する
+#   Kv=5.0 は暫定的に残しているだけで、根拠は現時点で無い。
+# ------------------------------------------------------------------------
 # Kv＝速度誤差→トルク割合の変換ゲイン。**スイープの実測で選んだ**（勘や目視ではない）：
 #   Kv    実効利得  視線の揺れ/step  眼球|w|max
 #   1.0    0.597     0.2923          15.46
@@ -70,6 +93,13 @@ VOR_GAIN = 1.03            # 1〜4ヶ月児の実測値（Finocchio et al. 1991�
 VOR_KV = 5.0
 EYE_KEY = "eye"            # 眼球のジョイント/アクチュエータ名に含まれる語
 
+# ★耳石器の経路（静的な傾きへの反応）を速度指令に変換するP制御のゲイン。
+# 耳石器が出すのは「目標の眼球角度」なので、既存の速度サーボに混ぜるために
+#   ω = kp × (目標角 - 現在角)
+# で速度指令へ直す。⚠️[Tier3・ARBITRARY] 文献に値はない。
+# 大きすぎると目標角へ跳ねるように動く（人間の counter-roll は緩やか）ので控えめに取る。
+KP_OCR = 2.0
+
 
 class VOR:
     """頭部角速度を打ち消す向きに眼球を動かし、方策の眼球出力を無効化する。
@@ -78,10 +108,40 @@ class VOR:
     C5の学習済みモデル（n_actuators=90）が読めなくなるため。
     """
 
-    def __init__(self, model, data, gain=VOR_GAIN, kv=VOR_KV):
+    def __init__(self, model, data, gain=VOR_GAIN, kv=VOR_KV,
+                 age_months=0.0, use_canals=True, use_otolith=True,
+                 kp_ocr=KP_OCR):
         self.gain = float(gain)
         self.kv = float(kv)
+        self.kp_ocr = float(kp_ocr)
         self.head_bid = int(model.body("head").id)
+        self.n_actuator = int(model.nu)
+        # ★2026-07-26：感覚器を経由するようにした。それまでは
+        #   data.cvel[head] から物理量を直読みしており、三半規管も耳石器も通っていなかった
+        #   （「semicircular」「canal」の参照がこのファイルに0件だった）。
+        #   その結果、頭がゆっくり傾き続けると眼球が可動域の限界に張り付いた。
+        self.canals = None
+        self.otolith = None
+        import sys as _s, os as _o
+        _core = _o.path.abspath(_o.path.join(
+            _o.path.dirname(_o.path.abspath(__file__)), _o.pardir, _o.pardir,
+            "taro_core", "src", "brain"))
+        if _core not in _s.path:
+            _s.path.insert(0, _core)
+        from spinal_cord.cpg import write_joint_command
+        self._write = write_joint_command
+        if use_canals or use_otolith:
+            _b = _o.path.join(_o.path.dirname(_o.path.abspath(__file__)),
+                              _o.pardir, _o.pardir, "taro_core", "src", "senses")
+            _b = _o.path.abspath(_b)
+            if _b not in _s.path:
+                _s.path.insert(0, _b)
+            if use_canals:
+                from semicircular_canals import SemicircularCanals
+                self.canals = SemicircularCanals(age_months=age_months)
+            if use_otolith:
+                from otolith_organs import OtolithOrgans
+                self.otolith = OtolithOrgans()
         self.units = []          # (actuator_id, joint_id, eye_body_id, axis, ctrl_lo, ctrl_hi)
         for i in range(model.nu):
             name = model.actuator(i).name
@@ -103,7 +163,10 @@ class VOR:
             ))
 
     def reset(self):
-        pass
+        if self.canals is not None:
+            self.canals.reset()
+        if self.otolith is not None:
+            self.otolith.reset()
 
     def _head_omega_world(self, data):
         """頭部の角速度（ワールド基準）。cvelは[角速度3, 線速度3]の順。"""
@@ -115,11 +178,37 @@ class VOR:
             return action
         out = np.array(action, dtype=float).copy()
         w_world = self._head_omega_world(data)
+
+        # ★①三半規管を通す：ゆっくりした回転は「感じなくなる」（高域通過）。
+        #   通さないと「回り続けても永久に感じ続ける」＝眼球が回りきって張り付く。
+        if self.canals is not None:
+            w_world = self.canals.update(w_world, float(dt))
+
+        # ★②耳石器を通す：頭が傾いたまま静止したときの「着地点」を決める。
+        #   比力（重力＋運動加速度）から重力方向を推定し、傾き角 × 0.15 を目標にする。
+        ocr_target = 0.0
+        if self.otolith is not None:
+            # 頭部座標系での比力。MuJoCo は重力を含んだ加速度を直接持たないので、
+            # 頭の姿勢から重力方向を頭部座標へ回して比力の主成分とする。
+            # ⚠️[ARBITRARY・簡略化] 本来は MIMo の vestibular_acc（耳石器の入力）を
+            #   使うべきだが、VOR は物理ステップの途中で呼ばれ観測が未生成のため、
+            #   ここでは重力方向だけを使う。運動加速度ぶんは含まれない＝
+            #   「重力慣性のあいまいさ」を回避してしまっている点は人間より有利。
+            Rh = np.array(data.xmat[self.head_bid], dtype=float).reshape(3, 3)
+            g_head = Rh.T @ np.array([0.0, 0.0, -9.81])
+            self.otolith.update(g_head, float(dt))
+            ocr_target = float(self.otolith.counter_roll())
+
         for u in self.units:
             # 眼球ボディのローカル軸へ頭部角速度を投影
             R = np.array(data.xmat[u["bid"]], dtype=float).reshape(3, 3)
             w_axis = float(np.dot(R.T @ w_world, u["axis"]))
             w_des = -self.gain * w_axis            # 頭と逆向き・同じ速さ＝視線を空間に固定
+            # ★耳石器の経路を足す（角度指令をP制御で速度指令に変換してから加算）。
+            #   ロール軸（torsional）にのみ効かせる＝OCR はロール専用の現象。
+            if self.otolith is not None and "torsional" in model.actuator(u["aid"]).name:
+                ang_now = float(data.qpos[u["qposadr"]])
+                w_des += self.kp_ocr * (ocr_target - ang_now)
             w_eye = float(data.qvel[u["dofadr"]])  # 今の眼球角速度
             torque_ratio = self.kv * (w_des - w_eye)
             # 可動域の端では戻す向きにだけ力を出す（端に押し付け続けない）
@@ -128,7 +217,14 @@ class VOR:
                 torque_ratio = 0.0
             elif ang <= u["jlo"] and torque_ratio < 0:
                 torque_ratio = 0.0
-            out[u["aid"]] = float(np.clip(torque_ratio, u["lo"], u["hi"]))
+            # ★2026-07-26：ここで `out[aid] = torque_ratio` と直接書いていたのが誤り。
+            #   MuscleModel では1関節が2本の筋（前半＝負方向筋・後半＝正方向筋）で駆動され、
+            #   各要素は [0, 1] に切り捨てられる。負の指令は消え、正の指令はいつも同じ
+            #   向き（負方向）に眼を動かした＝**眼は下にしか動けなかった**。
+            #   実測：VOR ON で左目の上下角が1秒で下限 −47度に張り付き戻らない。
+            #   共通の写像 write_joint_command を通す（眼球は相反神経支配なので共収縮は0）。
+            self._write(out, u["aid"], torque_ratio, self.n_actuator,
+                        co_activation=0.0)
         return out
 
     def gaze_axis(self, model, data, camera="eye_left"):

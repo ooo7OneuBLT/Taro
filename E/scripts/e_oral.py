@@ -37,6 +37,15 @@ E1は当初 hand regard（手を見つめる）を目標にしたが、文献調
 """
 import numpy as np
 
+# 関節への指令を、身体の駆動方式（筋肉2本／モーター1つ）に合った形で書き込む共通の写像。
+import os as _os, sys as _sys
+_CORE_BRAIN = _os.path.abspath(_os.path.join(
+    _os.path.dirname(_os.path.abspath(__file__)), _os.pardir, _os.pardir,
+    "taro_core", "src", "brain"))
+if _CORE_BRAIN not in _sys.path:
+    _sys.path.insert(0, _CORE_BRAIN)
+from spinal_cord.cpg import write_joint_command as _write_joint_command
+
 
 # --- 口周辺センサーの座標条件（頭ローカル。顔前面=+x, 左右=y, 顎<->頭頂=z）---
 # 目は頭ローカルで (x=0.052, |y|=0.018, z=0.050)。口はその下・顔前面・中央。
@@ -81,6 +90,7 @@ class OralSystem:
     def __init__(self, model, data, touch):
         self.mouth_idx, self.head_bid = find_mouth_sensor_idx(model, data, touch)
         self.touch = touch
+        self.model = model
         # ⚠️2026-07-21修正：内臓(discomfort)は100物理stepに1回しか進まない
         # （HybridEnv.STEPS_PER_BODY_SECOND）。sucking_discomfort_drop()をその瞬間だけ
         # 呼ぶと、99step接触して100step目に離れただけで**接触ごと見逃す**（hand regardの
@@ -133,10 +143,17 @@ class OralSystem:
             return out
         dy = float(centroid[1] - self.mouth_center[1])   # 左右のずれ
         dz = float(centroid[2] - self.mouth_center[2])   # 顎<->頭頂のずれ
+        # ★2026-07-26：直接 out[i] に符号つきで書いていたのが誤り。MuscleModel では
+        #   1関節が2本の筋で駆動され各要素は [0,1] に切り捨てられるため、負の指令が消えて
+        #   **首が片方向にしか回らなかった**（＝接触が片側にあるときだけ探索できる）。
+        #   詳細は e_vor.py と cpg.write_joint_command 参照。
+        n = int(self.model.nu)
         if self.act_swivel is not None:
-            out[self.act_swivel] = float(np.clip(ROOT_GAIN * dy, -1.0, 1.0))
+            _write_joint_command(out, self.act_swivel, ROOT_GAIN * dy, n,
+                                 co_activation=0.0)
         if self.act_tilt is not None:
-            out[self.act_tilt] = float(np.clip(ROOT_GAIN * dz, -1.0, 1.0))
+            _write_joint_command(out, self.act_tilt, ROOT_GAIN * dz, n,
+                                 co_activation=0.0)
         return out
 
     # --- 吸啜反射（sucking）：接触中は discomfort を下げる -------------

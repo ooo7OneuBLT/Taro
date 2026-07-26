@@ -42,6 +42,15 @@
 """
 import numpy as np
 
+# 関節への指令を、身体の駆動方式（筋肉2本／モーター1つ）に合った形で書き込む共通の写像。
+import os as _os, sys as _sys
+_CORE_BRAIN = _os.path.abspath(_os.path.join(
+    _os.path.dirname(_os.path.abspath(__file__)), _os.pardir, _os.pardir,
+    "taro_core", "src", "brain"))
+if _CORE_BRAIN not in _sys.path:
+    _sys.path.insert(0, _CORE_BRAIN)
+from spinal_cord.cpg import write_joint_command as _write_joint_command
+
 GRID_COLS = 3
 GRID_ROWS = 2
 VERTICAL_DAMPING = 10.0 / 30.0   # 文献の反応角度比（縦10度/横30度）。値は近似[ARBITRARY]
@@ -54,6 +63,7 @@ class OrientingReflex:
 
     def __init__(self, model):
         self.prev_eye = None
+        self.n_actuator = int(model.nu)
         self.neck_idx = {}
         self.eye_idx = {"h": [], "v": []}
         for i in range(model.nu):
@@ -83,16 +93,21 @@ class OrientingReflex:
         if h_dir == 0.0 and v_dir == 0.0:
             return action
         out = np.array(action, dtype=float).copy()
-        if "h" in self.neck_idx:
-            i = self.neck_idx["h"]
-            out[i] = float(np.clip(out[i] + NECK_GAIN * h_dir, -1, 1))
-        if "v" in self.neck_idx:
-            i = self.neck_idx["v"]
-            out[i] = float(np.clip(out[i] + NECK_GAIN * v_dir, -1, 1))
+        # ★2026-07-26：直接 out[i] に符号つきで書いていたのが誤り。MuscleModel では
+        #   1関節が2本の筋で駆動され各要素は [0,1] に切り捨てられるため、負の指令が消えて
+        #   **片方向にしか動けなかった**。詳細は e_vor.py と cpg.write_joint_command 参照。
+        n = self.n_actuator
+        for key in ("h", "v"):
+            if key in self.neck_idx:
+                d = h_dir if key == "h" else v_dir
+                _write_joint_command(out, self.neck_idx[key], NECK_GAIN * d, n,
+                                     co_activation=0.0, additive=True)
         for i in self.eye_idx["h"]:
-            out[i] = float(np.clip(out[i] + EYE_GAIN * h_dir, -1, 1))
+            _write_joint_command(out, i, EYE_GAIN * h_dir, n,
+                                 co_activation=0.0, additive=True)
         for i in self.eye_idx["v"]:
-            out[i] = float(np.clip(out[i] + EYE_GAIN * v_dir, -1, 1))
+            _write_joint_command(out, i, EYE_GAIN * v_dir, n,
+                                 co_activation=0.0, additive=True)
         return out
 
     def _direction(self, eye_image):

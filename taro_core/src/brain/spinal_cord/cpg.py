@@ -179,3 +179,77 @@ def antagonist_map(motor_cmd, co_activation=0.3):
     out[:n] = neg
     out[n:] = pos
     return out
+
+
+def is_antagonist_action(action, n_actuator):
+    """行動配列が拮抗筋2本ペア形式か（＝長さが 関節数×2 か）を判定する。
+
+    MIMo は身体の駆動方式が2種類ある：
+      MuscleModel        … 1関節に2本の筋。行動は 関節数×2 次元・各要素 [0, 1]
+      SpringDamperModel  … 1関節に1つのモーター。行動は 関節数 次元・各要素 [-1, 1]
+    どちらで走っているかは行動配列の長さで判別できる。
+    """
+    return int(len(action)) >= 2 * int(n_actuator)
+
+
+def write_joint_command(action, joint_index, cmd, n_actuator, co_activation=0.0,
+                        additive=False):
+    """1つの関節への指令 cmd([-1, 1]) を、行動配列に**駆動方式に合った形で**書き込む。
+
+    ★【2026-07-26・なぜ作ったか】反射（前庭動眼反射・視線誘導反射・口の探索）が
+    そろって `action[joint_index] = cmd`（符号つき）と直接書いており、**筋肉モデルでは
+    半分の指令が消えていた**。MuscleModel は行動を [0, 1] に切り捨てるので、
+      正の値 → 「負方向筋」が収縮する（意図と無関係にいつも同じ向きへ動く）
+      負の値 → 0 に切り捨て（＝何も起きない。正方向筋には触れていないので戻せない）
+    となり、**眼も首も片方向にしか動けなかった**。実測：VOR を入れると左目の上下角が
+    1秒で可動域の下限 −47度に張り付き、二度と戻らなかった（重力を切っても同じ）。
+    ユーザーの目視「眼球だけずっと下に引っ張られてる」と一致。
+
+    自発運動（脳側 explore → to_env_action）は `antagonist_map` を通しており正しかった。
+    **反射だけがこの写像を飛ばしていた**ので、共通の入り口をここに用意する。
+
+    Args:
+        action: 書き込み先の行動配列（その場で書き換える）。
+        joint_index: 関節の番号（＝アクチュエータの番号。0〜n_actuator-1）。
+        cmd: その関節への指令。[-1, 1]。符号が向き。
+        n_actuator: 関節（アクチュエータ）の総数。
+        co_activation: 共収縮の度合い。拮抗筋形式のときだけ効く。
+            ★眼球運動は既定の 0 でよい。人間の外眼筋は**相反神経支配**
+            （Sherrington の相反神経支配の法則）で、一方が収縮するとき他方は
+            積極的に弛緩する＝共収縮しない。四肢の共収縮とは別の話。
+        additive: True なら既にある値に足す（複数の反射を重ねる場合）。
+
+    Returns:
+        書き換えた action（引数と同じ配列）。
+    """
+    c = float(np.clip(cmd, -1.0, 1.0))
+    n = int(n_actuator)
+    if is_antagonist_action(action, n):
+        neg = float(np.clip(co_activation + max(-c, 0.0), 0.0, 1.0))
+        pos = float(np.clip(co_activation + max(+c, 0.0), 0.0, 1.0))
+        if additive:
+            action[joint_index] = float(np.clip(action[joint_index] + neg, 0.0, 1.0))
+            action[joint_index + n] = float(np.clip(action[joint_index + n] + pos, 0.0, 1.0))
+        else:
+            action[joint_index] = neg
+            action[joint_index + n] = pos
+    else:
+        if additive:
+            action[joint_index] = float(np.clip(action[joint_index] + c, -1.0, 1.0))
+        else:
+            action[joint_index] = c
+    return action
+
+
+def read_joint_command(action, joint_index, n_actuator, co_activation=0.0):
+    """行動配列から、1つの関節への指令（[-1, 1]・符号が向き）を取り出す。
+
+    `write_joint_command` の逆。反射が方策の出力に上書きするとき、
+    「今その関節に何の指令が来ているか」を知るために使う。
+    """
+    n = int(n_actuator)
+    if is_antagonist_action(action, n):
+        neg = float(action[joint_index]) - co_activation
+        pos = float(action[joint_index + n]) - co_activation
+        return float(np.clip(pos - neg, -1.0, 1.0))
+    return float(action[joint_index])
