@@ -113,9 +113,11 @@ def main():
     root.geometry("460x760+40+20")
     root.attributes("-topmost", True)
 
-    state = {"hold_pose": tk.BooleanVar(value=True),
+    # E_FREEZE=0 で物理ONの状態から始める（姿勢が重力で崩れないかを見るとき）
+    _freeze0 = os.environ.get("E_FREEZE", "1") == "1"
+    state = {"hold_pose": tk.BooleanVar(value=_freeze0),
              "shake": tk.BooleanVar(value=False),
-             "freeze": tk.BooleanVar(value=True),   # ★既定で物理を止める
+             "freeze": tk.BooleanVar(value=_freeze0),
              "toy": list(toy_pos0)}
 
     tk.Label(root, text="おもちゃの位置 [m]", font=("", 11, "bold")).pack(pady=(10, 2))

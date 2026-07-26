@@ -512,6 +512,51 @@ FLEXION_UNTIL_MO = 3.0
 #   "spring" ： 旧実装。qpos_spring + jnt_stiffness で目標角へ引き寄せる（比較用に残す）
 FLEXION_MODE = "range"
 
+# 【屈筋トーン（flexor tone）・2026-07-26】
+# 新生児は脱力しても手足が曲がったまま＝**曲げる筋肉が常にうっすら働いている**。
+# 大人が脱力すると重力で手足が伸びるのと逆。上の「壁」（拘縮＝伸展の限界）だけでは
+# 再現できない（ユーザーの目視「膝が伸びきってる」で発覚）。
+#
+# 【機構】伸張反射（筋紡錘 → 脊髄 → 筋収縮）を jnt_stiffness + qpos_spring で近似する。
+#   Solopova et al. (2019) Front Physiol [PMC6769424]（乳児54名、他動屈伸中の筋電）
+#     ・他動運動に対する筋電反応が高頻度に観察され、潜時 460〜630ms の**トニックな収縮**
+#     ・著者らは「脊髄・脊髄上ネットワークの興奮性水準の反映」＝**純粋な機械的特性ではない**と明記
+#   Dolinskaya et al. (2023) Biology 12(5):724 [PMC10215963] も同様の反応を報告
+# ⚠️[Tier2・近似] バネは伸張反射と**機能は似るが機構は違う**：
+#     人間 … 潜時 460〜630ms／γループで反射ゲインが状況依存に変わる
+#     バネ … 遅れゼロ／強さ固定
+#   → 逸脱リストに登録。遅れ付きの反射として実装するのは将来の候補。
+#
+# 【なぜ持続的な筋活性化にしないか】Schloon, O'Brien, Scholten & Prechtl (1976)
+#   Neuropädiatrie 7(4):384-415 [PMID 1036764] が安静時の多点筋電で
+#   **屈筋優位の持続的活動を見出さなかった**＝随意的な姿勢保持ではない。
+#
+# 【目標角（バネの中立位置）の根拠】
+#   肘 -105度  ★Farmania et al. (2017) J Neurosci Rural Pract 8(3) [PMC5602260]
+#              満期産 n=74 の arm recoil（腕を伸ばして離すと戻る角度）105.3 ± 14.2度
+#              ⚠️[Tier2] 反跳は「離した直後に戻る角度」で、静止時の角度とは厳密には別。
+#                ユーザーの目視は -134度 で約2SD分ずれる。文献値を優先して採用し、
+#                目視と食い違えば再検討する。
+#   股 -81度 / 膝 -107度  ⚠️[Tier3・ARBITRARY]
+#              ★安静時の関節角度の一次文献は**存在しない**（2026-07-26 調査で確認）。
+#              Cioni, Ferrari & Prechtl (1989) Early Hum Dev 18(4):247-262 は
+#              無刺激ビデオ観察をしたが「完全屈曲への選好は確認できず、個人差が大きい」
+#              と報告するのみで度数化していない。
+#              → ユーザーが Viewer で新生児の見た目に合わせて作った値を採用する
+#                （E/docs/pose_editor_saved.json）。
+TONE_TARGETS = {"hip1": -81.0, "knee": -107.0, "elbow": -105.0}
+# バネの強さ [N·m/rad]。★肘の arm recoil で較正した実測値（2026-07-26）。
+#   `E/scripts/e_arm_recoil_test.py` で 0.005〜0.2 を振り、肘を伸展位から離したときの
+#   落ち着く角度を測定：
+#       0.005〜0.02 → 14度台（ほぼ戻らない）／0.05 → 23度／0.1 → 91.9度／0.2 → 103.2度
+#   目標 105.3 ± 14.2度（Farmania 2017）に対し **0.2 が差 2.1度** で最も近い。
+# ★このプロジェクトで珍しく、目視でなく文献の実測から決まった値 [Tier2]。
+#   ⚠️暫定で置いていた 0.02 は10倍小さく、較正しなければ気づけなかった。
+TONE_STIFFNESS = 0.2
+# 屈筋トーンが解消する月齢。⚠️[Tier3] 一次典拠が見つかっていない（2026-07-20/26 の調査）。
+# 拘縮の解消（膝 21.4→10.7(3ヶ月)→3.3度(6ヶ月)、Broughton 1993）を目安に置く。
+TONE_UNTIL_MO = 3.0
+
 
 def apply_physiological_flexion(model, age=0.0, stiffness=None, verbose=True,
                                 mode=None, data=None):
@@ -588,12 +633,16 @@ def apply_physiological_flexion(model, age=0.0, stiffness=None, verbose=True,
                 continue
             model.jnt_range[jid, 1] = tgt      # 伸展側（正の側）の限界を target に
             model.jnt_limited[jid] = 1
-            # 跳ね防止：リセット姿勢と現在姿勢を新しい範囲内へ入れる
-            if float(model.qpos0[qadr]) > tgt:
-                model.qpos0[qadr] = tgt
-                clamped += 1
+            # ⚠️★【2026-07-26 修正】ここで model.qpos0 を書き換えてはいけない。
+            #   MuJoCo の関節の回転は **qpos - qpos0** で計算されるので、
+            #   qpos0 を動かすと**角度のゼロ点ごとずれる**。
+            #   実際 qpos0 と qpos を同じ値にしていたため回転がゼロになり、
+            #   qpos は -105度なのに実際の屈曲は 5度、という状態になっていた
+            #   （ユーザーの目視「ひじ膝伸びきってる」で発覚。→ チェックリスト項49）
+            #   跳ね防止は data.qpos 側だけで行う。
             if data is not None and float(data.qpos[qadr]) > tgt:
                 data.qpos[qadr] = tgt
+                clamped += 1
             n += 1
         applied.append(f"{base}{target:+.0f}")
     if verbose:
@@ -603,9 +652,62 @@ def apply_physiological_flexion(model, age=0.0, stiffness=None, verbose=True,
     return dict(n=n, mode="range", clamped=clamped)
 
 
+def apply_flexor_tone(model, age=0.0, stiffness=None, targets=None,
+                      verbose=True, data=None):
+    """屈筋トーン＝安静姿勢へ戻ろうとする弱いバネ（伸張反射の近似）。
+
+    上の `apply_physiological_flexion`（壁＝伸展の限界）と**併用する**。
+    壁は「これ以上は伸ばせない」を決めるだけで、屈曲側の深さを決めない。
+    新生児が脱力しても手足が曲がったままなのは、曲げる筋肉が常にうっすら
+    働いているから（＝屈筋トーン）。それをバネで近似する。
+
+    ⚠️2026-07-25 の "spring" 実装との違い：あれはバネの中立位置に
+      **拘縮の限界**（膝-21度）を使っていたので、深く曲がった肘を逆に伸ばしていた。
+      ここでは中立位置を**安静姿勢**（膝-107度）にする。根拠は上の TONE_TARGETS 参照。
+
+    Args:
+        data: 渡すと現在の qpos も目標角へ揃える（初期姿勢を安静姿勢にする）
+    """
+    import numpy as np
+    if float(age) >= TONE_UNTIL_MO:
+        if verbose:
+            print(f"[tone] age={age}mo >= {TONE_UNTIL_MO}mo: no correction")
+        return dict(n=0)
+    k = TONE_STIFFNESS if stiffness is None else float(stiffness)
+    tgts = TONE_TARGETS if targets is None else dict(targets)
+    n, applied = 0, []
+    for base, target in tgts.items():
+        tgt = np.radians(target)
+        for side in ("right_", "left_"):
+            try:
+                j = model.joint("robot:" + side + base)
+            except Exception:
+                continue
+            jid = int(j.id)
+            qadr = int(model.jnt_qposadr[jid])
+            lo, hi = float(model.jnt_range[jid, 0]), float(model.jnt_range[jid, 1])
+            tgt_c = float(np.clip(tgt, lo, hi))     # 壁の内側に収める
+            model.qpos_spring[qadr] = tgt_c
+            model.jnt_stiffness[jid] = k
+            # ⚠️★【2026-07-26 修正】model.qpos0 は書き換えない。
+            #   MuJoCo の関節の回転は qpos - qpos0 なので、qpos0 を動かすと
+            #   角度のゼロ点ごとずれる。ここで qpos0 = qpos = -105度 にしていたため
+            #   回転が 0 になり、**数値は曲がっているのに実際は真っ直ぐ**だった
+            #   （→ チェックリスト項49）。初期姿勢は data.qpos だけで設定する。
+            if data is not None:
+                data.qpos[qadr] = tgt_c
+            n += 1
+        applied.append(f"{base}{target:+.0f}")
+    if verbose:
+        print(f"[tone] age={age}mo: {n} joints, stiffness={k} ({' '.join(applied)}) "
+              f"[Tier2: 肘はarm recoil実測／Tier3: 股・膝は目視（安静時の文献なし）]")
+    return dict(n=n, stiffness=k)
+
+
 def apply_runtime_corrections(model, data, age, neck=True, limbs=True, head_mass=True,
                               limb_scale=1.0, distal_mass=1.0, flexion=False,
-                              flexion_stiffness=None, actuation_model=None):
+                              flexion_stiffness=None, actuation_model=None,
+                              tone=True, tone_stiffness=None):
     """モデル構築後に上書きする補正（筋力＝アクチュエータのgear）。
 
     - **首の筋力**（`infant_neck`）：MIMoは gear を geom の体積から計算するため、
@@ -638,3 +740,6 @@ def apply_runtime_corrections(model, data, age, neck=True, limbs=True, head_mass
         # ★data を渡す：range 方式では現在の qpos も新しい範囲内へ入れて跳ねを防ぐ
         apply_physiological_flexion(model, float(age), stiffness=flexion_stiffness,
                                     data=data)
+        # ★屈筋トーン（バネ）は壁の後。壁の内側に目標角を収めるため順序が必要。
+        if tone:
+            apply_flexor_tone(model, float(age), stiffness=tone_stiffness, data=data)

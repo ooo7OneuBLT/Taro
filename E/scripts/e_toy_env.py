@@ -384,9 +384,20 @@ class ToySupineEnv(SupineMimoEnv):
             print(f"[vor] enabled: gain={self._vor.gain} on {len(self._vor.units)} eye actuators "
                   f"(policy output to eyes is ignored)")
         if self._use_orient:
-            from e_orienting import OrientingReflex
-            self._orienting = OrientingReflex(self.model)
-            print(f"[orient] enabled: neck={list(self._orienting.neck_idx.keys())} "
+            # 【2026-07-26】視線誘導反射に新版(v2)を追加。E_ORIENT_V=2 で切り替える。
+            #   v1（既定）: e_orienting.py。6マス分割＋残差法。構造的な穴が6つ見つかっている
+            #   v2       : e_orienting_v2.py。設計図（E/docs/視線誘導反射_設計図.md）に基づく
+            #              複数フレーム動き検出＋中心バイアス＋側方抑制＋階段状サッケード
+            # ⚠️v1 は比較・アブレーション用に残す（撤回した実装を消さない方針）。
+            ver = os.environ.get("E_ORIENT_V", "1")
+            if ver == "2":
+                from e_orienting_v2 import OrientingReflexV2
+                self._orienting = OrientingReflexV2(self.model, dt=self.dt)
+            else:
+                from e_orienting import OrientingReflex
+                self._orienting = OrientingReflex(self.model)
+            print(f"[orient] enabled: v{ver} ({type(self._orienting).__name__}) "
+                  f"neck={list(self._orienting.neck_idx.keys())} "
                   f"eye_h={len(self._orienting.eye_idx['h'])} eye_v={len(self._orienting.eye_idx['v'])}")
 
     # ------------------------------------------------------------------
