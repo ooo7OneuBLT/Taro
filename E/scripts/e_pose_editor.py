@@ -213,6 +213,15 @@ def main():
     head_label = tk.Label(root, text="", font=("Consolas", 9), fg="#a30")
     head_label.pack()
 
+    # ★2026-07-26：めり込みの表示。物理を止めていると「おもちゃが顔にめり込んでいる」
+    #   ことが見た目では分からず、物理を回した瞬間に巨大な反力で弾き飛ばされる。
+    #   実測：おもちゃが頭に 15.6mm・右目に 13.4mm めり込み、拘束反力 1461+502 Nm。
+    #   首の筋力 0.066 Nm の2万倍。0.4秒で首が64度回っていた。
+    tk.Label(root, text="めり込み（物理を回すとここで弾かれる）",
+             font=("", 10, "bold")).pack(pady=(8, 2))
+    pen_label = tk.Label(root, text="", font=("Consolas", 9), justify="left")
+    pen_label.pack()
+
     msg = tk.Label(root, text="", fg="#0a7", font=("", 9))
     msg.pack()
 
@@ -396,6 +405,28 @@ def main():
                     head_label.config(
                         text=f"頭の角速度  平均 {hw.mean():.3f}  最大 {hw.max():.3f} rad/s"
                              f"（直近3秒。トーンOFFなら 0.01 程度が目安）")
+
+                # ★太郎の体とおもちゃのめり込みを列挙する（床どうしは除く）
+                pen = []
+                for ci in range(d.ncon):
+                    c = d.contact[ci]
+                    if c.dist >= -1e-4:          # 0.1mm 未満は無視
+                        continue
+                    b1 = int(m.geom_bodyid[c.geom1])
+                    b2 = int(m.geom_bodyid[c.geom2])
+                    n1, n2 = m.body(b1).name, m.body(b2).name
+                    if toy_bid not in (b1, b2):  # おもちゃが絡むものだけ見る
+                        continue
+                    other = n2 if b1 == toy_bid else n1
+                    pen.append((other, -c.dist * 1000))
+                if pen:
+                    pen.sort(key=lambda x: -x[1])
+                    txt = "★おもちゃがめり込んでいる：\n" + "\n".join(
+                        f"   {nm:<16} {mm:6.2f} mm" for nm, mm in pen[:4])
+                    pen_label.config(text=txt, fg="#a00")
+                else:
+                    pen_label.config(text="めり込みなし（この位置なら弾かれません）",
+                                     fg="#070")
                 # 一人称視点を更新（重いので5tickに1回＝約20Hz相当より粗く）
                 if tick % 20 == 0:
                     try:

@@ -57,7 +57,16 @@ REST_DIST = 0.158          # 静止時の肩→手の距離[m]
 #   視線の正面に置けば初期ずれ0°＝30°丸ごとを頭の揺れに回せる。
 # ⚠️ ただしこれで解決するのは配置ぶんだけ。**頭は平均50°振れる**ので、
 #   空間に固定したおもちゃを見続けるには視野の半角が54°以上必要＝根本原因は別（要検討）。
-TOY_DISTANCE = 0.086       # 目からおもちゃまでの距離[m]。⚠️暫定＝旧オフセットの長さを維持
+# 目からおもちゃまでの距離[m]。E_TOY_DIST で上書きできる。
+# ⚠️旧値 0.086 は「旧オフセットの長さを維持した暫定値」で、根拠がなかった。
+#   ★2026-07-26の実測（基準点を両目の中点に直したあと）：
+#     距離[cm]   視線のズレ   めり込み
+#        8.6        7.9度     13.65mm  ← 柵に当たる
+#       12.0        5.8度      5.23mm
+#       13.0        5.4度      1.37mm
+#       15.0        4.7度      0.00mm  ← めり込まず、腕(18.6cm)で届く
+#       18.0        3.9度      0.00mm  ← 腕の長さぎりぎり
+TOY_DISTANCE = float(os.environ.get("E_TOY_DIST", "0.086"))
                            #   （新生児の適切な注視距離は文献調査中。決まり次第ここを更新）
 TOY_OFFSET = np.array([-0.05, 0.0, 0.07])   # 旧方式（アブレーション用に残す）
 # 【2026-07-20 修正】吊り方を「バネ」から「紐（振り子）」へ。
@@ -198,6 +207,44 @@ def infant_vision_params(size=VISION_RES, fovy=VISION_FOVY, acuity_age=ACUITY_AG
            "acuity": acuity_age, "foveation": False}
     return {"eye_left": dict(eye), "eye_right": dict(eye)}
 FAR_AWAY = np.array([3.0, 3.0, 0.05])   # 使わない物体の退避先
+
+# ★おもちゃの登場を遅らせる（ユーザーの提案 2026-07-26）
+#
+# 【なぜ】リセット直後の太郎は落ち着いていない。実測：
+#   ・おもちゃが規定位置で頭に 15.6mm・右目に 13.4mm めり込み、
+#     拘束反力 1461+502 Nm が発生する（首の筋力 0.066Nm の3万倍）
+#   ・その反力で 0.4秒のうちに首が 64度回り、視線がおもちゃから 100度ずれる
+#   ・関節角も屈筋トーンの目標と最大56度ずれた状態から始まり、バネで引かれて動く
+#   ・首が落ち着くのは 2.4秒あたり
+#   → 視線に関わる実験が何ひとつ成立しなかった（研究日誌 2026-07-26 続き7）
+#
+# 【対処】おもちゃを最初は遠くに置き、太郎が落ち着いてから**親が運んでくる**。
+#   瞬間移動させないのは既存の方針と同じ（ワープは随伴性の学習を壊す。_apply_tether 参照）。
+#   人間の場面としても、親がおもちゃを見せるのは赤ちゃんが落ち着いてからで自然。
+#
+# ⚠️[Tier3・ARBITRARY] 秒数に文献の裏付けはない。実測（落ち着くまで2.4秒）と
+#   「人が手を動かす速さ」から置いている。E_TOY_DELAY / E_TOY_APPROACH で変えられる。
+TOY_APPEAR_DELAY = float(os.environ.get("E_TOY_DELAY", "1.0"))    # 何秒待つか
+TOY_APPROACH_SEC = float(os.environ.get("E_TOY_APPROACH", "0.5"))  # 運ぶのにかける時間
+TOY_APPROACH_DIST = 0.15   # どこから運び始めるか＝規定位置からの距離[m]
+#   0.15m を 0.5秒 ＝ 0.3 m/s。人が手でおもちゃを差し出す速さとして妥当な範囲。
+#
+# ★どの向きから運んでくるか（ユーザーの目視 2026-07-26「おもちゃが柵に引っかかって」）
+#   "above" 規定位置の**真上**から降ろす ← 既定。柵は側面にあるので上からなら通れる。
+#           親が柵（ベビーベッドの柵）越しに手を入れるのも上からで、場面として自然。
+#   "gaze"  視線方向の先から近づける（最初の実装）。⚠️柵を突き抜ける経路になる。
+# ⚠️私の測定はおもちゃが**到着した後**しか集計しておらず、運搬中に柵へ
+#   引っかかるのを見落としていた。ユーザーの目視で発覚（落とし穴 項1・項6）。
+TOY_APPROACH_FROM = os.environ.get("E_TOY_FROM", "above")
+
+# ★おもちゃの持たせ方（ユーザーの提案 2026-07-26「一回紐みたいなのやめたら」）
+#   "hold"   親が手に持っている＝位置を固定する。掴んでも動かない。
+#            ⚠️新生児におもちゃを見せるのは親が手に持ってが普通なので、場面として自然。
+#            力の要因が減るので**切り分けに向く**。★視線誘導反射のテストはこれで行う。
+#   "tether" ベビージムに吊るす（従来）。押せば動き、離せば戻る。
+#            掴んで動かす段階（リーチング）で随伴性を学ばせるための仕組み。
+#   "free"   何もしない＝重力で落ちる。仰向けの太郎からは見えなくなる（比較用）。
+TOY_MODE = os.environ.get("E_TOY_MODE", "hold")
 
 
 def _box_inertia(mass, half):
@@ -578,15 +625,77 @@ class ToySupineEnv(SupineMimoEnv):
         リセット時に一度だけ決めてエピソード中は固定＝現実のベビージムも動かない。
         （太郎に追従させると「おもちゃが赤ちゃんを追いかける」不自然さになる）
         """
-        head = self.data.body("head").xpos.copy()
+        # ★2026-07-26修正：基準点を「頭の中心」から「両目の中点」に変えた。
+        #   目は頭の中心より前方にあるので、頭の中心から視線方向へ進んだ点は
+        #   **目から見ると大きく横にずれる**。近いほどずれが大きい。
+        #   実測（修正前）：「初期ずれ0°」と書いてあるのに実際は
+        #     距離 8.6cm → ずれ 69.9度 ／ 12cm → 41.9度 ／ 18cm → 22.3度
+        #   ＝距離を変えるとずれが変わる（視線の正面ならどの距離でも0のはず）。
+        #   → 落とし穴チェックリスト 項17（設定した値が効いていると思い込まない）
+        eyes = []
+        for nm in ("eye_left", "eye_right"):
+            try:
+                eyes.append(np.array(self.data.cam_xpos[int(self.model.camera(nm).id)],
+                                     dtype=float))
+            except Exception:
+                pass
+        origin = (np.mean(eyes, axis=0) if eyes
+                  else self.data.body("head").xpos.copy())
         # おもちゃがぶら下がる位置。支点はその**真上に紐の長さぶん**取る＝
         # 重力で自然に垂れると、ちょうどこの位置に来る（振り子の静止点）。
         if self._toy_offset is None:
             g = self._gaze_dir()
-            self._rest_pos = head + g * self._toy_dist     # 視線の正面・距離 _toy_dist
+            self._rest_pos = origin + g * self._toy_dist   # 視線の正面・距離 _toy_dist
         else:
-            self._rest_pos = head + self._toy_offset       # 旧方式（アブレーション用に残す）
+            # 旧方式（アブレーション用に残す）。こちらは頭の中心からのオフセット。
+            self._rest_pos = self.data.body("head").xpos.copy() + self._toy_offset
         self._anchor = self._rest_pos + np.array([0.0, 0.0, self._tether_len])
+
+    def _carry_toy(self):
+        """親がおもちゃを運んでくる。TOY_APPEAR_DELAY 秒待ってから TOY_APPROACH_SEC 秒かけて動かす。
+
+        ★瞬間移動させない。ワープは物理的に不自然なうえ、「勝手に動く＝予測できない」ので
+        随伴性の学習を壊す（_apply_tether の注記と同じ理由）。
+        運んでいる間おもちゃは動いて見えるので、視線誘導反射にとっては
+        「親が注意を引く」場面そのものになる。
+
+        ★行き先（アンカー）は**到着する時点の視線の正面**に決める。
+        リセット時点で決めると、待っている1秒のあいだに首が回って視界の外になる
+        （実測：0.4秒で首が64度回る）。親は赤ちゃんの顔の向きに合わせて差し出すので、
+        到着時に決める方が人間の場面としても自然。
+        """
+        if not self._toy or not getattr(self, "_toy_pending", False):
+            return
+        self._t_since_reset += self.dt
+        if self._t_since_reset < TOY_APPEAR_DELAY:
+            return                                  # まだ遠くで待っている
+
+        if not self._toy_arriving:
+            # 運び始め：今の視線の正面を行き先に決め、その手前から動かし始める
+            self._set_anchor()                      # _rest_pos と _anchor が決まる
+            if TOY_APPROACH_FROM == "above":
+                # 真上から降ろす＝柵（側面にある）に引っかからない
+                away = np.array([0.0, 0.0, 1.0])
+            else:
+                head = self.data.body("head").xpos.copy()
+                away = self._rest_pos - head
+                n = float(np.linalg.norm(away))
+                away = away / n if n > 1e-9 else np.array([1.0, 0.0, 0.0])
+            self._carry_from = self._rest_pos + away * TOY_APPROACH_DIST
+            self._toy_arriving = True
+            self._toy_carry_t = 0.0
+            self._anchor = None                     # 運んでいる間は吊らない
+
+        self._toy_carry_t += self.dt
+        frac = min(1.0, self._toy_carry_t / max(TOY_APPROACH_SEC, 1e-9))
+        pos = self._carry_from + (self._rest_pos - self._carry_from) * frac
+        self._place(self._toy_qadr, pos)
+        self.data.qvel[self._toy_dadr:self._toy_dadr + 6] = 0.0
+        if frac >= 1.0:
+            # 到着：ここから紐に引き継ぐ（＝親が手を離してベビージムに預ける）
+            self._anchor = self._rest_pos + np.array([0.0, 0.0, self._tether_len])
+            self._toy_pending = False
+            self._toy_arriving = False
 
     def _apply_tether(self):
         """おもちゃを基準点に吊るす力（ベビージムの紐/ゴム）。
@@ -595,7 +704,23 @@ class ToySupineEnv(SupineMimoEnv):
         ★瞬間移動(respawn)を使わずに手元へ留めるための機構。ワープは物理的に不自然な上、
         「勝手に動く＝予測できない」ので**随伴性の学習を壊す**（Viewerでの目視で判明）。
         """
-        if not self._toy or self._anchor is None:
+        if not self._toy:
+            return
+        # ★持たせ方の切り替え（TOY_MODE 参照）
+        if TOY_MODE == "hold":
+            # 親が手に持っている＝位置を固定する。力を加えるのでなく位置を書き込む。
+            if getattr(self, "_toy_pending", False):
+                return                      # まだ運んでいる最中は _carry_toy が動かす
+            if getattr(self, "_rest_pos", None) is None:
+                return
+            self._place(self._toy_qadr, self._rest_pos)
+            self.data.qvel[self._toy_dadr:self._toy_dadr + 6] = 0.0
+            self.data.xfrc_applied[self._toy_bid, :3] = 0.0
+            return
+        if TOY_MODE == "free":
+            self.data.xfrc_applied[self._toy_bid, :3] = 0.0
+            return
+        if self._anchor is None:
             return
         pos = self.data.body("test_object1").xpos
         vel = self.data.qvel[self._toy_dadr:self._toy_dadr + 3]   # freejointの線速度
@@ -611,10 +736,22 @@ class ToySupineEnv(SupineMimoEnv):
         self.data.xfrc_applied[self._toy_bid, :3] = f
 
     def _spawn_toy(self):
-        if self._toy:
+        # ★おもちゃの登場を遅らせる（TOY_APPEAR_DELAY 参照）。
+        #   最初は遠くに置き、太郎が落ち着いてから親が運んでくる。
+        self._toy_arriving = False
+        self._toy_carry_t = 0.0
+        self._t_since_reset = 0.0
+        self._rest_pos = None          # 到着するまで置き場所は決まっていない
+        if self._toy and TOY_APPEAR_DELAY > 0.0:
+            self._place(self._toy_qadr, FAR_AWAY)
+            self._anchor = None            # 到着するまで吊らない
+            self._toy_pending = True
+        elif self._toy:
+            self._toy_pending = False
             self._set_anchor()
             self._place(self._toy_qadr, self._rest_pos)   # 支点の真下＝紐が垂れた位置
         else:
+            self._toy_pending = False
             self._place(self._toy_qadr, FAR_AWAY)
         self._place(self._obj2_qadr, FAR_AWAY + np.array([0.5, 0.0, 0.0]))
         self.data.qvel[self._toy_dadr:self._toy_dadr + 6] = 0.0
@@ -651,6 +788,12 @@ class ToySupineEnv(SupineMimoEnv):
     # ------------------------------------------------------------------
     def reset_model(self):
         obs = super().reset_model()        # 仰向け＋jitter＋settle
+        # ★眼球を正中位に戻してからおもちゃを置く。順序が重要：
+        #   おもちゃは「視線の正面」に置くので、眼球がずれたままだと
+        #   あさっての方向（柵の外）に置かれる（研究日誌 2026-07-26 続き7）。
+        from infant_body import center_eyes
+        center_eyes(self.model, self.data)
+        mujoco.mj_forward(self.model, self.data)   # 眼のカメラ姿勢を更新してから配置
         self._spawn_toy()                  # 落ち着いた後の肩位置を見て配置
         self._glow_until = -1e9            # 点灯の余韻を持ち越さない
         self._vision_cache = None          # data.time が巻き戻るのでキャッシュを捨てる
@@ -667,6 +810,7 @@ class ToySupineEnv(SupineMimoEnv):
         # 旧実装の「離れたら瞬間移動で置き直す(respawn)」は**廃止**。目視でワープが
         # 見えたうえ、随伴性（自分の行為→結果）を壊すため。代わりに吊り紐で留める。
         self.respawned_this_step = False
+        self._carry_toy()          # ★親がおもちゃを運んでくる（登場を遅らせる仕組み）
         self._apply_tether()
         self._update_glow()
         if self._vor is not None:

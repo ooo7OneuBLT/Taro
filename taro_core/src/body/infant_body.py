@@ -754,3 +754,51 @@ def apply_runtime_corrections(model, data, age, neck=True, limbs=True, head_mass
         # ★屈筋トーン（バネ）は壁の後。壁の内側に目標角を収めるため順序が必要。
         if tone:
             apply_flexor_tone(model, float(age), stiffness=tone_stiffness, data=data)
+
+
+# 眼球を正中位に戻す ----------------------------------------------------------
+# ★2026-07-26：リセット直後の眼球が **上に31.6度・横に26.9度** ずれた状態から
+#   始まっていた（MIMo の初期値か、リセット時のゆらぎ）。その結果、
+#     ・視線が真上から58.4度ずれる（仰向けなのに足の方を見ている）
+#     ・「視線の正面におもちゃを置く」設計が、あさっての方向に置く動作になる
+#     ・実際おもちゃがベビーサークルの柵の外（X=0.353 > 柵の 0.310）に置かれ、
+#       ユーザーの目視で「柵に引っかかって」と分かった
+#   分解すると眼球が 37.2度ぶんを占め、首（顎を引いた -30.6度）はむしろ視線を
+#   真上に近づけていた（首も中立にすると 21.2度 → 32.8度 と悪化する）。
+#
+# 【人間ではどうか】覚醒して目を開いたときの眼位は**正中位**が基準。
+#   新生児にも一過性の斜視（生後2〜3か月まで断続的にみられる）はあるが、
+#   「常に31度上・27度横を向いたまま始まる」状態を支持する報告は無い。
+#   ＝31.6度の初期偏位は身体モデルの初期値の問題であって、人間の模倣ではない。
+#
+# ⚠️新生児の一過性斜視をあとで入れるなら、ここに「時々ずれる」を足す形になる。
+#   今は「基準は正中位」だけを実装する。
+def center_eyes(model, data, verbose=False):
+    """眼球の関節角をすべて0（正中位）に戻す。リセットのたびに呼ぶ。
+
+    Args:
+        model, data: MuJoCo のモデルとデータ
+        verbose: 変更前の角度を表示するか
+
+    Returns:
+        int: 戻した関節の数
+    """
+    import numpy as _np
+    n = 0
+    before = []
+    for j in range(model.njnt):
+        name = model.joint(j).name
+        if "eye" not in name:
+            continue
+        adr = int(model.jnt_qposadr[j])
+        if verbose:
+            before.append((name, float(_np.degrees(data.qpos[adr]))))
+        data.qpos[adr] = 0.0
+        dof = int(model.jnt_dofadr[j])
+        data.qvel[dof] = 0.0
+        n += 1
+    if verbose and before:
+        txt = " ".join(f"{nm.split(':')[-1]}{v:+.1f}" for nm, v in before)
+        print(f"[eyes] 正中位に戻した {n}関節（戻す前: {txt}）"
+              f" [Tier2: 覚醒時の眼位の基準は正中位]")
+    return n
