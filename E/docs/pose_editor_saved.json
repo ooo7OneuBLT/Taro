@@ -1,16 +1,17 @@
 {
   "toy_pos": [
-    -0.08,
-    0.005,
-    0.4
+    0.155,
+    0.0,
+    0.17
   ],
+  "toy_half_size": 0.02,
   "joints": {
-    "hip1": -81.0,
-    "hip2": -12.0,
-    "knee": -107.0,
-    "shoulder_horizontal": 79.0,
-    "shoulder_ad_ab": 39.0,
-    "shoulder_rotation": -82.0,
-    "elbow": -134.0
+    "hip1": -71.0,
+    "hip2": -36.0,
+    "knee": -90.0,
+    "shoulder_horizontal": 58.0,
+    "shoulder_ad_ab": 3.0,
+    "shoulder_rotation": -65.0,
+    "elbow": -111.0
   }
 }

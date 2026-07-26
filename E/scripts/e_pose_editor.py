@@ -33,7 +33,11 @@ import mujoco
 import mujoco.viewer
 import tkinter as tk
 
-ARM_REACH = 0.158
+# ★腕のリーチ [m]。⚠️2026-07-26 修正：以前は 0.158（上腕7.9 + 前腕8.5cm）としていたが、
+#   **手そのものの長さ（指先までの2.2cm）が抜けていた**ため、届く距離を短く見積もり、
+#   パネルに「腕の275%」のような誤った割合を表示していた（ユーザー指摘「絶対届くはずなのに」）。
+#   実測（`right_upper_arm`→`right_lower_arm`→`right_hand` の距離＋手のgeomの広がり）。
+ARM_REACH = 0.186
 # 編集する関節（左右まとめて動かす）
 POSE_JOINTS = [("hip1", "股（前後）"), ("hip2", "股（開き）"),
                ("knee", "膝"),
@@ -106,11 +110,15 @@ def main():
                                lo=float(lo), hi=float(hi), init=cur))
     if saved and "toy_pos" in saved:
         toy_pos0 = np.array(saved["toy_pos"], dtype=float)
+    if saved and "toy_half_size" in saved:
+        _g = int(m.body("test_object1").geomadr[0])
+        _s = float(saved["toy_half_size"])
+        m.geom_size[_g] = [_s, _s, _s]
 
     # ---------------- パネル ----------------
     root = tk.Tk()
     root.title("太郎 姿勢／おもちゃ 編集パネル")
-    root.geometry("460x760+40+20")
+    root.geometry("470x980+30+10")
     root.attributes("-topmost", True)
 
     # E_FREEZE=0 で物理ONの状態から始める（姿勢が重力で崩れないかを見るとき）
@@ -132,8 +140,25 @@ def main():
                  variable=v, length=280, showvalue=True).pack(side="left")
         toy_vars.append(v)
 
+    # おもちゃの大きさ（geom の half-size）
+    f = tk.Frame(root); f.pack(fill="x", padx=14)
+    tk.Label(f, text="大きさ(半辺)", width=11, anchor="w").pack(side="left")
+    toy_gadr = int(m.body("test_object1").geomadr[0])
+    size0 = float(m.geom_size[toy_gadr][0])
+    size_var = tk.DoubleVar(value=size0)
+    tk.Scale(f, from_=0.005, to=0.05, resolution=0.0025, orient="horizontal",
+             variable=size_var, length=280, showvalue=True).pack(side="left")
+
     dist_label = tk.Label(root, text="", font=("Consolas", 10), justify="left")
-    dist_label.pack(pady=(6, 10))
+    dist_label.pack(pady=(6, 4))
+
+    # ★一人称視点（太郎の目に映る映像）。視線がどこを向いているかを直接見る。
+    #   第三者視点だけだと「おもちゃが見えているつもり」が起きる（2026-07-26）。
+    tk.Label(root, text="太郎の目に映っているもの（左目）",
+             font=("", 10, "bold")).pack(pady=(4, 2))
+    eye_canvas = tk.Label(root)
+    eye_canvas.pack()
+    _eye_imgtk = [None]     # GCで消えないよう保持する
 
     tk.Label(root, text="関節の角度 [度]（左右まとめて）",
              font=("", 11, "bold")).pack(pady=(4, 2))
@@ -158,6 +183,7 @@ def main():
 
     def save():
         data = {"toy_pos": [float(v.get()) for v in toy_vars],
+                "toy_half_size": float(size_var.get()),
                 "joints": {jd["base"]: float(v.get())
                            for jd, v in zip(joints, joint_vars)}}
         os.makedirs(os.path.dirname(SAVE_PATH), exist_ok=True)
@@ -210,6 +236,13 @@ def main():
                                       0.015 * np.sin(2 * np.pi * 2.5 * t), 0.0])
             d.qpos[toy_qadr:toy_qadr + 3] = pos
             d.qvel[toy_dof:toy_dof + 6] = 0.0
+            # おもちゃの大きさをスライダーに追従させる
+            s = float(size_var.get())
+            if abs(float(m.geom_size[toy_gadr][0]) - s) > 1e-9:
+                m.geom_size[toy_gadr] = [s, s, s]
+                # 質量と慣性も大きさに合わせる（密度一定＝体積比で変える）
+                dens = float(m.body_mass[toy_bid]) / max((2 * size0) ** 3, 1e-12)
+                m.body_mass[toy_bid] = dens * (2 * s) ** 3
 
             # 関節をスライダー値に固定
             if state["hold_pose"] .get() or freeze:
@@ -256,6 +289,21 @@ def main():
                     text=f"目 → おもちゃ   {de:6.1f} cm\n"
                          f"肩 → おもちゃ   {ds:6.1f} cm  （腕の {ds/(ARM_REACH*100)*100:3.0f}%）\n"
                          f"手 → おもちゃ   {dh:6.1f} cm" + gaze_txt)
+                # 一人称視点を更新（重いので5tickに1回＝約20Hz相当より粗く）
+                if tick % 20 == 0:
+                    try:
+                        imgs = env.unwrapped.get_vision_obs()
+                        if isinstance(imgs, dict) and "eye_left" in imgs:
+                            from PIL import Image, ImageTk
+                            arr = np.asarray(imgs["eye_left"])
+                            if arr.dtype != np.uint8:
+                                arr = np.clip(arr, 0, 255).astype(np.uint8)
+                            im = Image.fromarray(arr).resize((192, 192),
+                                                              Image.NEAREST)
+                            _eye_imgtk[0] = ImageTk.PhotoImage(im)
+                            eye_canvas.config(image=_eye_imgtk[0])
+                    except Exception:
+                        pass
                 try:
                     root.update()
                 except tk.TclError:
