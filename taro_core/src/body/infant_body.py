@@ -568,6 +568,59 @@ TONE_STIFFNESS = 0.2
 # 拘縮の解消（膝 21.4→10.7(3ヶ月)→3.3度(6ヶ月)、Broughton 1993）を目安に置く。
 TONE_UNTIL_MO = 3.0
 
+# ---- 首の筋緊張 -------------------------------------------------------------
+# ★2026-07-26 新設。それまで首にはバネが無く（stiffness=0）、仰向けで脱力させると
+#   重力で頭が倒れ続けた（実測：120秒で -25度 → +45度、止まらない）。
+#
+# 【なぜ入れるか】正常な新生児でも頸部には軽い受動抵抗がある。
+#   Amiel-Tison C, Korobkin R, Esque-Vaucouloux MT (1977) "Neck extensor hypertonia:
+#   a clinical sign of insult to the central nervous system of the newborn"
+#   Early Hum Dev 1(2):181-190 [PMID 617310]
+#   ＝**頸部伸筋の過緊張は正常新生児1655例中0.7%だけ**（脳障害の兆候がある児では
+#     17例中70%）。つまり「軽くあるのが正常、強いのは病的」。ゼロは正常でない。
+#
+# 【ただし首は四肢より弱い】筋緊張が現れる時期は
+#   下肢29〜35週 → 上肢35〜37週 → 体幹・頸部36〜40週（最も遅い）
+#   Allen MC, Capute AJ (1990) "Tone and reflex development before term"
+#   Pediatrics 85(3 Pt 2):393-399 [PMID 2304800]
+#   ＝新生児の head lag（引き起こすと頭が遅れる）は正常。**支えきれないのが正しい**。
+#
+# 【剛性の根拠】生体の実測値は存在しない（2026-07-26の調査で確認）。
+#   唯一の定量値は**死後標本**の曲げ試験（衝突安全工学の研究）：
+#     屈曲 3.05 ± 0.23 mNm/deg ≈ 0.175 N·m/rad
+#     伸展 7.03 ± 0.28 mNm/deg ≈ 0.40 N·m/rad（屈曲の約2.3倍硬い）
+#   Luck JF et al. (2008) "Tensile mechanical properties of the perinatal and
+#   pediatric PMHS osteoligamentous cervical spine" Stapp Car Crash J 52:107-134
+#   ⚠️これは**筋を含まない骨・靭帯だけ**の値＝生体の下限。実際はこれより硬い。
+#   → 上限側の 0.40 を採用する [Tier2]。
+#   ⚠️MuJoCo の jnt_stiffness は方向で変えられないので、
+#     「伸展が屈曲の2.3倍硬い」という非対称は**再現していない** [簡略化]。
+NECK_TONE_STIFFNESS = 0.40
+
+# ★首のバネの目標角 [度]。**重力を織り込んだ実効値で、解剖学的な角度ではない**。
+#
+# 【なぜ実効値なのか】バネの釣り合い点は目標角からずれる：
+#     ずれ = 重力トルク ÷ 剛性
+#   実測（`E/scripts/e_viewer.py` の「首のバネ」区画で振った、2026-07-26）：
+#     剛性0.2 → 目標-25度に対し +7.6度で釣り合う（ずれ32.6度・まだ動いている）
+#     剛性0.4 → 目標-25度に対し -4.6度で釣り合う（ずれ20.4度・120秒でほぼ静止）
+#     剛性0.8 → 目標-25度に対し -13.1度で釣り合う（ずれ11.9度・30秒で静止）
+#   ＝**剛性0.4で -25度に落ち着かせるには、目標を -45度に置く必要がある**。
+#
+# 【-25度はどこから来たか】⚠️[Tier3・ARBITRARY]
+#   ・仰臥位で脱力した新生児の頭が落ち着く角度の実測は**文献に存在しない**
+#     （頭位選好の研究（右65%・左15%／Michel 1981）は覚醒時の**能動的な行動**で、
+#       脱力時の物理的な釣り合いとは別物）
+#   ・そこで「今の身体モデルがリセット時に落ち着く角度」（屈曲ONで約-25度）を
+#     採用した。ユーザーとの合意（2026-07-26）
+#   → ★感度分析の対象。目視で「新生児らしい顎の角度」を確かめること
+NECK_TONE_TARGET = -45.0
+
+# ★どの軸に効かせるか。**前後の傾き（head_tilt）だけ**。
+#   3軸すべてに同じ剛性を入れると、左右のひねり・横倒しは重力の影響が小さいため
+#   過剰になる（ユーザーの目視「3軸をすべて効かすをONにすると行き過ぎる」2026-07-26）。
+NECK_TONE_JOINTS = ("head_tilt",)
+
 
 def apply_physiological_flexion(model, age=0.0, stiffness=None, verbose=True,
                                 mode=None, data=None):
@@ -718,7 +771,9 @@ def apply_flexor_tone(model, age=0.0, stiffness=None, targets=None,
 def apply_runtime_corrections(model, data, age, neck=True, limbs=True, head_mass=True,
                               limb_scale=1.0, distal_mass=1.0, flexion=False,
                               flexion_stiffness=None, actuation_model=None,
-                              tone=True, tone_stiffness=None):
+                              tone=True, tone_stiffness=None,
+                              neck_tone=True, neck_tone_stiffness=None,
+                              neck_tone_target=None):
     """モデル構築後に上書きする補正（筋力＝アクチュエータのgear）。
 
     - **首の筋力**（`infant_neck`）：MIMoは gear を geom の体積から計算するため、
@@ -754,6 +809,12 @@ def apply_runtime_corrections(model, data, age, neck=True, limbs=True, head_mass
         # ★屈筋トーン（バネ）は壁の後。壁の内側に目標角を収めるため順序が必要。
         if tone:
             apply_flexor_tone(model, float(age), stiffness=tone_stiffness, data=data)
+    # ★首の筋緊張は生理的屈曲（flexion）と独立に効かせる。
+    #   屈曲の壁（jnt_range）は四肢だけの話で、首には壁が無い。
+    #   首にバネが無いと重力で頭が倒れ続ける（実測：120秒で -25→+45度、止まらない）。
+    if neck_tone:
+        apply_neck_tone(model, float(age), stiffness=neck_tone_stiffness,
+                        target=neck_tone_target, data=data)
 
 
 # 眼球を正中位に戻す ----------------------------------------------------------
@@ -801,4 +862,78 @@ def center_eyes(model, data, verbose=False):
         txt = " ".join(f"{nm.split(':')[-1]}{v:+.1f}" for nm, v in before)
         print(f"[eyes] 正中位に戻した {n}関節（戻す前: {txt}）"
               f" [Tier2: 覚醒時の眼位の基準は正中位]")
+    return n
+
+
+def apply_neck_tone(model, age=0.0, stiffness=None, target=None, joints=None,
+                    verbose=True, data=None):
+    """首の筋緊張＝頭が重力で倒れきらないように支える弱いバネ。
+
+    ★2026-07-26新設。それまで首にはバネが無く、仰向けで脱力させると
+    重力で頭が倒れ続けた（120秒で -25度 → +45度、止まらない）。
+    正常な新生児でも頸部に軽い受動抵抗はある（Amiel-Tison 1977。定数のコメント参照）。
+
+    【減衰について】★文献に値が無い（2026-07-26の調査で確認）。
+    recoil の「戻る時間（秒）」を報告した論文は1件も無く、臨床評価は
+    「brisk（機敏）」「sluggish（緩慢）」という定性語だけ。
+    そこで**臨界減衰**（ちょうど振動しない値）を計算して置く：
+        c = 2 √(k · I)      I＝首の軸まわりの頭の慣性モーメント
+    ⚠️これは**工学的判断（安定性優先）であって実測値の再現ではない** [Tier3]。
+    参考：MIMo の原論文自身も「spring-damper の値は文献の乏しさゆえに
+    恣意的に近い設定（安定性優先で手動調整）」と明記している（arXiv:2312.04318）。
+
+    Args:
+        model: MuJoCo のモデル
+        age: 体の月齢。TONE_UNTIL_MO を超えたら何もしない
+        stiffness: バネの強さ [N·m/rad]。None なら NECK_TONE_STIFFNESS
+        target: 目標角 [度]。None なら NECK_TONE_TARGET
+            ⚠️重力を織り込んだ実効値で、解剖学的な角度ではない（定数のコメント参照）
+        joints: 対象の関節名（":"の後ろ）。None なら NECK_TONE_JOINTS
+        data: あれば減衰の計算に使う（首の軸まわりの慣性を測るため）
+        verbose: 設定内容を表示するか
+
+    Returns:
+        int: バネを入れた関節の数
+    """
+    import numpy as np
+    if float(age) >= TONE_UNTIL_MO:
+        if verbose:
+            print(f"[neck-tone] age={age}mo >= {TONE_UNTIL_MO}mo: 何もしない")
+        return 0
+    k = float(NECK_TONE_STIFFNESS if stiffness is None else stiffness)
+    tgt = float(NECK_TONE_TARGET if target is None else target)
+    names = tuple(NECK_TONE_JOINTS if joints is None else joints)
+
+    # 首の軸まわりの頭の慣性モーメント（平行軸の定理）。減衰の計算に使う。
+    head_bid = int(model.body("head").id)
+    inertia = float(model.body_inertia[head_bid][0])
+    mass = float(model.body_mass[head_bid])
+    arm = 0.0
+    if data is not None:
+        parent = int(model.body_parentid[head_bid])
+        arm = float(np.linalg.norm(np.array(data.xpos[head_bid])
+                                  - np.array(data.xpos[parent])))
+    I = inertia + mass * arm ** 2
+    c_crit = 2.0 * float(np.sqrt(max(k, 1e-12) * max(I, 1e-12)))
+
+    n = 0
+    for j in range(model.njnt):
+        short = model.joint(j).name.split(":")[-1]
+        if short not in names:
+            continue
+        adr = int(model.jnt_qposadr[j])
+        dof = int(model.jnt_dofadr[j])
+        model.jnt_stiffness[j] = k
+        model.qpos_spring[adr] = np.radians(tgt)
+        # 減衰は元の値と臨界減衰の大きい方（元より弱くはしない）
+        model.dof_damping[dof] = max(float(model.dof_damping[dof]), c_crit)
+        if data is not None:
+            # 初期姿勢もバネの釣り合い近くから始める（リセット直後の大移動を避ける）
+            data.qvel[dof] = 0.0
+        n += 1
+    if verbose and n:
+        print(f"[neck-tone] age={age}mo: {n}関節 stiffness={k} 目標{tgt:+.0f}度 "
+              f"damping>={c_crit:.4f}(臨界) "
+              f"[Tier2: 剛性は死後標本の上限0.40(Luck 2008)／"
+              f"Tier3: 目標角は重力込みの実効値・減衰は工学的判断]")
     return n
