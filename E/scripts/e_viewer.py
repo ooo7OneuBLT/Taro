@@ -263,6 +263,50 @@ def main():
                   f"{TE.TOY_APPROACH_SEC:.1f}秒かけて{TE.TOY_APPROACH_FROM}から",
              fg="#666", font=("", 8)).pack(anchor="w", padx=14)
 
+    # ---- ★あなたが「親」をやる ------------------------------------------
+    #   人間の親は、赤ちゃんの顔の向きを見ておもちゃをその前に持っていく。
+    #   太郎にはそれが無いので、首が動くとおもちゃが視界から外れたままになる。
+    #   自動化する前に**手で試して、必要な介入の性質を掴む**のが目的。
+    #   ⚠️瞬間移動はしない（ワープは随伴性の学習を壊す。_apply_tether の注記と同じ）。
+    tk.Label(sec_toy.body, text="★あなたが「親」をやる",
+             font=("", 10, "bold")).pack(anchor="w", padx=14, pady=(8, 0))
+    tk.Label(sec_toy.body, justify="left", fg="#555", font=("", 8),
+             text="人間の親は赤ちゃんの顔の向きに合わせておもちゃを見せる。\n"
+                  "太郎にはそれが無いので、首が動くと視界から外れたままになる。\n"
+                  "⚠️手動は「何が必要か」を掴むためのもの。数値の比較には使えない。"
+             ).pack(anchor="w", padx=18)
+    carry_sec = tk.DoubleVar(value=1.0)
+    slider(sec_toy.body, "運ぶ秒数", carry_sec, 0.2, 3.0, 0.1, width=9, length=250,
+           note="瞬間移動させない（随伴性を壊すため）")
+    _parent = [None]     # 手動で運んでいる最中の状態
+    parent_log = []      # 押した時刻の記録
+
+    def bring_to_face():
+        """今の視線の正面へ、指定秒かけておもちゃを運ぶ（＝親が持っていく）。"""
+        cid = int(m.camera("eye_left").id)
+        eyes = []
+        for nm2 in ("eye_left", "eye_right"):
+            try:
+                eyes.append(np.array(d.cam_xpos[int(m.camera(nm2).id)], dtype=float))
+            except Exception:
+                pass
+        origin = np.mean(eyes, axis=0) if eyes else np.array(d.cam_xpos[cid], dtype=float)
+        fwd = -np.array(d.cam_xmat[cid], dtype=float).reshape(3, 3)[:, 2]
+        dist = float(getattr(u, "_toy_dist", 0.086))
+        goal = origin + fwd * dist
+        start = np.array(d.xpos[toy_bid], dtype=float)
+        _parent[0] = {"t": 0.0, "from": start, "to": goal,
+                      "sec": max(0.05, float(carry_sec.get()))}
+        follow_var.set(True)     # 手動モードに切り替える
+        parent_log.append(None)   # 時刻はループ側で埋める
+        msg.config(text=f"親が顔の前へ運んでいます（{len(parent_log)}回目）")
+
+    tk.Button(sec_toy.body, text="★顔の前へ持っていく", command=bring_to_face,
+              width=22, bg="#a63", fg="white").pack(pady=4)
+    parent_label = tk.Label(sec_toy.body, text="", font=("Consolas", 9),
+                            justify="left")
+    parent_label.pack(anchor="w", padx=18)
+
     # ---- 区画2：姿勢 ----------------------------------------------------
     sec_pose = Section(root, "姿勢", op.get("pose", True))
     st_freeze = tk.BooleanVar(value=freeze0)
@@ -450,6 +494,7 @@ def main():
                 t_sim, wall0, tick = 0.0, time.time(), 0
                 toy_base[0] = None
                 head_w.clear(); devs.clear(); seens.clear(); neck_hist.clear()
+                parent_log.clear(); _parent[0] = None
                 prev_sacc[0] = 0
                 _restart[0] = False
 
@@ -482,7 +527,25 @@ def main():
             #   固定OFF … 環境が置いた位置（視線の正面）＋揺れ
             wob = np.array([0.0, SHAKE_AMP * np.sin(2 * np.pi * SHAKE_HZ * t_sim), 0.0]) \
                 if shake_var.get() else np.zeros(3)
-            if follow_var.get():
+
+            # ★親が顔の前へ運んでいる最中（ボタンで発動）。終わるとスライダーに引き継ぐ
+            if _parent[0] is not None:
+                if parent_log and parent_log[-1] is None:
+                    parent_log[-1] = round(t_sim, 2)   # 押された時刻を確定
+                _parent[0]["t"] += dt
+                frac = min(1.0, _parent[0]["t"] / _parent[0]["sec"])
+                pos = (_parent[0]["from"]
+                       + (_parent[0]["to"] - _parent[0]["from"]) * frac) + wob
+                d.qpos[toy_qadr:toy_qadr + 3] = pos
+                d.qvel[toy_dof:toy_dof + 6] = 0.0
+                u._rest_pos = pos.copy()
+                if frac >= 1.0:
+                    _syncing[0] = True
+                    for i2 in range(3):
+                        toy_vars[i2].set(round(float(_parent[0]["to"][i2]), 3))
+                    _syncing[0] = False
+                    _parent[0] = None
+            elif follow_var.get():
                 pos = np.array([v.get() for v in toy_vars], dtype=float) + wob
                 d.qpos[toy_qadr:toy_qadr + 3] = pos
                 d.qvel[toy_dof:toy_dof + 6] = 0.0
@@ -584,6 +647,19 @@ def main():
                         continue
                     other = b2 if b1 == toy_bid else b1
                     pen.append((m.body(other).name, -c.dist * 1000))
+                # ★親としての介入の記録（何回・どれくらいの間隔で持っていったか）
+                _pl = [x for x in parent_log if x is not None]
+                if _pl:
+                    gaps = [_pl[i] - _pl[i - 1] for i in range(1, len(_pl))]
+                    avg = (sum(gaps) / len(gaps)) if gaps else float("nan")
+                    parent_label.config(
+                        text=f"親の介入 {len(_pl)}回"
+                             f"（平均 {avg:.1f}秒おき）"
+                             f"{'　運搬中' if _parent[0] is not None else ''}")
+                else:
+                    parent_label.config(
+                        text="まだ介入していません（おもちゃが見えなくなったら押す）")
+
                 if pen:
                     pen.sort(key=lambda x: -x[1])
                     pen_label.config(
