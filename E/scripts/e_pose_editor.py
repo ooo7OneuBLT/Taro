@@ -54,9 +54,10 @@ def main():
     from e_body_config import body_kwargs_from_env
 
     kw = body_kwargs_from_env(0.0, verbose=True)
+    # ★orient=True で反射を生成しておき、実際に効かせるかはパネルのトグルで切り替える
     env = ToySupineEnv(actuation_model=MuscleModel,
                        vision_params=infant_vision_params(),
-                       age=0.0, toy=True, orient=False, **kw)
+                       age=0.0, toy=True, orient=True, **kw)
     m, d = env.unwrapped.model, env.unwrapped.data
     env.reset(seed=0)
     env.unwrapped._anchor = None          # 吊り紐を無効化（勝手に戻らないように）
@@ -178,6 +179,17 @@ def main():
     tk.Checkbutton(root, text="おもちゃを小さく激しく揺らす（1.5cm / 2.5Hz）",
                    variable=state["shake"]).pack(pady=(8, 2))
 
+    # ★2026-07-26 追加：問題を切り替えて目視で確認するためのトグル。
+    #   ここまでの測定で見つかった3つの問題を、Viewer で直接見られるようにする。
+    tk.Label(root, text="★問題の切り替え（目視で確認する）",
+             font=("", 10, "bold"), fg="#a30").pack(pady=(8, 2))
+    state["babble"] = tk.BooleanVar(value=False)
+    state["reflex"] = tk.BooleanVar(value=False)
+    tk.Checkbutton(root, text="自発運動を流す（問題1：眼球が振り回される）",
+                   variable=state["babble"]).pack(anchor="w", padx=24)
+    tk.Checkbutton(root, text="視線誘導反射を効かせる（問題2：逆効果の疑い）",
+                   variable=state["reflex"]).pack(anchor="w", padx=24)
+
     msg = tk.Label(root, text="", fg="#0a7", font=("", 9))
     msg.pack()
 
@@ -211,6 +223,12 @@ def main():
     dt = float(m.opt.timestep) * int(env.unwrapped.frame_skip)
     t = 0.0
     tick = 0
+    # 自発運動の生成器（トグルで使う）
+    sys.path.insert(0, os.path.join(_ROOT, "taro_core", "src", "brain", "spinal_cord"))
+    from cpg import ColoredNoiseGenerator
+    _gen = [ColoredNoiseGenerator(n_act, seed=0)]
+    _act = [np.zeros(n_act, dtype=np.float32)]
+    _saved_reflex = [env.unwrapped._orienting]
     # 体の根元（胴体の自由関節）の初期位置を覚えておく＝編集中に流れないように
     root_qadr = None
     for j in range(m.njnt):
@@ -252,6 +270,14 @@ def main():
                         d.qpos[qadr] = ang
                         d.qvel[m.jnt_dofadr[jid]] = 0.0
 
+            # ★問題の切り替え：反射を効かせるかどうか（環境側の apply を止める）
+            rf = env.unwrapped._orienting
+            if rf is not None:
+                env.unwrapped._orienting = rf if state["reflex"].get() else None
+                _saved_reflex[0] = rf
+            elif state["reflex"].get() and _saved_reflex[0] is not None:
+                env.unwrapped._orienting = _saved_reflex[0]
+
             if freeze:
                 # ★物理を回さない。関節角から体の位置を計算するだけ（純粋な運動学）。
                 #   衝突も重力も効かないので、膝を曲げても柵にぶつかって飛ばない。
@@ -261,7 +287,14 @@ def main():
                 d.qacc[:] = 0.0
                 mujoco.mj_forward(m, d)
             else:
-                env.step(zero)
+                # ★問題1を見るためのトグル：自発運動を流すか
+                if state["babble"].get():
+                    if tick % 10 == 0:
+                        _act[0] = np.clip(0.5 + 0.174 * _gen[0].sample(0.7), 0.0, 1.0
+                                          ).astype(np.float32)
+                    env.step(_act[0])
+                else:
+                    env.step(zero)
             t += dt
             tick += 1
 
