@@ -294,6 +294,13 @@ def main():
         fwd = -np.array(d.cam_xmat[cid], dtype=float).reshape(3, 3)[:, 2]
         dist = float(getattr(u, "_toy_dist", 0.086))
         goal = origin + fwd * dist
+        # ★柵の内側にとどめる。人間の親は柵の外に手を出さない。
+        #   首が横を向いていると「視線の正面」が柵の外になり、
+        #   おもちゃが柵に遮られて見えなくなる（ユーザーの報告 2026-07-27）。
+        mgn = 0.03
+        goal[0] = float(np.clip(goal[0], -TE.FENCE_HALF_X + mgn, TE.FENCE_HALF_X - mgn))
+        goal[1] = float(np.clip(goal[1], -TE.FENCE_HALF_Y + mgn, TE.FENCE_HALF_Y - mgn))
+        goal[2] = float(max(goal[2], 0.04))
         start = np.array(d.xpos[toy_bid], dtype=float)
         _parent[0] = {"t": 0.0, "from": start, "to": goal,
                       "sec": max(0.05, float(carry_sec.get()))}
@@ -353,18 +360,30 @@ def main():
                   "／Amiel-Tison 1977）。死後標本の剛性は屈曲0.175・伸展0.40 Nm/rad\n"
                   "（筋を含まない下限値／Luck 2008）。生体の実測値は存在しない。"
              ).pack(anchor="w", padx=14, pady=(2, 4))
-    st_neck = tk.BooleanVar(value=bool((saved or {}).get("neck_on", False)))
-    tk.Checkbutton(sec_neck.body, text="★首にバネを効かせる",
+    # ★2026-07-27修正：初期値は**core が実際に設定した値**から読む。
+    #   保存ファイルの古い値（バネOFF・剛性0.2・目標-25度）を初期値にしていたため、
+    #   起動しただけで core の実装（剛性0.40・目標-45度）が上書きされて消えていた。
+    #   ユーザーの報告「首のバネ OFF」で発覚。
+    _jt0 = neck_ids.get("head_tilt")
+    _k0 = float(m.jnt_stiffness[_jt0]) if _jt0 is not None else 0.0
+    _t0 = (float(np.degrees(m.qpos_spring[int(m.jnt_qposadr[_jt0])]))
+           if _jt0 is not None else 0.0)
+    _c0 = (float(m.dof_damping[int(m.jnt_dofadr[_jt0])]) if _jt0 is not None else 0.0265)
+    tk.Label(sec_neck.body, fg="#070", font=("", 8),
+             text=f"起動時に core が設定した値：剛性{_k0:.2f} 目標{_t0:+.0f}度 減衰{_c0:.4f}"
+             ).pack(anchor="w", padx=14)
+    st_neck = tk.BooleanVar(value=(_k0 > 0.0))
+    tk.Checkbutton(sec_neck.body, text="★首にバネを効かせる（外すと core の設定を消します）",
                    variable=st_neck, fg="#a30").pack(anchor="w", padx=14)
-    nk_k = tk.DoubleVar(value=float((saved or {}).get("neck_k", 0.2)))
+    nk_k = tk.DoubleVar(value=(_k0 if _k0 > 0 else 0.4))
     slider(sec_neck.body, "剛性[Nm/rad]", nk_k, 0.0, 0.6, 0.01,
            note="死後標本の下限 0.175〜0.40／四肢のトーンは 0.2")
-    nk_c = tk.DoubleVar(value=float((saved or {}).get("neck_c", 0.0265)))
+    nk_c = tk.DoubleVar(value=_c0)
     slider(sec_neck.body, "減衰", nk_c, 0.0, 0.2, 0.005,
-           note="既定 0.0265（元からある値）。臨界減衰は下に表示")
-    nk_t = tk.DoubleVar(value=float((saved or {}).get("neck_target", -25.0)))
+           note="臨界減衰（振動しない最小値）は下に表示")
+    nk_t = tk.DoubleVar(value=(_t0 if _k0 > 0 else -45.0))
     slider(sec_neck.body, "目標角[度]", nk_t, -60.0, 30.0, 1.0,
-           note="首を引き寄せる角度。★文献に無いので仮決め。-25度＝今の初期姿勢あたり")
+           note="★重力を織り込んだ実効値。-45度で実際は-25度あたりに落ち着く")
     nk_all = tk.BooleanVar(value=False)
     tk.Checkbutton(sec_neck.body, text="3軸すべてに効かせる（外すと前後の傾きだけ）",
                    variable=nk_all).pack(anchor="w", padx=14)
@@ -458,6 +477,21 @@ def main():
         mujoco.mj_forward(m, d)
         msg.config(text="仰向けに戻しました")
 
+    # ★「今どうなっているか」をまとめてクリップボードへ（ユーザーの提案 2026-07-27）。
+    #   설定だけでなく**測定値も**入れる。「こうしたらこうなった」を正確に伝えるため。
+    _snapshot = [""]
+
+    def copy_state():
+        try:
+            win.clipboard_clear()
+            win.clipboard_append(_snapshot[0])
+            win.update()
+            msg.config(text="設定と測定値をコピーしました（貼り付けて共有できます）")
+        except Exception as e:
+            msg.config(text=f"コピーに失敗: {e}")
+
+    tk.Button(bf, text="現在の設定をコピー", command=copy_state, width=16,
+              bg="#657", fg="white").pack(side="left", padx=3)
     tk.Button(bf, text="この設定を保存", command=save, width=13,
               bg="#2a7", fg="white").pack(side="left", padx=3)
     tk.Button(bf, text="仰向けに戻す", command=restore_supine, width=12,
@@ -495,6 +529,14 @@ def main():
                 toy_base[0] = None
                 head_w.clear(); devs.clear(); seens.clear(); neck_hist.clear()
                 parent_log.clear(); _parent[0] = None
+                # ★おもちゃも初期状態に戻す。戻さないと「顔の前へ持っていく」で
+                #   記録された位置（首が横を向いていれば体の横＝柵の外）が残り、
+                #   やり直しても変な所にあるままになる（ユーザーの報告 2026-07-27）。
+                follow_var.set(False)          # 環境まかせに戻す
+                _syncing[0] = True
+                for _i in range(3):
+                    toy_vars[_i].set(round(float(toy_pos0[_i]), 3))
+                _syncing[0] = False
                 prev_sacc[0] = 0
                 _restart[0] = False
 
@@ -742,6 +784,51 @@ def main():
                         eye_canvas.config(image=_imgtk[0])
                     except Exception:
                         pass
+
+                # ★コピー用のまとめ（「現在の設定をコピー」ボタンが使う）
+                _toy = [f"{v.get():.3f}" for v in toy_vars]
+                _pl2 = [x for x in parent_log if x is not None]
+                _gaps = [_pl2[i] - _pl2[i - 1] for i in range(1, len(_pl2))]
+                _navg = (sum(_gaps) / len(_gaps)) if _gaps else float("nan")
+                _nk = neck_ids.get("head_tilt")
+                _nkang = (float(np.degrees(d.qpos[int(m.jnt_qposadr[_nk])]))
+                          if _nk is not None else float("nan"))
+                _snapshot[0] = (
+                    "【設定】\n"
+                    f"おもちゃ  X={_toy[0]} Y={_toy[1]} Z={_toy[2]}  "
+                    f"大きさ{size_var.get():.3f}  "
+                    f"揺らす:{'ON' if shake_var.get() else 'OFF'}  "
+                    f"位置を固定:{'ON' if follow_var.get() else 'OFF（環境まかせ）'}\n"
+                    f"姿勢      物理:{'止めている' if freeze else '動かしている'}  "
+                    f"角度を固定:{'ON' if st_hold.get() else 'OFF'}\n"
+                    f"反射      視線誘導:{'ON' if st_orient.get() else 'OFF'}"
+                    f"（間隔{lat_var.get():.2f}秒 閾値{thr_var.get():.2f}）  "
+                    f"VOR:{'ON' if st_vor.get() else 'OFF'}  "
+                    f"屈筋トーン:{'ON' if st_tone.get() else 'OFF'}\n"
+                    f"首のバネ  {'ON' if st_neck.get() else 'OFF'}  "
+                    f"剛性{nk_k.get():.2f}  減衰{nk_c.get():.4f}  "
+                    f"目標{nk_t.get():+.0f}度  "
+                    f"{'3軸' if nk_all.get() else '前後だけ'}\n"
+                    f"再生      速度{speed_var.get():.1f}倍  "
+                    f"自発運動:{'ON' if st_babble.get() else 'OFF'}\n"
+                    "\n【今の状態】\n"
+                    f"経過 {t_sim:.1f}秒  サッケード {reflex.n_saccades}発\n"
+                    f"反応の強さ {reflex.strength:.3f}（閾値 {thr_var.get():.2f}）\n"
+                    f"①角度 {rep['angle']:.1f}度 "
+                    f"{'視野内' if rep['in_fov'] else '★視野外'}  "
+                    f"②光線 {'遮蔽なし' if rep['ray_ok'] else '★' + str(rep['ray_hit']) + 'に遮られている'}  "
+                    f"③画像 "
+                    + (f"{rep['n_pixels']}画素 中心からのずれ {dev:.2f}"
+                       if rep.get("pix_seen") else "★映っていない") + "\n"
+                    f"見えていた割合 {seen_pct:.1f}%  "
+                    f"ずれ平均 {(np.mean(devs) if devs else float('nan')):.2f}"
+                    f"（反射OFFで0.48）\n"
+                    f"首の角度 {_nkang:.1f}度  頭の角速度 平均{hw.mean():.3f}\n"
+                    f"目→おもちゃ {de:.1f}cm  肩→ {ds:.1f}cm"
+                    f"（腕の{ds/(ARM_REACH*100)*100:.0f}%）\n"
+                    f"親の介入 {len(_pl2)}回"
+                    + (f"（平均 {_navg:.1f}秒おき）" if _gaps else "")
+                )
 
                 try:
                     win.update()

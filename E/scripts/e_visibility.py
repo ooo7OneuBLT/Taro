@@ -118,12 +118,86 @@ def visible_in_image(image, min_pixels=1):
     return out
 
 
+# ---- ★描き分けによる正確な判定（2026-07-27 追加）------------------------
+# 色による判定（red_mask）は**本当の画素の46%しか拾えていなかった**
+#   本当のおもちゃ 2352画素 → 色で拾えたのは 1086画素、取りこぼし 1266画素
+#   ユーザーの目視「赤い部分があるのに緑に光ってないときがある」で発覚
+# 取りこぼしは**縁に集中**する（ぼかしで背景と混ざり「赤が飛び抜けている」と
+# 言えなくなる）ため、重心が中心寄りにずれていた。
+#
+# MuJoCo の segmentation rendering は「どの画素がどの geom か」を正確に返す。
+# ★ただし**太郎が受け取る情報ではない**（視力のぼかしを通っていない）。
+#   使い分け：
+#     「おもちゃが本当はどこにあるか」  → segment_mask（正確）
+#     「太郎に見分けられるか」          → red_mask（ぼかし後の画像）
+_SEG_CACHE = {}
+
+
+def segment_mask(model, data, body_id, camera="eye_left", size=128):
+    """★MuJoCo に描き分けさせて、対象の画素を正確に取り出す。
+
+    Returns:
+        np.ndarray: True/False の2次元マップ（対象の画素が True）
+    """
+    key = (id(model), camera, int(size))
+    ren = _SEG_CACHE.get(key)
+    if ren is None:
+        ren = mujoco.Renderer(model, height=int(size), width=int(size))
+        ren.enable_segmentation_rendering()
+        _SEG_CACHE[key] = ren
+    ren.update_scene(data, camera=camera)
+    seg = ren.render()
+    gids = [g for g in range(model.ngeom)
+            if int(model.geom_bodyid[g]) == int(body_id)]
+    return np.isin(seg[..., 0], gids)
+
+
+def visible_by_segment(model, data, body_id, camera="eye_left", size=128,
+                       min_pixels=1):
+    """描き分けで「対象が視野に何画素映っているか」と重心を返す。
+
+    Returns:
+        dict: seen / n_pixels / frac / cx, cy（画像中心を0、端を±1）
+    """
+    msk = segment_mask(model, data, body_id, camera, size)
+    n = int(msk.sum())
+    h, w = msk.shape[:2]
+    out = dict(seen=n >= int(min_pixels), n_pixels=n, frac=n / float(h * w),
+               cx=float("nan"), cy=float("nan"))
+    if n > 0:
+        ys, xs = np.nonzero(msk)
+        out["cx"] = float((xs.mean() - (w - 1) / 2.0) / ((w - 1) / 2.0))
+        out["cy"] = float((ys.mean() - (h - 1) / 2.0) / ((h - 1) / 2.0))
+    return out
+
+
+def close_renderers():
+    """作った Renderer を片付ける（環境を作り直す前に呼ぶ）。"""
+    for r in _SEG_CACHE.values():
+        try:
+            r.close()
+        except Exception:
+            pass
+    _SEG_CACHE.clear()
+
+
 def report(model, data, toy_bid, image=None, camera="eye_left"):
     """3つの判定をまとめて返す。食い違いがあれば、それ自体が情報になる。"""
     ang = gaze_angle(model, data, toy_bid, camera)
     ray_ok, hit = visible_by_ray(model, data, toy_bid, camera)
     out = dict(angle=ang, in_fov=bool(ang < HALF_FOV), ray_ok=ray_ok, ray_hit=hit,
-               pix_seen=None, n_pixels=0, frac=0.0, cx=float("nan"), cy=float("nan"))
+               pix_seen=None, n_pixels=0, frac=0.0, cx=float("nan"), cy=float("nan"),
+               seg_seen=None, seg_pixels=0, seg_cx=float("nan"), seg_cy=float("nan"))
+    # ★描き分けによる正確な位置（色の判定は本当の46%しか拾えない）
+    try:
+        sz = 128
+        if image is not None:
+            sz = int(np.asarray(image).shape[0])
+        sv = visible_by_segment(model, data, toy_bid, camera, size=sz)
+        out.update(seg_seen=sv["seen"], seg_pixels=sv["n_pixels"],
+                   seg_cx=sv["cx"], seg_cy=sv["cy"])
+    except Exception:
+        pass
     if image is not None:
         v = visible_in_image(image)
         out.update(pix_seen=v["seen"], n_pixels=v["n_pixels"], frac=v["frac"],
@@ -136,7 +210,10 @@ def describe(r):
     s = f"なす角{r['angle']:5.1f}° "
     s += "視野内 " if r["in_fov"] else "視野外 "
     s += "遮蔽なし " if r["ray_ok"] else f"★{r['ray_hit']}に遮られている "
+    if r.get("seg_seen") is not None:
+        s += (f"実際に{r['seg_pixels']:4d}画素(ずれ{np.hypot(r['seg_cx'], r['seg_cy']):.2f}) "
+              if r["seg_seen"] else "★視野に入っていない ")
     if r["pix_seen"] is not None:
-        s += (f"画像に{r['n_pixels']:4d}画素" if r["pix_seen"]
-              else "★画像に映っていない")
+        s += (f"／色で拾えたのは{r['n_pixels']:4d}画素" if r["pix_seen"]
+              else "／★色では拾えない")
     return s
