@@ -238,7 +238,12 @@ def main():
     cv.bind_all("<MouseWheel>", lambda e: cv.yview_scroll(int(-e.delta / 120), "units"))
 
     op = (saved or {}).get("open", {})
-    freeze0 = os.environ.get("E_FREEZE", "1") == "1"
+    # ★2026-07-27：既定を「物理を動かす」に変えた（それまでは止まって起動）。
+    #   反射が目を動かすのは env.step() の中なので、物理を止めていると
+    #   **方向は正しく計算されているのにサッケードが1発も撃たれない**
+    #   （ユーザーの目視：強さ0.406＞閾値、ずれ0.95 なのに 0発。2026-07-27）。
+    #   Viewer の主目的は反射の観察なので、止めたい人が自分でONにする形にする。
+    freeze0 = os.environ.get("E_FREEZE", "0") == "1"
 
     # ---- 区画1：おもちゃ ------------------------------------------------
     sec_toy = Section(root, "おもちゃ", op.get("toy", True))
@@ -357,7 +362,9 @@ def main():
     slider(sec_ref.body, "  間隔[秒]", lat_var, 0.1, 1.5, 0.1,
            note="0.2＝旧設定（撃ちすぎて視界から追い出す）／0.5〜0.9＝新生児の実測")
     thr_var = tk.DoubleVar(value=float((saved or {}).get("threshold", OR.SACCADE_MIN_STRENGTH)))
-    slider(sec_ref.body, "  発火の閾値", thr_var, 0.0, 0.5, 0.01,
+    # ⚠️範囲を 0〜0.5 から 0〜0.06 に狭めた。実測で決めた値は 0.015 で、
+    #   0.25 のような値にすると**動きの強さが届かず一度も撃たない**。
+    slider(sec_ref.body, "  発火の閾値", thr_var, 0.0, 0.06, 0.0025,
            note="0.02＝旧設定（低すぎて常に発火）／0.25前後で動きを選べる")
     st_vor = tk.BooleanVar(value=True)
     tk.Checkbutton(sec_ref.body, text="前庭動眼反射（頭の動きを眼で打ち消す）",
@@ -576,6 +583,10 @@ def main():
                 _restart[0] = False
 
             freeze = st_freeze.get()
+            # ★物理を止めていると反射の指令が実行されない（step の中にあるため）
+            if freeze and st_orient.get() and tick % 60 == 0:
+                msg.config(text="⚠️物理を止めています。反射は目を動かせません"
+                                "（『物理を止める』を外してください）")
             OR.SACCADE_LATENCY = float(lat_var.get())
             OR.SACCADE_MIN_STRENGTH = float(thr_var.get())
             u._orienting = reflex if st_orient.get() else None

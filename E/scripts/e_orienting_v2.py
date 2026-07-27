@@ -484,13 +484,22 @@ class OrientingReflexV2:
             for i in self.eye_idx["v"]:
                 _write_joint_command(out, i, float(np.clip(EYE_FB_GAIN * ev, -1, 1)),
                                      self.n_actuator, co_activation=0.0, additive=True)
-            for key in ("h", "v"):
-                if key in self.neck_idx and key in self.neck_qadr:
-                    e = self._tgt[f"neck_{key}"] - self._angle_deg(self.neck_qadr[key])
-                    errs.append(e)
-                    _write_joint_command(out, self.neck_idx[key],
-                                         float(np.clip(NECK_FB_GAIN * e, -1, 1)),
-                                         self.n_actuator, co_activation=0.0, additive=True)
+            # ★NECK_SHARE=0 のときは首に一切触らない。
+            #   それまでは分担0でも「撃った瞬間の首の角度」を目標にして
+            #   毎ステップ誤差を打ち消していた＝**首を固定しようとしていた**。
+            #   首が重力で動く → 反射が戻そうとする → 視野が流れる →
+            #   動き検出が反応する → また撃つ、という正のフィードバックになり、
+            #   ユーザーの目視で「揺らさなくてもサッケードが撃たれる」
+            #   「反射をONにすると顔が左に向く」として現れた（2026-07-27）。
+            if NECK_SHARE != 0.0:
+                for key in ("h", "v"):
+                    if key in self.neck_idx and key in self.neck_qadr:
+                        e = self._tgt[f"neck_{key}"] - self._angle_deg(self.neck_qadr[key])
+                        errs.append(e)
+                        _write_joint_command(out, self.neck_idx[key],
+                                             float(np.clip(NECK_FB_GAIN * e, -1, 1)),
+                                             self.n_actuator, co_activation=0.0,
+                                             additive=True)
             # 届いたら1発を早く終える（時間切れを待たない＝本物のサッケードも
             # 振幅で持続時間が変わる）
             if max(abs(e) for e in errs) <= SACCADE_DONE_DEG:
