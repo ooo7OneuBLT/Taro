@@ -36,6 +36,17 @@ if _CORE_BRAIN not in _sys.path:
     _sys.path.insert(0, _CORE_BRAIN)
 from spinal_cord.cpg import write_joint_command as _write_joint_command
 
+
+def _qposadr_of(model, act_i):
+    """そのアクチュエータが動かす関節の qpos アドレス（今の角度を読むため）。"""
+    try:
+        jid = int(model.actuator_trnid[act_i, 0])
+        if jid < 0:
+            return None
+        return int(model.jnt_qposadr[jid])
+    except Exception:
+        return None
+
 # ---- ステップ1（動き検出）------------------------------------------------
 # frame index の 1・5・20 前と現フレームを比べる（10Hzなら 0.1・0.5・2秒 前に対応）
 # [Tier3・ARBITRARY] 人間はフレーム記憶でなく連続的な時間フィルタ。効果のみ近似。
@@ -131,11 +142,41 @@ CENTROID_THRESH_FRAC = 0.35
 # 【文献で決まっている値】サッケード潜時は多くが 500ms 未満（Aslin & Salapatek 1975）
 # ⚠️[ARBITRARY] 以下の具体値は文献に直接の記載がなく、目視で調整する暫定値。
 SACCADE_LATENCY = 0.20      # 次のサッケードまでの最小間隔[秒]（<500ms の範囲内）
-SACCADE_DURATION = 0.05     # 1発のサッケードが続く時間[秒]
+SACCADE_DURATION = 0.05     # 1発のサッケードが続く時間[秒]（上限。届いたら早く終わる）
 SACCADE_MIN_STRENGTH = 0.02 # これ未満の動きでは撃たない
-# 首と目のゲイン。低振幅（hypometric）にするため小さく取り、
-# 届かなければ次のサッケードで詰める＝階段状になる。
-# ⚠️[ARBITRARY] 旧実装 e_orienting.py から引き継いだ暫定値。
+
+# ★2026-07-27：1発の大きさを「力を一定時間かける」から**位置の指令**に変えた。
+#
+# 【なぜ】それまでは「右向きの力をゲイン倍して 0.05秒かける」だけで、
+#   **何度動くかが誰にも決まっていなかった**。設計図が定める SACCADE_FRAC
+#   （ずれの何割を1発で詰めるか）が実装に存在せず、書いても意味を持たなかった。
+#
+# 【人間はどうか】上丘が出しているのは力ではなく**変位の指令**（地図上の
+#   発火位置がサッケードの振幅を決める）。脳幹のバースト生成器が、眼球位置の
+#   内部コピーと目標を比べ、差がゼロになるまで発射し続ける
+#   ＝位置の内部フィードバック（Robinson DA 1975 の local feedback model。
+#     以後のサッケード生成モデルの標準形）。
+#
+# 【新生児らしさ】1発では届かない（低振幅＝hypometric）。届かなければ次の
+#   サッケードで詰める＝階段状になる（Aslin & Salapatek 1975）。
+SACCADE_FRAC = 0.30         # 1発でずれの何割を詰めるか ⚠️[Tier3・ARBITRARY]
+                            #   文献は「著しく低振幅」としか言わない
+EYE_FB_GAIN = 0.25          # 位置の誤差[度] → 筋の活性化。4度で飽和 ⚠️[ARBITRARY]
+SACCADE_DONE_DEG = 0.5      # 目標にこれだけ近づいたら1発を終える[度] ⚠️[ARBITRARY]
+# ★首と目の分担。新生児の定位は主に眼球運動で、首は弱い（仰向けでは特に）。
+#   ⚠️暫定で首は動かさない。分担と VOR との干渉は次の論点で扱う。
+EYE_SHARE = 1.0
+NECK_SHARE = 0.0
+# ★関節の正方向と「視野のどちら側か」の対応。MIMo の眼球の水平関節は、
+#   角度を上げると視線が**左**を向く（＝正面の物体は画像の右へ動く）。
+#   よって物体が画像の右（h_dir>0）にあるときは、眼球角度を**下げる**。
+#   実測（2026-07-27）：符号を付けずに動かしたら、ずれが
+#     -0.130 → -0.429、+0.682 → +0.830 と**遠ざかった**。
+#   ⚠️垂直方向は未確認。水平と同じ向きかは測ってから決める。
+EYE_SIGN_H = -1.0
+EYE_SIGN_V = -1.0
+NECK_FB_GAIN = 0.15         # 首の位置の誤差[度] → 筋の活性化 ⚠️[ARBITRARY]
+# 旧方式（data を渡さずに使う場合）のゲイン。互換のため残す。
 NECK_GAIN = 0.3
 EYE_GAIN = 0.15
 # apply() 1回あたりの経過時間[秒]。環境の dt に合わせて上書きする。
@@ -170,8 +211,9 @@ LI_NOISE = 0.05
 class OrientingReflexV2:
     """視線誘導反射・新版。段階的に組み立てる。"""
 
-    def __init__(self, model, time_scales=TIME_SCALES, noise=LI_NOISE, seed=None,
-                 dt=DEFAULT_DT):
+    def __init__(self, model, data=None, time_scales=TIME_SCALES, noise=LI_NOISE,
+                 seed=None, dt=DEFAULT_DT):
+        self.data = data             # ★今の関節角を読むため（位置フィードバック）
         self.noise = float(noise)
         self.rng = np.random.default_rng(seed)
         self.dt = float(dt)
@@ -181,6 +223,8 @@ class OrientingReflexV2:
         self._sacc_remaining = 0.0   # 今のサッケードの残り時間[秒]
         self._sacc_h = 0.0           # 今のサッケードの方向（撃った瞬間に固定）
         self._sacc_v = 0.0
+        # ★撃った瞬間に決める目標角度[度]（位置フィードバックの目標）
+        self._tgt = {"eye_h": 0.0, "eye_v": 0.0, "neck_h": 0.0, "neck_v": 0.0}
         self.n_saccades = 0          # 撃った回数（テスト・観察用）
         self.time_scales = tuple(time_scales)
         self._max_scale = max(self.time_scales)
@@ -208,6 +252,13 @@ class OrientingReflexV2:
                 self.eye_idx["h"].append(i)
             elif "eye" in name and "vertical" in name:
                 self.eye_idx["v"].append(i)
+        # ★各アクチュエータが動かす関節の qpos アドレス（今の角度を読むため）
+        self.eye_qadr = {k: [a for a in (_qposadr_of(model, i) for i in v)
+                             if a is not None]
+                         for k, v in self.eye_idx.items()}
+        self.neck_qadr = {k: a for k, a in
+                          ((k, _qposadr_of(model, i)) for k, i in self.neck_idx.items())
+                          if a is not None}
 
     def reset(self):
         self._frame_buffer = []
@@ -243,19 +294,30 @@ class OrientingReflexV2:
         self.h_dir, self.v_dir, self.strength = h, v, s
         # ステップ4（階段状サッケード）・5（IOR）は未実装
 
+    def _angle_deg(self, adrs):
+        """今の関節角[度]。複数あれば平均（両目は同じだけ動く前提）。"""
+        if self.data is None:
+            return 0.0
+        if isinstance(adrs, (list, tuple)):
+            if not adrs:
+                return 0.0
+            return float(np.degrees(np.mean([self.data.qpos[a] for a in adrs])))
+        return float(np.degrees(self.data.qpos[adrs]))
+
     def apply(self, action, dt=None):
         """action に階段状サッケードを加算して返す（ステップ4）。
 
-        毎tick連続的に加算するのではなく、
+        ★2026-07-27：1発の大きさを「位置の指令」にした。
           ・前回から SACCADE_LATENCY 経過し、かつ動きが十分なら1発撃つ
-          ・撃ったサッケードは SACCADE_DURATION のあいだだけ出力される
-          ・その間は方向を固定する（撃った瞬間の h_dir/v_dir）
-          ・目標に届かなければ次の潜時のあとにまた撃つ → 階段状
+          ・撃つ瞬間に**目標角度**を決める（今の角度 ＋ ずれの SACCADE_FRAC）
+          ・そのあとは目標との差を見ながら筋を活性化し、届いたら止める
+            （＝脳幹の位置フィードバック。Robinson 1975）
+          ・1発で届かないので、次の潜時のあとにまた撃つ → 階段状
         """
-        self._t += self.dt if dt is None else float(dt)
+        step = self.dt if dt is None else float(dt)
+        self._t += step
 
         if self._sacc_remaining <= 0.0:
-            # サッケードを撃つか判断する
             ready = (self._t - self._last_saccade_t) >= SACCADE_LATENCY
             if ready and self.strength >= SACCADE_MIN_STRENGTH \
                     and (abs(self.h_dir) > 1e-6 or abs(self.v_dir) > 1e-6):
@@ -264,12 +326,49 @@ class OrientingReflexV2:
                 self._sacc_remaining = SACCADE_DURATION
                 self._last_saccade_t = self._t
                 self.n_saccades += 1
+                # ★網膜上のずれ[度] → 1発で詰める分だけ目標角度をずらす
+                half = VISION_FOVY_DEG / 2.0
+                dh = EYE_SIGN_H * SACCADE_FRAC * self.h_dir * half
+                dv = EYE_SIGN_V * SACCADE_FRAC * self.v_dir * half
+                self._tgt["eye_h"] = self._angle_deg(self.eye_qadr["h"]) + EYE_SHARE * dh
+                self._tgt["eye_v"] = self._angle_deg(self.eye_qadr["v"]) + EYE_SHARE * dv
+                if "h" in self.neck_qadr:
+                    self._tgt["neck_h"] = self._angle_deg(self.neck_qadr["h"]) + NECK_SHARE * dh
+                if "v" in self.neck_qadr:
+                    self._tgt["neck_v"] = self._angle_deg(self.neck_qadr["v"]) + NECK_SHARE * dv
             else:
                 return action     # サッケード中でなければ何も足さない
 
-        # サッケード実行中：固定した方向を出力する
-        self._sacc_remaining -= (self.dt if dt is None else float(dt))
+        # サッケード実行中：目標角度との差を見ながら動かす
+        self._sacc_remaining -= step
         out = np.array(action, dtype=float).copy()
+
+        if self.data is not None:
+            errs = []
+            eh = self._tgt["eye_h"] - self._angle_deg(self.eye_qadr["h"])
+            ev = self._tgt["eye_v"] - self._angle_deg(self.eye_qadr["v"])
+            errs += [eh, ev]
+            self.last_eye_cmd = float(np.clip(EYE_FB_GAIN * eh, -1, 1))  # 観察用
+            for i in self.eye_idx["h"]:
+                _write_joint_command(out, i, float(np.clip(EYE_FB_GAIN * eh, -1, 1)),
+                                     self.n_actuator, co_activation=0.0, additive=True)
+            for i in self.eye_idx["v"]:
+                _write_joint_command(out, i, float(np.clip(EYE_FB_GAIN * ev, -1, 1)),
+                                     self.n_actuator, co_activation=0.0, additive=True)
+            for key in ("h", "v"):
+                if key in self.neck_idx and key in self.neck_qadr:
+                    e = self._tgt[f"neck_{key}"] - self._angle_deg(self.neck_qadr[key])
+                    errs.append(e)
+                    _write_joint_command(out, self.neck_idx[key],
+                                         float(np.clip(NECK_FB_GAIN * e, -1, 1)),
+                                         self.n_actuator, co_activation=0.0, additive=True)
+            # 届いたら1発を早く終える（時間切れを待たない＝本物のサッケードも
+            # 振幅で持続時間が変わる）
+            if max(abs(e) for e in errs) <= SACCADE_DONE_DEG:
+                self._sacc_remaining = 0.0
+            return out
+
+        # data が無い場合の従来動作（力を一定時間かける）。互換のため残す。
         h, v = self._sacc_h, self._sacc_v
         # ★2026-07-26：ここで `out[i] = clip(out[i] + gain*h, -1, 1)` と直接書いていたのが誤り。
         #   MuscleModel では1関節が2本の筋（前半＝負方向筋・後半＝正方向筋）で駆動され、

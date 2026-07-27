@@ -481,7 +481,11 @@ class ToySupineEnv(SupineMimoEnv):
             ver = os.environ.get("E_ORIENT_V", "1")
             if ver == "2":
                 from e_orienting_v2 import OrientingReflexV2
-                self._orienting = OrientingReflexV2(self.model, dt=self.dt)
+                # ★data も渡す：サッケードは「力を一定時間かける」のではなく
+                #   **今の眼球角度と目標角度の差を見ながら**動かす（位置の内部
+                #   フィードバック＝Robinson 1975 の local feedback model）。
+                self._orienting = OrientingReflexV2(self.model, data=self.data,
+                                                    dt=self.dt)
             else:
                 from e_orienting import OrientingReflex
                 self._orienting = OrientingReflex(self.model)
