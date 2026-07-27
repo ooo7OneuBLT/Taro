@@ -41,18 +41,64 @@ from spinal_cord.cpg import write_joint_command as _write_joint_command
 # [Tier3・ARBITRARY] 人間はフレーム記憶でなく連続的な時間フィルタ。効果のみ近似。
 TIME_SCALES = (1, 5, 20)
 
-# ---- ステップ2（中心視野バイアス）----------------------------------------
-# 画像中心ほど重みが大きいガウス窓。上丘の中心視野マグニフィケーション
-# （対数極座標マッピング、Ottes et al. 1986）の粗い近似。
-# [Tier3・ARBITRARY] sigma は「画像端で重み ≈0.3」になるよう選んだ暫定値。
-CENTER_BIAS_SIGMA_FRAC = 0.32   # 画像サイズに対する比
+# ---- ステップ2（中心視野の優位）------------------------------------------
+# ★2026-07-27：ガウス窓（σ=0.32）による近似をやめ、上丘の実測に基づく
+#   対数極座標マッピングに置き換えた（`taro_core/src/brain/superior_colliculus.py`）。
+#
+#   旧：exp(-R²/2σ²) を掛ける      … 形も強さも [Tier3・ARBITRARY]
+#   新：Ottes et al. 1986 の変換で上丘座標へ写し、そこで重心を取る [Tier2]
+#       A=3° / Bu=1.4mm / Bv=1.8mm/rad
+#
+#   ⚠️なぜ形を変えたか：ガウス窓は裾が軽く（数σ先でほぼゼロ）、周辺の刺激を捨てる。
+#     上丘のマグニフィケーションは 1/(R+A)ⁿ ＝ べき乗則で裾が重い。**別種の関数**。
+#     実測でσを大きくするほど対象の位置を正しく出せたのは、裾が重い形に
+#     近づいていたため。σをどう調整しても形が違う以上たどり着けない。
+#   ⚠️さらに「平らな画像で重心を取る」のと「歪んだ地図で重心を取ってから逆変換」は
+#     数学的に別物（Jensen の不等式）。実際の上丘は後者
+#     （Goossens & Van Opstal 2012 J Neurophysiol）。
+#
+# ★2026-07-27（第2版）：「重みを掛ける」のもやめ、**上丘の格子へ写してから
+#   競合させる**方式にした（E_ORIENT_BIAS=grid、既定）。
+#
+#   【なぜ】重みを掛ける方式には2つの欠陥が残っていた。
+#     ①受容野が無い。上丘のニューロンは1画素でなく視野の広い範囲を担当する
+#       （浅層で2〜20度）。この段が無いと、大きな対象の左右の縁が鋭く分離した
+#       まま競合に入り、**片方の縁だけが勝って定位の向きが逆になる**
+#       （実測：見かけ26度の対象で符号が4/6、7度なら6/6）。
+#       人間は単一の対象なら縁を統合して正確に中心へ向く
+#       （Kilpeläinen & Georgeson 2018）。逆方向へ飛ぶ報告は無い。
+#     ②競合が画像の座標で起きていた。上丘の側方抑制は**組織の上の配線**で
+#       起きる（Munoz & Istvan 1998「局所抑制性介在ニューロンのネットワーク」）
+#       ので、届く範囲は上丘の mm で決まり、視野角では決まらない。
+#       上丘の地図は中心が引き伸ばされているので、上丘で一定の mm は
+#       視野角では「中心で狭く、周辺で広い」になる。
+#
+#   【格子方式で何が要らなくなるか】
+#     ・中心視野の重み（ガウス窓も、マグニフィケーションも）＝**掛けない**。
+#       中心視野の1画素が上丘の多数の升に写ること自体が中心の優位を表す。
+#       重みを掛けると二重になる。
+#     ・受容野の広さは上丘の mm で一定にできる（RF_DIAMETER_MM=0.8）。
+#       視野角で見たときの偏心度依存は座標変換から自動的に出る＝調整不要。
+#
+# E_ORIENT_BIAS=collicular で重み方式、gauss で旧ガウス窓に戻せる（アブレーション用）。
+CENTER_BIAS_MODE = _os.environ.get("E_ORIENT_BIAS", "grid")
+CENTER_BIAS_SIGMA_FRAC = 0.32   # 旧方式のときだけ使う [Tier3・ARBITRARY]
+# 画像1辺に対する視野角[度]。太郎の眼球カメラは fovy=60。
+VISION_FOVY_DEG = 60.0
 
 # ---- ステップ3（側方抑制＋重心）------------------------------------------
 # メキシカンハット：近く（sigma_exc）は助け合い、遠く（sigma_inh）は邪魔し合う。
 # [Tier3・ARBITRARY] 機構の存在は Munoz & Istvan 1998 の実測だが、
 # 具体的な sigma・重み・反復回数は文献に値がなく、目視で調整する暫定値。
-LI_SIGMA_EXC_FRAC = 0.025   # 局所興奮の広がり（画像サイズ比）
-LI_SIGMA_INH_FRAC = 0.12    # 近距離抑制の広がり（画像サイズ比）
+LI_SIGMA_EXC_FRAC = 0.025   # 局所興奮の広がり（画像サイズ比）★旧方式でのみ使う
+LI_SIGMA_INH_FRAC = 0.12    # 近距離抑制の広がり（画像サイズ比）★旧方式でのみ使う
+# ★格子方式では上丘の組織の上の長さ[mm]で持つ。地図の歪みを打ち消す配線は
+#   知られていないので、「上丘で一定」が配線の実態に近い。
+#   ⚠️[Tier3・ARBITRARY] 具体値は文献に無い（2026-07-27 の調査でも
+#   Munoz & Istvan 1998 / Kopecz & Schöner 1995 / Trappenberg 2001 の
+#   カーネル幅の数値までは取れなかった）。受容野 0.34mm を基準に置いた暫定値。
+LI_SIGMA_EXC_MM = 0.20      # 局所興奮の広がり [mm]
+LI_SIGMA_INH_MM = 1.00      # 近距離抑制の広がり [mm]
 LI_W_EXC = 1.0
 LI_W_INH = 0.9
 LI_RATE = 0.5               # 1反復あたりの更新率
@@ -142,7 +188,9 @@ class OrientingReflexV2:
         self.motion_map = None           # ステップ1の出力
         self.biased_map = None           # ステップ2の出力
         self.competed_map = None         # ステップ3の競合後の活動
+        self.sc_input = None             # ★格子方式：受容野でまとめた直後の上丘の活動
         self._center_weight = None       # ステップ2の重み（画像サイズが決まってから作る）
+        self._smap = None                # 上丘の地図（画像サイズが決まってから作る）
         self.h_dir = 0.0
         self.v_dir = 0.0
         self.strength = 0.0              # 反応の強さ（0〜1相当）
@@ -166,6 +214,12 @@ class OrientingReflexV2:
         self.motion_map = None
         self.biased_map = None
         self.competed_map = None
+        self.sc_input = None
+        # ★中心視野バイアスの重みもクリアする。キャッシュしたままだと
+        #   CENTER_BIAS_SIGMA_FRAC を変えても**古い重みが使われ続ける**。
+        #   実際にσを 0.20〜2.00 で振った測定が丸ごと無効になった（2026-07-27）。
+        #   → 落とし穴チェックリスト 項53（時間で切れないキャッシュ）と同型
+        self._center_weight = None
         self.h_dir = 0.0
         self.v_dir = 0.0
         self.strength = 0.0
@@ -280,15 +334,93 @@ class OrientingReflexV2:
     # ステップ2：中心視野バイアス
     # ------------------------------------------------------------
     def _apply_center_bias(self, motion):
-        """画像中心ほど重みが大きいガウス窓を掛ける。"""
+        """中心視野の優位を反映する。
+
+        ★既定（collicular）：上丘のマグニフィケーション（面積）を重みにする。
+          M_area(R) ∝ (Bu·Bv)/(R+A)² ＝「視野の1度が上丘で何mm²を占めるか」。
+          ガウス窓と違い**べき乗則で裾が重い**ので、周辺の刺激も捨てない。
+        旧（gauss）：ガウス窓。形も強さも根拠がなかった。比較用に残す。
+        """
+        if CENTER_BIAS_MODE == "grid":
+            # ★格子方式では**何も掛けない**。中心視野の優位は、次の段で
+            #   上丘の格子へ写すときに座標変換そのものから出る。
+            #   ここで重みを掛けると二重になる。
+            return motion
+
+        if CENTER_BIAS_MODE == "gauss":
+            if self._center_weight is None or self._center_weight.shape != motion.shape:
+                h, w = motion.shape
+                cy, cx = (h - 1) / 2.0, (w - 1) / 2.0
+                sigma = CENTER_BIAS_SIGMA_FRAC * max(h, w)
+                ys = np.arange(h)[:, None] - cy
+                xs = np.arange(w)[None, :] - cx
+                self._center_weight = np.exp(
+                    -(ys ** 2 + xs ** 2) / (2 * sigma ** 2)).astype(np.float32)
+            return motion * self._center_weight
+
+        smap = self._collicular_map(motion.shape)
         if self._center_weight is None or self._center_weight.shape != motion.shape:
-            h, w = motion.shape
-            cy, cx = (h - 1) / 2.0, (w - 1) / 2.0
-            sigma = CENTER_BIAS_SIGMA_FRAC * max(h, w)
-            ys = np.arange(h)[:, None] - cy
-            xs = np.arange(w)[None, :] - cx
-            self._center_weight = np.exp(-(ys ** 2 + xs ** 2) / (2 * sigma ** 2)).astype(np.float32)
+            w = smap.mag_area.astype(np.float32)
+            self._center_weight = w / max(float(w.max()), 1e-12)   # 中心を1に正規化
         return motion * self._center_weight
+
+    def _collicular_map(self, shape):
+        """画像の形に対応する上丘の地図を作る（一度だけ計算してキャッシュ）。"""
+        if self._smap is None or self._smap.h != shape[0] or self._smap.w != shape[1]:
+            import sys as _s, os as _o
+            _b = _o.path.abspath(_o.path.join(
+                _o.path.dirname(_o.path.abspath(__file__)), _o.pardir, _o.pardir,
+                "taro_core", "src", "brain"))
+            if _b not in _s.path:
+                _s.path.insert(0, _b)
+            from superior_colliculus import CollicularMap
+            self._smap = CollicularMap(width=shape[1], height=shape[0],
+                                       fovy_deg=VISION_FOVY_DEG)
+        return self._smap
+
+    # ------------------------------------------------------------
+    # ★ステップ2＋3（格子方式）：上丘の地図へ写し、受容野でまとめ、そこで競合する
+    # ------------------------------------------------------------
+    def _select_on_collicular_grid(self, activity):
+        """画像を上丘の格子へ写し、受容野でぼかしてから競合させ、重心を返す。
+
+        実際の上丘で起きている順序をそのままなぞる：
+            網膜の像 → 上丘の地図へ（中心視野が引き伸ばされる）
+                     → 受容野でまとめる（1ニューロンが視野の広い範囲を担当）
+                     → 上丘の組織の上で側方抑制の競合
+                     → 集団の重心（population vector）→ 視野の向きへ逆変換
+        """
+        smap = self._collicular_map(activity.shape)
+        g = smap.to_grid(activity)                       # [2, nv, nu]
+
+        # 受容野：上丘の上では一様な広がり（RF_SIGMA_MM）。視野角で見ると
+        # 中心では狭く周辺では広くなる＝偏心度依存が座標変換から自動的に出る。
+        sv, su = smap.rf_sigma_cells
+        g = gaussian_filter(g, (0.0, sv, su))
+        self.sc_input = g
+        if g.max() < 1e-9:
+            self.competed_map = g
+            return 0.0, 0.0, 0.0
+
+        inp = g / g.max()
+        u = inp.copy()
+        se = (0.0, LI_SIGMA_EXC_MM / smap.dv, LI_SIGMA_EXC_MM / smap.du)
+        si = (0.0, LI_SIGMA_INH_MM / smap.dv, LI_SIGMA_INH_MM / smap.du)
+        noise_scale = self.noise * np.sqrt(LI_RATE)
+        for _ in range(LI_N_ITER):
+            f = np.clip(u, 0, None)
+            exc = gaussian_filter(f, se) * LI_W_EXC
+            inh = gaussian_filter(f, si) * LI_W_INH
+            # 全体抑制＝左右の上丘のあいだの抑制も含む（Munoz & Istvan 1998）
+            inh_global = LI_W_GLOBAL * float(f.mean())
+            u = u + LI_RATE * (-u + inp + exc - inh - inh_global)
+            if noise_scale > 0:
+                u = u + noise_scale * self.rng.standard_normal(u.shape)
+        u = np.clip(u, 0, None)
+        self.competed_map = u
+        h_dir, v_dir = smap.grid_direction(u, thresh_frac=CENTROID_THRESH_FRAC)
+        strength = float(min(activity.max(), 1.0))
+        return float(h_dir), float(v_dir), strength
 
     # ------------------------------------------------------------
     # ステップ3：側方抑制で1箇所を選び、その周辺で重心を取る
@@ -303,7 +435,11 @@ class OrientingReflexV2:
         """
         if activity.max() < 1e-6:
             self.competed_map = np.zeros_like(activity)
+            self.sc_input = None
             return 0.0, 0.0, 0.0
+
+        if CENTER_BIAS_MODE == "grid":
+            return self._select_on_collicular_grid(activity)
 
         h, w = activity.shape
         sigma_exc = LI_SIGMA_EXC_FRAC * max(h, w)
@@ -328,20 +464,33 @@ class OrientingReflexV2:
         if u.max() < 1e-6:
             return 0.0, 0.0, 0.0
 
-        # 勝った山の裾を切って重心を取る
-        thresh = u.max() * CENTROID_THRESH_FRAC
-        mask = u > thresh
-        wsum = u[mask].sum()
-        if wsum < 1e-9:
+        # ★勝った山の裾を切ってから、上丘の座標で重心（population vector）を取る。
+        #   Lee, Rohrer & Sparks (1988) Nature 332:357-360 ＝ 上丘のサッケードは
+        #   活動している集団の重心で決まる（一部を薬理的に止める直接実験）。
+        #
+        #   ⚠️「平らな画像で重心を取る」のと「歪んだ地図で重心を取ってから逆変換」は
+        #     数学的に別物（Jensen の不等式）。実際の上丘は後者
+        #     （Goossens & Van Opstal 2012 J Neurophysiol）。
+        #     ★対象が視野の端にあるほど出力が中心寄りに潰れるのは、
+        #       バグではなく**この写像の性質そのもの**。
+        if u.max() <= 1e-12:
             return 0.0, 0.0, 0.0
-        ys, xs = np.nonzero(mask)
-        cy_map = float((ys * u[mask]).sum() / wsum)
-        cx_map = float((xs * u[mask]).sum() / wsum)
-
-        # 画像中心を原点に、[-1, 1] へ正規化
-        cy, cx = (h - 1) / 2.0, (w - 1) / 2.0
-        h_dir = (cx_map - cx) / cx
-        v_dir = -(cy_map - cy) / cy          # 画像の y は下向きなので反転
+        if CENTER_BIAS_MODE == "gauss":
+            # 旧方式（比較用）：平らな画像で重心を取る
+            thresh = u.max() * CENTROID_THRESH_FRAC
+            mask = u > thresh
+            wsum = u[mask].sum()
+            if wsum < 1e-9:
+                return 0.0, 0.0, 0.0
+            ys, xs = np.nonzero(mask)
+            cy_map = float((ys * u[mask]).sum() / wsum)
+            cx_map = float((xs * u[mask]).sum() / wsum)
+            cy, cx = (h - 1) / 2.0, (w - 1) / 2.0
+            h_dir = (cx_map - cx) / cx
+            v_dir = -(cy_map - cy) / cy      # 画像の y は下向きなので反転
+        else:
+            smap = self._collicular_map(u.shape)
+            h_dir, v_dir = smap.direction(u, thresh_frac=CENTROID_THRESH_FRAC)
         # 反応の強さ＝中心バイアス後の動きマップの最大値。
         # ★画像を [0,1] にそろえたので、これも [0,1] に収まる（_detect_motion 参照）。
         #   念のため上限で切る（中心バイアスの重みは1以下なので理論上は超えない）。
