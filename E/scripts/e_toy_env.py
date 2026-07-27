@@ -273,6 +273,15 @@ TOY_APPROACH_FROM = os.environ.get("E_TOY_FROM", "above")
 #   "free"   何もしない＝重力で落ちる。仰向けの太郎からは見えなくなる（比較用）。
 TOY_MODE = os.environ.get("E_TOY_MODE", "hold")
 
+# --- 親の介入（見失ったら差し出し直す）------------------------------------
+# E_PARENT=1 でON。定位の実験では、標的は実験者が乳児の視野へ導入する
+# （Aslin & Salapatek 1975 の introduced target）。太郎が対象を視野の外へ
+# 追いやったまま何も起きなくなるのを防ぐ。
+# ⚠️[ARBITRARY] 秒数・角度に文献値は無い。
+PARENT_INTERVENE = os.environ.get("E_PARENT", "0") == "1"
+PARENT_WAIT_SEC = float(os.environ.get("E_PARENT_WAIT", "2.0"))
+PARENT_LOST_DEG = float(os.environ.get("E_PARENT_LOST", "25.0"))
+
 
 def _box_inertia(mass, half):
     """一様な立方体(half-size=half)の慣性モーメント。size変更時に手で入れ直すため。"""
@@ -750,6 +759,47 @@ class ToySupineEnv(SupineMimoEnv):
             self._toy_pending = False
             self._toy_arriving = False
 
+    def _parent_intervene(self):
+        """★おもちゃを見失った状態が続いたら、親が視線の正面へ差し出し直す。
+
+        【なぜ必要か】太郎が対象を視野の外へ追いやってしまうと、そこから先は
+        何も起きない（動きが無いので反射も働かない）。人間の赤ちゃんは自力で
+        探し当てるわけではなく、**親が顔の前に持ってくる**。既存の「登場時に
+        親が運んでくる」処理と同じ場面で、それを繰り返す形にした。
+
+        【人間の場面として】親は赤ちゃんの視線に合わせておもちゃを差し出し、
+        注意を引く。定位実験でも、標的は実験者が乳児の視野へ導入する
+        （Aslin & Salapatek 1975 の introduced target）。
+
+        ⚠️[ARBITRARY] 何秒見失ったら差し出すか（PARENT_WAIT_SEC）と、
+          何度外れたら「見えていない」とするか（PARENT_LOST_DEG）は文献値が無い。
+          前者は「親が気づいて動かすまでの間」、後者は視野の半角より内側に置いた。
+        """
+        if not (PARENT_INTERVENE and self._toy):
+            return
+        if getattr(self, "_toy_pending", False):
+            return                       # いま運んでいる最中
+        if getattr(self, "_rest_pos", None) is None:
+            return
+        cid = int(self.model.camera("eye_left").id)
+        eye = np.array(self.data.cam_xpos[cid], dtype=float)
+        fwd = -np.array(self.data.cam_xmat[cid], dtype=float).reshape(3, 3)[:, 2]
+        toy = np.array(self.data.body("test_object1").xpos, dtype=float) - eye
+        n = float(np.linalg.norm(toy))
+        ang = 180.0 if n < 1e-9 else float(np.degrees(np.arccos(
+            np.clip(np.dot(fwd, toy / n), -1.0, 1.0))))
+        if ang > PARENT_LOST_DEG:
+            self._toy_lost_t = getattr(self, "_toy_lost_t", 0.0) + self.dt
+            if self._toy_lost_t >= PARENT_WAIT_SEC:
+                # 親がもう一度運んでくる（登場のときと同じ仕組みを再利用する）
+                self._toy_pending = True
+                self._toy_arriving = False
+                self._t_since_reset = TOY_APPEAR_DELAY
+                self._toy_lost_t = 0.0
+                self.n_parent_help = getattr(self, "n_parent_help", 0) + 1
+        else:
+            self._toy_lost_t = 0.0
+
     def _apply_tether(self):
         """おもちゃを基準点に吊るす力（ベビージムの紐/ゴム）。
 
@@ -863,6 +913,7 @@ class ToySupineEnv(SupineMimoEnv):
         # 旧実装の「離れたら瞬間移動で置き直す(respawn)」は**廃止**。目視でワープが
         # 見えたうえ、随伴性（自分の行為→結果）を壊すため。代わりに吊り紐で留める。
         self.respawned_this_step = False
+        self._parent_intervene()   # ★見失ったら親が差し出し直す
         self._carry_toy()          # ★親がおもちゃを運んでくる（登場を遅らせる仕組み）
         self._apply_tether()
         self._update_glow()
