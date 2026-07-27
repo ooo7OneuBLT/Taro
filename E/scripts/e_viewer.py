@@ -197,10 +197,24 @@ def main():
                                lo=float(lo), hi=float(hi), init=cur))
 
     toy_pos0 = d.qpos[toy_qadr:toy_qadr + 3].copy()
+    # ⚠️リセット直後のおもちゃは**退避位置 [3,3,0.05]**（登場を1秒遅らせる仕組み）。
+    #   そのままスライダーの初期値にすると、範囲（X:-0.1〜0.5 / Y:-0.3〜0.3）の外なので
+    #   少し動かした瞬間に範囲内へクランプされ、**おもちゃが突然どこかへ飛ぶ**
+    #   （ユーザーの目視「スライダーで位置を変えるとどこからか出てきた」2026-07-27）。
+    #   環境が置くはずの位置（視線の正面）を初期値にする。
+    if float(np.max(np.abs(toy_pos0[:2]))) > 1.0:
+        try:
+            u._set_anchor()
+            toy_pos0 = np.array(u._rest_pos, dtype=float)
+        except Exception:
+            toy_pos0 = np.array([0.28, 0.0, 0.18], dtype=float)
     if saved and "toy_pos" in saved:
         toy_pos0 = np.array(saved["toy_pos"], dtype=float)
     size0 = float(m.geom_size[toy_gadr][0])
-    if saved and "toy_half_size" in saved:
+    # ⚠️E_TOY_RADIUS を明示したときは保存値で上書きしない。
+    #   上書きすると、環境変数で指定した大きさが黙って無視される
+    #   （実際 E_TOY_RADIUS=0.010 が保存値 0.02 に置き換わっていた）。
+    if saved and "toy_half_size" in saved and "E_TOY_RADIUS" not in os.environ:
         size0 = float(saved["toy_half_size"])
         m.geom_size[toy_gadr] = [size0, size0, size0]
 
@@ -513,6 +527,27 @@ def main():
     fire_until = [-1.0]
 
     with mujoco.viewer.launch_passive(m, d) as viewer:
+        # ★2026-07-27：初期カメラを太郎の顔に寄せる。
+        #   これが無いと MuJoCo の既定カメラ（シーン全体を引きで映す）になり、
+        #   柵の外から見下ろす画になる。顔の前にある直径2cmのおもちゃは
+        #   小さすぎて柵に隠れ、**「おもちゃが出てこない」ように見えた**
+        #   （ユーザーの目視 2026-07-27。実際には正しい位置にあった）。
+        try:
+            # ★真上寄りから見下ろす。仰向けの太郎と、顔の前のおもちゃが
+            #   両方いちどに入る角度（実測で選んだ）。
+            _look = np.array(d.body("head").xpos, dtype=float)
+            try:
+                _toy = np.array(d.body("test_object1").xpos, dtype=float)
+                if np.max(np.abs(_toy[:2])) < 1.0:      # 退避位置でなければ中点を見る
+                    _look = (_look + _toy) * 0.5
+            except Exception:
+                pass
+            viewer.cam.lookat[:] = _look
+            viewer.cam.distance = 0.42
+            viewer.cam.elevation = -62.0
+            viewer.cam.azimuth = 180.0
+        except Exception:
+            pass
         t_sim, wall0, tick = 0.0, time.time(), 0
         toy_base = [None]
         while viewer.is_running():
@@ -620,6 +655,19 @@ def main():
                     for jid, qadr in jd["pair"]:
                         d.qpos[qadr] = ang
                         d.qvel[int(m.jnt_dofadr[jid])] = 0.0
+
+            # ★物理を止めているあいだは step() が呼ばれず、おもちゃを運ぶ処理も
+            #   動かない。待たずに定位置へ置く（2026-07-27）。
+            if freeze and getattr(u, "_toy_pending", False):
+                try:
+                    u.place_toy_now()
+                    toy_base[0] = np.array(u._rest_pos, dtype=float)
+                    _syncing[0] = True
+                    for _i in range(3):
+                        toy_vars[_i].set(round(float(u._rest_pos[_i]), 3))
+                    _syncing[0] = False
+                except Exception:
+                    pass
 
             if freeze:
                 if root_qpos0 is not None:

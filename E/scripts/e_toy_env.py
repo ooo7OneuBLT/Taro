@@ -711,6 +711,18 @@ class ToySupineEnv(SupineMimoEnv):
         else:
             # 旧方式（アブレーション用に残す）。こちらは頭の中心からのオフセット。
             self._rest_pos = self.data.body("head").xpos.copy() + self._toy_offset
+        # ★2026-07-27：柵の内側にとどめる。人間の親は柵の外に手を出さない。
+        #   新生児は仰向けで顔を横に向けているのが普通（頭位選好・右65%／Michel 1981）で、
+        #   そのとき「視線の正面」は柵の外になる。実際 Viewer の初期姿勢で
+        #   おもちゃが柵の向こう側に置かれ、遮られて見えなかった（目視 2026-07-27）。
+        #   ⚠️そのぶん視線とのずれは0にならない。柵という物理的な制約が優先される
+        #     ＝人間の場面としてはこちらが正しい。
+        _mgn = 0.03
+        self._rest_pos[0] = float(np.clip(self._rest_pos[0],
+                                          -FENCE_HALF_X + _mgn, FENCE_HALF_X - _mgn))
+        self._rest_pos[1] = float(np.clip(self._rest_pos[1],
+                                          -FENCE_HALF_Y + _mgn, FENCE_HALF_Y - _mgn))
+        self._rest_pos[2] = float(max(self._rest_pos[2], 0.04))
         self._anchor = self._rest_pos + np.array([0.0, 0.0, self._tether_len])
 
     def _carry_toy(self):
@@ -758,6 +770,25 @@ class ToySupineEnv(SupineMimoEnv):
             self._anchor = self._rest_pos + np.array([0.0, 0.0, self._tether_len])
             self._toy_pending = False
             self._toy_arriving = False
+
+    def place_toy_now(self):
+        """★登場演出を飛ばして、いますぐ視線の正面へ置く。
+
+        【なぜ要るか】おもちゃを運ぶ `_carry_toy()` は `step()` の中にしかない。
+        Viewer は物理を止めた「編集モード」（E_FREEZE=1 が既定）だと `step()` を
+        一度も呼ばないため、**おもちゃが退避位置 [3,3,0.05] に取り残されたまま**に
+        なっていた（ユーザーの目視「おもちゃが出てこない」2026-07-27）。
+        物理を止めているあいだは登場演出そのものが意味を持たないので、
+        待たずに定位置へ置く。
+        """
+        if not self._toy:
+            return
+        self._set_anchor()
+        self._place(self._toy_qadr, self._rest_pos)
+        self.data.qvel[self._toy_dadr:self._toy_dadr + 6] = 0.0
+        self._toy_pending = False
+        self._toy_arriving = False
+        mujoco.mj_forward(self.model, self.data)
 
     def _parent_intervene(self):
         """★おもちゃを見失った状態が続いたら、親が視線の正面へ差し出し直す。

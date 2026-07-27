@@ -162,7 +162,13 @@ LI_SIGMA_INH_MM = 1.00      # 近距離抑制の広がり [mm]
 LI_W_EXC = 1.0
 LI_W_INH = 0.9
 LI_RATE = 0.5               # 1反復あたりの更新率
-LI_N_ITER = 12              # 反復回数
+LI_N_ITER = int(_os.environ.get("E_LI_ITER", "8"))   # 反復回数
+# ★2026-07-27：12 → 8。上丘の競合は**実時間で動かすには重すぎた**。
+#   実測：格子96x128・反復12 で 1回 24.7ms。制御周期は10msなので、
+#   Viewer で見るとシミュレーションが実時間の4倍遅くなっていた（ユーザーの目視で発覚）。
+#   格子48x64・反復8 にすると 2.8ms で、出す向きの差は 0.002（無視できる）。
+#   ⚠️反復回数は数値解法の都合であり、人間の上丘の性質ではない。
+#     実際の競合は連続時間で進む。速く収束させるための工学的な選択。
 
 # 【全体抑制・2026-07-26 追加】視野全体に届く抑制。
 # 上記のガウス型抑制は届く範囲が約 46画素（sigma 15.4 の3倍）しかなく、
@@ -193,7 +199,7 @@ CENTROID_THRESH_FRAC = 0.35
 # 次のサッケードまでの最小間隔[秒]。E_SACC_LATENCY で振れる。
 # ⚠️文献：新生児のサッケードは 500〜900ms 間隔（Aslin & Salapatek 1975）。
 #   200ms は短すぎる＝**前のサッケードの結果を見る前に次を撃つ**。
-SACCADE_LATENCY = float(_os.environ.get("E_SACC_LATENCY", "0.20"))
+SACCADE_LATENCY = float(_os.environ.get("E_SACC_LATENCY", "0.90"))
 SACCADE_DURATION = 0.05     # 1発のサッケードが続く時間[秒]（上限。届いたら早く終わる）
 SACCADE_MIN_STRENGTH = float(_os.environ.get("E_SACC_MIN_STRENGTH", "0.015"))
 # これ未満の動きでは撃たない。
@@ -258,9 +264,11 @@ NECK_SHARE = float(_os.environ.get("E_NECK_SHARE", "0.0"))
 #   よって物体が画像の右（h_dir>0）にあるときは、眼球角度を**下げる**。
 #   実測（2026-07-27）：符号を付けずに動かしたら、ずれが
 #     -0.130 → -0.429、+0.682 → +0.830 と**遠ざかった**。
-#   ⚠️垂直方向は未確認。水平と同じ向きかは測ってから決める。
+#   ★垂直は水平と**逆**（+1.0）。関節のプラス方向が水平は「左」、垂直は「上」で
+#     食い違っていた。可動域が -47〜+33度 と非対称なことから読めたはずで、
+#     -1.0 のままでは全条件で対象を見失っていた。→ 落とし穴チェックリスト 項57
 EYE_SIGN_H = float(_os.environ.get("E_EYE_SIGN_H", "-1.0"))
-EYE_SIGN_V = float(_os.environ.get("E_EYE_SIGN_V", "-1.0"))
+EYE_SIGN_V = float(_os.environ.get("E_EYE_SIGN_V", "1.0"))
 NECK_FB_GAIN = 0.15         # 首の位置の誤差[度] → 筋の活性化 ⚠️[ARBITRARY]
 # 旧方式（data を渡さずに使う場合）のゲイン。互換のため残す。
 NECK_GAIN = 0.3
@@ -299,6 +307,12 @@ class OrientingReflexV2:
 
     def __init__(self, model, data=None, time_scales=TIME_SCALES, noise=LI_NOISE,
                  seed=None, dt=DEFAULT_DT):
+        # ★2026-07-27：seed が None だと神経ノイズが毎回変わり、**同じ設定でも
+        #   結果がばらつく**（同一条件3回で 0.319 / 0.215 / 0.189）。
+        #   高速化の前後を1回ずつ比べて「悪化した」と誤判定した。
+        #   E_ORIENT_SEED で固定できるようにする（既定 0）。
+        if seed is None:
+            seed = int(_os.environ.get("E_ORIENT_SEED", "0"))
         self.data = data             # ★今の関節角を読むため（位置フィードバック）
         self.noise = float(noise)
         self.rng = np.random.default_rng(seed)

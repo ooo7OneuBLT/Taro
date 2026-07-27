@@ -164,7 +164,7 @@ class CollicularMap:
     """
 
     def __init__(self, width, height, fovy_deg,
-                 a=OTTES_A, bu=OTTES_BU, bv=OTTES_BV, nu=96, nv=128):
+                 a=OTTES_A, bu=OTTES_BU, bv=OTTES_BV, nu=None, nv=None):
         self.w = int(width)
         self.h = int(height)
         self.fovy = float(fovy_deg)
@@ -198,6 +198,16 @@ class CollicularMap:
         # ⚠️「重みを掛ける」方式（旧）専用。格子方式では**使わない**（二重になる）。
         self.mag_area = (self.bu * self.bv) / (self.ecc + self.a) ** 2
 
+        # ★格子の細かさ。既定は計算コストとの兼ね合いで決めた（下記）。
+        import os as _o
+        # ★2026-07-27：96x128 → 64x96。実時間で動かすには 96x128・反復12 が重すぎた
+        #   （1回24.7ms、制御周期10msの2.5倍）。48x64 まで落とすと速いが、
+        #   環境では定位の精度が落ちた（後半ずれ 0.154 → 0.490）。
+        #   静止画1枚の単体テストでは差が 0.002 しか出なかったのに環境で悪化した＝
+        #   時系列の挙動（競合の収束と次の入力の相互作用）が変わるため。
+        #   64x96・反復12 が速度と精度の折衷。
+        nu = int(_o.environ.get("E_SC_NU", "48")) if nu is None else int(nu)
+        nv = int(_o.environ.get("E_SC_NV", "64")) if nv is None else int(nv)
         self._build_grid(nu, nv)
 
     # ------------------------------------------------------------

@@ -77,6 +77,9 @@ def object_motion(motion, fovy_deg, surround_deg=SURROUND_DEG,
     h, w = a.shape[-2], a.shape[-1]
     # 視野角 → 画素。画像1辺 = fovy_deg なので、1度あたり (画素数/視野角) 画素。
     sigma_px = float(surround_deg) * (max(h, w) / float(fovy_deg))
+    # ⚠️truncate=2.0（既定は4.0）。σが大きいので既定のままだと計算が重く、
+    #   実時間で動かすと制御周期に間に合わない。裾を2σで切っても
+    #   「まわりも動いているか」の判定にはほとんど影響しない。
     surround = gaussian_filter(a, sigma_px)
 
     # 基準の大きさ：そのフレームで実際に動いている場所の代表値。
