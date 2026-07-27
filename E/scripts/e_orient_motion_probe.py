@@ -51,13 +51,17 @@ import e_visibility as VIS
 SHAKE_HZ = 2.5
 SHAKE_AMP = 0.008
 N_FRAMES = 40
-OFFSETS = [-0.05, -0.03, -0.015, 0.0, 0.015, 0.03, 0.05]
+OFFSETS = [float(x) for x in
+           os.environ.get("E_ORIENT_OFFSETS", "-0.05,-0.03,-0.015,0,0.015,0.03,0.05").split(",")]
+# ★どの軸を診るか。E_ORIENT_AXIS=v で上下方向。
+AXIS = os.environ.get("E_ORIENT_AXIS", "h")
+IS_V = (AXIS == "v")
 THRESHES = [0.0, 0.10, 0.20, 0.35, 0.50]
 OUT_DIR = os.path.join(_ROOT, "E", "logs", "orient_motion")
 
 
 def centroid_x(a, thresh_frac=0.0):
-    """平らな画像で重心の横位置を -1〜1 で返す。"""
+    """平らな画像で重心を -1〜1 で返す（IS_V なら上下、上が正）。"""
     a = np.clip(np.asarray(a, dtype=float), 0, None)
     if a.max() <= 1e-12:
         return float("nan")
@@ -65,6 +69,11 @@ def centroid_x(a, thresh_frac=0.0):
         a = np.where(a >= a.max() * thresh_frac, a, 0.0)
     if a.sum() <= 1e-12:
         return float("nan")
+    if IS_V:
+        h = a.shape[0]
+        cy = float((np.arange(h)[:, None] * a).sum() / a.sum())
+        hy = (h - 1) / 2.0
+        return -(cy - hy) / hy          # 画像の y は下向きなので反転
     w = a.shape[1]
     cx = float((np.arange(w)[None, :] * a).sum() / a.sum())
     hx = (w - 1) / 2.0
@@ -105,13 +114,14 @@ def main():
     for _ in range(int((TE.TOY_APPEAR_DELAY + TE.TOY_APPROACH_SEC + 0.2) / dt)):
         env.step(a)
     frozen = d.qpos.copy()
-    right = np.array(d.cam_xmat[cam_id], dtype=float).reshape(3, 3)[:, 0]
+    _R = np.array(d.cam_xmat[cam_id], dtype=float).reshape(3, 3)
+    right = _R[:, 1] if IS_V else _R[:, 0]     # ★IS_V なら上方向へずらす
     eye = np.array(d.cam_xpos[cam_id], dtype=float)
-    fwd = -np.array(d.cam_xmat[cam_id], dtype=float).reshape(3, 3)[:, 2]
+    fwd = -_R[:, 2]
     dist = float(np.linalg.norm(np.array(u._rest_pos, dtype=float) - eye))
     base = eye + fwd * dist
 
-    print("=== 動き検出（ステップ1）の切り分け ===")
+    print(f"=== 動き検出（ステップ1）の切り分け（{'上下' if IS_V else '左右'}方向）===")
     print(f"  顔からおもちゃまで {dist*100:.1f} cm  揺れ幅 {SHAKE_AMP*100:.1f} cm")
     print("  ★中心バイアス・競合を通す**前**の生の動きマップだけを見る\n")
 
@@ -119,6 +129,7 @@ def main():
     hdr = "".join(f"{t:>8.2f}" for t in THRESHES)
     print(f"{'置いた位置':>10}{'真の位置':>9}{hdr}    おもちゃ外の動きの割合")
     maps, truths, masks, rgbs, sides = [], [], [], [], []
+    grid_info = []
     errs = {t: [] for t in THRESHES}
     for off in OFFSETS:
         reflex.reset()
@@ -139,7 +150,7 @@ def main():
         mp = np.asarray(reflex.motion_map, dtype=float)
         rgbs.append(last_rgb)
         sv = VIS.visible_by_segment(m, d, toy_bid, "eye_left", size=mp.shape[0])
-        truth = sv["cx"] if sv["seen"] else float("nan")
+        truth = ((-sv["cy"] if IS_V else sv["cx"]) if sv["seen"] else float("nan"))
         mask = VIS.segment_mask(m, d, toy_bid, "eye_left", size=mp.shape[0])
         mask = np.asarray(mask, dtype=bool)
         # おもちゃは揺れるので、領域を少し広げてから内外を比べる
@@ -161,6 +172,17 @@ def main():
             lft = rgt = float("nan")
         sides.append((lft, rgt))
 
+        # ★上丘の格子に活動が写っているか（写らなければ向きが出るはずがない）
+        sm = getattr(reflex, "_smap", None)
+        sci = getattr(reflex, "sc_input", None)
+        if sm is not None and sci is not None:
+            gsum = float(np.asarray(sci).sum())
+            gx, gy = sm.grid_direction(sci)
+            gdir = gy if IS_V else gx
+        else:
+            gsum, gdir = float("nan"), float("nan")
+        grid_info.append((gsum, gdir))
+
         cs = [centroid_x(mp, t) for t in THRESHES]
         for t, c in zip(THRESHES, cs):
             if not (np.isnan(c) or np.isnan(truth)):
@@ -168,8 +190,10 @@ def main():
         rat = lft / max(rgt, 1e-12) if not np.isnan(lft) else float("nan")
         print(f"{off*100:>+9.1f}cm{fmt(truth)}" + "".join(fmt(c) for c in cs)
               + f"{frac_out*100:>13.1f} %"
-              + (f"   左:右 = {lft/(lft+rgt)*100:4.0f}:{rgt/(lft+rgt)*100:<4.0f}"
-                 if not np.isnan(rat) else ""))
+              + (f"  {'下:上' if IS_V else '左:右'} = "
+                 f"{lft/(lft+rgt)*100:3.0f}:{rgt/(lft+rgt)*100:<3.0f}"
+                 if not np.isnan(rat) else "")
+              + f"   上丘の活動 {gsum:8.1f}  向き {gdir:+.2f}")
         maps.append(mp)
         truths.append(truth)
         masks.append(grown)
@@ -188,14 +212,17 @@ def main():
             ax.contour(mk.astype(float), levels=[0.5], colors="cyan",
                        linewidths=0.8)
         w = mp.shape[1]
+        line = ax.axhline if IS_V else ax.axvline
+        def _pos(v):
+            return (1 - v) / 2 * (w - 1) if IS_V else (v + 1) / 2 * (w - 1)
         if not np.isnan(tr):
-            ax.axvline((tr + 1) / 2 * (w - 1), color="cyan", lw=1.2, ls="--")
+            line(_pos(tr), color="cyan", lw=1.2, ls="--")
         c0 = centroid_x(mp, 0.0)
         c3 = centroid_x(mp, 0.35)
         if not np.isnan(c0):
-            ax.axvline((c0 + 1) / 2 * (w - 1), color="lime", lw=1.2)
+            line(_pos(c0), color="lime", lw=1.2)
         if not np.isnan(c3):
-            ax.axvline((c3 + 1) / 2 * (w - 1), color="white", lw=1.2, ls=":")
+            line(_pos(c3), color="white", lw=1.2, ls=":")
         ax.set_title(f"{off*100:+.1f} cm\n真{tr:+.2f} / 閾0 {c0:+.2f} / 閾.35 {c3:+.2f}",
                      fontsize=9)
         ax.set_xticks([]); ax.set_yticks([])
@@ -204,7 +231,7 @@ def main():
     fig.tight_layout()
     import e_toy_env as _TE
     tag = f"{_TE.TOY_SHAPE}_r{_TE.TOY_RADIUS*1000:.1f}mm"
-    png = os.path.join(OUT_DIR, f"motion_maps_{tag}.png")
+    png = os.path.join(OUT_DIR, f"motion_maps_{AXIS}_{tag}.png")
     fig.savefig(png, dpi=110)
     plt.close(fig)
     print(f"\n  画像を保存: {png}")
@@ -218,12 +245,15 @@ def main():
         ax.imshow(im)
         w = im.shape[1]
         if not np.isnan(tr):
-            ax.axvline((tr + 1) / 2 * (w - 1), color="cyan", lw=1.2, ls="--")
+            if IS_V:
+                ax.axhline((1 - tr) / 2 * (w - 1), color="cyan", lw=1.2, ls="--")
+            else:
+                ax.axvline((tr + 1) / 2 * (w - 1), color="cyan", lw=1.2, ls="--")
         ax.set_title(f"{off*100:+.1f} cm", fontsize=10)
         ax.set_xticks([]); ax.set_yticks([])
     fig.suptitle("左目に映っている生の画像（水色破線＝おもちゃの真の重心）", fontsize=11)
     fig.tight_layout()
-    png2 = os.path.join(OUT_DIR, f"eye_rgb_{tag}.png")
+    png2 = os.path.join(OUT_DIR, f"eye_rgb_{AXIS}_{tag}.png")
     fig.savefig(png2, dpi=110)
     plt.close(fig)
     print(f"  画像を保存: {png2}")

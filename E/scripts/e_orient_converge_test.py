@@ -42,10 +42,19 @@ plt.rcParams["axes.unicode_minus"] = False
 
 import e_visibility as VIS
 
-START_OFFSETS = [-0.04, -0.02, 0.02, 0.04]   # おもちゃの初期の横位置[m]
+# おもちゃの初期位置[m]。E_ORIENT_OFFSETS で振れる。
+# ⚠️★新生児が定位できる範囲は方向で違う：水平・斜めは30度まで、
+#   **垂直は10度まで**（Aslin & Salapatek 1975）。距離10.9cmなら
+#   0.02m ≒ 10度、0.04m ≒ 20度。垂直を ±0.04 で測るのは能力の範囲外。
+START_OFFSETS = [float(x) for x in
+                 os.environ.get("E_ORIENT_OFFSETS", "-0.04,-0.02,0.02,0.04").split(",")]
 BLINK_HZ = 2.5     # おもちゃを点滅させる周期[Hz]
 SECONDS = 6.0
 OUT_DIR = os.path.join(_ROOT, "E", "logs", "orient_converge")
+# ★どの軸で測るか。E_ORIENT_AXIS=v で上下方向。
+#   水平の符号は実測で直したが、垂直は「水平と同じ向き」と仮定しただけだった。
+AXIS = os.environ.get("E_ORIENT_AXIS", "h")
+IS_V = (AXIS == "v")
 
 
 def run(orient_on, off, env, u, m, d, dt, toy_gadr, right, toy_bid, n_steps):
@@ -55,7 +64,9 @@ def run(orient_on, off, env, u, m, d, dt, toy_gadr, right, toy_bid, n_steps):
     if reflex is not None:
         reflex.reset()
     a = np.zeros(env.action_space.shape[0], dtype=np.float32)
-    ts, errs, eyes, sacc, cmds, tgts = [], [], [], [], [], []
+    ts, errs, eyes, sacc = [], [], [], []
+    cmds, tgts, hdirs = [], [], []
+    snap = {}   # ★途中の一枚（生の画像・動きマップ）を診断用に取っておく
     import e_toy_env as TE
 
     # ★おもちゃの置き場所は、親が運び始める瞬間に環境が決める（視線の正面）。
@@ -84,20 +95,34 @@ def run(orient_on, off, env, u, m, d, dt, toy_gadr, right, toy_bid, n_steps):
         env.step(a)
         if i % every:
             continue
+        if orient_on and not snap and i >= n_steps // 2:
+            _im = u.get_vision_obs()
+            snap["rgb"] = (np.asarray(_im.get("eye_left"))
+                           if isinstance(_im, dict) and _im.get("eye_left") is not None
+                           else None)
+            snap["motion"] = (np.asarray(reflex.motion_map).copy()
+                              if (reflex is not None and reflex.motion_map is not None)
+                              else None)
+            snap["dir"] = (reflex.v_dir if IS_V else reflex.h_dir) if reflex else 0.0
         sv = VIS.visible_by_segment(m, d, toy_bid, "eye_left", size=64)
         ts.append(i * dt)
-        errs.append(sv["cx"] if sv["seen"] else float("nan"))   # ★符号つき
-        eyes.append(reflex._angle_deg(reflex.eye_qadr["h"])
+        # ★画像の y は下向きなので、上下方向は符号を反転して「上が正」に揃える
+        if sv["seen"]:
+            errs.append(-sv["cy"] if IS_V else sv["cx"])
+        else:
+            errs.append(float("nan"))
+        eyes.append(reflex._angle_deg(reflex.eye_qadr["v" if IS_V else "h"])
                     if (reflex is not None and orient_on) else 0.0)
         sacc.append(reflex.n_saccades if (reflex is not None and orient_on) else 0)
         if reflex is not None and orient_on:
             cmds.append(float(getattr(reflex, "last_eye_cmd", 0.0)))
-            tgts.append(float(reflex._tgt["eye_h"]))
+            tgts.append(float(reflex._tgt["eye_v" if IS_V else "eye_h"]))
+            hdirs.append(float(reflex.v_dir if IS_V else reflex.h_dir))
         else:
-            cmds.append(0.0); tgts.append(0.0)
+            cmds.append(0.0); tgts.append(0.0); hdirs.append(0.0)
     m.geom_rgba[toy_gadr] = base_rgba
     return (np.array(ts), np.array(errs), np.array(eyes), np.array(sacc),
-            np.array(cmds), np.array(tgts))
+            np.array(cmds), np.array(tgts), np.array(hdirs), snap)
 
 
 def main():
@@ -128,12 +153,14 @@ def main():
         cam_id = int(m.camera("eye_left").id)
         eye = np.array(d.cam_xpos[cam_id], dtype=float)
         R = np.array(d.cam_xmat[cam_id], dtype=float).reshape(3, 3)
-        right, fwd = R[:, 0], -R[:, 2]
+        right, up, fwd = R[:, 0], R[:, 1], -R[:, 2]
+        shift = up if IS_V else right
         dist = float(np.linalg.norm(np.array(u._rest_pos, dtype=float) - eye))
         base = eye + fwd * dist
 
         if orient_on:
-            print("=== 視線誘導反射：おもちゃを中心へ寄せられるか ===")
+            print(f"=== 視線誘導反射：おもちゃを中心へ寄せられるか"
+                  f"（{'上下' if IS_V else '左右'}方向）===")
             print(f"  顔からおもちゃまで {dist*100:.1f} cm   {SECONDS} 秒間")
             print(f"  1発で詰める割合 SACCADE_FRAC={OR.SACCADE_FRAC}"
                   f"  間隔 {OR.SACCADE_LATENCY}s  閾値 {OR.SACCADE_MIN_STRENGTH}")
@@ -142,27 +169,28 @@ def main():
         for off in START_OFFSETS:
             key = (orient_on, off)
             results[key] = run(orient_on, off, env, u, m, d, dt,
-                               toy_gadr, right, toy_bid, n_steps)
+                               toy_gadr, shift, toy_bid, n_steps)
         env.close()
 
     # ---- 表 ----------------------------------------------------------------
     print("  ★ずれは符号つき（正＝おもちゃが視野の右）。眼球の動きも符号つき。")
     print("    正しければ、おもちゃが右にあるとき眼球も右へ動いてずれが減る\n")
     print(f"{'初期位置':>10}{'反射':>6}{'最初のずれ':>11}{'最後のずれ':>11}"
-          f"{'|ずれ|の最小':>12}{'サッケード':>11}{'眼球の動き':>11}")
+          f"{'後半の|ずれ|平均':>16}{'|ずれ|最小':>11}{'サッケード':>11}")
     for off in START_OFFSETS:
         for on in (True, False):
-            ts, errs, eyes, sacc, cmds, tgts = results[(on, off)]
+            ts, errs, eyes, sacc, cmds, tgts, hdirs, snap = results[(on, off)]
             good = errs[~np.isnan(errs)]
             e0 = float(np.nanmean(errs[:5])) if len(errs) >= 5 else float("nan")
             e1 = float(np.nanmean(errs[-5:])) if len(errs) >= 5 else float("nan")
             emin = float(np.abs(good).min()) if len(good) else float("nan")
+            # ★振動しているので「最後の値」は運で決まる。後半の平均で評価する。
+            half = errs[len(errs) // 2:]
+            ehalf = float(np.nanmean(np.abs(half))) if len(half) else float("nan")
             de = float(eyes[-1] - eyes[0]) if len(eyes) else 0.0
             print(f"{off*100:>+9.1f}cm{'ON' if on else 'OFF':>6}"
-                  f"{e0:>11.3f}{e1:>11.3f}{emin:>11.3f}"
-                  f"{int(sacc[-1]):>11d}{de:>10.1f}度"
-                  + (f"   指令 max{np.abs(cmds).max():.2f}"
-                     f"  目標の振れ幅{tgts.max()-tgts.min():.1f}度" if on else ""))
+                  f"{e0:>11.3f}{e1:>11.3f}{ehalf:>16.3f}{emin:>11.3f}"
+                  f"{int(sacc[-1]):>11d}")
 
     # ---- グラフ ------------------------------------------------------------
     fig, axes = plt.subplots(2, len(START_OFFSETS),
@@ -170,8 +198,11 @@ def main():
     for j, off in enumerate(START_OFFSETS):
         ax = axes[0, j]
         for on, c, lb in ((True, "tab:red", "反射ON"), (False, "tab:gray", "反射OFF")):
-            ts, errs, eyes, sacc, cmds, tgts = results[(on, off)]
+            ts, errs, eyes, sacc, cmds, tgts, hdirs, snap = results[(on, off)]
             ax.plot(ts, errs, color=c, lw=1.4, label=lb)
+        ts, errs, eyes, sacc, cmds, tgts, hdirs, snap = results[(True, off)]
+        ax.plot(ts, hdirs, color="tab:green", lw=1.1, ls=":",
+                label="反射が出す向き h_dir")
         ax.set_title(f"初期位置 {off*100:+.1f} cm")
         ax.set_ylabel("中心からのずれ")
         ax.set_ylim(-1.05, 1.05)
@@ -180,21 +211,51 @@ def main():
         if j == 0:
             ax.legend(fontsize=9)
         ax2 = axes[1, j]
-        ts, errs, eyes, sacc, cmds, tgts = results[(True, off)]
+        ts, errs, eyes, sacc, cmds, tgts, hdirs, snap = results[(True, off)]
         ax2.plot(ts, eyes, color="tab:blue", lw=1.4, label="実際の角度")
         ax2.plot(ts, tgts, color="tab:orange", lw=1.0, ls="--", label="目標角度")
         if j == 0:
             ax2.legend(fontsize=8)
         ax2.set_xlabel("時刻[秒]")
-        ax2.set_ylabel("眼球の水平角[度]")
+        ax2.set_ylabel(f"眼球の{'垂直' if IS_V else '水平'}角[度]")
         ax2.grid(alpha=0.3)
-    fig.suptitle("視線誘導反射：おもちゃを視野の中心へ寄せられるか"
+    fig.suptitle(f"視線誘導反射（{'上下' if IS_V else '左右'}方向）：おもちゃを視野の中心へ寄せられるか"
                  "（上＝ずれ／下＝眼球の角度）", fontsize=12)
     fig.tight_layout()
-    png = os.path.join(OUT_DIR, "converge.png")
+    png = os.path.join(OUT_DIR, f"converge_{AXIS}.png")
     fig.savefig(png, dpi=110)
     plt.close(fig)
     print(f"\n  グラフを保存: {png}")
+
+    # ---- ★診断図：反射が働いている最中の「目に映る像」と「動き検出の出力」----
+    fig2, ax2s = plt.subplots(2, len(START_OFFSETS),
+                              figsize=(3.4 * len(START_OFFSETS), 7.0))
+    if len(START_OFFSETS) == 1:
+        ax2s = ax2s.reshape(2, 1)
+    for j, off in enumerate(START_OFFSETS):
+        snap = results[(True, off)][-1]
+        axa, axb = ax2s[0, j], ax2s[1, j]
+        rgb = snap.get("rgb")
+        if rgb is not None:
+            im = rgb if rgb.dtype == np.uint8 else np.clip(rgb, 0, 1)
+            axa.imshow(im)
+        axa.set_title(f"{off*100:+.1f} cm  目に映る像", fontsize=10)
+        mo = snap.get("motion")
+        if mo is not None and np.asarray(mo).max() > 0:
+            axb.imshow(mo, cmap="inferno")
+            axb.set_title(f"動き検出（最大 {float(np.asarray(mo).max()):.3f}）"
+                          f"／向き {snap.get('dir', 0.0):+.2f}", fontsize=9)
+        else:
+            axb.set_title("動き検出＝空", fontsize=9)
+        for ax in (axa, axb):
+            ax.set_xticks([]); ax.set_yticks([])
+    fig2.suptitle(f"反射が働いている最中の診断（{'上下' if IS_V else '左右'}方向）",
+                  fontsize=12)
+    fig2.tight_layout()
+    png3 = os.path.join(OUT_DIR, f"diag_{AXIS}.png")
+    fig2.savefig(png3, dpi=110)
+    plt.close(fig2)
+    print(f"  診断図を保存: {png3}")
     VIS.close_renderers()
 
 
