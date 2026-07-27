@@ -36,6 +36,14 @@ if _CORE_BRAIN not in _sys.path:
     _sys.path.insert(0, _CORE_BRAIN)
 from spinal_cord.cpg import write_joint_command as _write_joint_command
 
+# 網膜の中心-周辺抑制（背景の流れと対象の動きを分ける）
+_CORE_SENSES = _os.path.abspath(_os.path.join(
+    _os.path.dirname(_os.path.abspath(__file__)), _os.pardir, _os.pardir,
+    "taro_core", "src", "senses"))
+if _CORE_SENSES not in _sys.path:
+    _sys.path.insert(0, _CORE_SENSES)
+from retina import object_motion as _object_motion
+
 
 def _qposadr_of(model, act_i):
     """そのアクチュエータが動かす関節の qpos アドレス（今の角度を読むため）。"""
@@ -78,6 +86,20 @@ TIME_SCALES = tuple(int(x) for x in
 #   という強い形にしている。感度を下げるだけでは、流れが対象より強いままになるため。
 # ⚠️[ARBITRARY] 0.15秒という長さは、知覚の時間窓（150〜200ms後）から取った暫定値。
 SACC_SUPPRESS_SEC = float(_os.environ.get("E_SACC_SUPPRESS", "0.15"))
+
+# ---- 網膜の中心-周辺抑制（object motion sensitivity）----------------------
+# 【なぜ要るか・2026-07-27】眼球が動くと視野全体が流れる。とくに**床と背景の
+#   水平な境界線**が強い動き信号を出し、線は画面の全幅にわたるので総量で対象を
+#   圧倒する。左右方向は線が対称なので害がないが、**上下方向は重心を完全に
+#   支配され、定位が失敗していた**（対象の実際のずれ +0.44 に対し出力 +0.03）。
+# 【人間はどうか】網膜と上丘に「中心と周辺の動きが一致していたら抑える」仕組みが
+#   実在する（詳細は taro_core/src/senses/retina.py）。皮質を使わないので
+#   新生児でも働きうる。＝環境から境界を消して回避するのではなく、
+#   **太郎に足りない器官を足す**のが人間模倣として正しい。
+# E_OMS=0 で切れる（アブレーション用）。
+USE_OMS = _os.environ.get("E_OMS", "1") == "1"
+OMS_SURROUND_DEG = float(_os.environ.get("E_OMS_SURROUND", "20.0"))
+OMS_UNIFORM_GAIN = float(_os.environ.get("E_OMS_GAIN", "0.49"))
 
 # ---- ステップ2（中心視野の優位）------------------------------------------
 # ★2026-07-27：ガウス窓（σ=0.32）による近似をやめ、上丘の実測に基づく
@@ -259,7 +281,8 @@ class OrientingReflexV2:
         self.time_scales = tuple(time_scales)
         self._max_scale = max(self.time_scales)
         self._frame_buffer = []          # 直近フレームのリング（最大 _max_scale+1 枚）
-        self.motion_map = None           # ステップ1の出力
+        self.motion_map = None           # ステップ1の出力（網膜の抑制ずみ）
+        self.raw_motion_map = None       # 抑制をかける前（診断用）
         self.biased_map = None           # ステップ2の出力
         self.competed_map = None         # ステップ3の競合後の活動
         self.sc_input = None             # ★格子方式：受容野でまとめた直後の上丘の活動
@@ -327,6 +350,13 @@ class OrientingReflexV2:
             return
 
         motion = self._detect_motion(eye_image)          # ステップ1
+        self.raw_motion_map = motion
+        # ★ステップ1.5：網膜の中心-周辺抑制。まわりも一緒に動いていれば
+        #   「自分が動いたせい」として割り引く（object motion sensitivity）。
+        if USE_OMS:
+            motion = _object_motion(motion, VISION_FOVY_DEG,
+                                    surround_deg=OMS_SURROUND_DEG,
+                                    uniform_gain=OMS_UNIFORM_GAIN)
         self.motion_map = motion
         biased = self._apply_center_bias(motion)         # ステップ2
         self.biased_map = biased
