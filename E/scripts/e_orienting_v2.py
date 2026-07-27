@@ -195,7 +195,30 @@ CENTROID_THRESH_FRAC = 0.35
 #   200ms は短すぎる＝**前のサッケードの結果を見る前に次を撃つ**。
 SACCADE_LATENCY = float(_os.environ.get("E_SACC_LATENCY", "0.20"))
 SACCADE_DURATION = 0.05     # 1発のサッケードが続く時間[秒]（上限。届いたら早く終わる）
-SACCADE_MIN_STRENGTH = 0.02 # これ未満の動きでは撃たない
+SACCADE_MIN_STRENGTH = float(_os.environ.get("E_SACC_MIN_STRENGTH", "0.015"))
+# これ未満の動きでは撃たない。
+# ★2026-07-27：0.02 → 0.015。実測（e_orient_threshold_probe.py）で
+#   固視の境界 0.083 と組み合わせたとき、誤発射を半分に減らしつつ
+#   対象を中心に保てる値（ずれ 0.052）。0.030 まで上げると撃つ回数が減りすぎて
+#   追えなくなる（ずれ 0.801）。
+
+# ★2026-07-27追加：中心に十分近ければ撃たない（固視）。
+#
+# 【なぜ要るか】「動きの強さ」だけを条件にすると、**対象が無くても撃つ**。
+#   実測：おもちゃを遠方へ退避させた条件でも撃つ率が109%で、strength の平均は
+#   対象がある条件（0.032）と変わらなかった。太郎自身の頭・眼が動くことで
+#   視野が流れ、それが対象と同じ強さの信号になるため、閾値では分けられない。
+#   ただし**向きの大きさ**は違う：自己運動由来の向きは小さく散らばり、
+#   対象があるときは大きく偏る。
+#
+# 【人間ではどうか】対象が中心窩に載っていればサッケードは要らない（固視）。
+#   上丘の吻側部には固視ニューロンがあり、サッケードニューロンと相互に抑制し合う
+#   （Munoz DP & Istvan PJ 1998 J Neurophysiol 79:1193）。
+#   ＝「中心にあるものへは撃たない」は実在の機構。
+#
+# 【値の根拠】中心窩の直径は約5度（無桿体領域は約1.25度）。視野の半角30度に対し
+#   2.5度/30度 ≒ 0.083。⚠️[Tier2に近い／境界の選び方は判断]
+SACCADE_MIN_DIR = float(_os.environ.get("E_SACC_MIN_DIR", "0.083"))
 
 # ★2026-07-27：1発の大きさを「力を一定時間かける」から**位置の指令**に変えた。
 #
@@ -273,6 +296,7 @@ class OrientingReflexV2:
         self._t = 0.0                # apply() が刻む内部時刻[秒]
         self._last_saccade_t = -1e9  # 前回サッケードを撃った時刻
         self._sacc_remaining = 0.0   # 今のサッケードの残り時間[秒]
+        self._sacc_end_t = -1e9      # ★サッケードが終わった時刻（抑制の起点）
         self._sacc_h = 0.0           # 今のサッケードの方向（撃った瞬間に固定）
         self._sacc_v = 0.0
         # ★撃った瞬間に決める目標角度[度]（位置フィードバックの目標）
@@ -330,6 +354,7 @@ class OrientingReflexV2:
         self._t = 0.0
         self._last_saccade_t = -1e9
         self._sacc_remaining = 0.0
+        self._sacc_end_t = -1e9
         self._sacc_h = 0.0
         self._sacc_v = 0.0
         self.n_saccades = 0
@@ -343,8 +368,14 @@ class OrientingReflexV2:
         #   自分が目を動かしたことで視野全体が流れ、それを「動き」として拾って
         #   しまうため（実測：対象が視野の端にあるのに出力が1/4に潰れた）。
         #   フレームの記憶も捨てる＝**サッケードをまたぐ比較をしない**。
-        if SACC_SUPPRESS_SEC > 0 and \
-                (self._t - self._last_saccade_t) < SACC_SUPPRESS_SEC:
+        # ★2026-07-27修正：抑制の起点を「撃った時刻」から**サッケードが終わった時刻**へ。
+        #   位置フィードバックにしたのでサッケードの持続時間は可変で、
+        #   撃った時刻から150ms数えると**まだ眼球が動いている最中に抑制が明ける**。
+        #   実測：おもちゃが無い条件でも撃つ率が109%＝自己運動由来の反応が
+        #   対象と同じ強さで残っていた。
+        if SACC_SUPPRESS_SEC > 0 and (
+                self._sacc_remaining > 0.0
+                or (self._t - self._sacc_end_t) < SACC_SUPPRESS_SEC):
             self._frame_buffer = []
             self.strength = 0.0      # 古い向きのまま撃たないように
             return
@@ -389,8 +420,11 @@ class OrientingReflexV2:
 
         if self._sacc_remaining <= 0.0:
             ready = (self._t - self._last_saccade_t) >= SACCADE_LATENCY
-            if ready and self.strength >= SACCADE_MIN_STRENGTH \
-                    and (abs(self.h_dir) > 1e-6 or abs(self.v_dir) > 1e-6):
+            # ★中心に十分近ければ撃たない（固視）。自己運動由来の向きは小さいので、
+            #   ここで落ちる。対象があるときは向きが大きく偏るので通る。
+            far_enough = (abs(self.h_dir) >= SACCADE_MIN_DIR
+                          or abs(self.v_dir) >= SACCADE_MIN_DIR)
+            if ready and self.strength >= SACCADE_MIN_STRENGTH and far_enough:
                 self._sacc_h = self.h_dir
                 self._sacc_v = self.v_dir
                 self._sacc_remaining = SACCADE_DURATION
@@ -436,6 +470,8 @@ class OrientingReflexV2:
             # 振幅で持続時間が変わる）
             if max(abs(e) for e in errs) <= SACCADE_DONE_DEG:
                 self._sacc_remaining = 0.0
+            if self._sacc_remaining <= 0.0:
+                self._sacc_end_t = self._t      # ★終わった時刻を記録
             return out
 
         # data が無い場合の従来動作（力を一定時間かける）。互換のため残す。
