@@ -127,8 +127,24 @@ FENCE_RGBA_RICH = np.array([0.35, 0.45, 0.85, 1.0])  # 豊かな条件での柵�
 #   Viewer を見ながら調整した値（`E/docs/pose_editor_saved.json`）。
 #   ⚠️[Tier3・ARBITRARY] 新生児のおもちゃの適切な大きさの文献値は未調査。
 #   「握れる／視界で見える／体に当たりすぎない」を目視で満たす値として選んだ。
-TOY_RADIUS = 0.020         # 箱の half-size[m]＝4cm角。新生児が握れる大きさ
+TOY_RADIUS = float(os.environ.get("E_TOY_RADIUS", "0.020"))
+# 箱の half-size[m]＝4cm角。新生児が握れる大きさ
 TOY_MASS = 0.0154          # 15.4g。密度を保ったまま4cm角にした質量（元は5cm角で30g）
+TOY_DENSITY = TOY_MASS / (2 * 0.020) ** 3    # 240.6 kg/m³。形を変えても密度は保つ
+
+# ★2026-07-27：おもちゃの形を選べるようにした（既定は従来どおり箱）。
+# 【なぜ】定位反射の測定で、**立方体だと動き検出の重心が中心へ寄る**ことが分かった。
+#   おもちゃを視野の端に置くと、透視投影のせいで「中心を向いた側面」が見える。
+#   側面は暗く正面は赤いので、その境目の明暗差が大きい。一方、外側の縁は
+#   灰色の背景との境目で明暗差が小さい。結果、揺らしたときの動き信号が
+#   **中心側の縁に集中**する（実測：視野の端に置くと 96:4 まで偏った）。
+#   → 重心が中心へ引っ張られ、定位の向きが正しく出ない。
+#   球ならどの向きから見ても見え方が同じで、この非対称が原理的に生じない。
+# 【新生児の実験との対応】文献の定位実験で使う視標は平らなカードや小さな図形で、
+#   こうした側面は生じない（Aslin & Salapatek 1975、Hunter & Richards 2003 など）。
+#   ⚠️視標の形・大きさの文献値そのものは未確認 [Tier3・ARBITRARY]。
+# E_TOY_SHAPE=sphere で球、E_TOY_RADIUS で大きさ[m]を変えられる。
+TOY_SHAPE = os.environ.get("E_TOY_SHAPE", "box")   # box / sphere
 # 摩擦[slide, spin, roll]。**転がり続けを止めるために roll/spin を既定より上げる**。
 # 理由＝実測で「手が遠いのにおもちゃが動く(0.342mm/tick)」＝一度押されると転がり続け、
 # 「今の自分の運動」と無関係に動いて**随伴性(自分の行為→結果)が濁る**ため。
@@ -250,6 +266,12 @@ TOY_MODE = os.environ.get("E_TOY_MODE", "hold")
 def _box_inertia(mass, half):
     """一様な立方体(half-size=half)の慣性モーメント。size変更時に手で入れ直すため。"""
     i = mass * (2 * half) ** 2 / 6.0
+    return np.array([i, i, i])
+
+
+def _sphere_inertia(mass, radius):
+    """一様な球(半径=radius)の慣性モーメント I = (2/5)mr²。"""
+    i = 0.4 * mass * radius ** 2
     return np.array([i, i, i])
 
 
@@ -402,10 +424,24 @@ class ToySupineEnv(SupineMimoEnv):
         # --- おもちゃ(箱)の大きさ・質量・慣性を新生児向けに作り替える ---
         self._toy_bid = self.model.body("test_object1").id
         gadr = self.model.body("test_object1").geomadr[0]
-        self.model.geom_size[gadr] = [self._toy_radius] * 3
-        self.model.body_mass[self._toy_bid] = self._toy_mass
-        self.model.body_inertia[self._toy_bid] = _box_inertia(self._toy_mass,
-                                                              self._toy_radius)
+        if TOY_SHAPE == "sphere":
+            # ★球（定位の測定用）。どの向きから見ても見え方が同じなので、
+            #   立方体で起きる「中心側の側面だけが強く光る」非対称が生じない。
+            import mujoco as _mj
+            self.model.geom_type[gadr] = int(_mj.mjtGeom.mjGEOM_SPHERE)
+            self.model.geom_size[gadr] = [self._toy_radius, 0.0, 0.0]
+            # 質量は密度を保って体積から出し直す（大きさを変えても手触りが変わらない）
+            self._toy_mass = TOY_DENSITY * (4.0 / 3.0) * np.pi * self._toy_radius ** 3
+            self.model.body_mass[self._toy_bid] = self._toy_mass
+            self.model.body_inertia[self._toy_bid] = _sphere_inertia(
+                self._toy_mass, self._toy_radius)
+        else:
+            self.model.geom_size[gadr] = [self._toy_radius] * 3
+            if abs(self._toy_radius - 0.020) > 1e-9:
+                self._toy_mass = TOY_DENSITY * (2 * self._toy_radius) ** 3
+            self.model.body_mass[self._toy_bid] = self._toy_mass
+            self.model.body_inertia[self._toy_bid] = _box_inertia(self._toy_mass,
+                                                                  self._toy_radius)
         self.model.geom_friction[gadr] = TOY_FRICTION   # 転がり続けを止める（上のコメント）
         # 目視用に目立つ色（赤）。太郎の体・床と区別がつかないと動画で確認できないため。
         # 接触中は TOY_RGBA_ON（明るい黄）に切り替わる＝「触れている間だけ光る」。
