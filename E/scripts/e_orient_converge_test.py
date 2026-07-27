@@ -49,7 +49,7 @@ import e_visibility as VIS
 START_OFFSETS = [float(x) for x in
                  os.environ.get("E_ORIENT_OFFSETS", "-0.04,-0.02,0.02,0.04").split(",")]
 BLINK_HZ = 2.5     # おもちゃを点滅させる周期[Hz]
-SECONDS = 6.0
+SECONDS = float(os.environ.get("E_SECONDS", "6.0"))
 OUT_DIR = os.path.join(_ROOT, "E", "logs", "orient_converge")
 # ★どの軸で測るか。E_ORIENT_AXIS=v で上下方向。
 #   水平の符号は実測で直したが、垂直は「水平と同じ向き」と仮定しただけだった。
