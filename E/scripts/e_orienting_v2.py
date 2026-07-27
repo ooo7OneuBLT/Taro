@@ -45,6 +45,17 @@ if _CORE_SENSES not in _sys.path:
 from retina import object_motion as _object_motion
 
 
+def _dofadr_of(model, act_i):
+    """そのアクチュエータが動かす関節の dof アドレス（角速度を読むため）。"""
+    try:
+        jid = int(model.actuator_trnid[act_i, 0])
+        if jid < 0:
+            return None
+        return int(model.jnt_dofadr[jid])
+    except Exception:
+        return None
+
+
 def _qposadr_of(model, act_i):
     """そのアクチュエータが動かす関節の qpos アドレス（今の角度を読むため）。"""
     try:
@@ -86,6 +97,27 @@ TIME_SCALES = tuple(int(x) for x in
 #   という強い形にしている。感度を下げるだけでは、流れが対象より強いままになるため。
 # ⚠️[ARBITRARY] 0.15秒という長さは、知覚の時間窓（150〜200ms後）から取った暫定値。
 SACC_SUPPRESS_SEC = float(_os.environ.get("E_SACC_SUPPRESS", "0.15"))
+# ★眼球が動いているあいだも視覚を使わない（時間ではなく実際の速さで判定）。
+#   時間窓だけだと、サッケードが終わったあとも眼球は慣性と粘りで動き続け、
+#   その流れを動き検出が拾って**対象が無くても撃つ**（実測：対象を遠方へ
+#   退避させた条件でも撃つ率109%）。
+#   ⚠️[ARBITRARY] 閾値に文献値は無い。眼球の可動域45度・サッケード1発が数度
+#     であることから、静止とみなせる速さとして置いた暫定値。
+#   E_EYE_STILL=0 で切れる（アブレーション用）。
+EYE_STILL_DEG_S = float(_os.environ.get("E_EYE_STILL", "1.5"))
+# 実測（撃つ閾値の探索）：対象が無い条件で撃つ率が
+#   切る 109% ／ 1.5度/秒 82% ／ 3.0度/秒 100% ／ 6.0度/秒 105%
+# ＝1.5 が最良。ただし**根本的には消えない**（眼球が動けば必ず視野が流れる）。
+#
+# ★2026-07-27 の気づき：「対象が無いのに撃つ」を悪と決めつけるのは誤りかもしれない。
+#   ユーザーの目視で「おもちゃを揺らさなくても中心へ寄せようとする」ことが分かった。
+#   太郎自身の微小な動き（首が重力で倒れる・眼球が動く）で視野が流れ、
+#   **静止している対象の縁も画面上で動く**ため検出できている。
+#   人間も固視微動（マイクロサッケード・ドリフト・トレモア）を止められず、
+#   網膜像を人工的に完全静止させると像は数秒で消える（静止網膜像の消失）。
+#   ＝「自己運動を消しきる」と、静止した対象が見えなくなる。
+#   今日入れた対策（時間の幅を短く・サッケード後の抑制・網膜の中心-周辺抑制）は
+#   どれも流れを消す方向なので、効かせすぎないこと。
 
 # ---- 網膜の中心-周辺抑制（object motion sensitivity）----------------------
 # 【なぜ要るか・2026-07-27】眼球が動くと視野全体が流れる。とくに**床と背景の
@@ -358,6 +390,9 @@ class OrientingReflexV2:
         self.eye_qadr = {k: [a for a in (_qposadr_of(model, i) for i in v)
                              if a is not None]
                          for k, v in self.eye_idx.items()}
+        self.eye_dadr = {k: [a for a in (_dofadr_of(model, i) for i in v)
+                             if a is not None]
+                         for k, v in self.eye_idx.items()}
         self.neck_qadr = {k: a for k, a in
                           ((k, _qposadr_of(model, i)) for k, i in self.neck_idx.items())
                           if a is not None}
@@ -398,9 +433,17 @@ class OrientingReflexV2:
         #   撃った時刻から150ms数えると**まだ眼球が動いている最中に抑制が明ける**。
         #   実測：おもちゃが無い条件でも撃つ率が109%＝自己運動由来の反応が
         #   対象と同じ強さで残っていた。
-        if SACC_SUPPRESS_SEC > 0 and (
+        moving = False
+        if EYE_STILL_DEG_S > 0 and self.data is not None:
+            try:
+                w = max(abs(float(self.data.qvel[a]))
+                        for v in self.eye_dadr.values() for a in v)
+                moving = np.degrees(w) > EYE_STILL_DEG_S
+            except Exception:
+                moving = False
+        if moving or (SACC_SUPPRESS_SEC > 0 and (
                 self._sacc_remaining > 0.0
-                or (self._t - self._sacc_end_t) < SACC_SUPPRESS_SEC):
+                or (self._t - self._sacc_end_t) < SACC_SUPPRESS_SEC)):
             self._frame_buffer = []
             self.strength = 0.0      # 古い向きのまま撃たないように
             return
