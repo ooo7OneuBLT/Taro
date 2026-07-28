@@ -1,0 +1,34 @@
+{
+  "toy_pos": [
+    0.33,
+    0.005,
+    0.25
+  ],
+  "toy_half_size": 0.01,
+  "joints": {
+    "hip1": -71.0,
+    "hip2": -36.0,
+    "knee": -90.0,
+    "shoulder_horizontal": 58.0,
+    "shoulder_ad_ab": 3.0,
+    "shoulder_rotation": -65.0,
+    "elbow": -111.0
+  },
+  "shake": false,
+  "follow": true,
+  "orient": false,
+  "latency": 0.9,
+  "threshold": 0.015,
+  "neck_on": true,
+  "neck_k": 0.6,
+  "neck_c": 0.2,
+  "neck_target": -23.0,
+  "open": {
+    "toy": true,
+    "pose": true,
+    "reflex": true,
+    "neck": true,
+    "measure": true,
+    "run": true
+  }
+}

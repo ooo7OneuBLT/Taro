@@ -116,13 +116,26 @@ def main():
     import e_orienting_v2 as OR
     import e_toy_env as TE
 
-    kw = body_kwargs_from_env(0.0, verbose=True)
+    # ★【2026-07-28】測定スクリプト（e_orient_converge_test.py）と条件を揃える。
+    #   揃えないと「Viewerで見ている太郎と、測っている太郎が別物」になる
+    #   （2026-07-25 に実際に起きた問題＝身体の設定が散らばる）。
+    #     体年齢4ヶ月  … この反射を使うリーチングの月齢に揃えた
+    #     視力も4ヶ月  … 体と揃える（1ヶ月の4.3倍）
+    #     頭を抑える    … 人間の乳児実験と同じ条件（Hunter & Richards 2003）
+    from e_head_hold import CaregiverHands
+    _AGE = float(os.environ.get("E_AGE", "4.0"))
+    _HEAD_HOLD = os.environ.get("E_HEAD_HOLD", "1") == "1"
+
+    kw = body_kwargs_from_env(_AGE, verbose=True)
     env = ToySupineEnv(actuation_model=MuscleModel,
-                       vision_params=infant_vision_params(),
-                       age=0.0, toy=True, vor=True, orient=True, **kw)
+                       vision_params=infant_vision_params(acuity_age=_AGE),
+                       age=_AGE, toy=True, vor=True, orient=True, **kw)
     u = env.unwrapped
     m, d = u.model, u.data
     env.reset(seed=0)
+    hands = CaregiverHands(m, d)
+    if _HEAD_HOLD:
+        hands.hold(verbose=True)
     dt = float(m.opt.timestep) * int(u.frame_skip)
     n_act = env.action_space.shape[0]
     zero = np.zeros(n_act, dtype=np.float32)
@@ -219,11 +232,17 @@ def main():
         m.geom_size[toy_gadr] = [size0, size0, size0]
 
     # ================= パネル =================
+    # ★【2026-07-28 レイアウト改訂】1列（幅520px）で6区画を縦に積んでいたため
+    #   画面からはみ出して縦に長すぎた（ユーザーの指摘）。**2列**に変え、
+    #   目の映像も左右そろえて出す。
     win = tk.Tk()
     win.title("太郎ビューア（統一版）")
-    _h = min(1000, win.winfo_screenheight() - 80)
-    win.geometry(f"520x{_h}+20+10")
-    win.attributes("-topmost", True)
+    _h = min(980, win.winfo_screenheight() - 80)
+    _w = min(1080, win.winfo_screenwidth() - 60)
+    win.geometry(f"{_w}x{_h}+20+10")
+    # ⚠️★最前面に固定しない（2026-07-28、ユーザーの要望）。他の窓を見るたびに
+    #   ビューアが邪魔になるため。MuJoCoの3D窓とパネルは別窓なので、必要なら
+    #   タスクバーから前面に出せる。
 
     outer = tk.Frame(win); outer.pack(fill="both", expand=True)
     cv = tk.Canvas(outer, highlightthickness=0)
@@ -237,6 +256,21 @@ def main():
     cv.bind("<Configure>", lambda e: cv.itemconfigure(wid, width=e.width))
     cv.bind_all("<MouseWheel>", lambda e: cv.yview_scroll(int(-e.delta / 120), "units"))
 
+    # ★2列。左＝環境と条件（いじる物）／右＝見る物（映像・数値）
+    #
+    # ⚠️★【2026-07-28 修正】最初 `pack` + `pack_propagate(False)` + `width=520` で
+    #   組んだところ、**幅だけ固定されて高さが潰れ**、列の中身が1つも表示されなかった
+    #   （ユーザーの報告「一番下のボタン以外表示されない」）。
+    #   pack_propagate(False) は「子に合わせてリサイズしない」＝高さも指定しないと
+    #   既定の小さい値のままになる。
+    #   → `grid` + `columnconfigure(weight=1, uniform=...)` で幅を等分し、
+    #     高さは中身に任せる（伝播させる）。
+    cols = tk.Frame(root); cols.pack(fill="both", expand=True)
+    cols.columnconfigure(0, weight=1, uniform="col")
+    cols.columnconfigure(1, weight=1, uniform="col")
+    colL = tk.Frame(cols); colL.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
+    colR = tk.Frame(cols); colR.grid(row=0, column=1, sticky="nsew", padx=(4, 0))
+
     op = (saved or {}).get("open", {})
     # ★2026-07-27：既定を「物理を動かす」に変えた（それまでは止まって起動）。
     #   反射が目を動かすのは env.step() の中なので、物理を止めていると
@@ -245,8 +279,94 @@ def main():
     #   Viewer の主目的は反射の観察なので、止めたい人が自分でONにする形にする。
     freeze0 = os.environ.get("E_FREEZE", "0") == "1"
 
+    # ---- 区画0：環境（プリセット）★2026-07-28 新設 -----------------------
+    #
+    # 【なぜ要るか】ユーザーの要望「環境をいくつかバージョン用意して、プルダウンで選んで
+    # 最初からやり直しを押したらその環境で始まる」。実験ごとに条件（月齢・柵・頭の支え）を
+    # 手で合わせるのは間違いのもとで、実際に「Viewerで見ている太郎と測っている太郎が
+    # 別物」という問題が起きていた（2026-07-25、体型補正が環境ごとにバラバラだった件）。
+    #
+    # ⚠️**月齢だけはモデルを作るときに決まる**（geomの寸法・質量が変わる）ので、
+    #   実行中に変えられない。月齢が変わるプリセットを選んだときは**プロセスを
+    #   作り直す**（環境変数を設定して自分を起動し直す）。それ以外は即反映。
+    sec_env = Section(colL, "環境（プリセット）", op.get("env", True))
+
+    # プリセット定義。age だけが「作り直しが要る」項目。
+    PRESETS = {
+        "視線誘導反射の測定（4ヶ月・頭を抑える・柵なし）": dict(
+            age=4.0, head_hold=True, fence=False, orient=True, toy_radius=0.0056,
+            note="e_orient_converge_test.py と同じ条件。人間の乳児実験の作法"),
+        "新生児（0ヶ月・支えなし・柵あり）": dict(
+            age=0.0, head_hold=False, fence=True, orient=True, toy_radius=0.0056,
+            note="2026-07-27 までの条件。過去の測定と比べるとき用"),
+        "4ヶ月・支えなし・柵なし": dict(
+            age=4.0, head_hold=False, fence=False, orient=True, toy_radius=0.0056,
+            note="頭の支えが効いているかを見るための対照"),
+        "自由に動く（4ヶ月・柵あり・反射なし）": dict(
+            age=4.0, head_hold=False, fence=True, orient=False, toy_radius=0.0056,
+            note="自発運動の観察用。柵に当たるかもここで見る"),
+    }
+    preset_names = list(PRESETS)
+    # 今の起動条件に最も近いプリセットを初期選択にする
+    _cur = next((k for k, v in PRESETS.items()
+                 if abs(v["age"] - _AGE) < 1e-9 and v["head_hold"] == _HEAD_HOLD),
+                preset_names[0])
+    preset_var = tk.StringVar(value=_cur)
+    _pf = tk.Frame(sec_env.body); _pf.pack(fill="x", padx=10, pady=(4, 0))
+    tk.Label(_pf, text="環境", width=6, anchor="w").pack(side="left")
+    tk.OptionMenu(_pf, preset_var, *preset_names).pack(side="left", fill="x", expand=True)
+    preset_note = tk.Label(sec_env.body, text=PRESETS[_cur]["note"],
+                           fg="#666", font=("", 8), wraplength=460, justify="left")
+    preset_note.pack(anchor="w", padx=14)
+    tk.Label(sec_env.body,
+             text="★「最初からやり直し」を押すと、選んだ環境で始まります\n"
+                  "　 月齢が変わるときは体を作り直すので数十秒かかります",
+             fg="#a30", font=("", 8), justify="left").pack(anchor="w", padx=14)
+
+    # 個別のスイッチ（プリセットを選ぶと連動して変わる）
+    st_fence = tk.BooleanVar(value=True)
+    tk.Checkbutton(sec_env.body, text="柵（ベビーサークル）を有効にする",
+                   variable=st_fence).pack(anchor="w", padx=14)
+    st_hold_head = tk.BooleanVar(value=_HEAD_HOLD)
+    tk.Checkbutton(sec_env.body, text="実験者が頭を抑える（人間の乳児実験と同じ）",
+                   variable=st_hold_head, fg="#06a").pack(anchor="w", padx=14)
+    env_label = tk.Label(sec_env.body, text="", font=("Consolas", 9),
+                         justify="left", fg="#444")
+    env_label.pack(anchor="w", padx=14)
+
+    def on_preset(*_a):
+        p = PRESETS[preset_var.get()]
+        preset_note.config(text=p["note"])
+        st_fence.set(bool(p["fence"]))
+        st_hold_head.set(bool(p["head_hold"]))
+    preset_var.trace_add("write", on_preset)
+
+    # 柵のgeom（実行時にON/OFFする）。名前は e_toy_env の `fence_post_{i}`。
+    fence_gids = [g for g in range(m.ngeom) if "fence" in (m.geom(g).name or "")]
+    fence_rgba0 = {g: m.geom_rgba[g].copy() for g in fence_gids}
+    fence_con0 = {g: (int(m.geom_contype[g]), int(m.geom_conaffinity[g]))
+                  for g in fence_gids}
+    fence_on = [True]
+
+    def apply_fence(want):
+        """柵を実行時に消す／戻す。★geomを消せないので当たり判定と色で表現する。"""
+        # ⚠️★環境側のフラグも合わせる。おもちゃの置き場所は `_set_anchor` が
+        #   「柵の内側」にクランプするので、ここを切らないと**柵を消しても
+        #   おもちゃだけ柵の枠に押し込まれる**（2026-07-28 に発覚）。
+        u._fence = bool(want)
+        for g in fence_gids:
+            if want:
+                m.geom_rgba[g] = fence_rgba0[g]
+                m.geom_contype[g], m.geom_conaffinity[g] = fence_con0[g]
+            else:
+                _c = fence_rgba0[g].copy(); _c[3] = 0.0     # 透明＝見えない
+                m.geom_rgba[g] = _c
+                m.geom_contype[g] = 0                        # 当たらない
+                m.geom_conaffinity[g] = 0
+        fence_on[0] = bool(want)
+
     # ---- 区画1：おもちゃ ------------------------------------------------
-    sec_toy = Section(root, "おもちゃ", op.get("toy", True))
+    sec_toy = Section(colL, "おもちゃ", op.get("toy", True))
     # ★スライダーを動かしたら自動で「固定する」に切り替える。
     #   そうしないと、既定（環境まかせ）のときスライダーが効かず、
     #   「動かせない」ように見える（ユーザーの目視 2026-07-26）。
@@ -311,14 +431,20 @@ def main():
                 pass
         origin = np.mean(eyes, axis=0) if eyes else np.array(d.cam_xpos[cid], dtype=float)
         fwd = -np.array(d.cam_xmat[cid], dtype=float).reshape(3, 3)[:, 2]
-        dist = float(getattr(u, "_toy_dist", 0.086))
+        # ★距離はスライダーの値を使う（2026-07-28。それまで環境の固定値だった）
+        dist = float(dist_var.get())
+        u._toy_dist = dist          # 環境側（_set_anchor）にも反映
         goal = origin + fwd * dist
         # ★柵の内側にとどめる。人間の親は柵の外に手を出さない。
         #   首が横を向いていると「視線の正面」が柵の外になり、
         #   おもちゃが柵に遮られて見えなくなる（ユーザーの報告 2026-07-27）。
-        mgn = 0.03
-        goal[0] = float(np.clip(goal[0], -TE.FENCE_HALF_X + mgn, TE.FENCE_HALF_X - mgn))
-        goal[1] = float(np.clip(goal[1], -TE.FENCE_HALF_Y + mgn, TE.FENCE_HALF_Y - mgn))
+        # ⚠️★【2026-07-28 修正】**柵があるときだけ**にした。柵は新生児の体に合わせた
+        #   寸法なので、4ヶ月の体では顔の前が枠の外になり、おもちゃが胸元へ落ちていた
+        #   （ユーザーの目視「顔の前にもっていくを押しても視界に来ないで胸元に来る」）。
+        if fence_on[0]:
+            mgn = 0.03
+            goal[0] = float(np.clip(goal[0], -TE.FENCE_HALF_X + mgn, TE.FENCE_HALF_X - mgn))
+            goal[1] = float(np.clip(goal[1], -TE.FENCE_HALF_Y + mgn, TE.FENCE_HALF_Y - mgn))
         goal[2] = float(max(goal[2], 0.04))
         start = np.array(d.xpos[toy_bid], dtype=float)
         _parent[0] = {"t": 0.0, "from": start, "to": goal,
@@ -327,6 +453,36 @@ def main():
         parent_log.append(None)   # 時刻はループ側で埋める
         msg.config(text=f"親が顔の前へ運んでいます（{len(parent_log)}回目）")
 
+    # ★【2026-07-28 新設】目からおもちゃまでの距離。
+    #
+    # 【なぜ要るか】従来 `TOY_DISTANCE = 0.086`（8.6cm）の固定値で、これは
+    # **0ヶ月の腕の長さ（18.6cm）を基準に決めた暫定値**だった。しかも e_toy_env.py の
+    # コメントには実測結果として「8.6cmは柵に当たる／15cmならめり込まず腕で届く」と
+    # 書いてあるのに、既定値が更新されていなかった。体年齢を上げると腕が伸びるので、
+    # 距離も見直す必要がある。
+    #
+    # ⚠️★近すぎると**輻輳（寄り目）**が要る。太郎は両目に同じ指令を出す実装
+    # （Hering の等神経支配の法則）で、輻輳は実装していない。
+    #     距離8.6cm・瞳孔間4.5cm → 必要な寄り目 約29度
+    #     距離15cm              → 約17度
+    #     距離30cm              → 約8.6度
+    # ＝近いほど「両目で同じものを見られない」状態になる。下に必要角を表示する。
+    dist_var = tk.DoubleVar(value=float((saved or {}).get(
+        "toy_dist", getattr(u, "_toy_dist", 0.086))))
+    slider(sec_toy.body, "目からの距離[m]", dist_var, 0.05, 0.40, 0.005,
+           note="★「顔の前へ持っていく」を押すとこの距離に置く")
+    vergence_label = tk.Label(sec_toy.body, text="", font=("Consolas", 9),
+                              justify="left", fg="#06a")
+    vergence_label.pack(anchor="w", padx=14)
+
+    # 瞳孔間距離（両目のカメラの間隔）を実測しておく＝輻輳角の計算に使う
+    try:
+        _el = np.array(d.cam_xpos[int(m.camera("eye_left").id)], dtype=float)
+        _er = np.array(d.cam_xpos[int(m.camera("eye_right").id)], dtype=float)
+        IPD = float(np.linalg.norm(_el - _er))
+    except Exception:
+        IPD = 0.045
+
     tk.Button(sec_toy.body, text="★顔の前へ持っていく", command=bring_to_face,
               width=22, bg="#a63", fg="white").pack(pady=4)
     parent_label = tk.Label(sec_toy.body, text="", font=("Consolas", 9),
@@ -334,7 +490,7 @@ def main():
     parent_label.pack(anchor="w", padx=18)
 
     # ---- 区画2：姿勢 ----------------------------------------------------
-    sec_pose = Section(root, "姿勢", op.get("pose", True))
+    sec_pose = Section(colL, "姿勢", op.get("pose", True))
     st_freeze = tk.BooleanVar(value=freeze0)
     st_hold = tk.BooleanVar(value=freeze0)
 
@@ -354,7 +510,7 @@ def main():
         joint_vars.append(v)
 
     # ---- 区画3：反射 ----------------------------------------------------
-    sec_ref = Section(root, "反射", op.get("reflex", True))
+    sec_ref = Section(colL, "反射", op.get("reflex", True))
     st_orient = tk.BooleanVar(value=bool((saved or {}).get("orient", False)))
     tk.Checkbutton(sec_ref.body, text="視線誘導反射（動くものに目・首を向ける）",
                    variable=st_orient).pack(anchor="w", padx=14)
@@ -374,7 +530,7 @@ def main():
                    variable=st_tone).pack(anchor="w", padx=14)
 
     # ---- 区画3b：首のバネ（★調整中。値が決まったら core に実装する）----------
-    sec_neck = Section(root, "首のバネ（調整中）", op.get("neck", True))
+    sec_neck = Section(colL, "首のバネ（調整中）", op.get("neck", True))
     tk.Label(sec_neck.body, justify="left", fg="#555", font=("", 8),
              text="首にはバネが無く（stiffness=0）、重力で60秒かけて60度倒れ続ける。\n"
                   "正常な新生児でも頸部に軽い抵抗はある（過緊張は正常児の0.7%だけ\n"
@@ -428,12 +584,22 @@ def main():
               width=20).pack(pady=4)
 
     # ---- 区画4：測定器 --------------------------------------------------
-    sec_mes = Section(root, "測定器", op.get("measure", True))
-    tk.Label(sec_mes.body, text="太郎の目に映っているもの（左目・検出画素は緑）",
+    sec_mes = Section(colR, "測定器", op.get("measure", True))
+    # ★【2026-07-28】右目も出す（ユーザーの要望）。それまで左目だけだった。
+    #   両眼を並べると「片方にしか映っていない」ことに気づける。
+    #   ⚠️太郎の反射は**両眼の画像を使う**（左目だけ使っていた旧実装は 2026-07-26 に修正済み）
+    #     ので、片目だけ見ていると反射が見ているものと食い違う。
+    tk.Label(sec_mes.body, text="太郎の目に映っているもの（検出画素は緑）",
              font=("", 9, "bold")).pack(pady=(4, 2))
-    eye_canvas = tk.Label(sec_mes.body)
-    eye_canvas.pack()
-    _imgtk = [None]
+    eye_row = tk.Frame(sec_mes.body); eye_row.pack()
+    _eye_frames, eye_canvases = {}, {}
+    for _side, _lb in (("eye_left", "左目"), ("eye_right", "右目")):
+        _f = tk.Frame(eye_row); _f.pack(side="left", padx=4)
+        tk.Label(_f, text=_lb, font=("", 8)).pack()
+        _c = tk.Label(_f); _c.pack()
+        _eye_frames[_side] = _f
+        eye_canvases[_side] = _c
+    _imgtk = {"eye_left": None, "eye_right": None}
     mask_var = tk.BooleanVar(value=True)
     tk.Checkbutton(sec_mes.body, text="検出した画素を緑で重ねる",
                    variable=mask_var).pack(anchor="w", padx=14)
@@ -448,7 +614,7 @@ def main():
     head_label.pack(anchor="w", padx=14)
 
     # ---- 区画5：再生 ----------------------------------------------------
-    sec_run = Section(root, "再生", op.get("run", True))
+    sec_run = Section(colR, "再生", op.get("run", True))
     speed_var = tk.DoubleVar(value=float(os.environ.get("E_SPEED", "1.0")))
     slider(sec_run.body, "速度", speed_var, 0.1, 2.0, 0.1,
            note="1.0＝等倍速。0.25＝4分の1のスロー")
@@ -470,6 +636,11 @@ def main():
     def save():
         data = {"toy_pos": [float(v.get()) for v in toy_vars],
                 "toy_half_size": float(size_var.get()),
+                # ★2026-07-28 追加。距離・環境の条件も保存する。
+                #   これが無いと「保存した位置」を再現しても距離の設定が失われる。
+                "toy_dist": float(dist_var.get()),
+                "age": float(_AGE), "head_hold": bool(st_hold_head.get()),
+                "fence": bool(st_fence.get()), "preset": preset_var.get(),
                 "joints": {jd["base"]: float(v.get())
                            for jd, v in zip(joints, joint_vars)},
                 "shake": bool(shake_var.get()), "follow": bool(follow_var.get()),
@@ -565,7 +736,38 @@ def main():
                 break
 
             if _restart[0]:
+                # ★★【2026-07-28】プリセットで**月齢が変わる**なら、体そのものを
+                #   作り直す必要がある（geomの寸法・質量はモデル構築時に決まるので
+                #   実行中には変えられない）。環境変数を設定して自分を起動し直す。
+                _p = PRESETS[preset_var.get()]
+                if abs(float(_p["age"]) - _AGE) > 1e-9:
+                    msg.config(text="体を作り直しています…（数十秒かかります）")
+                    win.update_idletasks()
+                    _envv = dict(os.environ)
+                    _envv["E_AGE"] = str(_p["age"])
+                    _envv["E_HEAD_HOLD"] = "1" if _p["head_hold"] else "0"
+                    _envv["E_FENCE"] = "1" if _p["fence"] else "0"
+                    _envv["E_TOY_RADIUS"] = str(_p["toy_radius"])
+                    try:
+                        env.close()
+                    except Exception:
+                        pass
+                    try:
+                        win.destroy()
+                    except Exception:
+                        pass
+                    os.execve(sys.executable,
+                              [sys.executable, os.path.abspath(__file__)], _envv)
+                    return          # execve が成功すればここには来ない
+
                 env.reset(seed=0)
+                # ★やり直しのたびに支え直す（目標角は「支え始めた時点の角度」なので、
+                #   リセット後の姿勢で取り直す必要がある）
+                if st_hold_head.get():
+                    hands.hold()
+                else:
+                    hands.release()
+                apply_fence(st_fence.get())
                 reflex.reset()
                 t_sim, wall0, tick = 0.0, time.time(), 0
                 toy_base[0] = None
@@ -597,18 +799,32 @@ def main():
                     m.jnt_stiffness[j] = tone_k[j] if want_tone else 0.0
                 tone_on[0] = want_tone
 
-            # ★首のバネ（調整中）。スライダーの値をそのまま反映する
-            _on = st_neck.get()
-            _tgt = np.radians(float(nk_t.get()))
-            for nm, j in neck_ids.items():
-                if nm != "head_tilt" and not nk_all.get():
-                    m.jnt_stiffness[j] = 0.0
-                    m.dof_damping[int(m.jnt_dofadr[j])] = neck_damp0[nm]
-                    continue
-                m.jnt_stiffness[j] = float(nk_k.get()) if _on else 0.0
-                m.qpos_spring[int(m.jnt_qposadr[j])] = _tgt if _on else 0.0
-                m.dof_damping[int(m.jnt_dofadr[j])] = (float(nk_c.get()) if _on
-                                                       else neck_damp0[nm])
+            # ★★【2026-07-28 修正】頭を抑えているあいだは、このスライダーを**適用しない**。
+            #   実験者の手も首のバネも同じ `jnt_stiffness` を使うので、毎tickここで
+            #   スライダーの値（既定0.4）を書くと、`hands.hold()` が入れた強さ200が
+            #   **上書きされて消えていた**（ユーザーの目視「首が結構動いてる」で発覚）。
+            #   ＝落とし穴チェックリスト項62「設定した値が本当に体に届いているか」の再発。
+            if not st_hold_head.get():
+                _on = st_neck.get()
+                _tgt = np.radians(float(nk_t.get()))
+                for nm, j in neck_ids.items():
+                    if nm != "head_tilt" and not nk_all.get():
+                        m.jnt_stiffness[j] = 0.0
+                        m.dof_damping[int(m.jnt_dofadr[j])] = neck_damp0[nm]
+                        continue
+                    m.jnt_stiffness[j] = float(nk_k.get()) if _on else 0.0
+                    m.qpos_spring[int(m.jnt_qposadr[j])] = _tgt if _on else 0.0
+                    m.dof_damping[int(m.jnt_dofadr[j])] = (float(nk_c.get()) if _on
+                                                           else neck_damp0[nm])
+
+            # ★環境のスイッチ（柵・実験者の手）を実行中でも反映する
+            if bool(st_fence.get()) != fence_on[0]:
+                apply_fence(st_fence.get())
+            if bool(st_hold_head.get()) != bool(hands.holding):
+                if st_hold_head.get():
+                    hands.hold()
+                else:
+                    hands.release()
 
             # おもちゃ。★揺らしは「固定するか」と独立に効かせる。
             #   固定ON  … スライダーの位置＋揺れ
@@ -708,8 +924,9 @@ def main():
                 u._vision_t = None          # 時間が止まるとキャッシュが切れないので毎回捨てる
                 u._vision_cache = None
                 img = None
+                imgs = {}
                 try:
-                    imgs = u.get_vision_obs()
+                    imgs = u.get_vision_obs() or {}
                     img = imgs.get("eye_left") if isinstance(imgs, dict) else None
                 except Exception:
                     pass
@@ -829,20 +1046,50 @@ def main():
                          f"ずれ平均 {np.mean(devs) if devs else float('nan'):5.2f}"
                          f"（反射OFFで0.48）")
 
-                if img is not None and mask_var.get() is not None:
-                    try:
-                        from PIL import Image, ImageTk
-                        arr = np.asarray(img)
+                # ★距離と輻輳（寄り目）の必要角を出す（2026-07-28）。
+                #   実際の目からおもちゃまでの距離も測って、設定値と比べられるようにする。
+                try:
+                    _eyes = [np.array(d.cam_xpos[int(m.camera(_n).id)], dtype=float)
+                             for _n in ("eye_left", "eye_right")]
+                    _org = np.mean(_eyes, axis=0)
+                    _real = float(np.linalg.norm(
+                        np.array(d.xpos[toy_bid], dtype=float) - _org))
+                    _verg = 2.0 * np.degrees(np.arctan2(IPD / 2.0, max(_real, 1e-4)))
+                    vergence_label.config(
+                        text=f"実際の距離 {_real*100:5.1f}cm（設定 {dist_var.get()*100:.1f}cm）\n"
+                             f"両目で見るのに要る寄り目 {_verg:5.1f}度"
+                             f"（瞳孔間 {IPD*100:.1f}cm）★太郎は寄り目ができない")
+                except Exception:
+                    pass
+
+                # ★環境の状態＝「今どの条件で見ているか」を常に出す（2026-07-28）。
+                #   Viewer と測定で条件が食い違っていた事故を防ぐため。
+                _off = hands.offsets() if hands.holding else {}
+                _offmax = max((abs(v) for v in _off.values()), default=0.0)
+                env_label.config(
+                    text=f"体年齢 {_AGE:g}ヶ月（視力も同じ）  "
+                         f"柵 {'あり' if fence_on[0] else 'なし'}\n"
+                         f"実験者の手 {'抑えている' if hands.holding else 'なし'}"
+                         + (f"（頭のずれ {_offmax:.2f}度）" if hands.holding else ""))
+
+                # ★左右の目をそれぞれ描く（2026-07-28）
+                try:
+                    from PIL import Image, ImageTk
+                    for _side, _cv in eye_canvases.items():
+                        _im = imgs.get(_side) if isinstance(imgs, dict) else None
+                        if _im is None:
+                            continue
+                        arr = np.asarray(_im)
                         if arr.dtype != np.uint8:
                             arr = np.clip(arr, 0, 255).astype(np.uint8)
                         arr = arr.copy()
                         if mask_var.get():
                             arr[VIS.red_mask(arr)] = [0, 255, 0]
-                        _imgtk[0] = ImageTk.PhotoImage(
-                            Image.fromarray(arr).resize((192, 192), Image.NEAREST))
-                        eye_canvas.config(image=_imgtk[0])
-                    except Exception:
-                        pass
+                        _imgtk[_side] = ImageTk.PhotoImage(
+                            Image.fromarray(arr).resize((176, 176), Image.NEAREST))
+                        _cv.config(image=_imgtk[_side])
+                except Exception:
+                    pass
 
                 # ★コピー用のまとめ（「現在の設定をコピー」ボタンが使う）
                 _toy = [f"{v.get():.3f}" for v in toy_vars]
