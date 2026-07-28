@@ -126,16 +126,25 @@ def main():
     _AGE = float(os.environ.get("E_AGE", "4.0"))
     _HEAD_HOLD = os.environ.get("E_HEAD_HOLD", "1") == "1"
 
+    # ★リクライニングの角度[度]。0=仰向け。モデル構築時に決まるので実行中は変えられない
+    _RECLINE = float(os.environ.get("E_RECLINE", "0"))
+    _EYE_REST_V = float(os.environ.get("E_EYE_REST_V", "0"))
     kw = body_kwargs_from_env(_AGE, verbose=True)
     env = ToySupineEnv(actuation_model=MuscleModel,
                        vision_params=infant_vision_params(acuity_age=_AGE),
-                       age=_AGE, toy=True, vor=True, orient=True, **kw)
+                       age=_AGE, toy=True, vor=True, orient=True,
+                       recline_deg=_RECLINE, **kw)
     u = env.unwrapped
     m, d = u.model, u.data
     env.reset(seed=0)
     hands = CaregiverHands(m, d)
+    # ★支える角度。指定しなければ「今の角度」で支える。
+    #   リクライニングでは顎を引かせないと視線が上を向いてしまうので、
+    #   前後（head_tilt）だけ指定できるようにした（2026-07-28）。
+    _HOLD_TILT = os.environ.get("E_HOLD_TILT")
+    _hold_tgt = ({"head_tilt": float(_HOLD_TILT)} if _HOLD_TILT else None)
     if _HEAD_HOLD:
-        hands.hold(verbose=True)
+        hands.hold(target=_hold_tgt, verbose=True)
     dt = float(m.opt.timestep) * int(u.frame_skip)
     n_act = env.action_space.shape[0]
     zero = np.zeros(n_act, dtype=np.float32)
@@ -223,6 +232,14 @@ def main():
             toy_pos0 = np.array([0.28, 0.0, 0.18], dtype=float)
     if saved and "toy_pos" in saved:
         toy_pos0 = np.array(saved["toy_pos"], dtype=float)
+    # ★プリセットが持つおもちゃの位置（E_TOY_POS）は保存値より優先する。
+    #   ＝「この環境ではここに置く」という条件の一部なので（2026-07-28）。
+    if os.environ.get("E_TOY_POS"):
+        try:
+            toy_pos0 = np.array([float(x) for x in
+                                 os.environ["E_TOY_POS"].split(",")], dtype=float)
+        except Exception:
+            pass
     size0 = float(m.geom_size[toy_gadr][0])
     # ⚠️E_TOY_RADIUS を明示したときは保存値で上書きしない。
     #   上書きすると、環境変数で指定した大きさが黙って無視される
@@ -293,9 +310,11 @@ def main():
 
     # プリセット定義。age だけが「作り直しが要る」項目。
     PRESETS = {
-        "視線誘導反射の測定（4ヶ月・頭を抑える・柵なし）": dict(
+        "視線誘導反射の測定（4ヶ月・仰向け・頭を抑える）": dict(
             age=4.0, head_hold=True, fence=False, orient=True, toy_radius=0.0056,
-            note="e_orient_converge_test.py と同じ条件。人間の乳児実験の作法"),
+            recline=0.0, hold_tilt=None, eye_rest_v=0.0,
+            note="e_orient_converge_test.py と同じ条件。仰向け・眼球は正中位。"
+                 "人間の乳児実験の作法（Hunter & Richards 2003）"),
         "新生児（0ヶ月・支えなし・柵あり）": dict(
             age=0.0, head_hold=False, fence=True, orient=True, toy_radius=0.0056,
             note="2026-07-27 までの条件。過去の測定と比べるとき用"),
@@ -305,12 +324,48 @@ def main():
         "自由に動く（4ヶ月・柵あり・反射なし）": dict(
             age=4.0, head_hold=False, fence=True, orient=False, toy_radius=0.0056,
             note="自発運動の観察用。柵に当たるかもここで見る"),
+        "★リーチング（リクライニング60度・顎を引く）": dict(
+            age=4.0, head_hold=True, fence=False, orient=True, toy_radius=0.0056,
+            recline=60.0, hold_tilt=60.0, eye_rest_v=-15.0,
+            toy_pos=(-0.048, -0.115, 0.113),
+            note="体幹64.5度・首60度（顎を引く）・眼球-15度。"
+                 "おもちゃは目から17.8cm・視線から3.7度・腕の94%＝見えて届く。"
+                 "リーチはこの姿勢が有利（Carvalho 2007／Savelsbergh 1994）"),
+        "リクライニング45度": dict(
+            age=4.0, head_hold=True, fence=False, orient=True, toy_radius=0.0056,
+            recline=45.0, hold_tilt=45.0, eye_rest_v=-15.0,
+            note="実測で体幹30.4度。より寝た姿勢"),
+        "リクライニング30度": dict(
+            age=4.0, head_hold=True, fence=False, orient=True, toy_radius=0.0056,
+            recline=30.0, hold_tilt=30.0, eye_rest_v=-10.0,
+            note="実測で体幹23.8度。ほぼ仰向けに近い"),
     }
     preset_names = list(PRESETS)
     # 今の起動条件に最も近いプリセットを初期選択にする
-    _cur = next((k for k, v in PRESETS.items()
-                 if abs(v["age"] - _AGE) < 1e-9 and v["head_hold"] == _HEAD_HOLD),
-                preset_names[0])
+    # ⚠️★リクライニング角も判定に入れる（2026-07-28）。入れていなかったため、
+    #   70度で起動しているのに「0度のプリセット」が選ばれ、「最初からやり直し」を
+    #   押すと条件が違うと判定されて**体の作り直しが走り、窓が閉じた**
+    #   （ユーザーの報告「最初からにすると落ちる」）。
+    def _matches(v):
+        """起動時の条件とプリセットが一致するか。★姿勢一式で判定する（2026-07-28）。
+
+        ⚠️リクライニング角だけを見ていたため、「顎を引いた60度」で起動しても
+        「4ヶ月・柵なし」（仰向け）が選ばれていた（ユーザーの報告）。
+        姿勢の設定を環境変数に散らしていたのが原因なので、プリセット側に
+        姿勢一式を持たせ、判定もそれで行う。
+        """
+        _t = v.get("hold_tilt")
+        _c = (float(_HOLD_TILT) if _HOLD_TILT else None)
+        if (_t is None) != (_c is None):
+            return False
+        if _t is not None and abs(float(_t) - _c) > 1e-9:
+            return False
+        return (abs(v["age"] - _AGE) < 1e-9
+                and v["head_hold"] == _HEAD_HOLD
+                and abs(float(v.get("recline", 0.0)) - _RECLINE) < 1e-9
+                and abs(float(v.get("eye_rest_v", 0.0)) - _EYE_REST_V) < 1e-9)
+
+    _cur = next((k for k, v in PRESETS.items() if _matches(v)), preset_names[0])
     preset_var = tk.StringVar(value=_cur)
     _pf = tk.Frame(sec_env.body); _pf.pack(fill="x", padx=10, pady=(4, 0))
     tk.Label(_pf, text="環境", width=6, anchor="w").pack(side="left")
@@ -558,12 +613,27 @@ def main():
     nk_c = tk.DoubleVar(value=_c0)
     slider(sec_neck.body, "減衰", nk_c, 0.0, 0.2, 0.005,
            note="臨界減衰（振動しない最小値）は下に表示")
-    nk_t = tk.DoubleVar(value=(_t0 if _k0 > 0 else -45.0))
-    slider(sec_neck.body, "目標角[度]", nk_t, -60.0, 30.0, 1.0,
-           note="★重力を織り込んだ実効値。-45度で実際は-25度あたりに落ち着く")
-    nk_all = tk.BooleanVar(value=False)
-    tk.Checkbutton(sec_neck.body, text="3軸すべてに効かせる（外すと前後の傾きだけ）",
-                   variable=nk_all).pack(anchor="w", padx=14)
+    # ★目標角の範囲と既定を姿勢に合わせる（2026-07-28）。
+    #   仰向けは -45度（重力を織り込んだ実効値）だが、リクライニングでは
+    #   顎を引く側（正）にしないと視線が上を向いてしまう。
+    _nk_lo, _nk_hi = (-60.0, 30.0) if _RECLINE <= 0 else (-30.0, 70.0)
+    _nk_def = -45.0 if _RECLINE <= 0 else 30.0
+    nk_t = tk.DoubleVar(value=(_t0 if _k0 > 0 else _nk_def))
+    slider(sec_neck.body, "目標角[度]", nk_t, _nk_lo, _nk_hi, 1.0,
+           note=("★重力を織り込んだ実効値。-45度で実際は-25度あたりに落ち着く"
+                 if _RECLINE <= 0 else
+                 "★正が前屈（顎を引く）。リクライニングでは顎を引かないと視線が上を向く"))
+    # ★★リクライニングでは既定でON。
+    #   首のバネは前後（head_tilt）だけに入れる設計だったが、これは**仰向け前提**。
+    #   体を起こすと頭の重さが左右方向にも効くので、前後だけだと
+    #   **頭が横を向いて倒れる**（実測：視線が真横 y=0.83。2026-07-28）。
+    #   ユーザーの目視「さっきはなんか首が変だった」の原因。
+    nk_all = tk.BooleanVar(value=(_RECLINE > 0))
+    tk.Checkbutton(sec_neck.body,
+                   text="3軸すべてに効かせる（外すと前後の傾きだけ）"
+                        "★リクライニングでは必要",
+                   variable=nk_all, fg=("#a30" if _RECLINE > 0 else "black")
+                   ).pack(anchor="w", padx=14)
     neck_label = tk.Label(sec_neck.body, text="", font=("Consolas", 9), justify="left")
     neck_label.pack(anchor="w", padx=14)
 
@@ -648,6 +718,16 @@ def main():
                 "latency": float(lat_var.get()), "threshold": float(thr_var.get()),
                 "neck_on": bool(st_neck.get()), "neck_k": float(nk_k.get()),
                 "neck_c": float(nk_c.get()), "neck_target": float(nk_t.get()),
+                # ★【2026-07-28 追加】スイッチの状態も残す。
+                #   これが無いと、保存された位置を測るときに**別の姿勢の太郎**を
+                #   測ってしまう（実際、首のバネ30度で調整した設定を
+                #   「実験者が60度で支える」条件で測って、まったく違う値が出た）。
+                "head_hold": bool(st_hold_head.get()),
+                "hold_tilt": (float(_HOLD_TILT) if _HOLD_TILT else None),
+                "neck_all_axes": bool(nk_all.get()),
+                "freeze": bool(st_freeze.get()), "pose_hold": bool(st_hold.get()),
+                "vor": bool(st_vor.get()), "tone": bool(st_tone.get()),
+                "eye_rest_v": float(_EYE_REST_V),
                 "open": {"toy": sec_toy.opened, "pose": sec_pose.opened,
                          "reflex": sec_ref.opened, "neck": sec_neck.opened,
                          "measure": sec_mes.opened, "run": sec_run.opened}}
@@ -740,14 +820,59 @@ def main():
                 #   作り直す必要がある（geomの寸法・質量はモデル構築時に決まるので
                 #   実行中には変えられない）。環境変数を設定して自分を起動し直す。
                 _p = PRESETS[preset_var.get()]
-                if abs(float(_p["age"]) - _AGE) > 1e-9:
-                    msg.config(text="体を作り直しています…（数十秒かかります）")
+                # ★体の角度もモデル構築時に決まるので作り直しが要る
+                # ★姿勢一式（リクライニング角・顎の角度・眼球の基準）は
+                #   モデル構築時／リセット時に決まるので、変わるなら作り直す。
+                _p_tilt = _p.get("hold_tilt")
+                _cur_tilt = (float(_HOLD_TILT) if _HOLD_TILT else None)
+                _tilt_changed = (
+                    (_p_tilt is None) != (_cur_tilt is None)
+                    or (_p_tilt is not None and _cur_tilt is not None
+                        and abs(float(_p_tilt) - _cur_tilt) > 1e-9))
+                if (abs(float(_p["age"]) - _AGE) > 1e-9
+                        or abs(float(_p.get("recline", 0.0)) - _RECLINE) > 1e-9
+                        or abs(float(_p.get("eye_rest_v", 0.0)) - _EYE_REST_V) > 1e-9
+                        or _tilt_changed):
+                    msg.config(text="★条件が変わったので体を作り直します。"
+                                    "新しい窓が開いたら、この窓は閉じます")
                     win.update_idletasks()
+                    win.after(0, lambda: None)
                     _envv = dict(os.environ)
                     _envv["E_AGE"] = str(_p["age"])
                     _envv["E_HEAD_HOLD"] = "1" if _p["head_hold"] else "0"
                     _envv["E_FENCE"] = "1" if _p["fence"] else "0"
                     _envv["E_TOY_RADIUS"] = str(_p["toy_radius"])
+                    _envv["E_RECLINE"] = str(_p.get("recline", 0.0))
+                    _envv["E_EYE_REST_V"] = str(_p.get("eye_rest_v", 0.0))
+                    if _p.get("hold_tilt") is None:
+                        _envv.pop("E_HOLD_TILT", None)
+                    else:
+                        _envv["E_HOLD_TILT"] = str(_p["hold_tilt"])
+                    if _p.get("toy_pos"):
+                        _envv["E_TOY_POS"] = ",".join(str(v) for v in _p["toy_pos"])
+                    # ★★【2026-07-28 修正】`os.execve` をやめた。
+                    #   Windows には本当の exec が無く、Python は「新プロセスを作って
+                    #   自分は終了する」動作になる。その結果、新プロセスが親のコンソールを
+                    #   失って管理から外れ、**見た目にはアプリが消えた**ように見えた
+                    #   （ユーザーの報告「最初からやり直すを押すとアプリが消える」）。
+                    #   → 独立したプロセスとして起動し、自分は普通に閉じる。
+                    import subprocess
+                    _flags = 0
+                    if os.name == "nt":
+                        # 新しいコンソールを開く＝完全に独立したプロセスになる。
+                        # ⚠️DETACHED_PROCESS だとログが見えず、失敗しても気づけない
+                        _flags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
+                    try:
+                        subprocess.Popen(
+                            [sys.executable, os.path.abspath(__file__)],
+                            env=_envv, cwd=os.getcwd(), creationflags=_flags)
+                        msg.config(text="新しい条件で立ち上げています。"
+                                        "別の窓が開くまで少し待ってください")
+                        win.update_idletasks()
+                    except Exception as _e:
+                        msg.config(text=f"⚠️起動に失敗しました: {_e}")
+                        _restart[0] = False
+                        continue
                     try:
                         env.close()
                     except Exception:
@@ -756,15 +881,13 @@ def main():
                         win.destroy()
                     except Exception:
                         pass
-                    os.execve(sys.executable,
-                              [sys.executable, os.path.abspath(__file__)], _envv)
-                    return          # execve が成功すればここには来ない
+                    return
 
                 env.reset(seed=0)
                 # ★やり直しのたびに支え直す（目標角は「支え始めた時点の角度」なので、
                 #   リセット後の姿勢で取り直す必要がある）
                 if st_hold_head.get():
-                    hands.hold()
+                    hands.hold(target=_hold_tgt)
                 else:
                     hands.release()
                 apply_fence(st_fence.get())
@@ -822,7 +945,7 @@ def main():
                 apply_fence(st_fence.get())
             if bool(st_hold_head.get()) != bool(hands.holding):
                 if st_hold_head.get():
-                    hands.hold()
+                    hands.hold(target=_hold_tgt)
                 else:
                     hands.release()
 
@@ -876,7 +999,12 @@ def main():
                 m.geom_size[toy_gadr] = [s, s, s]
 
             # 姿勢
-            if st_hold.get() or freeze:
+            # ⚠️★【2026-07-28 修正】`freeze`（物理を止める）でスライダーの角度を
+            #   書き戻していたため、**止めた瞬間に姿勢が作りかけの値へ飛んでいた**
+            #   （ユーザーの要望「現状維持のまま物理を止めてほしい」）。
+            #   スライダーで姿勢を作りたいときは「姿勢を固定」（st_hold）を使う。
+            #   止めるだけなら今の姿勢をそのまま保つ。
+            if st_hold.get():
                 for jd, v in zip(joints, joint_vars):
                     ang = np.radians(v.get())
                     for jid, qadr in jd["pair"]:
@@ -897,8 +1025,10 @@ def main():
                     pass
 
             if freeze:
-                if root_qpos0 is not None:
-                    d.qpos[root_qadr:root_qadr + 7] = root_qpos0
+                # ⚠️★体の根元（位置・向き）も戻さない。止めた時点の姿勢を保つ。
+                #   `root_qpos0` はリセット直後の値なので、書き戻すと
+                #   リクライニングで座っていた体が仰向けの初期位置へ飛ぶ。
+                #   「仰向けに戻す」ボタンを使いたいときだけ明示的に戻す。
                 d.qvel[:] = 0.0
                 d.qacc[:] = 0.0
                 mujoco.mj_forward(m, d)
@@ -1068,7 +1198,10 @@ def main():
                 _offmax = max((abs(v) for v in _off.values()), default=0.0)
                 env_label.config(
                     text=f"体年齢 {_AGE:g}ヶ月（視力も同じ）  "
-                         f"柵 {'あり' if fence_on[0] else 'なし'}\n"
+                         f"柵 {'あり' if fence_on[0] else 'なし'}  "
+                         f"リクライニング {_RECLINE:.0f}度\n"
+                         f"顎 {(_HOLD_TILT + '度で支える') if _HOLD_TILT else '指定なし'}"
+                         f"　眼球の基準 {_EYE_REST_V:+.0f}度\n"
                          f"実験者の手 {'抑えている' if hands.holding else 'なし'}"
                          + (f"（頭のずれ {_offmax:.2f}度）" if hands.holding else ""))
 

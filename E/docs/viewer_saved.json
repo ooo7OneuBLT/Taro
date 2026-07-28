@@ -1,10 +1,15 @@
 {
   "toy_pos": [
-    0.33,
-    0.005,
-    0.25
+    -0.005,
+    0.03,
+    0.235
   ],
-  "toy_half_size": 0.01,
+  "toy_half_size": 0.005,
+  "toy_dist": 0.18,
+  "age": 4.0,
+  "head_hold": true,
+  "fence": true,
+  "preset": "★リーチング（リクライニング60度・顎を引く）",
   "joints": {
     "hip1": -71.0,
     "hip2": -36.0,
@@ -22,7 +27,7 @@
   "neck_on": true,
   "neck_k": 0.6,
   "neck_c": 0.2,
-  "neck_target": -23.0,
+  "neck_target": 30.0,
   "open": {
     "toy": true,
     "pose": true,

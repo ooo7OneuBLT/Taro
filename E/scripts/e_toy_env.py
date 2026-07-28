@@ -114,6 +114,50 @@ FENCE_POST_T = 0.024       # 柱の厚さ[m]（柵の法線方向＝従来の直
 FENCE_N_LONG = 9           # 長辺1本あたりの柱の本数
 FENCE_N_SHORT = 6          # 短辺1本あたりの柱の本数（角は長辺側が担うので端を除く）
 FENCE_HEIGHT = 0.225       # 柱の高さ[m]（目視の結果15cm→1.5倍に。低いと越えられそうに見えた）
+
+# ============================================================================
+# ★リクライニング（体を起こす）— 2026-07-28 新設
+# ----------------------------------------------------------------------------
+# 【なぜ要るか】リーチングに進むにあたり、仰向けでは「見える位置」と「手が届く位置」が
+# 両立しないことが実測で分かった：
+#     おもちゃを視線の正面（目から8.6cm）に置くと、肩からは21.7cm。
+#     4ヶ月の腕は16.8cmなので**届かない**。
+#   仰向けではおもちゃが顔の真上に来るため、肩から遠くなるのが原因。
+#
+# 【人間の実験ではどうしているか（2026-07-28 調査）】
+#   ★**体を起こして解決している**。完全な仰向け(0度)でリーチを取る研究は少数派。
+#     Carvalho, Tudella & Savelsbergh (2007) Infant Behav Dev 30(1):26-35
+#       4〜6ヶ月児。座位「ベビーチェア、水平から70度」と仰向け(0度)を比較し、
+#       **座位の方がリーチの頻度・質ともに優れる**（特に4ヶ月児で顕著）。
+#       5〜6ヶ月で差が消える＝姿勢制御が育つと仰向けの不利をカバーできる。
+#     Savelsbergh & van der Kamp (1994) J Exp Child Psychol 58(3):510-528
+#       垂直90度／傾斜60度／仰向け0度。**姿勢を起こすことがリーチ成立の決定的要因**。
+#       12〜19週児を座位にすると20〜27週児が仰向けで出す頻度に匹敵する。
+#
+# 【なぜ有利か（物理）】仰向けで手を伸ばすのは腕を**重力に逆らって持ち上げる**動作。
+#   リクライニングなら前方へ出す動きになり、重力は伸ばす方向と直角に近くなる。
+#
+# 傾きの角度[度]。0=仰向け、90=直立。★70度は Carvalho et al. 2007 のベビーチェアの値。
+RECLINE_DEG = float(os.environ.get("E_RECLINE", "0"))
+# 背もたれの寸法[m]。⚠️[Tier3] 乳児用バウンサーの寸法規格は調査で見つからなかった。
+# 太郎の体（4ヶ月で身長約68cm）が乗る大きさとして決めた。
+SEAT_HALF_LEN = 0.40       # 背もたれの長さの半分（体軸方向）
+SEAT_HALF_WID = 0.22       # 背もたれの幅の半分（左右）
+SEAT_THICK = 0.02          # 板の厚み
+SEAT_RGBA = np.array([0.62, 0.55, 0.50, 1.0])
+# ★背もたれ・座面の摩擦。ずり落ちを防ぐ。
+#
+# 【なぜ要るか】実測（`e_recline_check.py`）で45度・3秒間に **1.56cm ずり落ちた**。
+# 実験は15秒〜数分なので、そのままでは姿勢が保てない（ユーザーの指摘、2026-07-28）。
+#
+# 【人間ではどうか】乳児用のバウンサー・ベビーチェアは
+#   ・布／ウレタンの表面（滑りにくい）
+#   ・★**股ベルトで固定する**（安全基準で義務づけられている）
+# の2つでずり落ちを防いでいる。摩擦だけで足りなければベルトに相当する拘束を足す。
+#
+# ⚠️[Tier3] 布と皮膚の摩擦係数の文献値は持っていない。MuJoCo の既定は 1.0。
+#   まず 2.0（＝滑りにくい布）で試し、足りなければ上げる／ベルトを足す。
+SEAT_FRICTION = float(os.environ.get("E_SEAT_FRICTION", "2.0"))
 # 視覚的な「豊かさ」の切替。E_PLAIN=1(既定)＝床の市松模様を消し柵を床と同色に＝**見えないnest**。
 # 根拠と意図は _make_visually_plain() のdocstring参照（White 1966 と Ferrari 2007 の両立）。
 # 【色の統一】床・柵・空を**同じ色**にする＝どこを向いても同じ＝最も「貧しい」視界。
@@ -341,7 +385,7 @@ class ToySupineEnv(SupineMimoEnv):
                  fence_post_w=FENCE_POST_W, fence_post_t=FENCE_POST_T,
                  fence_n_long=FENCE_N_LONG, fence_n_short=FENCE_N_SHORT,
                  fence_height=FENCE_HEIGHT, newborn_neck=None, newborn_limbs=None,
-                 vor=None, orient=None, **kwargs):
+                 vor=None, orient=None, recline_deg=None, **kwargs):
         # VOR（前庭動眼反射）。眼球を方策から切り離し、頭の動きを打ち消して視線を安定させる。
         # E_VOR=0 でOFF（アブレーション）。根拠と簡略化は e_vor.py 参照。
         if vor is None:
@@ -390,6 +434,8 @@ class ToySupineEnv(SupineMimoEnv):
         # ⚠️ _edit_spec は super().__init__() の中（モデル構築時）に呼ばれるので、
         #    これらの属性は super() より**前**に代入しておく必要がある。
         self._fence = fence
+        # ★リクライニングの角度[度]。0なら従来どおり仰向け（背もたれも作らない）
+        self._recline_deg = float(RECLINE_DEG if recline_deg is None else recline_deg)
         self._fence_half_x = float(fence_half_x)
         self._fence_half_y = float(fence_half_y)
         self._fence_post_w = float(fence_post_w)
@@ -437,6 +483,11 @@ class ToySupineEnv(SupineMimoEnv):
             if _custom:
                 kwargs["custom_measurements"] = _custom
         super().__init__(**kwargs)
+
+        # ★リクライニング：体の向きを背もたれの角度に合わせる（2026-07-28）。
+        #   親クラス（SupineMimoEnv）が仰向け（水平）に置いたあと、y軸まわりに起こす。
+        if self._recline_deg > 0.0:
+            self._apply_recline()
 
         self._arm_body = f"{toy_side}_upper_arm"
         self._hand_body = f"{toy_side}_hand"
@@ -584,6 +635,116 @@ class ToySupineEnv(SupineMimoEnv):
         ceil.contype = 0     # 物理的な衝突はさせない（見えるだけ）＝太郎が触れても動かない・当たらない
         ceil.conaffinity = 0
 
+    def _recline_lift(self):
+        """★リクライニング時に体（と背もたれ）を持ち上げる量[m]。
+
+        ⚠️【2026-07-28 に踏んだ】この計算を `_apply_recline`（体）と `_add_seat`（板）の
+        **2箇所に別々に書いていた**ため、体だけが角度に応じて持ち上がり、板は固定のままで、
+        角度が大きいほど体が板から浮いた。45度では偶然乗ったが、70度では滑り落ちて
+        x=-1.04m まで転がった（真横からの画像で確認）。→ 落とし穴チェックリスト項64
+        （同じ処理を2箇所に書かない）。1つにまとめる。
+        """
+        return SEAT_HALF_LEN * np.sin(np.radians(self._recline_deg)) * 0.5
+
+    def _apply_recline(self):
+        """★体を背もたれの角度まで起こす。2026-07-28 新設。
+
+        【★2026-07-28 に2回間違えた場所。総当たり（`e_recline_rot_probe.py`）で確定した】
+        誤り1：`model.body("hip").quat` を書き換えた
+            → **hip には自由関節が無い**。体全体を動かす free joint は `mimo_location`
+              にある。hip の pos/quat を書いても姿勢は変わらなかった。
+              （親クラス SupineMimoEnv も hip を書いているが、そちらは reset 前なので
+                qpos0 の計算に反映され、結果として効いている）
+        誤り2：回転の符号と軸を推測で決めた
+            → 実測：y軸まわり **-70度** で体幹 +76度（目標70度）。
+              +70度だと -63.9度（頭が下＝逆立ち）になる。
+
+        ⚠️合成は**左右どちらでもほぼ同じ**（76.1度 / 76.0度）。ここでは world 基準
+          （左から）を使う。
+        """
+        import mujoco as _mj
+        # 体全体を動かす自由関節を探す（おもちゃの自由関節は除く）
+        qadr = None
+        for j in range(self.model.njnt):
+            if int(self.model.jnt_type[j]) != int(_mj.mjtJoint.mjJNT_FREE):
+                continue
+            bn = self.model.body(int(self.model.jnt_bodyid[j])).name
+            if "object" in bn or "toy" in bn:
+                continue
+            qadr = int(self.model.jnt_qposadr[j])
+            break
+        if qadr is None:
+            print("[recline] ⚠️体の自由関節が見つからないので起こせない")
+            return
+        self._recline_qadr = qadr
+        # ★qpos0（リセット時の姿勢）を書き換える。data.qpos だけ変えても
+        #   reset のたびに元へ戻ってしまう。
+        th = -np.radians(self._recline_deg)          # ★符号は実測で確定（上記）
+        q_tilt = np.zeros(4)
+        _mj.mju_axisAngle2Quat(q_tilt, np.array([0.0, 1.0, 0.0]), th)
+        q_now = np.array(self.model.qpos0[qadr + 3:qadr + 7], dtype=float)
+        q_new = np.zeros(4)
+        _mj.mju_mulQuat(q_new, q_tilt, q_now)        # world基準で起こす
+        self.model.qpos0[qadr + 3:qadr + 7] = q_new
+        # 位置も背もたれの上へ（起こすと体が伸びる方向が変わるので持ち上げる）
+        self.model.qpos0[qadr + 2] += self._recline_lift()
+        print(f"[recline] 体を {self._recline_deg:.0f}度 起こした"
+              f"（0=仰向け／90=直立）[Tier2: Carvalho et al. 2007 のベビーチェアは70度]")
+
+    def _add_seat(self, spec):
+        """★リクライニング用の背もたれ（傾いた板）をワールドに置く。2026-07-28 新設。
+
+        人間の実験で使われるベビーチェア／バウンサーに相当する。
+
+        ⚠️★【2026-07-28 に踏んだ】最初、板を体と**反対側**（-x）に置いてしまい、
+        体が板にぶつかって姿勢が崩れた（体幹 -35.7度）。太郎の体は**頭が +x 方向**に
+        あるので、板も +x 側へ、体軸に沿って置く必要がある。
+
+        【向きの決め方】体は y軸まわり -recline_deg 回転している（`_apply_recline`）。
+            体軸（骨盤→頭）  = ( cos, 0,  sin)
+            背中の向き        = ( sin, 0, -cos)     ※体軸に垂直で、元の -z 側
+        板の中心を「骨盤から体軸方向へ半分」＋「背中側へ少し」の位置に置く。
+
+        ⚠️[Tier3] 実物のバウンサーは連続した曲面で、股ベルトで固定されている。
+          寸法の規格も調査で見つからなかった（2026-07-28）。太郎の体が乗る大きさとして決めた。
+        """
+        th = np.radians(self._recline_deg)
+        axis = np.array([np.cos(th), 0.0, np.sin(th)])       # 骨盤→頭
+        back_dir = np.array([np.sin(th), 0.0, -np.cos(th)])  # 背中側
+        # ★★板は**低い位置に固定**する。体だけを持ち上げて、**上から落として乗せる**。
+        #
+        # ⚠️【2026-07-28 に戻した】「体と同じだけ板も持ち上げる」ようにしたら
+        #   45度まで壊れた（それまで45度は板に背中を預けて成立していた）。
+        #   初期状態で体と板が同じ高さになると**干渉して弾かれる**。
+        #   低い板に上から体を落とす関係が正しい。真横からの画像で確認。
+        #   ＝物体を物体に乗せるときは「重ねない・上から落とす」。
+        hip0 = np.array([0.0, 0.0, 0.05])
+
+        back = spec.worldbody.add_geom()
+        back.name = "recline_back"
+        back.type = mujoco.mjtGeom.mjGEOM_BOX
+        back.size = [SEAT_HALF_LEN, SEAT_HALF_WID, SEAT_THICK]
+        pos = hip0 + axis * (SEAT_HALF_LEN * 0.55) + back_dir * 0.055
+        back.pos = [float(pos[0]), 0.0, float(pos[2])]
+        # 板の長軸（ローカルx）を体軸に向ける＝y軸まわりに -recline_deg
+        back.quat = [float(np.cos(-th / 2)), 0.0, float(np.sin(-th / 2)), 0.0]
+        back.material = ""
+        back.rgba = list(SEAT_RGBA)
+        back.condim = 3
+        # ★滑り摩擦を上げてずり落ちを防ぐ（横回転・転がりの摩擦もわずかに上げる）
+        back.friction = [SEAT_FRICTION, 0.02, 0.001]
+
+        # 座面：水平な板。骨盤を受けてずり落ちを止める
+        seat = spec.worldbody.add_geom()
+        seat.name = "recline_seat"
+        seat.type = mujoco.mjtGeom.mjGEOM_BOX
+        seat.size = [SEAT_HALF_WID, SEAT_HALF_WID, SEAT_THICK]
+        seat.pos = [float(hip0[0]), 0.0, float(hip0[2] - 0.045)]
+        seat.material = ""
+        seat.rgba = list(SEAT_RGBA)
+        seat.condim = 3
+        seat.friction = [SEAT_FRICTION, 0.02, 0.001]
+
     def _elongate_head(self, spec):
         """頭のgeomを球→楕円体にして、**体軸方向にだけ**伸ばす。
 
@@ -627,6 +788,8 @@ class ToySupineEnv(SupineMimoEnv):
         柱は静的（freejointなし）なので、太郎が当たっても動かない＝壁として働く。
         """
         self._elongate_head(spec)
+        if self._recline_deg > 0.0:
+            self._add_seat(spec)
         if self._plain:
             self._make_visually_plain(spec)
         if self._static_tex:

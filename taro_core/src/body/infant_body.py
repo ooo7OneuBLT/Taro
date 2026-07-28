@@ -900,17 +900,37 @@ def apply_runtime_corrections(model, data, age, neck=True, limbs=True, head_mass
 #
 # ⚠️新生児の一過性斜視をあとで入れるなら、ここに「時々ずれる」を足す形になる。
 #   今は「基準は正中位」だけを実装する。
-def center_eyes(model, data, verbose=False):
-    """眼球の関節角をすべて0（正中位）に戻す。リセットのたびに呼ぶ。
+# ★リセット時の眼球の上下角[度]。既定は0（正中位）。
+#
+# 【なぜ振れるようにしたか、2026-07-28】リクライニング姿勢で「眼球をもう少し下に
+# 向けたい」という要望が出た（ユーザーの目視）。体を起こすと視線が上を向きやすく、
+# 対象が視野の上端に来てしまう。
+#
+# ⚠️[Tier3] **人間の基準は正中位**（下の説明を参照）。ここを0以外にするのは
+#   人間からの逸脱になる。実験の都合で対象を視野に入れるための調整であって、
+#   「人間の眼球がそう向いている」という主張ではない。
+#   ⇒ 本当は「対象の位置を変える」か「首の角度を変える」方が筋が良い。
+#     首の角度で解決できることは 2026-07-28 の探索で確認済み
+#     （リクライニング60度＋首60度で「見えて届く」位置が97通り）。
+import os as _os_eye
+EYE_REST_VERTICAL_DEG = float(_os_eye.environ.get("E_EYE_REST_V", "0"))
+
+
+def center_eyes(model, data, verbose=False, vertical_deg=None):
+    """眼球の関節角を基準位置に戻す。リセットのたびに呼ぶ。
 
     Args:
         model, data: MuJoCo のモデルとデータ
         verbose: 変更前の角度を表示するか
+        vertical_deg: 上下角[度]。None なら EYE_REST_VERTICAL_DEG（既定0＝正中位）。
+            ⚠️0以外は人間からの逸脱（上の説明を参照）
 
     Returns:
         int: 戻した関節の数
     """
     import numpy as _np
+    _v = _np.radians(float(EYE_REST_VERTICAL_DEG if vertical_deg is None
+                           else vertical_deg))
     n = 0
     before = []
     for j in range(model.njnt):
@@ -920,7 +940,8 @@ def center_eyes(model, data, verbose=False):
         adr = int(model.jnt_qposadr[j])
         if verbose:
             before.append((name, float(_np.degrees(data.qpos[adr]))))
-        data.qpos[adr] = 0.0
+        # ★上下（vertical）だけ基準角を入れられる。他の軸は正中位のまま。
+        data.qpos[adr] = _v if "vertical" in name else 0.0
         dof = int(model.jnt_dofadr[j])
         data.qvel[dof] = 0.0
         n += 1
