@@ -81,11 +81,25 @@ AGE = float(os.environ.get("E_AGE", "4.0"))
 # 詳細と実装は `E/scripts/e_head_hold.py`。
 HEAD_HOLD = os.environ.get("E_HEAD_HOLD", "1") == "1"
 
+# ★【2026-07-28】シードを振れるようにした。
+#
+# 【なぜ要るか】2026-07-27 に「高速化で悪化した（0.154→0.490）」と判断したが、
+# 実際は神経ノイズのシードが毎回変わっていただけで、同じ条件3回で
+# 0.319 / 0.215 / 0.189 とばらついていた（＝ばらつきの幅0.13）。
+# ★今日の改善幅（0.175→0.076＝0.10）は**このばらつきより小さい可能性がある**。
+# 1シードの結果だけでは本物かどうか言えないので、複数シードで確かめる。
+#
+# ⚠️2つのシードを揃える必要がある：
+#     env.reset(seed=)      … 物理の初期ゆらぎ
+#     E_ORIENT_SEED         … 反射の神経ノイズ（e_orienting_v2.py）
+SEED = int(os.environ.get("E_SEED", "0"))
+os.environ.setdefault("E_ORIENT_SEED", str(SEED))
+
 
 def run(orient_on, off, env, u, m, d, dt, toy_gadr, right, toy_bid, n_steps,
         hands=None):
     """1条件を走らせ、時系列（時刻・ずれ・眼球角度・サッケード数）を返す。"""
-    env.reset(seed=0)
+    env.reset(seed=SEED)
     # ★reset のたびに支え直す。バネの設定自体は model に残るが、**目標角**は
     #   「支え始めた時点の角度」なので、リセット後の姿勢で取り直す必要がある。
     if hands is not None and HEAD_HOLD:
@@ -180,7 +194,7 @@ def main():
                            age=AGE, toy=True, vor=True, orient=orient_on, **kw)
         u = env.unwrapped
         m, d = u.model, u.data
-        env.reset(seed=0)
+        env.reset(seed=SEED)
         # ★実験者が頭を抑える（人間の乳児実験と同じ条件）。reset の後に呼ぶ
         #   ＝体が落ち着いた姿勢で支え始める（静止中は力がゼロ）。
         hands = CaregiverHands(m, d)
@@ -230,6 +244,7 @@ def main():
     print("    正しければ、おもちゃが右にあるとき眼球も右へ動いてずれが減る\n")
     print(f"{'初期位置':>10}{'反射':>6}{'最初のずれ':>11}{'最後のずれ':>11}"
           f"{'後半の|ずれ|平均':>16}{'|ずれ|最小':>11}{'サッケード':>11}")
+    _rows = []      # ★JSONに残す行（複数シードの集計用）
     for off in START_OFFSETS:
         for on in (True, False):
             ts, errs, eyes, sacc, cmds, tgts, hdirs, snap = results[(on, off)]
@@ -244,6 +259,18 @@ def main():
             print(f"{off*100:>+9.1f}cm{'ON' if on else 'OFF':>6}"
                   f"{e0:>11.3f}{e1:>11.3f}{ehalf:>16.3f}{emin:>11.3f}"
                   f"{int(sacc[-1]):>11d}")
+            _rows.append(dict(axis=AXIS, seed=SEED, age=AGE, head_hold=HEAD_HOLD,
+                              offset=float(off), orient=bool(on),
+                              first=e0, last=e1, half_mean=ehalf, min_abs=emin,
+                              saccades=int(sacc[-1]), seconds=SECONDS))
+
+    # ★【2026-07-28】結果をJSONで残す。複数シードを回して**まとめて集計する**ため。
+    #   1シードの結果だけでは、改善がばらつきに埋もれているか判断できない。
+    import json as _json
+    _jp = os.path.join(OUT_DIR, f"result_{AXIS}_seed{SEED}.json")
+    with open(_jp, "w", encoding="utf-8") as _fp:
+        _json.dump(_rows, _fp, ensure_ascii=False, indent=1)
+    print(f"\n  → 結果を保存: {os.path.relpath(_jp, _ROOT)}")
 
     # ---- グラフ ------------------------------------------------------------
     # ⚠️squeeze=False：条件が1つのとき axes が1次元になって axes[0, j] が失敗する
@@ -277,7 +304,7 @@ def main():
     fig.suptitle(f"視線誘導反射（{'上下' if IS_V else '左右'}方向）：おもちゃを視野の中心へ寄せられるか"
                  "（上＝ずれ／下＝眼球の角度）", fontsize=12)
     fig.tight_layout()
-    png = os.path.join(OUT_DIR, f"converge_{AXIS}.png")
+    png = os.path.join(OUT_DIR, f"converge_{AXIS}_seed{SEED}.png")
     fig.savefig(png, dpi=110)
     plt.close(fig)
     print(f"\n  グラフを保存: {png}")
@@ -307,7 +334,7 @@ def main():
     fig2.suptitle(f"反射が働いている最中の診断（{'上下' if IS_V else '左右'}方向）",
                   fontsize=12)
     fig2.tight_layout()
-    png3 = os.path.join(OUT_DIR, f"diag_{AXIS}.png")
+    png3 = os.path.join(OUT_DIR, f"diag_{AXIS}_seed{SEED}.png")
     fig2.savefig(png3, dpi=110)
     plt.close(fig2)
     print(f"  診断図を保存: {png3}")
