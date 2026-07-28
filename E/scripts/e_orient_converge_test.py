@@ -56,10 +56,40 @@ OUT_DIR = os.path.join(_ROOT, "E", "logs", "orient_converge")
 AXIS = os.environ.get("E_ORIENT_AXIS", "h")
 IS_V = (AXIS == "v")
 
+# ★【2026-07-28】体年齢を 0ヶ月 → 4ヶ月に変更した。
+#
+# 【なぜ4ヶ月か】この反射を実装した目的は**リーチング**（運動発達ロードマップ段階3、
+# 人間年齢3〜5ヶ月・体年齢4m）の前提を満たすこと。`E/docs/全体設計_目標E.md` §2.5 が
+# 「対象への視覚的注意・固視」を**リーチの唯一の強い一方向依存**（von Hofsten）と位置づけ、
+# 視線誘導反射をそのボトルネックA としている。＝反射を検証する月齢は、それを使う月齢に
+# 揃えるべき（ユーザーの判断、2026-07-28）。
+#
+# ⚠️【引き受ける逸脱】4ヶ月の人間は**皮質（前頭眼野など）が定位に関与し始める**
+# （Johnson 1990）が、太郎は上丘だけで「対象を選んで見続ける」注意機構を持たない。
+# 設計図はこれを既知の穴とし「本能で足すか創発に委ねるかは要判断」と保留にしている。
+# 4ヶ月で回すことで、設計の予測（注意が無いとリーチが空振りする）を実際に確かめられる。
+#
+# ⚠️人間の視覚定位実験（Hunter & Richards 2003）の最年長群は**14週齢＝3.2ヶ月**なので、
+# 4ヶ月はその近傍。比較は可能だが厳密に同月齢ではない。
+AGE = float(os.environ.get("E_AGE", "4.0"))
 
-def run(orient_on, off, env, u, m, d, dt, toy_gadr, right, toy_bid, n_steps):
+# ★実験中は**実験者が頭を抑える**（既定ON）。
+# 人間の乳児実験でも実験者が支えている（Hunter & Richards 2003：5週齢は頭の両側に枕、
+# 8〜14週齢は親が手で頭を抑える）。太郎の首が倒れて対象を捉え続けられないのは、
+# 「首がすわっていない」からではなく「支えていない」からだった。
+# `E/docs/全体設計_目標E.md` も E1 では「外部支持でも可」と明記している。
+# 詳細と実装は `E/scripts/e_head_hold.py`。
+HEAD_HOLD = os.environ.get("E_HEAD_HOLD", "1") == "1"
+
+
+def run(orient_on, off, env, u, m, d, dt, toy_gadr, right, toy_bid, n_steps,
+        hands=None):
     """1条件を走らせ、時系列（時刻・ずれ・眼球角度・サッケード数）を返す。"""
     env.reset(seed=0)
+    # ★reset のたびに支え直す。バネの設定自体は model に残るが、**目標角**は
+    #   「支え始めた時点の角度」なので、リセット後の姿勢で取り直す必要がある。
+    if hands is not None and HEAD_HOLD:
+        hands.hold()
     reflex = u._orienting
     if reflex is not None:
         reflex.reset()
@@ -136,16 +166,26 @@ def main():
     from e_body_config import body_kwargs_from_env
     import e_orienting_v2 as OR
 
+    from e_head_hold import CaregiverHands
+
     results = {}
     for orient_on in (True, False):
-        kw = body_kwargs_from_env(0.0, verbose=False)
+        kw = body_kwargs_from_env(AGE, verbose=False)
         kw["flexion"] = True
+        # ⚠️★視力の月齢も体に揃える。揃えないと「体は4ヶ月・目は0.5ヶ月」という
+        #   ちぐはぐな太郎になる（体型補正が環境ごとにバラバラだった問題と同じ構造）。
+        #   4ヶ月の視力は1ヶ月の4.3倍（0.852 → 3.689 cycles/deg、Mayer et al. 1995）。
         env = ToySupineEnv(actuation_model=MuscleModel,
-                           vision_params=infant_vision_params(),
-                           age=0.0, toy=True, vor=True, orient=orient_on, **kw)
+                           vision_params=infant_vision_params(acuity_age=AGE),
+                           age=AGE, toy=True, vor=True, orient=orient_on, **kw)
         u = env.unwrapped
         m, d = u.model, u.data
         env.reset(seed=0)
+        # ★実験者が頭を抑える（人間の乳児実験と同じ条件）。reset の後に呼ぶ
+        #   ＝体が落ち着いた姿勢で支え始める（静止中は力がゼロ）。
+        hands = CaregiverHands(m, d)
+        if HEAD_HOLD:
+            hands.hold(verbose=orient_on)
         dt = float(m.opt.timestep) * int(u.frame_skip)
         n_steps = int(SECONDS / dt)
         toy_bid = int(m.body("test_object1").id)
@@ -155,7 +195,16 @@ def main():
         R = np.array(d.cam_xmat[cam_id], dtype=float).reshape(3, 3)
         right, up, fwd = R[:, 0], R[:, 1], -R[:, 2]
         shift = up if IS_V else right
-        dist = float(np.linalg.norm(np.array(u._rest_pos, dtype=float) - eye))
+        # ⚠️★おもちゃの置き場所は「親が運び始める瞬間」に環境が決めるので、
+        #   reset 直後はまだ決まっていない（`_rest_pos` が退避位置か未設定）。
+        #   ここで距離を測ると nan や無意味な値になる（表示が「nan cm」になっていた）。
+        #   → 決まっていなければ環境に決めさせてから測る。
+        if getattr(u, "_rest_pos", None) is None or \
+                not np.all(np.isfinite(np.asarray(u._rest_pos, dtype=float))):
+            if hasattr(u, "_set_anchor"):
+                u._set_anchor()
+        _rp = np.asarray(getattr(u, "_rest_pos", None), dtype=float)
+        dist = float(np.linalg.norm(_rp - eye)) if _rp.size == 3 else float("nan")
         base = eye + fwd * dist
 
         if orient_on:
@@ -164,12 +213,16 @@ def main():
             print(f"  顔からおもちゃまで {dist*100:.1f} cm   {SECONDS} 秒間")
             print(f"  1発で詰める割合 SACCADE_FRAC={OR.SACCADE_FRAC}"
                   f"  間隔 {OR.SACCADE_LATENCY}s  閾値 {OR.SACCADE_MIN_STRENGTH}")
-            print(f"  首の分担 {OR.NECK_SHARE}（暫定で首は動かさない）\n")
+            print(f"  首の分担 {OR.NECK_SHARE}（暫定で首は動かさない）")
+            print(f"  体年齢 {AGE:g}ヶ月（リーチングの月齢に揃えた）"
+                  f"  視力も同じ月齢")
+            print(f"  頭 {'実験者が抑える' if HEAD_HOLD else '支えなし'}"
+                  f"（人間の乳児実験と同じ条件＝Hunter & Richards 2003）\n")
 
         for off in START_OFFSETS:
             key = (orient_on, off)
             results[key] = run(orient_on, off, env, u, m, d, dt,
-                               toy_gadr, shift, toy_bid, n_steps)
+                               toy_gadr, shift, toy_bid, n_steps, hands=hands)
         env.close()
 
     # ---- 表 ----------------------------------------------------------------
@@ -193,7 +246,9 @@ def main():
                   f"{int(sacc[-1]):>11d}")
 
     # ---- グラフ ------------------------------------------------------------
-    fig, axes = plt.subplots(2, len(START_OFFSETS),
+    # ⚠️squeeze=False：条件が1つのとき axes が1次元になって axes[0, j] が失敗する
+    #   （下の診断図では reshape で対処していたが、こちらは漏れていた）
+    fig, axes = plt.subplots(2, len(START_OFFSETS), squeeze=False,
                              figsize=(4.0 * len(START_OFFSETS), 6.4), sharex=True)
     for j, off in enumerate(START_OFFSETS):
         ax = axes[0, j]

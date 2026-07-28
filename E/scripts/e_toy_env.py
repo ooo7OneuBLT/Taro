@@ -717,12 +717,20 @@ class ToySupineEnv(SupineMimoEnv):
         #   おもちゃが柵の向こう側に置かれ、遮られて見えなかった（目視 2026-07-27）。
         #   ⚠️そのぶん視線とのずれは0にならない。柵という物理的な制約が優先される
         #     ＝人間の場面としてはこちらが正しい。
-        _mgn = 0.03
-        self._rest_pos[0] = float(np.clip(self._rest_pos[0],
-                                          -FENCE_HALF_X + _mgn, FENCE_HALF_X - _mgn))
-        self._rest_pos[1] = float(np.clip(self._rest_pos[1],
-                                          -FENCE_HALF_Y + _mgn, FENCE_HALF_Y - _mgn))
-        self._rest_pos[2] = float(max(self._rest_pos[2], 0.04))
+        #
+        # ★★【2026-07-28 修正】このクランプは**柵が無いときにも効いていた**。
+        #   柵は新生児の体に合わせた寸法（±31cm × ±16cm）なので、体年齢を4ヶ月に
+        #   上げると顔の前がこの枠の外になり、おもちゃが胸元へ落ちる。
+        #   ユーザーの目視「顔の前にもっていくを押しても視界に来ないで、ちょっと
+        #   胸元ぐらいに来ちゃう（多分新生児の時の相対座標に動いてるのかな？）」で発覚。
+        #   → **柵があるときだけ**クランプする。柵が無ければ制約する理由が無い。
+        if self._fence:
+            _mgn = 0.03
+            self._rest_pos[0] = float(np.clip(self._rest_pos[0],
+                                              -FENCE_HALF_X + _mgn, FENCE_HALF_X - _mgn))
+            self._rest_pos[1] = float(np.clip(self._rest_pos[1],
+                                              -FENCE_HALF_Y + _mgn, FENCE_HALF_Y - _mgn))
+        self._rest_pos[2] = float(max(self._rest_pos[2], 0.04))   # 床にめり込ませない
         self._anchor = self._rest_pos + np.array([0.0, 0.0, self._tether_len])
 
     def _carry_toy(self):
