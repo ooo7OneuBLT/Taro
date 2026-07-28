@@ -98,6 +98,38 @@ HEAD_MASS_FRACTION = 0.25   # [Tier2〜3・一次文献の裏取り未了]
 # 何ヶ月まで頭の質量を補正するか。首の筋力補正（4ヶ月で解除）と揃えてある[Tier3]。
 HEAD_MASS_UNTIL_MO = 4.0
 
+# ★【2026-07-28】新生児向けの補正を月齢で**薄める**ための重み。
+#
+# 【なぜ要るか】従来これらの補正は `age >= 期限` で**その月齢に達した瞬間に消えていた**。
+# 実測（`E/scripts/e_age_body_audit.py`）で、4ヶ月に上げた途端に
+#     頭の質量  2.150kg(25.1%) → 1.341kg(16.2%)   ＝0.8kg が一瞬で消える
+#     首の筋力  23.59 N·m → 31.39 N·m             ＝持ち上げ能力比が24→47.5に跳ぶ
+# という**崖**が起きることが分かった。人間の発達にこんな不連続は無い。
+# ＝補正を切るなら、月齢をかけて**連続的に**MIMoの素の値へ戻すべき。
+#
+# ⚠️[Tier3] 薄め方（線形）に根拠は無い。太郎の既存の補正（首の筋力の回復曲線）が
+#   線形なのに合わせてある。「崖が無い」ことだけが根拠のある主張。
+def taper_weight(age, until_mo):
+    """新生児向け補正の重み。0ヶ月で1.0、until_mo で0.0（＝素のMIMo）へ線形に薄れる。"""
+    if until_mo <= 0:
+        return 0.0
+    return float(max(0.0, min(1.0, 1.0 - float(age) / float(until_mo))))
+
+
+# 体型補正（NEWBORN_SHAPE_DEFAULTS）を何ヶ月まで効かせるか。
+#
+# 【根拠＝実測、2026-07-28】体型補正は「mimoGrowth の age=0 が新生児として不正確」を
+# 直すために作った（身長35.6cm・体重1.44kg・2.8頭身だった）。ところが月齢別に体重を
+# 測ると、**素のMIMoは2ヶ月以降ほぼ正確**で、補正はむしろ邪魔になっていた：
+#     月齢   人間(WHO男児)  素のMIMo   体型補正あり
+#      0      3.3kg         2.888kg    3.367kg (102%)  ← 補正が要る
+#      2      5.6kg         5.851kg    6.899kg (123%)  ← 補正が過剰
+#      4      7.0kg         7.033kg    8.303kg (119%)  ← ★素のMIMoがほぼ完璧
+#      6      7.9kg         7.895kg    9.327kg (118%)  ← 同上
+# ＝**体型補正は新生児固有の補正**であって、月齢を上げたら外すのが正しい。
+# 生理的屈曲・屈筋トーンの期限（3ヶ月）に揃えてある[Tier3]。
+SHAPE_UNTIL_MO = 3.0
+
 # 足＝相似縮小するgeom群（左側だけ指定すれば右側は自動でミラーされる）
 _FOOT_GEOMS = [
     "geom:left_foot1", "geom:left_foot2", "geom:left_foot3",
@@ -245,9 +277,14 @@ def body_scale_custom(age, scales=None, verbose=True):
         scales = NEWBORN_SHAPE_DEFAULTS
     _restore_growth_schema()   # ★累積バグ対策（上の説明を参照）
     base = get_growth_params(age, "v2")["geoms"]
+    # ★【2026-07-28】体型補正は**新生児固有**なので月齢で薄める。実測で、素のMIMoは
+    #   2ヶ月以降の体重をほぼ正確に出しており（4ヶ月 7.033kg vs 人間 7.0kg）、
+    #   新生児用の係数を掛け続けると19%重くなっていた。SHAPE_UNTIL_MO のコメント参照。
+    w = taper_weight(age, SHAPE_UNTIL_MO)
     custom, note = {}, []
     for grp, (names, idx) in _GROUPS.items():
         k = float(scales.get(grp, 1.0))
+        k = 1.0 + (k - 1.0) * w       # w=0（=SHAPE_UNTIL_MO以降）なら 1.0＝触らない
         if abs(k - 1.0) < 1e-9:
             continue
         n = 0
@@ -265,7 +302,10 @@ def body_scale_custom(age, scales=None, verbose=True):
                 n += 1
         note.append(f"{grp}x{k:.2f}(×{n})")
     if note and verbose:
-        print("[body] 体型補正: " + " ".join(note) + " [逸脱リスト参照]")
+        print(f"[body] 体型補正(薄め重み {w:.2f}): " + " ".join(note) + " [逸脱リスト参照]")
+    elif verbose and w <= 0.0:
+        print(f"[body] age={age}mo >= {SHAPE_UNTIL_MO}mo: 体型補正なし"
+              f"（素のMIMoの方が正確＝実測で確認済み）")
     return custom
 
 
@@ -335,9 +375,9 @@ def apply_head_mass(model, age=0.0, fraction=None, verbose=True):
         fraction: 目標の割合。None なら HEAD_MASS_FRACTION（0.25）。
     """
     import numpy as np
-    if float(age) >= HEAD_MASS_UNTIL_MO:
+    w = taper_weight(age, HEAD_MASS_UNTIL_MO)
+    if w <= 0.0:
         return
-    frac = HEAD_MASS_FRACTION if fraction is None else float(fraction)
     hid = int(model.body("head").id)
     # 太郎の身体だけを数える（床・柵・おもちゃを含めない）
     skip = ("floor", "wall", "fence", "object", "toy", "target", "world")
@@ -346,7 +386,16 @@ def apply_head_mass(model, age=0.0, fraction=None, verbose=True):
     total = float(sum(model.body_mass[i] for i in ids))
     head = float(model.body_mass[hid])
     others = total - head
-    if others <= 0 or not (0.0 < frac < 1.0):
+    if others <= 0:
+        return
+    # ★【2026-07-28】目標の割合を月齢で薄める。0ヶ月は 0.25、HEAD_MASS_UNTIL_MO で
+    #   MIMoの素の割合に一致する＝**その月齢で崖にならない**。
+    #   従来は期限で打ち切っていたため、4ヶ月ちょうどで頭が 2.150kg → 1.341kg と
+    #   一瞬で0.8kg軽くなっていた（実測、`E/scripts/e_age_body_audit.py`）。
+    target = HEAD_MASS_FRACTION if fraction is None else float(fraction)
+    natural = head / total          # 補正しなければこうなる、という割合
+    frac = w * target + (1.0 - w) * natural
+    if not (0.0 < frac < 1.0):
         return
     new_head = others * frac / (1.0 - frac)
     k = new_head / head if head > 0 else 1.0
@@ -354,8 +403,8 @@ def apply_head_mass(model, age=0.0, fraction=None, verbose=True):
     model.body_inertia[hid] = np.asarray(model.body_inertia[hid]) * k
     if verbose:
         print(f"[head] 頭の質量 {head:.3f}kg -> {new_head:.3f}kg "
-              f"(全体の {head/total*100:.1f}% -> {frac*100:.1f}%, 密度 x{k:.2f}) "
-              f"[Tier1: 人間の新生児の体節質量比]")
+              f"(全体の {natural*100:.1f}% -> {frac*100:.1f}%, 密度 x{k:.2f}, "
+              f"薄め重み {w:.2f}) [Tier1: 人間の新生児の体節質量比]")
 
 
 def apply_distal_mass(model, scale=1.0, verbose=True):
@@ -620,6 +669,23 @@ NECK_TONE_TARGET = -45.0
 #   3軸すべてに同じ剛性を入れると、左右のひねり・横倒しは重力の影響が小さいため
 #   過剰になる（ユーザーの目視「3軸をすべて効かすをONにすると行き過ぎる」2026-07-26）。
 NECK_TONE_JOINTS = ("head_tilt",)
+
+# ★【2026-07-28 新設】首のバネを何ヶ月まで効かせるか。
+#
+# 【なぜ分けたか】従来は四肢の屈筋トーンの期限（TONE_UNTIL_MO＝3ヶ月）を**流用**していた。
+# その結果、月齢を4ヶ月に上げると**首を支えるものが何も無くなる**（実測で確認）。
+# しかし首の受動抵抗は新生児期に限った現象ではない：
+#   ・首の筋緊張がゼロなのは正常ではない（Amiel-Tison 1977。正常新生児1655例中、
+#     頸部伸筋の過緊張は0.7%だけ＝「軽くあるのが正常、強いのは病的」）
+#   ・受動的な組織抵抗（筋・靭帯・関節包）は**一生ある**。四肢の屈筋トーン
+#     （新生児に特有で3ヶ月で解消する）とは性質が違う。
+# ＝首のバネは新生児固有の補正ではないので、四肢と同じ期限で切るのは誤りだった。
+#
+# ⚠️[Tier3] 18ヶ月まで一定に保つのは簡略化。本当は体が大きくなれば剛性も上がるはずだが、
+#   月齢別の剛性の文献値が無い（Luck 2008 の死後標本データは新生児のみ）。
+#   ★頭は重くなるのにバネは一定なので、月齢が上がるほど相対的に弱くなる
+#     ＝**支えきれなくなる方向**。これは感度分析の対象（→ 逸脱リスト）。
+NECK_TONE_UNTIL_MO = 18.0
 
 
 def apply_physiological_flexion(model, age=0.0, stiffness=None, verbose=True,
@@ -896,9 +962,12 @@ def apply_neck_tone(model, age=0.0, stiffness=None, target=None, joints=None,
         int: バネを入れた関節の数
     """
     import numpy as np
-    if float(age) >= TONE_UNTIL_MO:
+    # ★【2026-07-28】四肢の屈筋トーン（TONE_UNTIL_MO＝3ヶ月）ではなく**首専用の期限**を使う。
+    #   従来は流用していたため、4ヶ月に上げると首を支えるものが消えていた。理由は
+    #   NECK_TONE_UNTIL_MO のコメントを参照。
+    if float(age) >= NECK_TONE_UNTIL_MO:
         if verbose:
-            print(f"[neck-tone] age={age}mo >= {TONE_UNTIL_MO}mo: 何もしない")
+            print(f"[neck-tone] age={age}mo >= {NECK_TONE_UNTIL_MO}mo: 何もしない")
         return 0
     k = float(NECK_TONE_STIFFNESS if stiffness is None else stiffness)
     tgt = float(NECK_TONE_TARGET if target is None else target)
