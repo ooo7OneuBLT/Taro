@@ -73,6 +73,11 @@ IS_V = (AXIS == "v")
 # 4ヶ月はその近傍。比較は可能だが厳密に同月齢ではない。
 AGE = float(os.environ.get("E_AGE", "4.0"))
 
+# ★★【2026-07-29】既定のシーン。E_SCENE=名前 で切り替えられる。
+#   環境の条件（月齢・柵・リクライニング・頭の支え・おもちゃ）はシーンが持つので、
+#   ここから下の AGE / HEAD_HOLD は**シーンの値で上書きされる**（表示用に残している）。
+DEFAULT_SCENE = os.environ.get("E_SCENE", "視線誘導反射_仰向け_頭を支える")
+
 # ★実験中は**実験者が頭を抑える**（既定ON）。
 # 人間の乳児実験でも実験者が支えている（Hunter & Richards 2003：5週齢は頭の両側に枕、
 # 8〜14週齢は親が手で頭を抑える）。太郎の首が倒れて対象を捉え続けられないのは、
@@ -97,13 +102,14 @@ os.environ.setdefault("E_ORIENT_SEED", str(SEED))
 
 
 def run(orient_on, off, env, u, m, d, dt, toy_gadr, right, toy_bid, n_steps,
-        hands=None):
+        hands=None, scene=None):
     """1条件を走らせ、時系列（時刻・ずれ・眼球角度・サッケード数）を返す。"""
-    env.reset(seed=SEED)
-    # ★reset のたびに支え直す。バネの設定自体は model に残るが、**目標角**は
-    #   「支え始めた時点の角度」なので、リセット後の姿勢で取り直す必要がある。
-    if hands is not None and HEAD_HOLD:
-        hands.hold()
+    import e_scene
+    # ★★【2026-07-29】`env.reset()` ではなくシーンへ戻す。
+    #   reset だけだと**シーンの姿勢が失われ**、2条件目からは既定の姿勢で
+    #   走ってしまう（Viewer と測定の食い違いと同じ型）。
+    e_scene.reset_to_scene(env, scene, hands=(hands if HEAD_HOLD else None),
+                           seed=SEED)
     reflex = u._orienting
     if reflex is not None:
         reflex.reset()
@@ -111,20 +117,16 @@ def run(orient_on, off, env, u, m, d, dt, toy_gadr, right, toy_bid, n_steps,
     ts, errs, eyes, sacc = [], [], [], []
     cmds, tgts, hdirs = [], [], []
     snap = {}   # ★途中の一枚（生の画像・動きマップ）を診断用に取っておく
-    import e_toy_env as TE
 
-    # ★おもちゃの置き場所は、親が運び始める瞬間に環境が決める（視線の正面）。
-    #   そこを横へずらす。**一度だけ**動かす（毎ステップ動かすと、顔と重なった
-    #   ときに hold が位置を強制して巨大な反力になり、物理が破綻した）。
-    moved = False
-    while getattr(u, "_toy_pending", False):
-        env.step(a)
-        if getattr(u, "_toy_arriving", False) and not moved and u._rest_pos is not None:
-            u._rest_pos = np.array(u._rest_pos, dtype=float) + right * off
-            u._carry_from = u._rest_pos + np.array([0.0, 0.0, 1.0]) * TE.TOY_APPROACH_DIST
-            moved = True
+    # ★おもちゃを**シーンの位置から** off だけ横（または上下）へずらす。
+    #   ＝「視野の端に置いて、反射が中心へ寄せられるか」を測るための条件。
+    #   ⚠️移行前は「親が運んでくる途中で行き先をずらす」実装だったが、
+    #     シーンでは位置が最初から決まっているので運搬を待つ必要がない。
+    #     `place_toy` は固定位置（`_rest_pos`）ごと動かすので、次の step で
+    #     元の場所へ引き戻されることもない。
+    e_scene.place_toy(env, right * off, relative=True)
     for _ in range(int(0.2 / dt)):
-        env.step(a)                       # 到着後に落ち着かせる
+        env.step(a)                       # 落ち着かせる
 
     # ★動きを作る手段は「点滅」。おもちゃを物理的に動かすと顔と当たって壊れる。
     #   文献の定位実験も点滅光を使い（Lewis & Maurer 系）、上丘のニューロンは
@@ -183,23 +185,29 @@ def main():
     from e_head_hold import CaregiverHands
 
     results = {}
+    # ★★【2026-07-29】シーン方式へ移行した。
+    #   環境の条件（月齢・柵・リクライニング・頭の支え・おもちゃ）は
+    #   **シーンファイルが全部持つ**ので、ここでは組み立てない。
+    #   ⇒ Viewer で見た状態と、この測定が走る状態が構造的に同じになる。
+    #   ⚠️移行前は `fence` を指定しておらず既定（柵あり）で走っていたが、
+    #     Viewer 側は柵なしで見ていた＝**実際に食い違っていた**。
+    import e_scene
+    global AGE, HEAD_HOLD
+    scene = e_scene.from_env_var(default=DEFAULT_SCENE)
+    AGE = float(scene["body"]["age_months"])
+    HEAD_HOLD = bool(scene["setup"].get("head_hold"))
+    print(f"[scene] 「{scene['name']}」で測ります")
+    if scene.get("note"):
+        print(f"        {scene['note']}")
     for orient_on in (True, False):
-        kw = body_kwargs_from_env(AGE, verbose=False)
-        kw["flexion"] = True
-        # ⚠️★視力の月齢も体に揃える。揃えないと「体は4ヶ月・目は0.5ヶ月」という
-        #   ちぐはぐな太郎になる（体型補正が環境ごとにバラバラだった問題と同じ構造）。
-        #   4ヶ月の視力は1ヶ月の4.3倍（0.852 → 3.689 cycles/deg、Mayer et al. 1995）。
-        env = ToySupineEnv(actuation_model=MuscleModel,
-                           vision_params=infant_vision_params(acuity_age=AGE),
-                           age=AGE, toy=True, vor=True, orient=orient_on, **kw)
+        env, hands = e_scene.build(scene, orient=orient_on, vor=True,
+                                   seed=SEED, verbose=False)
         u = env.unwrapped
         m, d = u.model, u.data
-        env.reset(seed=SEED)
-        # ★実験者が頭を抑える（人間の乳児実験と同じ条件）。reset の後に呼ぶ
-        #   ＝体が落ち着いた姿勢で支え始める（静止中は力がゼロ）。
-        hands = CaregiverHands(m, d)
-        if HEAD_HOLD:
-            hands.hold(verbose=orient_on)
+        # 保存した状態と本当に同じ環境かを確かめる。違ったらここで止まる
+        #   ＝「見ていたのとは別の実験」を黙って走らせない
+        e_scene.verify(scene, env, strict=True, verbose=orient_on)
+        e_scene.reset_to_scene(env, scene, hands=hands, seed=SEED)
         dt = float(m.opt.timestep) * int(u.frame_skip)
         n_steps = int(SECONDS / dt)
         toy_bid = int(m.body("test_object1").id)
@@ -236,7 +244,8 @@ def main():
         for off in START_OFFSETS:
             key = (orient_on, off)
             results[key] = run(orient_on, off, env, u, m, d, dt,
-                               toy_gadr, shift, toy_bid, n_steps, hands=hands)
+                               toy_gadr, shift, toy_bid, n_steps, hands=hands,
+                               scene=scene)
         env.close()
 
     # ---- 表 ----------------------------------------------------------------

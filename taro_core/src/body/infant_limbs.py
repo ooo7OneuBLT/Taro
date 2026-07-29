@@ -164,3 +164,244 @@ def apply_limb_inversion_fix(model, data, age, reference_age=REFERENCE_AGE,
               f"[target = same relative strength as age {reference_age:.0f}mo]{_tag}")
     return dict(n_fixed=n, median_scale=float(np.median(scales)) if scales else 1.0,
                 before_median=float(np.median(before)), after_median=float(np.median(after)))
+
+
+# ============================================================================
+# ★四肢の筋緊張（2026-07-29 新設）— 脱力しても腕が体の前に保たれる
+# ----------------------------------------------------------------------------
+# 【なぜ要るか】4ヶ月の太郎を脱力させると、腕が重力で真横に伸びきる。
+# 実測：手からおもちゃまで 22.7cm。人間の4ヶ月児は脱力しても肘が曲がり、
+# 手が体の前にあるので、対象までの距離がはるかに短い。この差のせいで
+# リーチングの実験が成立していなかった（30秒の自発運動で接触0回）。
+#
+# 【人間ではどうか（2026-07-29 の文献調査）】
+#   ★**3〜5ヶ月児の安静時の関節角度を度数で測った研究は存在しない**。
+#     乳児の筋緊張評価は Amiel-Tison法・HINE など**すべて段階評価（0/1/2）**で、
+#     連続値の角度やトルクを報告していない
+#     （Goo, Tucker & Johnston 2018, Dev Med Child Neurol の系統的レビューで確認。
+#      97研究21手法を調べ、妥当性が中程度以上の4手法はいずれも序数尺度）。
+#   ⇒ 「値が無い」ことが確定した壁。1つに決めず**振って確かめる**（感度分析）。
+#
+#   間接的な根拠は一致している：
+#     Dubowitz et al. 1970  満期新生児の安静姿勢は「腕も脚も完全屈曲」（Score 4）。
+#                           腕を伸ばして離すと **90度以上**まで自分で戻る（arm recoil）
+#     Shah et al. 2017      新生児の肘は他動でも **19.2度** 伸びきらない（構造的制限）
+#     Watanabe et al. 1979  肘の伸展制限 出生時 -14度 → 2〜4週 -6度 → **4〜8ヶ月で0度**
+#     Solopova et al. 2019  他動運動への反射的な筋反応は **6ヶ月頃まで残る**
+#                           （Front Physiol 10:1158、健常児54名）
+#     定性的な記述          3〜7ヶ月の典型的安静姿勢は「肩外転・肘屈曲」。
+#                           伸展位という報告は**皆無**
+#
+#   ★重要な区別：**関節の構造的な制限（4〜8ヶ月で解消）**と
+#     **筋緊張による屈曲（6ヶ月頃まで残る）**は別物。太郎に欠けているのは後者。
+#     4ヶ月は「構造的な壁はほぼ消えたが、筋緊張はまだ効いている」時期にあたる。
+#
+# 【首との違い】首は `infant_body.apply_neck_tone`。剛性 0.40 N·m/rad は
+# 死後標本の実測上限（Luck 2008）という根拠があるが、四肢には対応する実測が無い。
+# ⇒ 四肢は「腕が体の前に保たれる」という**機能から逆算**する（下記 tone_from_gravity）。
+#
+# ⚠️これは太郎の**身体の性質**であって脳ではない。意思とも別。
+#   バネなので、筋の指令がバネより強ければ腕は動く（力を抜けば戻る）。
+LIMB_TONE_UNTIL_MO = 6.0     # [Tier2] Solopova 2019：反射的な筋反応は6ヶ月頃まで
+# ★部位を細かく分ける（2026-07-29）。
+#   【なぜ】ひじだけ筋緊張がきつすぎて可動域の15%しか使えず、自発運動で
+#   おもちゃに近づけなかった（実測：ひじ151度の可動域に対し28度しか動かない）。
+#   一方で肩は緩めると腕が垂れる。⇒ **部位ごとに強さを変えられる必要がある**。
+LIMB_TONE_GROUPS = {
+    "shoulder": ("shoulder_horizontal", "shoulder_ad_ab", "shoulder_rotation"),
+    "elbow": ("elbow",),
+    "wrist": ("hand1", "hand2", "hand3"),
+    "hip": ("hip1", "hip2", "hip3"),
+    "knee": ("knee",),
+    "ankle": ("foot1", "foot2", "foot3"),
+}
+# まとめて指定するための別名（従来の "arm" / "leg" もそのまま使える）
+LIMB_TONE_ALIASES = {
+    "arm": ("shoulder", "elbow", "wrist"),
+    "leg": ("hip", "knee", "ankle"),
+}
+GROUP_JP_LIMB = {"shoulder": "肩", "elbow": "ひじ", "wrist": "手首",
+                 "hip": "股", "knee": "ひざ", "ankle": "足首"}
+
+
+def _expand_groups(groups):
+    """"arm" のような別名を細かい部位に展開する。"""
+    out = []
+    for g in (groups or ()):
+        out.extend(LIMB_TONE_ALIASES.get(g, (g,)))
+    return tuple(dict.fromkeys(out))     # 重複を消して順序は保つ
+
+
+def limb_tone_joints(model, groups=("arm", "leg")):
+    """筋緊張を効かせる関節の名前（":" の後ろ）を返す。"""
+    return [nm for nm, _g in limb_tone_joints_by_group(model, groups)]
+
+
+def limb_tone_joints_by_group(model, groups=("arm", "leg")):
+    """(関節名, 部位名) の一覧を返す。部位ごとに強さを変えるために使う。"""
+    import mujoco as _mj
+    want = {}
+    for g in _expand_groups(groups):
+        for base in LIMB_TONE_GROUPS.get(g, ()):
+            want[base] = g
+    out = []
+    for j in range(model.njnt):
+        if int(model.jnt_type[j]) != int(_mj.mjtJoint.mjJNT_HINGE):
+            continue
+        nm = (model.joint(j).name or "").split(":")[-1]
+        base = nm
+        for pre in ("right_", "left_"):
+            if base.startswith(pre):
+                base = base[len(pre):]
+                break
+        if base in want:
+            out.append((nm, want[base]))
+    return out
+
+
+def gravity_moment(model, data, joint_name, worst_case=True):
+    """その関節から先（末端側）にぶら下がる重力モーメント [N·m] を測る。
+
+    ＝「バネがどれだけの力に抗う必要があるか」。剛性を機能から逆算するために使う。
+
+    Args:
+        worst_case: True（既定）なら**姿勢によらない上界**を返す。
+            False なら「今この瞬間の」モーメント。
+
+    ⚠️★【2026-07-29 に踏んだ】最初は「今の姿勢での軸まわりのモーメント」を
+      使っていた。ところが腕が関節軸と平行に近い姿勢だと重力が効かず、
+      モーメントがほぼゼロと計算される。実測：右肩の水平方向で **0.016**
+      （左は0.073）＝ほぼゼロの剛性が入り、**右手だけ17cm落ちた**。
+      姿勢が少し変われば重力は効き始めるので、その瞬間の値で決めてはいけない。
+
+      ⇒ 既定を「軸に垂直な距離 × 重さ」の合計に変えた。
+        関節をどう回してもその先の相対配置は変わらないので、この値は
+        **姿勢によらず、重力がいちばん効く向きでのモーメント**にあたる。
+    """
+    import numpy as _np
+    jid = None
+    for j in range(model.njnt):
+        if (model.joint(j).name or "").split(":")[-1] == joint_name:
+            jid = j
+            break
+    if jid is None:
+        return None
+    axis_world = _np.array(data.xaxis[jid], dtype=float)
+    na = float(_np.linalg.norm(axis_world))
+    if na > 1e-12:
+        axis_world = axis_world / na
+    anchor = _np.array(data.xanchor[jid], dtype=float)
+    tau = 0.0
+    for bid in _descendants(model, int(model.jnt_bodyid[jid])):
+        mass = float(model.body_mass[bid])
+        if mass <= 0.0:
+            continue
+        com = _np.array(data.xipos[bid], dtype=float)
+        r = com - anchor
+        if worst_case:
+            # 軸に垂直な距離＝てこの最大の腕。重力の向きに関係なく決まる
+            perp = r - _np.dot(r, axis_world) * axis_world
+            tau += mass * G * float(_np.linalg.norm(perp))
+        else:
+            f = _np.array([0.0, 0.0, -mass * G], dtype=float)
+            tau += float(_np.dot(axis_world, _np.cross(r, f)))
+    return abs(tau)
+
+
+def tone_from_gravity(model, data, joint_name, hold_deg=20.0):
+    """「重力に対して hold_deg 度のずれで釣り合う」剛性 [N·m/rad] を返す。
+
+    【なぜこの決め方か】四肢の筋緊張の実測値は文献に存在しない（上記）。
+    値を勘で決める代わりに、**機能から逆算**する：
+        バネ剛性 k のとき、重力モーメント τ に対するずれは θ = τ / k
+        ⇒ 「θ度のずれで止まってほしい」なら k = τ / radians(θ)
+    ⚠️hold_deg 自体は文献値ではない[Tier3]。ただし「腕が保たれる／落ちる」という
+      観察可能な条件に対応しているので、勘で剛性を決めるより検証しやすい。
+    """
+    import numpy as _np
+    tau = gravity_moment(model, data, joint_name)
+    if tau is None:
+        return None
+    return float(tau / max(_np.radians(float(hold_deg)), 1e-9))
+
+
+def apply_limb_tone(model, data, age=0.0, target=None, stiffness=None,
+                    hold_deg=20.0, groups=("arm", "leg"),
+                    until_mo=LIMB_TONE_UNTIL_MO, verbose=True):
+    """四肢の筋緊張＝脱力しても腕が体の前に保たれる弱いバネ。
+
+    Args:
+        target: 戻る目標角の辞書 {関節名: 度}。**None なら「今の姿勢」を目標にする**
+            ＝Viewer で作った姿勢がそのまま筋緊張の落ち着き先になる
+        stiffness: 剛性 [N·m/rad]。None なら重力から逆算（`tone_from_gravity`）
+        hold_deg: 逆算に使う「許すずれ」[度]。小さいほど硬い。
+            ★**辞書 {部位名: 度} を渡すと部位ごとに変えられる**
+            （例 {"shoulder":10, "elbow":60}）。数値なら全部位に同じ値。
+        groups: "arm" / "leg"、または細かい部位（"shoulder" / "elbow" / "wrist" /
+            "hip" / "knee" / "ankle"）
+        until_mo: この月齢を超えたら何もしない
+
+    ⚠️部位ごとに変えられるようにした理由（2026-07-29 の実測）：
+      ひじだけ筋緊張がきつすぎて可動域151度のうち**28度しか使えず**、
+      自発運動でおもちゃに近づけなかった。緩めると近づくが、肩まで緩めると
+      腕が垂れて出発点が遠くなる。⇒ 部位ごとに別の値が要る。
+
+    Returns:
+        dict(n=効かせた関節数, k=関節名→剛性)
+    """
+    import numpy as _np
+    import mujoco as _mj
+    if float(age) >= float(until_mo):
+        if verbose:
+            print(f"[limb-tone] age={age}mo >= {until_mo}mo: 何もしない")
+        return dict(n=0, k={})
+    _mj.mj_forward(model, data)      # ⚠️重力モーメントを測る前に姿勢を確定させる
+    pairs = dict(limb_tone_joints_by_group(model, groups))
+    names = set(pairs)
+    n, ks = 0, {}
+    for j in range(model.njnt):
+        nm = (model.joint(j).name or "").split(":")[-1]
+        if nm not in names:
+            continue
+        # 部位ごとの「許すずれ」。辞書でなければ全部位に同じ値
+        _hd = (float(hold_deg.get(pairs[nm], hold_deg.get("default", 10.0)))
+               if isinstance(hold_deg, dict) else float(hold_deg))
+        # 部位ごとの剛性指定にも対応
+        _st = (stiffness.get(pairs[nm]) if isinstance(stiffness, dict) else stiffness)
+        adr = int(model.jnt_qposadr[j])
+        dof = int(model.jnt_dofadr[j])
+        k = (float(_st) if _st is not None
+             else tone_from_gravity(model, data, nm, _hd))
+        if k is None or not _np.isfinite(k):
+            continue
+        tgt = (_np.radians(float(target[nm])) if (target and nm in target)
+               else float(data.qpos[adr]))       # None なら今の角度
+        model.jnt_stiffness[j] = k
+        model.qpos_spring[adr] = tgt
+        # 減衰は臨界減衰（ちょうど振動しない値）。⚠️工学的判断で実測ではない[Tier3]
+        #   首（apply_neck_tone）と同じ式にそろえてある
+        bid = int(model.jnt_bodyid[j])
+        inertia = float(model.body_inertia[bid][0])
+        mass = float(model.body_mass[bid])
+        arm = float(_np.linalg.norm(_np.array(data.xipos[bid])
+                                    - _np.array(data.xanchor[j])))
+        I = max(inertia + mass * arm ** 2, 1e-12)
+        c_crit = 2.0 * float(_np.sqrt(max(k, 1e-12) * I))
+        model.dof_damping[dof] = max(float(model.dof_damping[dof]), c_crit)
+        data.qvel[dof] = 0.0
+        ks[nm] = k
+        n += 1
+    if verbose and n:
+        vals = list(ks.values())
+        if isinstance(hold_deg, dict):
+            how = "重力から逆算（部位ごと " + " ".join(
+                f"{GROUP_JP_LIMB.get(g, g)}{v:g}度" for g, v in hold_deg.items()) + "）"
+        else:
+            how = f"重力から逆算（{float(hold_deg):g}度のずれで釣り合う）"
+        print(f"[limb-tone] age={age}mo: {n}関節 剛性{how} "
+              f"中央値{_np.median(vals):.3f}N·m/rad "
+              f"目標{'今の姿勢' if not target else '指定'} "
+              f"[⚠️Tier3: 乳児の四肢の筋緊張の実測値は文献に存在しない"
+              f"（Goo et al. 2018 の系統的レビューで確認）。"
+              f"間接根拠＝Dubowitz 1970・Solopova 2019 は屈曲位を支持]")
+    return dict(n=n, k=ks)

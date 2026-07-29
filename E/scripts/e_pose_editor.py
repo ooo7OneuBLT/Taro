@@ -312,7 +312,12 @@ def main():
     # 体の根元（胴体の自由関節）の初期位置を覚えておく＝編集中に流れないように
     root_qadr = None
     for j in range(m.njnt):
-        if m.jnt_type[j] == mujoco.mjtJoint.mjJNT_FREE and m.body(m.jnt_bodyid[j]).name != "test_object1":
+        # ⚠️★【2026-07-29 修正】「おもちゃ以外の自由関節」で探すと、MIMo本家の
+        #   シーンに元からある **test_object2**（使っていない球）を掴む。
+        #   太郎の体は body 名 "mimo_location"（関節名は "mimo_orientation"）。
+        #   落とし穴 項67 の再発。名指しで取ること。
+        if (m.jnt_type[j] == mujoco.mjtJoint.mjJNT_FREE
+                and (m.body(int(m.jnt_bodyid[j])).name or "") == "mimo_location"):
             root_qadr = int(m.jnt_qposadr[j])
             break
     root_qpos0 = d.qpos[root_qadr:root_qadr + 7].copy() if root_qadr is not None else None

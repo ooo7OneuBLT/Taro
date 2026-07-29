@@ -59,11 +59,56 @@ SHAKE_HZ = 2.5             # 「小さく激しく」＝2.5Hz
 SHAKE_AMP = 0.015          # 1.5cm
 EPISODE_SEC = 20.0
 
-POSE_JOINTS = [
-    ("hip1", "股（前後）"), ("hip2", "股（開き）"), ("knee", "ひざ"),
-    ("shoulder_horizontal", "肩（前後）"), ("shoulder_ad_ab", "肩（開き）"),
-    ("shoulder_rotation", "肩（ひねり）"), ("elbow", "ひじ"),
+# ============================================================================
+# 姿勢を作るための関節（2026-07-29 に全身へ拡張）
+# ----------------------------------------------------------------------------
+# 【なぜ広げたか】ユーザーの指摘「今のViewerは一部の関節の回転しかできない。
+# 首の位置を変えたり腕の角度を変えたりしたい」。
+# それまでは7つ（股2・ひざ・肩3・ひじ）だけで、しかも**左右が必ず同じ角度**だった。
+#
+# 太郎の関節は全部で96個あるが、姿勢を作るのに要るのは43個
+# （首3・体幹8・腕8・手首6・股6・ひざ2・足首6・つま先4）。
+# 指44個と眼球6個は除く：指は細かすぎ、眼球は反射が動かすので人が決めるものではない。
+#
+# 各項目 = (関節名の末尾, 日本語名)
+# 左右がある関節は `right_` / `left_` を付けて探す（PAIRED=True のグループ）。
+POSE_GROUPS = [
+    # (グループ名, 左右のペアがあるか, [(関節名, 日本語名), ...], 既定で開くか)
+    ("首", False, [
+        ("head_tilt", "首（前後・うなずき）"),
+        ("head_swivel", "首（左右ふり）"),
+        ("head_tilt_side", "首（左右かたむき）"),
+    ], True),
+    ("肩・うで", True, [
+        ("shoulder_horizontal", "肩（前後）"),
+        ("shoulder_ad_ab", "肩（開き）"),
+        ("shoulder_rotation", "肩（ひねり）"),
+        ("elbow", "ひじ"),
+    ], True),
+    ("体幹", False, [
+        ("hip_bend1", "腰（前後の曲げ・下）"),
+        ("hip_bend2", "腰（前後の曲げ・上）"),
+        ("hip_lean1", "腰（左右たおし・下）"),
+        ("hip_lean2", "腰（左右たおし・上）"),
+        ("hip_rot1", "腰（ひねり・下）"),
+        ("hip_rot2", "腰（ひねり・上）"),
+        ("chest_lean", "胸（左右たおし）"),
+        ("chest_rot", "胸（ひねり）"),
+    ], False),
+    ("手首", True, [
+        ("hand1", "手首1"), ("hand2", "手首2"), ("hand3", "手首3"),
+    ], False),
+    ("股・あし", True, [
+        ("hip1", "股（前後）"), ("hip2", "股（開き）"), ("hip3", "股（ひねり）"),
+        ("knee", "ひざ"),
+    ], True),
+    ("足首・つま先", True, [
+        ("foot1", "足首1"), ("foot2", "足首2"), ("foot3", "足首3"),
+        ("toes", "つま先"), ("big_toe", "親ゆび"),
+    ], False),
 ]
+# 旧定義（7関節・左右同時）。互換のために名前だけ残す
+POSE_JOINTS = [(nm, jp) for _, _, items, _ in POSE_GROUPS for nm, jp in items]
 
 
 class Section:
@@ -123,28 +168,63 @@ def main():
     #     視力も4ヶ月  … 体と揃える（1ヶ月の4.3倍）
     #     頭を抑える    … 人間の乳児実験と同じ条件（Hunter & Richards 2003）
     from e_head_hold import CaregiverHands
-    _AGE = float(os.environ.get("E_AGE", "4.0"))
-    _HEAD_HOLD = os.environ.get("E_HEAD_HOLD", "1") == "1"
+    import e_scene
 
-    # ★リクライニングの角度[度]。0=仰向け。モデル構築時に決まるので実行中は変えられない
-    _RECLINE = float(os.environ.get("E_RECLINE", "0"))
-    _EYE_REST_V = float(os.environ.get("E_EYE_REST_V", "0"))
-    kw = body_kwargs_from_env(_AGE, verbose=True)
-    env = ToySupineEnv(actuation_model=MuscleModel,
-                       vision_params=infant_vision_params(acuity_age=_AGE),
-                       age=_AGE, toy=True, vor=True, orient=True,
-                       recline_deg=_RECLINE, **kw)
-    u = env.unwrapped
-    m, d = u.model, u.data
-    env.reset(seed=0)
-    hands = CaregiverHands(m, d)
-    # ★支える角度。指定しなければ「今の角度」で支える。
-    #   リクライニングでは顎を引かせないと視線が上を向いてしまうので、
-    #   前後（head_tilt）だけ指定できるようにした（2026-07-28）。
-    _HOLD_TILT = os.environ.get("E_HOLD_TILT")
-    _hold_tgt = ({"head_tilt": float(_HOLD_TILT)} if _HOLD_TILT else None)
-    if _HEAD_HOLD:
-        hands.hold(target=_hold_tgt, verbose=True)
+    # ========================================================================
+    # ★シーン方式（2026-07-29 新設）— E_SCENE=名前 でシーンから始める
+    # ------------------------------------------------------------------------
+    # 【なぜ】環境の条件が4か所（コードの定数／環境変数／プリセット／保存ファイル）に
+    # 散らばっており、Viewer で見ている太郎と測定している太郎が食い違っていた。
+    # シーンを使うと**環境を組み立てるのは `e_scene.build` だけ**になるので、
+    # Viewer と測定が構造的に同じ環境になる。設計は `E/docs/シーン方式_設計.md`。
+    # ========================================================================
+    _scene = None
+    _scene_name = os.environ.get("E_SCENE")
+    if _scene_name:
+        _scene = e_scene.load(_scene_name)
+        _AGE = float(_scene["body"]["age_months"])
+        _RECLINE = float(_scene["world"]["recline_deg"])
+        _EYE_REST_V = float(_scene["body"]["eye_rest_vertical_deg"])
+        _hh = _scene["setup"].get("head_hold") or {}
+        _HEAD_HOLD = bool(_hh)
+        _tgt = _hh.get("target_deg") or None
+        _HOLD_TILT = (str(_tgt["head_tilt"]) if _tgt and "head_tilt" in _tgt else None)
+        _hold_tgt = _tgt
+        print(f"[scene] 「{_scene['name']}」から始めます", flush=True)
+        if _scene.get("note"):
+            print(f"        {_scene['note']}", flush=True)
+        env, hands = e_scene.build(_scene, orient=True, vor=True, seed=0, verbose=True)
+        u = env.unwrapped
+        m, d = u.model, u.data
+        if hands is None:
+            hands = CaregiverHands(m, d)
+        # 保存した状態と本当に同じ環境になったかを確かめる（止めはしない＝
+        # Viewer は直すための道具なので、ずれていても開けた方が直せる）
+        e_scene.verify(_scene, env, strict=False, verbose=True)
+    else:
+        # ---- 従来の起動（環境変数で条件を指定する）--------------------------
+        # ⚠️こちらは順次たたむ予定。新しい実験はシーンを使うこと。
+        _AGE = float(os.environ.get("E_AGE", "4.0"))
+        _HEAD_HOLD = os.environ.get("E_HEAD_HOLD", "1") == "1"
+        # ★リクライニングの角度[度]。0=仰向け。モデル構築時に決まるので実行中は変えられない
+        _RECLINE = float(os.environ.get("E_RECLINE", "0"))
+        _EYE_REST_V = float(os.environ.get("E_EYE_REST_V", "0"))
+        kw = body_kwargs_from_env(_AGE, verbose=True)
+        env = ToySupineEnv(actuation_model=MuscleModel,
+                           vision_params=infant_vision_params(acuity_age=_AGE),
+                           age=_AGE, toy=True, vor=True, orient=True,
+                           recline_deg=_RECLINE, **kw)
+        u = env.unwrapped
+        m, d = u.model, u.data
+        env.reset(seed=0)
+        hands = CaregiverHands(m, d)
+        # ★支える角度。指定しなければ「今の角度」で支える。
+        #   リクライニングでは顎を引かせないと視線が上を向いてしまうので、
+        #   前後（head_tilt）だけ指定できるようにした（2026-07-28）。
+        _HOLD_TILT = os.environ.get("E_HOLD_TILT")
+        _hold_tgt = ({"head_tilt": float(_HOLD_TILT)} if _HOLD_TILT else None)
+        if _HEAD_HOLD:
+            hands.hold(target=_hold_tgt, verbose=True)
     dt = float(m.opt.timestep) * int(u.frame_skip)
     n_act = env.action_space.shape[0]
     zero = np.zeros(n_act, dtype=np.float32)
@@ -180,18 +260,30 @@ def main():
     NECK_I = float(m.body_inertia[_hb][0]) + float(m.body_mass[_hb]) * _neck_arm ** 2
 
     # 体の根元（胴体の自由関節）＝「仰向けに戻す」で使う
+    # ⚠️★【2026-07-29 修正】以前は「おもちゃ（test_object1）以外の自由関節」で
+    #   探していたが、このモデルには**使っていない予備の物体 test_object2**があり、
+    #   そちらを先に拾っていた（位置 3.5, 3.0, 0.05）。
+    #   ＝「仰向けに戻す」はずっと**体ではなく予備の物体**を動かしていた。
+    #   落とし穴 項67「体を動かす自由関節は、思っている body に無い」の再発。
     root_qadr = None
     for j in range(m.njnt):
         if (m.jnt_type[j] == mujoco.mjtJoint.mjJNT_FREE
-                and m.body(m.jnt_bodyid[j]).name != "test_object1"):
+                and (m.body(int(m.jnt_bodyid[j])).name or "") == TE.ROOT_BODY):
             root_qadr = int(m.jnt_qposadr[j])
             break
+    if root_qadr is None:
+        print(f"[viewer] ⚠️体（body='{TE.ROOT_BODY}'）の自由関節が見つからない。"
+              "「仰向けに戻す」は姿勢だけ戻します", flush=True)
     root_qpos0 = (d.qpos[root_qadr:root_qadr + 7].copy()
                   if root_qadr is not None else None)
 
     # ---- 前回の保存を読む（旧ファイルからも引き継ぐ）--------------------
+    # ⚠️★シーンから始めたときは旧保存を読まない（2026-07-29）。
+    #   読むと、シーンの姿勢で立ち上げたのにスライダーの初期値だけ旧ファイルの
+    #   値になり、姿勢保持がONの瞬間に**別の姿勢へ書き換わる**。
+    #   ＝「散らばった設定が競合する」問題そのものなので、入口を1つに保つ。
     saved = None
-    for path in (SAVE_PATH, OLD_SAVE):
+    for path in ([] if _scene is not None else (SAVE_PATH, OLD_SAVE)):
         if os.path.exists(path):
             try:
                 with open(path, encoding="utf-8") as fp:
@@ -201,22 +293,42 @@ def main():
             except Exception as e:
                 print(f"[load] 読み込み失敗 {path}: {e}", flush=True)
 
-    joints = []
-    for base, jp in POSE_JOINTS:
-        pair = []
-        for side in ("right_", "left_"):
+    # ---- 姿勢を作る関節を集める（2026-07-29 に全身へ拡張）------------------
+    #   ★左右がある関節は**別々のスライダー**にする。以前は必ず同じ角度に
+    #     なっていたので、片手だけ口に持っていくような姿勢が作れなかった。
+    def _find_joint(name):
+        """関節を名前で探す。見つからなければ None（モデルによって無い関節がある）。"""
+        for pre in ("robot:", ""):
             try:
-                j = m.joint("robot:" + side + base)
+                j = m.joint(pre + name)
+                return int(j.id), int(m.jnt_qposadr[j.id])
             except Exception:
                 continue
-            pair.append((int(j.id), int(m.jnt_qposadr[j.id])))
-        if pair:
-            lo, hi = np.degrees(m.jnt_range[pair[0][0]])
-            cur = float(np.degrees(d.qpos[pair[0][1]]))
-            if saved and base in saved.get("joints", {}):
-                cur = float(saved["joints"][base])
-            joints.append(dict(base=base, jp=jp, pair=pair,
-                               lo=float(lo), hi=float(hi), init=cur))
+        return None
+
+    joints = []
+    for gname, paired, items, opened in POSE_GROUPS:
+        for base, jp in items:
+            cands = ([(f"right_{base}", "右"), (f"left_{base}", "左")]
+                     if paired else [(base, "")])
+            for jname, side in cands:
+                got = _find_joint(jname)
+                if got is None:
+                    continue
+                jid, qadr = got
+                lo, hi = np.degrees(m.jnt_range[jid])
+                if abs(hi - lo) < 1e-9:      # 可動域ゼロ＝動かせない関節は出さない
+                    continue
+                joints.append(dict(
+                    base=jname, key=jname, group=gname, side=side,
+                    jp=(f"{side}{jp}" if side else jp),
+                    pair=[(jid, qadr)],
+                    lo=float(lo), hi=float(hi),
+                    init=float(np.degrees(d.qpos[qadr])),
+                    is_neck=(gname == "首"),
+                    twin=(f"left_{base}" if side == "右" else
+                          (f"right_{base}" if side == "左" else None))))
+    print(f"[pose] 姿勢を作れる関節 {len(joints)} 個", flush=True)
 
     toy_pos0 = d.qpos[toy_qadr:toy_qadr + 3].copy()
     # ⚠️リセット直後のおもちゃは**退避位置 [3,3,0.05]**（登場を1秒遅らせる仕組み）。
@@ -306,10 +418,82 @@ def main():
     # ⚠️**月齢だけはモデルを作るときに決まる**（geomの寸法・質量が変わる）ので、
     #   実行中に変えられない。月齢が変わるプリセットを選んだときは**プロセスを
     #   作り直す**（環境変数を設定して自分を起動し直す）。それ以外は即反映。
-    sec_env = Section(colL, "環境（プリセット）", op.get("env", True))
+    sec_env = Section(colL, "シーン（環境）", op.get("env", True))
 
-    # プリセット定義。age だけが「作り直しが要る」項目。
-    PRESETS = {
+    # ------------------------------------------------------------------
+    # ★シーン一覧（2026-07-29）。旧 PRESETS を置き換えたもの。
+    #   プリセットは Viewer の中にしか無く、測定スクリプトからは使えなかった。
+    #   シーンはファイルなので、Viewer で作ったものをそのまま測定が読める。
+    # ------------------------------------------------------------------
+    scene_names = e_scene.list_scenes()
+    _init_scene = (_scene["name"] if _scene else
+                   (scene_names[0] if scene_names else ""))
+    scene_var = tk.StringVar(value=_init_scene)
+    scene_name_var = tk.StringVar(value=(_init_scene or "新しいシーン"))
+    note_var = tk.StringVar(value=(_scene.get("note", "") if _scene else ""))
+
+    _pf = tk.Frame(sec_env.body); _pf.pack(fill="x", padx=10, pady=(4, 0))
+    tk.Label(_pf, text="シーン", width=6, anchor="w").pack(side="left")
+    _scene_menu = tk.OptionMenu(_pf, scene_var,
+                                *(scene_names or ["（シーンがまだ無い）"]))
+    _scene_menu.pack(side="left", fill="x", expand=True)
+    scene_note = tk.Label(sec_env.body, text="", fg="#666", font=("", 8),
+                          wraplength=460, justify="left")
+    scene_note.pack(anchor="w", padx=14)
+    tk.Label(sec_env.body,
+             text="★「最初からやり直す」を押すと、選んだシーンで始まります\n"
+                  "　 別のシーンに切り替えるときは体を作り直すので数十秒かかります",
+             fg="#a30", font=("", 8), justify="left").pack(anchor="w", padx=14)
+
+    def _refresh_scene_menu():
+        names = e_scene.list_scenes()
+        mnu = _scene_menu["menu"]
+        mnu.delete(0, "end")
+        for n in names:
+            mnu.add_command(label=n, command=tk._setit(scene_var, n))
+
+    def on_scene_pick(*_a):
+        """選んだシーンが**成立しているか**を、始める前に見せる。
+
+        ⚠️「姿勢が崩れる」「おもちゃが体に隠れて見えない」は、
+          実際に走らせてからでは気づきにくい（2026-07-28 に両方とも起きた）。
+          保存時に記録した指紋と安定確認の結果をここに出す。
+        """
+        try:
+            sc = e_scene.load(scene_var.get())
+        except Exception:
+            scene_note.config(text="", fg="#666")
+            return
+        fp = sc.get("fingerprint") or {}
+        se = fp.get("settle") or {}
+        lines = []
+        if sc.get("note"):
+            lines.append(sc["note"])
+        lines.append(f"{sc['body']['age_months']:g}ヶ月 / "
+                     f"リクライニング{sc['world']['recline_deg']:g}度 / "
+                     f"柵{'あり' if sc['world']['fence'] else 'なし'} / "
+                     f"頭を支える{'あり' if sc['setup'].get('head_hold') else 'なし'}")
+        warn = False
+        if se:
+            lines.append(se.get("summary", ""))
+            warn = warn or not se.get("ok", True)
+        if fp.get("toy_visible_left") is not None:
+            lines.append("おもちゃは見えています" if fp["toy_visible_left"]
+                         else "⚠️おもちゃが体に隠れて見えません")
+            warn = warn or not fp["toy_visible_left"]
+        if fp.get("toy_reach_ratio") is not None:
+            r = float(fp["toy_reach_ratio"])
+            lines.append(f"おもちゃは肩から腕の{r*100:.0f}%"
+                         + ("（届く）" if r <= 1.0 else "（★届かない）"))
+            warn = warn or r > 1.0
+        scene_note.config(text="\n".join(t for t in lines if t),
+                          fg=("#a30" if warn else "#666"))
+    scene_var.trace_add("write", on_scene_pick)
+
+    # 旧プリセット（削除予定）。シーンへ移し終えたら消す。
+    # ⚠️2026-07-29 現在、下の PRESETS はどこからも参照していない。
+    #   条件の由来をたどれるようにするためだけに残している。
+    _OLD_PRESETS = {
         "視線誘導反射の測定（4ヶ月・仰向け・頭を抑える）": dict(
             age=4.0, head_hold=True, fence=False, orient=True, toy_radius=0.0056,
             recline=0.0, hold_tilt=None, eye_rest_v=0.0,
@@ -340,45 +524,7 @@ def main():
             recline=30.0, hold_tilt=30.0, eye_rest_v=-10.0,
             note="実測で体幹23.8度。ほぼ仰向けに近い"),
     }
-    preset_names = list(PRESETS)
-    # 今の起動条件に最も近いプリセットを初期選択にする
-    # ⚠️★リクライニング角も判定に入れる（2026-07-28）。入れていなかったため、
-    #   70度で起動しているのに「0度のプリセット」が選ばれ、「最初からやり直し」を
-    #   押すと条件が違うと判定されて**体の作り直しが走り、窓が閉じた**
-    #   （ユーザーの報告「最初からにすると落ちる」）。
-    def _matches(v):
-        """起動時の条件とプリセットが一致するか。★姿勢一式で判定する（2026-07-28）。
-
-        ⚠️リクライニング角だけを見ていたため、「顎を引いた60度」で起動しても
-        「4ヶ月・柵なし」（仰向け）が選ばれていた（ユーザーの報告）。
-        姿勢の設定を環境変数に散らしていたのが原因なので、プリセット側に
-        姿勢一式を持たせ、判定もそれで行う。
-        """
-        _t = v.get("hold_tilt")
-        _c = (float(_HOLD_TILT) if _HOLD_TILT else None)
-        if (_t is None) != (_c is None):
-            return False
-        if _t is not None and abs(float(_t) - _c) > 1e-9:
-            return False
-        return (abs(v["age"] - _AGE) < 1e-9
-                and v["head_hold"] == _HEAD_HOLD
-                and abs(float(v.get("recline", 0.0)) - _RECLINE) < 1e-9
-                and abs(float(v.get("eye_rest_v", 0.0)) - _EYE_REST_V) < 1e-9)
-
-    _cur = next((k for k, v in PRESETS.items() if _matches(v)), preset_names[0])
-    preset_var = tk.StringVar(value=_cur)
-    _pf = tk.Frame(sec_env.body); _pf.pack(fill="x", padx=10, pady=(4, 0))
-    tk.Label(_pf, text="環境", width=6, anchor="w").pack(side="left")
-    tk.OptionMenu(_pf, preset_var, *preset_names).pack(side="left", fill="x", expand=True)
-    preset_note = tk.Label(sec_env.body, text=PRESETS[_cur]["note"],
-                           fg="#666", font=("", 8), wraplength=460, justify="left")
-    preset_note.pack(anchor="w", padx=14)
-    tk.Label(sec_env.body,
-             text="★「最初からやり直し」を押すと、選んだ環境で始まります\n"
-                  "　 月齢が変わるときは体を作り直すので数十秒かかります",
-             fg="#a30", font=("", 8), justify="left").pack(anchor="w", padx=14)
-
-    # 個別のスイッチ（プリセットを選ぶと連動して変わる）
+    # 個別のスイッチ（シーンを選ぶと連動して変わる）
     st_fence = tk.BooleanVar(value=True)
     tk.Checkbutton(sec_env.body, text="柵（ベビーサークル）を有効にする",
                    variable=st_fence).pack(anchor="w", padx=14)
@@ -389,12 +535,23 @@ def main():
                          justify="left", fg="#444")
     env_label.pack(anchor="w", padx=14)
 
-    def on_preset(*_a):
-        p = PRESETS[preset_var.get()]
-        preset_note.config(text=p["note"])
-        st_fence.set(bool(p["fence"]))
-        st_hold_head.set(bool(p["head_hold"]))
-    preset_var.trace_add("write", on_preset)
+    # シーンを選んだら、そのシーンの説明とスイッチを反映する
+    #   ⚠️柵と頭の支えは**実行中に切り替えられる**ので即反映してよい。
+    #     月齢・リクライニング角・眼球の基準角はモデル構築時に決まるので、
+    #     「最初からやり直す」でプロセスごと作り直す。
+    def on_scene_switches(*_a):
+        try:
+            sc = e_scene.load(scene_var.get())
+        except Exception:
+            return
+        st_fence.set(bool(sc["world"]["fence"]))
+        st_hold_head.set(bool(sc["setup"].get("head_hold")))
+        scene_name_var.set(sc["name"])
+        note_var.set(sc.get("note", ""))
+    scene_var.trace_add("write", on_scene_switches)
+    on_scene_pick()          # 起動時の説明を出す
+    if _scene is not None:
+        st_fence.set(bool(_scene["world"]["fence"]))
 
     # 柵のgeom（実行時にON/OFFする）。名前は e_toy_env の `fence_post_{i}`。
     fence_gids = [g for g in range(m.ngeom) if "fence" in (m.geom(g).name or "")]
@@ -558,11 +715,140 @@ def main():
                    variable=st_freeze, fg="#a30", command=on_freeze).pack(anchor="w", padx=14)
     tk.Checkbutton(sec_pose.body, text="この角度で固定する（★物理ONのまま使うと暴れます）",
                    variable=st_hold).pack(anchor="w", padx=14)
+
+    # ---- 左右対称スイッチ ------------------------------------------------
+    #   ★既定はOFF（左右を別々に動かせる）。以前は必ず同じ角度になっていて、
+    #     片手だけ口へ持っていくような**非対称の姿勢が作れなかった**。
+    st_sym = tk.BooleanVar(value=False)
+    tk.Checkbutton(sec_pose.body, text="左右を対称に動かす（片方を動かすともう片方も同じ角度）",
+                   variable=st_sym, fg="#06a").pack(anchor="w", padx=14)
+
     joint_vars = []
+    _by_key = {}          # 関節名 → スライダー（左右連動に使う）
+    _sym_busy = [False]   # 連動の再帰を防ぐ
+
+    # ボタンは**スライダーより先**に置く（43個の下だと遠くて押しに行けない）
+    _pf2 = tk.Frame(sec_pose.body); _pf2.pack(fill="x", padx=14, pady=(4, 2))
+    tk.Button(_pf2, text="いまの姿勢を取り込む",
+              command=lambda: pose_from_body(), width=20).pack(side="left", padx=2)
+    tk.Button(_pf2, text="右→左に写す",
+              command=lambda: pose_mirror_rl(), width=13).pack(side="left", padx=2)
+    tk.Label(sec_pose.body,
+             text="★首を動かすと、実験者の手が支える目標角も一緒に動きます\n"
+                  "　 姿勢を作る手順： ①物理を止める ②角度を決める ③固定をON ④保存",
+             fg="#666", font=("", 8), justify="left").pack(anchor="w", padx=14)
+
+    # ---- 四肢の筋緊張（2026-07-29 新設）--------------------------------
+    #
+    # 【なぜ要るか】ユーザーの目視「手を体の前にやったけど、すぐ重力で下に降りちゃう」。
+    # 太郎の四肢には筋緊張が無いので、脱力すると腕が真横に伸びきる。
+    # 実測：腕を体の前にしても20秒で **18cm 落ちて**、手とおもちゃが24cmに広がる。
+    # 人間の4ヶ月児は脱力しても肘が曲がり手が体の前にある（Dubowitz 1970 ほか）。
+    #
+    # 【使い方】姿勢を作る → このスイッチをON → その姿勢が「戻る先」になる。
+    #   自発運動でバネより強い力が出れば腕は動き、力を抜けば戻る。
+    # ⚠️意思ではなく**身体の性質**。太郎の脳（方策）は通らない。
+    _lt0 = ((_scene or {}).get("setup") or {}).get("limb_tone") or {}
+    st_tone_limb = tk.BooleanVar(value=bool(_lt0))
+    lt_hold = tk.DoubleVar(value=float(_lt0.get("hold_deg", 10.0)))
+    _limb_saved = [None]
+
+    def limb_tone_apply(*_a):
+        """いまの姿勢を四肢の筋緊張の目標にする。"""
+        from infant_limbs import apply_limb_tone, limb_tone_joints
+        if _limb_saved[0] is None:      # 最初の1回だけ元の値を控える（OFFで戻すため）
+            names = set(limb_tone_joints(m))
+            sv = {}
+            for j in range(m.njnt):
+                nm = (m.joint(j).name or "").split(":")[-1]
+                if nm in names:
+                    adr, dof = int(m.jnt_qposadr[j]), int(m.jnt_dofadr[j])
+                    sv[nm] = (float(m.jnt_stiffness[j]), float(m.qpos_spring[adr]),
+                              float(m.dof_damping[dof]), j, adr, dof)
+            _limb_saved[0] = sv
+        r = apply_limb_tone(m, d, age=_AGE, hold_deg=float(lt_hold.get()),
+                            verbose=True)
+        msg.config(text=f"いまの姿勢を四肢の筋緊張の目標にしました"
+                        f"（{r['n']}関節・許すずれ{lt_hold.get():g}度）", fg="#0a7")
+
+    def limb_tone_release(*_a):
+        sv = _limb_saved[0]
+        if not sv:
+            return
+        for nm, (k, sp, dp, j, adr, dof) in sv.items():
+            m.jnt_stiffness[j] = k
+            m.qpos_spring[adr] = sp
+            m.dof_damping[dof] = dp
+        msg.config(text="四肢の筋緊張を切りました（腕は重力で落ちます）", fg="#0a7")
+
+    def on_limb_tone(*_a):
+        (limb_tone_apply if st_tone_limb.get() else limb_tone_release)()
+
+    tk.Checkbutton(sec_pose.body,
+                   text="四肢の筋緊張（脱力しても腕が体の前に保たれる）",
+                   variable=st_tone_limb, fg="#06a",
+                   command=on_limb_tone).pack(anchor="w", padx=14)
+    slider(sec_pose.body, "  許すずれ[度]", lt_hold, 2, 40, 1, width=13, length=200,
+           note="　 小さいほど硬い。⚠️乳児の四肢の筋緊張の実測値は文献に存在しない"
+                "（Tier3・感度分析の対象）")
+    tk.Button(sec_pose.body, text="いまの姿勢を筋緊張の目標にする",
+              command=limb_tone_apply, width=28).pack(anchor="w", padx=14, pady=(0, 2))
+
+    def _make_sym_hook(jd, var):
+        def _hook(*_a):
+            if not st_sym.get() or _sym_busy[0] or not jd.get("twin"):
+                return
+            tw = _by_key.get(jd["twin"])
+            if tw is None:
+                return
+            _sym_busy[0] = True
+            try:
+                tw.set(var.get())
+            finally:
+                _sym_busy[0] = False
+        return _hook
+
+    # 部位ごとに折りたたみ（43個を一列に並べると縦に長すぎて操作できない）
+    for gname, paired, items, opened in POSE_GROUPS:
+        mine = [jd for jd in joints if jd["group"] == gname]
+        if not mine:
+            continue
+        sub = Section(sec_pose.body, f"　{gname}（{len(mine)}）", opened)
+        for jd in mine:
+            v = tk.DoubleVar(value=jd["init"])
+            slider(sub.body, jd["jp"], v, jd["lo"], jd["hi"], 1, width=16, length=200)
+            joint_vars.append(v)
+            _by_key[jd["key"]] = v
+            jd["var"] = v
     for jd in joints:
-        v = tk.DoubleVar(value=jd["init"])
-        slider(sec_pose.body, jd["jp"], v, jd["lo"], jd["hi"], 1)
-        joint_vars.append(v)
+        jd["var"].trace_add("write", _make_sym_hook(jd, jd["var"]))
+
+    def pose_from_body():
+        """★いまの体の角度をスライダーへ取り込む。
+
+        【なぜ要るか】物理を回して落ち着いた姿勢を土台にして手直ししたい。
+        取り込みが無いと、スライダーは起動時の値のままなので「固定」を押した
+        瞬間に**作りかけの姿勢へ飛ぶ**（2026-07-28 に踏んだ問題と同じ形）。
+        """
+        _sym_busy[0] = True
+        try:
+            for jd in joints:
+                jd["var"].set(round(float(np.degrees(d.qpos[jd["pair"][0][1]])), 1))
+        finally:
+            _sym_busy[0] = False
+        msg.config(text="いまの姿勢をスライダーに取り込みました", fg="#0a7")
+
+    def pose_mirror_rl():
+        """右の角度を左へ写す（左右対称の姿勢をすぐ作る）。"""
+        _sym_busy[0] = True
+        try:
+            for jd in joints:
+                if jd.get("side") == "右" and jd.get("twin") in _by_key:
+                    _by_key[jd["twin"]].set(jd["var"].get())
+        finally:
+            _sym_busy[0] = False
+        msg.config(text="右の角度を左へ写しました", fg="#0a7")
+
 
     # ---- 区画3：反射 ----------------------------------------------------
     sec_ref = Section(colL, "反射", op.get("reflex", True))
@@ -698,10 +984,92 @@ def main():
     run_label.pack(anchor="w", padx=14)
 
     # ---- ボタン ---------------------------------------------------------
-    msg = tk.Label(root, text="", fg="#0a7", font=("", 9))
+    msg = tk.Label(root, text="", fg="#0a7", font=("", 9), justify="left")
     msg.pack(pady=(6, 0))
+
+    # ---- シーンとして保存する欄（2026-07-29 新設）------------------------
+    #   ここで名前を付けて保存すると、測定スクリプトが E_SCENE=名前 で
+    #   **まったく同じ状態**から始められる。
+    sf = tk.Frame(root); sf.pack(fill="x", padx=12, pady=(6, 0))
+    tk.Label(sf, text="シーン名", width=8, anchor="w").pack(side="left")
+    tk.Entry(sf, textvariable=scene_name_var, width=30).pack(side="left", padx=(0, 6))
+    tk.Label(sf, text="説明", width=4, anchor="w").pack(side="left")
+    tk.Entry(sf, textvariable=note_var, width=44).pack(side="left", fill="x",
+                                                       expand=True)
+
     bf = tk.Frame(root); bf.pack(pady=8)
     _restart = [True]
+
+    # ========================================================================
+    # ★シーンとして保存する（2026-07-29）
+    # ------------------------------------------------------------------------
+    # 【なぜ変えたか】旧 `viewer_saved.json` は**一部の項目しか保存していなかった**。
+    #   実物には preset 名に「リクライニング60度」と書いてあるのに、
+    #   リクライニング角そのものが入っていない。読む側が足りない値を環境変数から
+    #   補うので、保存した状態と測定した状態が別物になっていた。
+    # ⇒ シーンは「体・環境・実験前の設定・姿勢（qpos 丸ごと）・指紋」を全部持つ。
+    # ========================================================================
+    def _current_scene():
+        """いまの Viewer の状態からシーンを組み立てる。"""
+        import copy as _copy
+        sc = (_copy.deepcopy(_scene) if _scene is not None
+              else e_scene.default_scene("新しいシーン"))
+        sc.pop("_path", None)
+        sc["body"]["age_months"] = float(_AGE)
+        sc["body"]["eye_rest_vertical_deg"] = float(_EYE_REST_V)
+        sc["world"]["recline_deg"] = float(_RECLINE)
+        sc["world"]["fence"] = bool(st_fence.get())
+        sc["world"]["toy"]["radius"] = float(size_var.get())
+        sc["world"]["toy"]["dist"] = float(dist_var.get())
+        # ⚠️首のバネと実験者の手は**同じ `jnt_stiffness` を使う**ので排他。
+        #   頭を抑えているあいだ Viewer はスライダーを適用しない（落とし穴 項62）。
+        if st_hold_head.get():
+            sc["setup"]["head_hold"] = {"stiffness": float(hands.stiffness),
+                                        "target_deg": (dict(_hold_tgt) if _hold_tgt
+                                                       else None)}
+            sc["setup"]["neck_tone"] = None
+        else:
+            sc["setup"]["head_hold"] = None
+            sc["setup"]["neck_tone"] = ({"target_deg": float(nk_t.get()),
+                                         "stiffness": float(nk_k.get())}
+                                        if st_neck.get() else None)
+        # ★四肢の筋緊張。目標角は書かない＝**保存した姿勢が戻る先**になる
+        #   （読み込み側は `apply_state` のあとに効かせるので、これで一致する）
+        sc["setup"]["limb_tone"] = ({"hold_deg": float(lt_hold.get()),
+                                     "groups": ["arm", "leg"]}
+                                    if st_tone_limb.get() else None)
+        return sc
+
+    def save_scene():
+        name = (scene_name_var.get() or "").strip()
+        if not name:
+            msg.config(text="シーンの名前を入れてください", fg="#a30")
+            return
+        try:
+            sc = _current_scene()
+            sc["note"] = (note_var.get() or "").strip()
+            saved, drift = e_scene.save(
+                sc, name=name, env=env,
+                hands=(hands if st_hold_head.get() else None),
+                settle_seconds=3.0, verbose=True)
+        except Exception as e:
+            msg.config(text=f"保存に失敗: {e}", fg="#a30")
+            return
+        ok = (drift or {}).get("ok", True)
+        fp = saved.get("fingerprint") or {}
+        seen = fp.get("toy_visible_left")
+        parts = [f"保存しました → E/scenes/{name}.json"]
+        if drift:
+            parts.append(drift["summary"].replace("　", " "))
+        if seen is not None:
+            parts.append("おもちゃは見えています" if seen
+                         else "⚠️おもちゃが体に隠れて見えません")
+        msg.config(text="\n".join(parts), fg=("#0a7" if ok and seen else "#a30"))
+        # 保存し直したときに一覧を最新にする
+        try:
+            _refresh_scene_menu()
+        except Exception:
+            pass
 
     def save():
         data = {"toy_pos": [float(v.get()) for v in toy_vars],
@@ -710,9 +1078,8 @@ def main():
                 #   これが無いと「保存した位置」を再現しても距離の設定が失われる。
                 "toy_dist": float(dist_var.get()),
                 "age": float(_AGE), "head_hold": bool(st_hold_head.get()),
-                "fence": bool(st_fence.get()), "preset": preset_var.get(),
-                "joints": {jd["base"]: float(v.get())
-                           for jd, v in zip(joints, joint_vars)},
+                "fence": bool(st_fence.get()), "preset": scene_var.get(),
+                "joints": {jd["key"]: float(jd["var"].get()) for jd in joints},
                 "shake": bool(shake_var.get()), "follow": bool(follow_var.get()),
                 "orient": bool(st_orient.get()),
                 "latency": float(lat_var.get()), "threshold": float(thr_var.get()),
@@ -739,8 +1106,8 @@ def main():
     def restore_supine():
         if root_qpos0 is not None:
             d.qpos[root_qadr:root_qadr + 7] = root_qpos0
-        for jd, v in zip(joints, joint_vars):
-            ang = np.radians(v.get())
+        for jd in joints:
+            ang = np.radians(jd["var"].get())
             for jid, qadr in jd["pair"]:
                 d.qpos[qadr] = ang
         d.qpos[toy_qadr:toy_qadr + 3] = [v.get() for v in toy_vars]
@@ -764,7 +1131,8 @@ def main():
 
     tk.Button(bf, text="現在の設定をコピー", command=copy_state, width=16,
               bg="#657", fg="white").pack(side="left", padx=3)
-    tk.Button(bf, text="この設定を保存", command=save, width=13,
+    tk.Button(bf, text="旧形式で保存", command=save, width=11).pack(side="left", padx=3)
+    tk.Button(bf, text="この状態をシーンとして保存", command=save_scene, width=24,
               bg="#2a7", fg="white").pack(side="left", padx=3)
     tk.Button(bf, text="仰向けに戻す", command=restore_supine, width=12,
               bg="#37a", fg="white").pack(side="left", padx=3)
@@ -816,40 +1184,30 @@ def main():
                 break
 
             if _restart[0]:
-                # ★★【2026-07-28】プリセットで**月齢が変わる**なら、体そのものを
-                #   作り直す必要がある（geomの寸法・質量はモデル構築時に決まるので
-                #   実行中には変えられない）。環境変数を設定して自分を起動し直す。
-                _p = PRESETS[preset_var.get()]
-                # ★体の角度もモデル構築時に決まるので作り直しが要る
-                # ★姿勢一式（リクライニング角・顎の角度・眼球の基準）は
-                #   モデル構築時／リセット時に決まるので、変わるなら作り直す。
-                _p_tilt = _p.get("hold_tilt")
-                _cur_tilt = (float(_HOLD_TILT) if _HOLD_TILT else None)
-                _tilt_changed = (
-                    (_p_tilt is None) != (_cur_tilt is None)
-                    or (_p_tilt is not None and _cur_tilt is not None
-                        and abs(float(_p_tilt) - _cur_tilt) > 1e-9))
-                if (abs(float(_p["age"]) - _AGE) > 1e-9
-                        or abs(float(_p.get("recline", 0.0)) - _RECLINE) > 1e-9
-                        or abs(float(_p.get("eye_rest_v", 0.0)) - _EYE_REST_V) > 1e-9
-                        or _tilt_changed):
-                    msg.config(text="★条件が変わったので体を作り直します。"
+                # ★★【2026-07-29】シーン方式。選んだシーンが今と違うなら、
+                #   体そのものを作り直す必要がある（geomの寸法・質量・リクライニング角は
+                #   モデル構築時に決まるので実行中には変えられない）。
+                #   ⇒ E_SCENE を設定して自分を起動し直す。
+                #   ★旧版は条件を1つずつ環境変数に詰め直していたため、詰め忘れると
+                #     「別の条件で立ち上がる」ことが起きていた。シーン名1つで済む。
+                _pick = scene_var.get()
+                _need_rebuild = bool(_pick) and (_scene is None
+                                                 or _pick != _scene.get("name"))
+                if _need_rebuild:
+                    msg.config(text=f"★シーン「{_pick}」で体を作り直します。"
                                     "新しい窓が開いたら、この窓は閉じます")
                     win.update_idletasks()
                     win.after(0, lambda: None)
                     _envv = dict(os.environ)
-                    _envv["E_AGE"] = str(_p["age"])
-                    _envv["E_HEAD_HOLD"] = "1" if _p["head_hold"] else "0"
-                    _envv["E_FENCE"] = "1" if _p["fence"] else "0"
-                    _envv["E_TOY_RADIUS"] = str(_p["toy_radius"])
-                    _envv["E_RECLINE"] = str(_p.get("recline", 0.0))
-                    _envv["E_EYE_REST_V"] = str(_p.get("eye_rest_v", 0.0))
-                    if _p.get("hold_tilt") is None:
-                        _envv.pop("E_HOLD_TILT", None)
-                    else:
-                        _envv["E_HOLD_TILT"] = str(_p["hold_tilt"])
-                    if _p.get("toy_pos"):
-                        _envv["E_TOY_POS"] = ",".join(str(v) for v in _p["toy_pos"])
+                    _envv["E_SCENE"] = _pick
+                    # ⚠️シーンが全部を決めるので、古い個別指定は消しておく
+                    #   （残っていると「シーンの値と環境変数のどちらが効くのか」が
+                    #     曖昧になり、散らばりが復活する）。
+                    for _k in ("E_AGE", "E_HEAD_HOLD", "E_FENCE", "E_TOY_RADIUS",
+                               "E_RECLINE", "E_EYE_REST_V", "E_HOLD_TILT",
+                               "E_TOY_POS", "E_SEAT_FRICTION", "E_TOY_MODE",
+                               "E_TOY_SHAPE", "E_TOY_DIST"):
+                        _envv.pop(_k, None)
                     # ★★【2026-07-28 修正】`os.execve` をやめた。
                     #   Windows には本当の exec が無く、Python は「新プロセスを作って
                     #   自分は終了する」動作になる。その結果、新プロセスが親のコンソールを
@@ -883,13 +1241,28 @@ def main():
                         pass
                     return
 
-                env.reset(seed=0)
-                # ★やり直しのたびに支え直す（目標角は「支え始めた時点の角度」なので、
-                #   リセット後の姿勢で取り直す必要がある）
-                if st_hold_head.get():
-                    hands.hold(target=_hold_tgt)
+                # ★★【2026-07-29 修正・重大】シーンから起動したときは
+                #   `env.reset()` **だけ**では駄目。リセットは既定の姿勢に戻すので、
+                #   シーンの姿勢もおもちゃの位置も消える。
+                #   `_restart` の初期値は True なので**起動直後に必ずここを通る**＝
+                #   シーンで立ち上げても最初のフレームで既定状態に戻っていた
+                #   （ユーザーの報告「おもちゃの位置がまた元に戻ってる」2026-07-29）。
+                if _scene is not None:
+                    e_scene.reset_to_scene(env, _scene,
+                                           hands=(hands if st_hold_head.get() else None),
+                                           seed=0)
+                    if not st_hold_head.get():
+                        hands.release()
+                    # スライダーもシーンの位置に合わせる（食い違いを残さない）
+                    toy_pos0 = np.array(d.qpos[toy_qadr:toy_qadr + 3], dtype=float)
                 else:
-                    hands.release()
+                    env.reset(seed=0)
+                    # ★やり直しのたびに支え直す（目標角は「支え始めた時点の角度」なので、
+                    #   リセット後の姿勢で取り直す必要がある）
+                    if st_hold_head.get():
+                        hands.hold(target=_hold_tgt)
+                    else:
+                        hands.release()
                 apply_fence(st_fence.get())
                 reflex.reset()
                 t_sim, wall0, tick = 0.0, time.time(), 0
@@ -1005,11 +1378,20 @@ def main():
             #   スライダーで姿勢を作りたいときは「姿勢を固定」（st_hold）を使う。
             #   止めるだけなら今の姿勢をそのまま保つ。
             if st_hold.get():
-                for jd, v in zip(joints, joint_vars):
-                    ang = np.radians(v.get())
+                _neck_tgt = {}
+                for jd in joints:
+                    ang = np.radians(jd["var"].get())
                     for jid, qadr in jd["pair"]:
                         d.qpos[qadr] = ang
                         d.qvel[int(m.jnt_dofadr[jid])] = 0.0
+                    if jd.get("is_neck"):
+                        _neck_tgt[jd["key"]] = float(jd["var"].get())
+                # ★首は実験者の手（バネ）が支えているので、**支える目標角も**
+                #   一緒に動かす。これをしないと、スライダーで首を曲げた瞬間に
+                #   バネが元の角度へ引き戻し、姿勢が作れない（強さ200N·m/rad）。
+                if _neck_tgt and st_hold_head.get() and hands.holding:
+                    hands.hold(target=_neck_tgt)
+                    _hold_tgt = dict(_neck_tgt)
 
             # ★物理を止めているあいだは step() が呼ばれず、おもちゃを運ぶ処理も
             #   動かない。待たずに定位置へ置く（2026-07-27）。
@@ -1196,6 +1578,14 @@ def main():
                 #   Viewer と測定で条件が食い違っていた事故を防ぐため。
                 _off = hands.offsets() if hands.holding else {}
                 _offmax = max((abs(v) for v in _off.values()), default=0.0)
+                # ★実行速度（2026-07-29 追加）。ユーザーの報告「めっちゃ重い」に対し、
+                #   何倍速で動いているかを常に見えるようにする。
+                #     実速度 = シミュレーション時間 ÷ 実際に経過した時間
+                #     1.0 なら等倍速。0.3 なら現実の3分の1の速さでしか進んでいない
+                _wall = max(time.time() - wall0, 1e-6)
+                _rate = t_sim / _wall
+                _tgt = float(speed_var.get())
+                _mark = "" if _rate >= _tgt * 0.9 else "  ★遅い"
                 env_label.config(
                     text=f"体年齢 {_AGE:g}ヶ月（視力も同じ）  "
                          f"柵 {'あり' if fence_on[0] else 'なし'}  "
@@ -1203,7 +1593,9 @@ def main():
                          f"顎 {(_HOLD_TILT + '度で支える') if _HOLD_TILT else '指定なし'}"
                          f"　眼球の基準 {_EYE_REST_V:+.0f}度\n"
                          f"実験者の手 {'抑えている' if hands.holding else 'なし'}"
-                         + (f"（頭のずれ {_offmax:.2f}度）" if hands.holding else ""))
+                         + (f"（頭のずれ {_offmax:.2f}度）" if hands.holding else "")
+                         + f"\n実行速度 {_rate:.2f}倍速（設定 {_tgt:.1f}）"
+                           f"　{t_sim:.1f}秒ぶん進んだ / 実時間 {_wall:.0f}秒{_mark}")
 
                 # ★左右の目をそれぞれ描く（2026-07-28）
                 try:

@@ -76,3 +76,6 @@ doc/_private/
 # 研究日誌のまとめ（読む用のコピー・549KB）。元ファイルが正なので追跡しない。
 # 必要なときに再生成する: python doc/merge_research_logs.py
 doc/研究日誌まとめ_A-E.md
+
+# Viewer のランチャーが覚えている「前回開いたシーン」（ローカルの状態）
+E/scenes/_前回開いたシーン.txt

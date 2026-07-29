@@ -72,6 +72,80 @@ HOLD_STIFFNESS_SOFT = 10.0    # B-2：柔らかく支える（2度程度のず�
 HOLD_JOINTS = ("head_swivel", "head_tilt", "head_tilt_side")
 
 
+# ============================================================================
+# ★体を支える範囲を部位で選ぶ（2026-07-29 追加）
+# ----------------------------------------------------------------------------
+# 【なぜ要るか】ユーザーの提案：
+#   「肩から手先までと目は自由に動かせるようにして、それ以外の関節は固定する」
+#
+# 【人間の実験ではどうか】リーチングの実験は、乳児を**椅子に固定し頭を支えた**
+# 状態で行う。von Hofsten (1982) の新生児リーチ実験、Carvalho et al. (2007) の
+# ベビーチェア（水平から70度）いずれも体幹は支持されている。
+# 乳児用チェアは股ベルトの装着が安全基準で義務づけられてもいる。
+#   ⇒ 首・体幹を支えるのは**人間の実験条件をそのまま写したもの**。
+#
+# ⚠️【逸脱】脚の固定は人間からの逸脱。現実の乳児は椅子に座っても脚は自由に動く。
+#   交絡（脚の動きで姿勢が崩れる・視野に入って反射が誤発火する）を減らすための
+#   **実験の測定条件**であって、太郎の身体の性質ではない。
+#   逸脱リストに登録すること。
+#
+# ⚠️指は「肩から手先まで」に含める（握るのに要る）。
+JOINT_GROUPS = {
+    "head":   ("head_swivel", "head_tilt", "head_tilt_side"),
+    "trunk":  ("hip_bend1", "hip_bend2", "hip_lean1", "hip_lean2",
+               "hip_rot1", "hip_rot2", "chest_lean", "chest_rot"),
+    "arm":    ("shoulder_horizontal", "shoulder_ad_ab", "shoulder_rotation",
+               "elbow", "hand1", "hand2", "hand3"),
+    "leg":    ("hip1", "hip2", "hip3", "knee",
+               "foot1", "foot2", "foot3", "toes", "big_toe"),
+}
+# 日本語名（表示・記録用）
+GROUP_JP = {"head": "首", "trunk": "体幹", "arm": "肩から手先", "leg": "脚",
+            "finger": "指", "eye": "眼球"}
+
+
+def joint_group(short_name):
+    """関節名（"robot:" と左右の接頭辞を外した名前）から部位を判定する。"""
+    nm = short_name
+    for pre in ("right_", "left_"):
+        if nm.startswith(pre):
+            nm = nm[len(pre):]
+            break
+    if "eye" in nm:
+        return "eye"
+    for g, names in JOINT_GROUPS.items():
+        if nm in names:
+            return g
+    # 指（ff/mf/rf/lf/th で始まる細かい関節）
+    if nm.split("_")[0] in ("ff", "mf", "rf", "lf", "th"):
+        return "finger"
+    return "other"
+
+
+def joints_to_support(model, free=("arm", "finger", "eye")):
+    """「自由にする部位」以外の、動かせる関節の名前を返す。
+
+    Args:
+        free: 自由にしておく部位（"arm" / "finger" / "eye" / "head" / "trunk" / "leg"）
+    Returns:
+        list[str]: 支える関節の名前（":" の後ろ）
+    """
+    import mujoco as _mj
+    free = set(free or ())
+    out = []
+    for j in range(model.njnt):
+        if int(model.jnt_type[j]) != int(_mj.mjtJoint.mjJNT_HINGE):
+            continue          # 自由関節・ボール関節はバネで支えられない
+        nm = (model.joint(j).name or "").split(":")[-1]
+        if not nm:
+            continue
+        g = joint_group(nm)
+        if g in free or g == "eye":
+            continue          # ⚠️眼球は反射が動かすので、常に支えない
+        out.append(nm)
+    return out
+
+
 class CaregiverHands:
     """親が手で頭を支える。関節のバネとして表現する。
 

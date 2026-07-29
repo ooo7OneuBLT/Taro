@@ -206,6 +206,19 @@ TOY_SHAPE = os.environ.get("E_TOY_SHAPE", "box")   # box / sphere
 # 押した分だけ動いてすぐ止まる＝カーペット上のおもちゃに相当し、随伴が明確になる。
 TOY_FRICTION = np.array([1.0, 0.05, 0.02])
 
+# ★太郎の体を空間に置いている body の名前（＝自由関節がぶら下がっている body）。
+#
+# ⚠️【2026-07-29 に踏んだ】このモデルには自由関節が **3つ** ある：
+#     test_object1   おもちゃ
+#     test_object2   使っていない予備の物体（遠く (3.5, 3.0, 0.05) に置いてある）
+#     mimo_location  ★太郎の体（関節名は "mimo_orientation" で body 名と違う）
+#   「おもちゃ以外の自由関節」という選び方をすると **test_object2 を掴む**。
+#   実際、体を留めるつもりで test_object2 を留め、その間ずっと太郎は椅子から
+#   転がり落ちていた。Viewer の「仰向けに戻す」も同じ選び方をしていた。
+#   ＝落とし穴チェックリスト 項67「体を動かす自由関節は、思っている body に無い」。
+#   ⇒ 名指しで取る。見つからなければ**別のもので代用しない**。
+ROOT_BODY = "mimo_location"
+
 # --- 光るおもちゃ（随伴性を"薄まらないチャネル"に出すため）---
 # 【なぜ光らせるか】実測で、接触の反力は**固有感覚621次元に薄まって消える**ことが判明した
 #   （接触あり/なしで予測誤差 pe の効果量 d=-0.005＝差なし。腕の次元だけ見ると d=-0.22 で
@@ -1125,7 +1138,129 @@ class ToySupineEnv(SupineMimoEnv):
         if self._orienting is not None:
             # 前回描画された画像から計算済みの方向を、首・（VOR後の）目に加算する
             action = self._orienting.apply(action)
-        return super().step(action)
+        out = super().step(action)
+        self._pin_root()           # ★椅子とベルトが体を留める（実験の測定条件）
+        return out
+
+    # ------------------------------------------------------------------
+    # ★体そのものを空間に留める（2026-07-29 追加）
+    # ------------------------------------------------------------------
+    def pin_root(self, on=True, qpos=None):
+        """体全体（自由関節）を今の位置・向きに留める／解除する。
+
+        【なぜ要るか、2026-07-29】リクライニング姿勢で関節をバネで固定しても、
+        **体そのものが椅子から横へ転がり落ちた**（実測：頭が中心から23cm ずれ、
+        視線が真後ろを向いた）。関節のバネは `jnt_stiffness` を使うが、
+        体を空間に置いている自由関節（`mimo_location`）にはバネが効かないため。
+
+        【人間ではどうか】乳児用チェアは**股ベルトの装着が安全基準で義務**。
+        リーチの実験も乳児を椅子に固定して行う（von Hofsten 1982）。
+        ＝体を留めること自体は人間の実験条件をそのまま写したもの。
+
+        ⚠️ただし実装は工学的な固定（毎ステップ位置を書き戻す）であって、
+          ベルトの物理を再現したものではない。ユーザーの判断（2026-07-29）
+          「リーチングが発動するかの実験だから、関節の固定も工学的にやっていい」。
+          逸脱リストに登録すること。
+
+        Args:
+            qpos: 留める位置・向き（7要素）。None なら今の値
+        """
+        if not on:
+            self._pin_qpos = None
+            return None
+        if getattr(self, "_root_qadr", None) is None:
+            # ⚠️★【2026-07-29 に踏んだ】最初の版は関節名に "mimo_location" を含むかで
+            #   探し、見つからなければ「おもちゃ以外の自由関節」を拾う保険を付けていた。
+            #   ところが**保険がおもちゃの関節を拾い**、体ではなくおもちゃを留めていた
+            #   （実測：留めた位置が (3.5, 3.0, 0.05) ＝ おもちゃの退避位置 FAR_AWAY）。
+            #   その間、体は椅子から転がり落ち続けていた。
+            #   ＝落とし穴チェックリスト 項67「体を動かす自由関節は、思っている
+            #     body に無い」の再発。名前で当てにいかず、**体の中身で判定する**。
+            #   ⇒ 太郎の体は **body 名が "mimo_location"**（関節名は "mimo_orientation"）。
+            #     このモデルには自由関節が3つある：
+            #       test_object1  … おもちゃ
+            #       test_object2  … 使っていない予備の物体（遠くに置いてある）
+            #       mimo_location … ★太郎の体
+            #     「おもちゃ以外」で選ぶと **test_object2** を掴む。名指しで取る。
+            adr = None
+            for j in range(self.model.njnt):
+                if int(self.model.jnt_type[j]) != int(mujoco.mjtJoint.mjJNT_FREE):
+                    continue
+                bid = int(self.model.jnt_bodyid[j])
+                if (self.model.body(bid).name or "") != ROOT_BODY:
+                    continue
+                adr = int(self.model.jnt_qposadr[j])
+                self._root_dadr = int(self.model.jnt_dofadr[j])
+                self._root_bid = bid
+                break
+            self._root_qadr = adr
+            if adr is None:
+                print(f"[pin] ⚠️体（body='{ROOT_BODY}'）の自由関節が見つからない")
+                return None
+            if adr is not None:
+                p = np.array(self.data.qpos[adr:adr + 3], dtype=float)
+                bn = self.model.body(self._root_bid).name or "?"
+                # ⚠️拾った関節が本当に体か確かめる。遠くにあるなら別物を掴んでいる
+                if float(np.max(np.abs(p[:2]))) > 1.0:
+                    print(f"[pin] ⚠️体のつもりで掴んだ関節が遠くにある "
+                          f"body={bn} 位置={np.round(p, 3)}。留めるのを中止する")
+                    self._root_qadr = None
+                    return None
+                print(f"[pin] 体の自由関節: body={bn} qpos[{adr}:{adr+7}]")
+        if self._root_qadr is None:
+            print("[pin] ⚠️体の自由関節が見つからないので留められない")
+            return None
+        q = (self.data.qpos[self._root_qadr:self._root_qadr + 7].copy()
+             if qpos is None else np.asarray(qpos, dtype=float))
+        self._pin_qpos = q
+        return q
+
+    def pin_joints(self, names=None, on=True):
+        """指定した関節を「今の角度」に完全固定する（毎ステップ書き戻す）。
+
+        【なぜバネでなく書き戻しか、2026-07-29】椅子の支え（バネ 200N·m/rad）でも
+        体幹がゆっくり動き続け、リクライニング姿勢で
+          ・目が3秒で2cm動く
+          ・**VOR が頭の動きを打ち消そうとして眼球が可動域の上限（+33度）に張り付く**
+        という問題が残った。眼が上を向いたままでは視線の実験が成立しない。
+        ⇒ ユーザーの判断（2026-07-29）「体幹も固定しちゃっていいよ」により、
+          バネではなく完全固定にする。
+
+        ⚠️【逸脱】これは工学的な固定であって人間の体の性質ではない。
+          人間のリーチ実験も乳児を椅子とベルトで支えるが、体幹はわずかに動く。
+          **リーチングが発動するかを見る実験のための測定条件**であり、
+          太郎の身体の性質を主張するものではない。逸脱リストに登録すること。
+
+        Args:
+            names: 固定する関節の名前（":" の後ろ）。None なら解除
+        """
+        if not on or not names:
+            self._pin_j = None
+            return 0
+        want = set(names)
+        pins = []
+        for j in range(self.model.njnt):
+            if int(self.model.jnt_type[j]) != int(mujoco.mjtJoint.mjJNT_HINGE):
+                continue
+            nm = (self.model.joint(j).name or "").split(":")[-1]
+            if nm not in want:
+                continue
+            qadr = int(self.model.jnt_qposadr[j])
+            dof = int(self.model.jnt_dofadr[j])
+            pins.append((qadr, dof, float(self.data.qpos[qadr])))
+        self._pin_j = pins
+        return len(pins)
+
+    def _pin_root(self):
+        """留める設定があれば、毎ステップ体と指定関節を元の状態へ戻す。"""
+        q = getattr(self, "_pin_qpos", None)
+        if q is not None:
+            a = self._root_qadr
+            self.data.qpos[a:a + 7] = q
+            self.data.qvel[self._root_dadr:self._root_dadr + 6] = 0.0
+        for qadr, dof, val in (getattr(self, "_pin_j", None) or ()):
+            self.data.qpos[qadr] = val
+            self.data.qvel[dof] = 0.0
 
     def get_vision_obs(self):
         """★MIMoの壊れたgym描画を迂回し、眼球カメラを生APIで直接描画する（D側と同じ）。
