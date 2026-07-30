@@ -37,7 +37,7 @@ import numpy as np
 import torch
 
 
-def _make_key_callback(speed_ref, reset_ref=None):
+def _make_key_callback(speed_ref, reset_ref=None, extra_keys=None):
     """キー操作。★BACKSPACE（MuJoCo組み込みのリセット）を横取りする。
 
     【なぜ必要か、2026-07-25】MuJoCoのpassive viewerはBACKSPACEで `mj_resetData` を
@@ -60,6 +60,14 @@ def _make_key_callback(speed_ref, reset_ref=None):
             ch = chr(keycode)
         except ValueError:
             return
+        # ★【2026-07-30】呼び出し側が独自のキーを差し込めるようにした。
+        #   条件を切り替えながら**同じ状態のまま**見比べるため
+        #   （例：Goal Babbling の ON/OFF を1キーで往復する）。
+        #   ⚠️別プロセスで2回起動して見比べると、乱数も姿勢も違うので
+        #     「どちらが速いか」のような主観の比較が当てにならない。
+        if extra_keys and ch in extra_keys:
+            extra_keys[ch]()
+            return
         if ch in ".>":
             speed_ref[0] = min(speed_ref[0] * 2 if speed_ref[0] > 0 else 64.0, 64.0)
         elif ch in ",<":
@@ -75,10 +83,19 @@ def _make_key_callback(speed_ref, reset_ref=None):
     return _cb
 
 
-def _show_speed_overlay(viewer, speed_ref, eff):
-    """右上に速度オーバーレイ表示。d_c5 の実装から流用（3D空間でなくオーバーレイ）。"""
+def _show_speed_overlay(viewer, speed_ref, eff, status=""):
+    """右上に速度オーバーレイ表示。d_c5 の実装から流用（3D空間でなくオーバーレイ）。
+
+    ★status: 呼び出し側の状態（例 "GoalBabbling ON"）。
+      【なぜ要るか、2026-07-30】条件の ON/OFF をキーで切り替えられるようにしたが、
+      状態は print で出していたので**Viewerだけ見ているユーザーには見えなかった**。
+      ユーザー：「コンソールなんてないけど／ちゃんと機能しているのかがわからない」
+      ＝目視で評価する道具なのに、条件が画面に出ていないのは設計の欠陥。
+    """
     req = (f"x{speed_ref[0]:.4g}" if speed_ref[0] > 0 else "MAX")
     txt = f"speed {req} (real x{eff:.1f})"
+    if status:
+        txt += f" | {status}"
     if getattr(viewer, "_last_speed_txt", None) == txt:
         return
     viewer._last_speed_txt = txt
@@ -90,7 +107,7 @@ def _show_speed_overlay(viewer, speed_ref, eff):
         fig.flg_ticklabel[:] = [0, 0]
         fig.figurergba[:] = [0.0, 0.0, 0.0, 0.4]
         vp = viewer.viewport
-        w = max(int(vp.width * 0.22), 180)
+        w = max(int(vp.width * 0.34), 300)
         h = 46
         rect = mujoco.MjrRect(int(vp.width - w - 10), int(vp.height - h - 10), w, h)
         viewer.set_figures([(rect, fig)])
@@ -99,7 +116,8 @@ def _show_speed_overlay(viewer, speed_ref, eff):
 
 
 def run_viewer(env, brain, policy_fn, rescale_action, *,
-               K=100, n_act=None, reflex_fns=(), banner=""):
+               K=100, n_act=None, reflex_fns=(), banner="", extra_keys=None,
+               status_fn=None):
     """共通Viewer本体。
 
     Args:
@@ -111,6 +129,12 @@ def run_viewer(env, brain, policy_fn, rescale_action, *,
         n_act: 行動次元(reset時にprev_aを作るため)
         reflex_fns: [callable(action) -> action] のリスト。把握反射・ATNR等を差し込む
         banner: 起動時に表示するメモ(条件表示など)
+        status_fn: callable() -> str 。★毎フレーム呼ばれ、返した文字列を画面右上に
+            表示する（例 "GoalBabbling ON"）。Viewerだけ見ていても条件が分かるように
+        extra_keys: {"文字": callable()} 。★条件を切り替えながら同じ状態のまま
+            見比べるためのキー（例：Goal Babbling の ON/OFF）。
+            ⚠️別プロセスで2回起動して比べると乱数も姿勢も違うので、
+              「どちらが速いか」のような主観の比較が当てにならない
 
     環境変数：E_REALTIME, E4_CONTINUOUS, E_CTRL_M
     """
@@ -125,13 +149,15 @@ def run_viewer(env, brain, policy_fn, rescale_action, *,
 
     speed = [1.0 if realtime else 0.0]
     want_reset = [False]
-    key_cb = _make_key_callback(speed, want_reset)
+    key_cb = _make_key_callback(speed, want_reset, extra_keys=extra_keys)
 
     _ctrl_desc = f"連続制御(ctrl_m={ctrl_m})" if continuous else f"1秒ホールド(K={K})"
     print(f"\n[Viewer] {banner}  制御刻み={_ctrl_desc}  再生={'等倍' if realtime else '最速'}",
           flush=True)
     print("  キー操作: . = 速く / , = 遅く / 0 = 等倍 / M = 最速（待たない）"
           " / R or BackSpace = リセット", flush=True)
+    if extra_keys:
+        print("  ★追加キー: " + " / ".join(sorted(extra_keys)), flush=True)
 
     obs, _ = env.reset(seed=0)
     hidden = brain.init_motor_hidden()
@@ -169,7 +195,8 @@ def run_viewer(env, brain, policy_fn, rescale_action, *,
                     eff = eff_sim / (now - eff_t0)
                     eff_t0, eff_sim = now, 0.0
                 if now - t_draw >= SYNC_DT:
-                    _show_speed_overlay(viewer, speed, eff)
+                    _show_speed_overlay(viewer, speed, eff,
+                                        status=(status_fn() if status_fn else ""))
                     viewer.sync()
                     t_draw = now
                 if speed[0] > 0:

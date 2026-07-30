@@ -1,0 +1,19 @@
+{
+  "name": "リーチング：自発運動で偶然おもちゃに触れるか",
+  "note": "2026-07-30。おもちゃを右へ6cm動かしたら 0回→25回 になった実験の再現。ただし当時は関節モードだったので、筋肉モード（既定）で回し直す。",
+  "scene": "リーチング_リクライニング60度",
+  "taro": {
+    "goal_babbling": false,
+    "vor": true
+  },
+  "run": {
+    "type": "measure",
+    "steps": 6000,
+    "seed": 0,
+    "checkpoint": 600
+  },
+  "plugins": {
+    "toy_touch": true,
+    "hand_in_view": true
+  }
+}

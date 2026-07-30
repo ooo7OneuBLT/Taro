@@ -178,7 +178,23 @@ _SMOOTH = os.environ.get("E_SMOOTH", "0") == "1"
 # 太郎が自己モデルを立てられるか」の実現可能性検証。共収縮（拮抗筋の本領）はここでは入れない
 # ＝各筋を独立にexplore()の出力で駆動する最小版[Tier3・簡略化]。シナジーは90-actuator index
 # 前提なので自動でOFFにする。
-_MUSCLE = os.environ.get("E_MUSCLE", "0") == "1"
+# ★【2026-07-30 既定を反転】0（関節モード）→ 1（筋肉モード）。
+#   【なぜ】測定スクリプトは80本以上が `actuation_model=MuscleModel` を直書きし、
+#     シーン（e_scene.build）も筋肉モードが既定だったのに、**学習ループだけが
+#     既定で関節モード**だった。＝学習した太郎と、測定・Viewerで見ていた太郎が
+#     別の体だった（2026-07-30 にユーザーの目視「視線誘導反射の実験の時とは
+#     動きが全然違う／等速でも倍速みたい」で発覚。実測で動きが約3.3倍速い）。
+#   【どちらが正しいか】関節モード（90関節を独立に駆動）は
+#     **逸脱リストの「逸脱5」に登録済みの明確な人間模倣からの逸脱**
+#     （Hadders-Algra 1992［Tier1］＝新生児は拮抗筋を同時に力ませる）。
+#     逸脱リスト自身が「拮抗筋なし筋肉モードで先に進む」と判断している。
+#     過去の実測でも margin +58.8（筋肉モード）vs 今日の +25〜30（関節モード）。
+#   ⚠️関節モードを使うには **明示的に E_MUSCLE=0** と書く（＝逸脱を選ぶ意思表示）。
+#   ⚠️★既定が変わったので、E_MUSCLE を指定していない過去の実験とは条件が違う。
+_MUSCLE = os.environ.get("E_MUSCLE", "1") == "1"
+if not _MUSCLE:
+    print("⚠️[actuation] ★関節モード（90関節を独立に駆動）＝逸脱リスト 逸脱5 の逸脱を"
+          "選んでいます。人間の新生児は拮抗筋を同時に力ませる[Tier1]", flush=True)
 # 【拮抗筋co-activation】E_ANTAGONIST=1 で拮抗筋モード（要 E_MUSCLE=1）。脳は「関節レベルの
 # 指令」(n_joint次元, [-1,1]) を出し、脊髄CPG(cpg.py の antagonist_map)が2本の筋
 # (n_muscle=2*n_joint, [0,1])に写像する。共収縮の度合いは E_COACTIVATION（既定0.3、
@@ -495,10 +511,10 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
 
     if _AGE is not None:
         _age_kw = _body_kwargs_for_age(float(_AGE))
-    # ★シーン経由で作るとき、駆動モデルを**明示的に**渡すために既定を持っておく。
-    #   （e_scene.build は None を渡すと MuscleModel になるので、黙って別の体に
-    #     なるのを防ぐ。行動の次元が変わると学習済みモデルが読めなくなる）
-    from mimoActuation.actuation import SpringDamperModel as _DEFAULT_ACT
+    # ⚠️★【2026-07-30 撤回】ここで SpringDamperModel を既定として渡していた。
+    #   「学習ループの既定に合わせる」という判断だったが、それは
+    #   **学習ループの既定そのものが逸脱していた**ので、分裂を固定するだけだった。
+    #   → 駆動モデルを渡さない（None）ときは e_scene.build の既定＝筋肉モードに従う。
     _act_kw = {}
     if _MUSCLE:   # 【筋肉モデル】拮抗筋2本/関節・活性化ダイナミクス・引くだけ
         from mimoActuation.muscle import MuscleModel
@@ -534,7 +550,7 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
             sc["fingerprint"] = None      # 月齢を差し替えたので保存時の指紋とは一致しない
             env0, _hands = e_scene.build(
                 sc, orient=False, vor=True, seed=seed, verbose=False,
-                actuation_model=_act_kw.get("actuation_model", _DEFAULT_ACT))
+                actuation_model=_act_kw.get("actuation_model"))
             return HybridEnv(env0)
         if _E1:
             return HybridEnv(ToySupineEnv(vision_params=_vp, touch_params=_touch_params(),
@@ -740,6 +756,49 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
             print(f"[Viewer] 運動性喃語ON（探索）: std={_VIEW_STD} "
                   f"（学習初期の実効値≒0.174／noise=neで変動）", flush=True)
 
+        # ★【2026-07-30 追加】E_VIEW_GOALBABBLE=1 で Goal Babbling の動きを目視する。
+        #   【なぜ要るか】Goal Babbling を有効にすると、おもちゃに触れる回数が
+        #     25回→17回（7分以降0回）に減り、自己モデルも +30.7%→+17.2% に崩れた。
+        #     数字だけでは「何が起きているか」が分からない（退化を構造的に高評価する
+        #     指標があるので、必ず目で見る＝feedback-watch-dont-just-measure）。
+        #   ⚠️再生モードでは学習しないので goal_buf は空。ここで溜めながら使う。
+        #     順モデルは読み込んだまま固定なので「いまのモデルが逆算する動き」が見える。
+        #   ⚠️学習ループの切り替えは「予測誤差＋ノルアドレナリン」だが、再生では
+        #     予測誤差を計算しないので、**割合を直接指定**する（E_VIEW_GB_RATE、既定0.5＝半分）。
+        #     ＝学習ループと完全に同じ挙動ではない。動きの性質を見るための近似。
+        # ★可変にしておく＝Viewer実行中に g キーで ON/OFF を往復できる。
+        #   別プロセスで2回起動して比べると乱数も姿勢も違うので、
+        #   「どちらが速いか」のような主観の比較が当てにならない（同じ状態で切り替える）。
+        _VIEW_GB = [os.environ.get("E_VIEW_GOALBABBLE", "0") == "1"]
+        _VIEW_GB_RATE = float(os.environ.get("E_VIEW_GB_RATE", "0.5"))
+        _view_gbuf = []
+        _view_gb_stat = {"goal": 0, "explore": 0}
+
+        def _toggle_gb():
+            _VIEW_GB[0] = not _VIEW_GB[0]
+            print(f"  [GoalBabbling] {'★ON' if _VIEW_GB[0] else 'OFF'}"
+                  f"（目標指向 {_view_gb_stat['goal']} 回 / 探索 {_view_gb_stat['explore']} 回）",
+                  flush=True)
+
+        def _gb_status():
+            # ★画面右上に出す文字。Viewerだけ見ていても条件と発動回数が分かるように。
+            if not _VIEW_GB[0]:
+                return "GoalBabbling OFF"
+            n = len(_view_gbuf)
+            if n < 64:
+                return f"GoalBabbling ON (warmup {n}/64)"
+            _n = max(_view_gb_stat['goal'], 1)
+            _avg = _view_gb_stat.get('dsum', 0.0) / _n
+            return (f"GoalBabbling ON goal={_view_gb_stat['goal']} "
+                    f"dAction avg={_avg:.4f} max={_view_gb_stat.get('dmax', 0.0):.3f}")
+
+        print(f"[Viewer] Goal Babbling {'★ON' if _VIEW_GB[0] else 'OFF'}"
+              f"（目標指向の割合 {_VIEW_GB_RATE:.0%}）／目標は経験から一様ランダム"
+              f"＝学習ループと同じ選び方／★ ; か ' か / キーで切り替え", flush=True)
+        # ⚠️★g は使えない：MuJoCo の組み込みキーと衝突して「世界が暗くなる」
+        #   （BACKSPACE が mj_resetData を呼ぶのと同じ構造。落とし穴チェックリスト参照）
+        #   記号キーは組み込みで使われていないので安全側に3つ用意する。
+
         def _policy_fn(obs, prev_a, hidden, *, recompute, frac):
             # 連続制御の frac は今の学習済みモデルには使わない(policyはboundaryでのみ再計算、
             # 間は同じctrl保持)。将来 policyが frac を扱う場合はここで使う。
@@ -749,6 +808,34 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
             z, _kl, _rc, hn = zc(sv, prev_a, cf, hidden)
             z = z.detach()
             mean = act_mean(z)
+            # ⚠️★経験のバッファは**常に**溜める（ON/OFF に関係なく）。
+            #   学習ループも goal_step の外で append しているので、そちらに合わせる。
+            #   【2026-07-30 に踏んだ】ONのときだけ溜める実装にしたため、
+            #   g キーで切り替えるたびに64件たまる前にOFFになり、
+            #   **Goal Babbling が一度も発動しなかった**（ログ上は「目標指向 0 回」が続いた）。
+            #   ユーザーの「g押してもなんも変わってない気がする」で発覚。
+            _clp = ln_prop(obs).detach()
+            _view_gbuf.append(_clp)
+            if len(_view_gbuf) > 2000:
+                _view_gbuf.pop(0)
+            if _VIEW_GB[0]:
+                if len(_view_gbuf) >= 64 and torch.rand(1).item() < _VIEW_GB_RATE:
+                    g = _view_gbuf[torch.randint(len(_view_gbuf), (1,)).item()]
+                    # ★行動をどれだけ変えたかを測る。ユーザーの目視
+                    #   「ONにしてもOFFでも動きが全く変わらない」を数値で確かめるため。
+                    #   Goal Babbling が発動していても mean がほぼ動かないなら、
+                    #   順モデルの反転が効いていない（調査④の仮説：反転が的外れ）。
+                    _before = mean.detach().clone()
+                    mean = infer_goal_action(z, _clp, mean, g)
+                    _d = float((mean - _before).abs().mean())
+                    _view_gb_stat["dsum"] = _view_gb_stat.get("dsum", 0.0) + _d
+                    _view_gb_stat["dmax"] = max(_view_gb_stat.get("dmax", 0.0), _d)
+                    _view_gb_stat["goal"] += 1
+                else:
+                    _view_gb_stat["explore"] += 1
+                if sum(_view_gb_stat.values()) % 100 == 0:
+                    print(f"[Viewer] 目標指向 {_view_gb_stat['goal']} 回 / "
+                          f"探索 {_view_gb_stat['explore']} 回", flush=True)
             if _VIEW_EXPLORE:
                 a, _lp = brain.explore(mean, torch.full_like(mean, _VIEW_STD))
                 return a.detach(), hn.detach()
@@ -757,7 +844,9 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
 
         banner = f"E_LOADMODEL={os.path.basename(_LOADMODEL) if _LOADMODEL else '(白紙)'}"
         run_viewer(env, brain, _policy_fn, rescale_action,
-                   K=K, n_act=n_act, banner=banner)
+                   K=K, n_act=n_act, banner=banner,
+                   extra_keys={";": _toggle_gb, "'": _toggle_gb, "/": _toggle_gb},
+                   status_fn=_gb_status)
         return  # 再生モードは学習・保存・録画に進まない
 
     # 【姿勢の測定・2026-07-25】E_MEASURE_POSTURE=1 で、学習せず**学習済みモデルの姿勢**を測る。
@@ -1001,6 +1090,9 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
         #   学習が途中で落ちる。上付き2・絵文字で実際に2回踏んだ）。
         if caps_accum:
             act_tag += f" da2={np.mean(caps_accum[-200:]):.4f}(lam={_CAPS})"
+        # ★おもちゃへの接触（リーチングの主指標）。通しの累積なので毎回同じ形で出る。
+        if _touch_probe is not None:
+            act_tag += " " + _touch_probe.line(K * DT)
         print(f"[AC seed{seed} rew={_REWARD} ne={'rel' if _NE_REL else 'abs'} touch={_TOUCH_MODE if _TOUCH else 'off'}] life={life_min:.0f}min | classify={cl:.1f}% margin={mg:+.1f}% "
               f"corr={co:.3f} persist={pr:.1f}% agency={ag:.1f}%(mag {magr:.0f}%) | "
               f"noise={noise:.3f}(mat={ne.maturation:.2f}){cereb_tag}{act_tag} real={real_min:.0f}min", flush=True)
@@ -1020,6 +1112,16 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
     _lp = LearningProgress()
     pe_fast, pe_slow = _lp.pe_fast, _lp.pe_slow
     hv = {"hit": 0, "tot": 0}    # ★E1：手が視野内だったtickの数（checkpointごとにリセット）
+    # ★【2026-07-30】おもちゃに手が触れた回数（リーチングの主指標）。
+    #   ⚠️hv と違い**通しの累積**にする。リーチングは希少な事象で、
+    #     区間ごとにリセットすると「0回」が並ぶだけで推移が読めない。
+    _touch_probe = None
+    if _E1:
+        from e_toy_touch import ToyTouchProbe
+        _touch_probe = ToyTouchProbe(env.unwrapped.model, env.unwrapped.data)
+        if not _touch_probe.ok:
+            print("[toy_touch] おもちゃが無い環境＝接触は測らない", flush=True)
+            _touch_probe = None
     mj = env.unwrapped           # モデル/データへの参照（hand_in_view_rate 用）
     reach_goal, reach_prev_dist = None, 0.0  # 閉ループreaching訓練：保持中の目標と直前の距離
 
@@ -1136,6 +1238,10 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
         if _E1:      # ★E1：手が視野に入っているかを毎tick数える（記録のみ。報酬には効かない）
             hv["hit"] += hand_in_view_rate(mj.model, mj.data)
             hv["tot"] += 1
+            # ★【2026-07-30】おもちゃに手が触れたかも数える（記録のみ）。
+            #   リーチングが起きたかの主指標。判定の実体は e_toy_touch.py に一本化。
+            if _touch_probe is not None:
+                _touch_probe.update(mj.model, mj.data)
         pe = block_pe(pred, nlp)   # ★次元数の影響を除く（段階1）
         # 【2026-07-25】学習進度を太郎の中（core: brain/learning_progress.py）へ一元化。
         # 旧実装は同じ式・同じ時定数(0.9/0.99)を3ファイルにコピペ＝数値は完全に同一。
