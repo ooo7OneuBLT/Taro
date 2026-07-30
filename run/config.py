@@ -42,6 +42,11 @@ TARO_DEFAULTS = {
     "touch_mode":    ("target", "触覚を予測対象にするか input/target", "E_TOUCH_MODE"),
     "somatosensory": (False, "触覚を視床VPL+S1相当の経路にする", "E_SOMATOSENSORY"),
     "vision":        (True, "視覚を入力に入れる", "E_E1_VISION"),
+    # ★反射。シーンを組むときに渡す（run/plugins/common/scene.py が読む）。
+    #   ⚠️ここに無いと measure では使えて train/view では弾かれる、という
+    #     非対称が起きる（2026-07-30 の点検で発覚）。
+    "vor":           (True, "前庭動眼反射（頭が動いても視線を保つ）", None),
+    "orienting_reflex": (False, "視線誘導反射（動くものへ目を向ける）", None),
     # 予測対象。"0"=固有感覚のみ／"vision"=+視覚／"all"=+前庭+触覚+視覚
     "target":        ("0", "予測対象 0/vision/all", "E_E1_TARGET"),
     "lam_v":         (1.0, "視覚ブロックの重み[Tier3]", "E_LAM_V"),
@@ -161,9 +166,18 @@ class Config:
                 taro[key] = int(v)
             else:
                 taro[key] = v if v != "" else None
+        # ⚠️★既定値の型で分ける。全部 int() にすると E_VIEW_STD=0.174 で落ちる
+        #   （2026-07-30 の点検で発覚）。
         for key, (dflt, _doc, envname) in RUN_DEFAULTS.items():
-            if envname and envname in os.environ:
-                run[key] = int(os.environ[envname])
+            if not envname or envname not in os.environ:
+                continue
+            v = os.environ[envname]
+            if isinstance(dflt, bool):
+                run[key] = (v == "1")
+            elif isinstance(dflt, float):
+                run[key] = float(v)
+            else:
+                run[key] = int(v)
         if os.environ.get("E_SCENE"):
             return cls(taro, run, scene=os.environ["E_SCENE"])
         return cls(taro, run)
@@ -171,11 +185,25 @@ class Config:
     # ------------------------------------------------------------ 確かめる
     def _check(self):
         """組み合わせとして成り立たない設定をここで止める。"""
-        if str(self.actuation).lower() not in ("muscle", "joint", "spring",
+        # ⚠️語彙は run/plugins/common/scene.py と★同じにする（片方だけ通ると
+        #   measure では動いて train では弾かれる、という非対称になる）
+        if str(self.actuation).lower() not in ("muscle", "muscles", "joint", "spring",
                                                "springdamper", "torque"):
             raise ValueError(f"actuation が不明: {self.actuation}（muscle / joint）")
         if self.antagonist and not self.is_muscle:
             raise ValueError("antagonist（拮抗筋モード）は actuation=muscle が要る")
+        # ★体を育てる設定なのに育たない組み合わせを止める。
+        #   【なぜ、2026-07-30】`age_every<=0` だと月齢を見直す処理が**一度も走らない**のに、
+        #     起動時には「月齢 0.0 → 4.0」と表示される＝典型的な「黙って壊れる」。
+        if self.age_to is not None and self.age_every <= 0:
+            raise ValueError(
+                f"★age_to={self.age_to} を指定しているのに age_every={self.age_every} です。\n"
+                "  age_every は「何回ごとに月齢を見直すか」なので、0以下だと\n"
+                "  **体が一度も育たないまま**学習が終わります（既定は500）。")
+        if self.age_to is not None and self.age_start >= self.steps:
+            raise ValueError(
+                f"★age_start={self.age_start} が steps={self.steps} 以上です。\n"
+                "  月齢を変え始める前に学習が終わるので、**体が育ちません**。")
         # ⚠️触覚ONで体を育てると観測次元がずれて黙って壊れる（落とし穴 項75）
         if self.touch and self.age_to is not None:
             raise ValueError(
@@ -198,7 +226,7 @@ class Config:
     # ---------------------------------------------------------- 便利な読み
     @property
     def is_muscle(self):
-        return str(self.actuation).lower() == "muscle"
+        return str(self.actuation).lower() in ("muscle", "muscles", "")
 
     @property
     def target_kind(self):

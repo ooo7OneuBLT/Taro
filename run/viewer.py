@@ -32,7 +32,19 @@ def view(cfg, *, plugins=(), verbose=True):
     """学習済みの太郎を等倍速で動かして見る。★学習しない。"""
     from motor_viewer import run_viewer
 
-    tr = Trainer(cfg, plugins=plugins, verbose=verbose).build()
+    # ★プラグインは受け取らない。目視のループは `motor_viewer.run_viewer` が回すので、
+    #   on_step / on_checkpoint が**一度も呼ばれない**。
+    #   ⚠️黙って「0件」のまま終わると「測ったつもり」になるので、ここで止める。
+    #     （2026-07-30 の点検で発覚。統合は第4段階＝E/docs/実行基盤_設計.md §7）
+    if plugins:
+        raise ValueError(
+            "★run.type=view では測る道具（plugins）は使えません。\n"
+            f"  指定されたもの: {[p.name for p in plugins]}\n"
+            "  目視のループは motor_viewer が回すので on_step が呼ばれず、\n"
+            "  **黙って何も測らないまま終わる**ため止めています。\n"
+            "  測るなら run.type=train を使ってください（統合は第4段階）。")
+
+    tr = Trainer(cfg, plugins=(), verbose=verbose).build()
     t, env = tr.taro, tr.env
     if not cfg.model:
         print("⚠️[view] ★モデルを指定していない＝白紙の脳を見ています"
@@ -99,9 +111,12 @@ def view(cfg, *, plugins=(), verbose=True):
     banner = f"model={os.path.basename(cfg.model) if cfg.model else '(白紙)'}"
     # ⚠️★g は使えない：MuJoCo の組み込みキーと衝突して「世界が暗くなる」。
     #   記号キーは組み込みで使われていないので安全側に3つ用意する。
-    run_viewer(env, t.brain, policy_fn, rescale_action,
-               K=cfg.K, n_act=t.n_act, banner=banner,
-               extra_keys={";": _toggle, "'": _toggle, "/": _toggle},
-               status_fn=_status)
-    env.close()
+    from run.trainer import close_env
+    try:
+        run_viewer(env, t.brain, policy_fn, rescale_action,
+                   K=cfg.K, n_act=t.n_act, banner=banner,
+                   extra_keys={";": _toggle, "'": _toggle, "/": _toggle},
+                   status_fn=_status)
+    finally:
+        close_env(env)      # ⚠️窓を閉じても例外が出ても必ず片づける
     return {"note": "目視（学習していない）"}

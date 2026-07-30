@@ -196,6 +196,18 @@ class Taro:
         self.fusion.insula.load_state_dict(blob["fusion_insula"])
         self.fusion.proprio.load_state_dict(blob["fusion_proprio"])
         self.fusion.vestibular.load_state_dict(blob["fusion_vestibular"])
+        # ★触覚のエンコーダ。save は保存していたのに**読み戻していなかった**
+        #   （2026-07-30 の点検で発覚）。黙って白紙に戻るので、
+        #   「続きから学習できている」ように見えて触覚だけ学習しなおしになる。
+        if "fusion_touch" in blob:
+            if self.fusion.touch is not None:
+                _match(self.fusion.touch, blob["fusion_touch"], "触覚")
+            else:
+                print("⚠️[load] 保存されたモデルは★触覚あり、いまの設定は触覚なしです。"
+                      "触覚のエンコーダは読み込みません（taro.touch を確認）", flush=True)
+        elif self.fusion.touch is not None:
+            print("⚠️[load] いまの設定は★触覚ありですが、保存されたモデルに触覚が"
+                  "ありません。触覚のエンコーダは白紙から学習します", flush=True)
         if "emb_proj" in blob:
             print("  [注意] 旧形式のチェックポイント（emb_proj/nat_head が別層）です。"
                   "層の構成が変わったため、その2層は読み込まれません＝学習しなおしになります。",

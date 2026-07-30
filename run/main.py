@@ -57,9 +57,11 @@ def _register():
     from run.plugins.common.toy_touch import ToyTouch
     from run.plugins.common.hand_in_view import HandInView
     from run.plugins.common.self_model import SelfModel
+    from run.plugins.common.trace import Trace
     PLUGINS["toy_touch"] = ToyTouch
     PLUGINS["hand_in_view"] = HandInView
     PLUGINS["self_model"] = SelfModel
+    PLUGINS["trace"] = Trace       # ★内部の値の指紋を残す（原因追跡用）
     # ⚠️self_model は★太郎の脳が要る（run.type=train）。脳側との接続は第2段階。
     #   いまの train は e_growth_train を包んでいるので、測定はそちらで行われる。
 
@@ -200,7 +202,9 @@ def run(spec, *, steps_override=None, verbose=False):
         if rep:
             out[p.name] = rep
             print(f"  {p.name}: {json.dumps(rep, ensure_ascii=False)}")
-    env.close()
+    # ⚠️閉じ損ねると MuJoCo の描画コンテキストが残り、次の実行が不安定になる
+    from run.trainer import close_env
+    close_env(env)
     return out
 
 
