@@ -281,7 +281,7 @@ def save(scene, name=None, env=None, hands=None, settle_seconds=3.0,
 # ============================================================================
 # 組み立て（ここでしか環境を作らない）
 # ============================================================================
-def build(scene, orient=None, vor=True, seed=0, verbose=False):
+def build(scene, orient=None, vor=True, seed=0, verbose=False, actuation_model=None):
     """シーンから環境を作る。**組み立てはここだけ**。
 
     Args:
@@ -289,6 +289,14 @@ def build(scene, orient=None, vor=True, seed=0, verbose=False):
         orient: 視線誘導反射のON/OFF（実験の条件なのでシーンには入れない）
         vor: 前庭動眼反射のON/OFF（同上）
         seed: リセットの乱数の種（同上）
+        actuation_model: 筋の駆動モデル。★None なら MuscleModel（従来どおり）。
+            【なぜ渡せるようにしたか、2026-07-30】学習ループ
+            （`e_growth_train.py`）は既定で SpringDamperModel を使うのに、
+            ここが MuscleModel 固定だったため、シーンで学習しようとすると
+            **行動の次元が食い違って学習済みモデルを読み込めなかった**。
+            ⚠️駆動モデルは「体の性質」なので本来シーンに入れるべきだが、
+            既存シーン3つを壊さないため、まず引数で受ける形にした。
+            → やることリストに「シーンに actuation を入れる」を積むこと。
     Returns:
         (env, hands)  hands は実験者の手。使わない設定なら None
     """
@@ -327,7 +335,9 @@ def build(scene, orient=None, vor=True, seed=0, verbose=False):
 
     import e_toy_env as TE
     import infant_body as IB
-    from mimoActuation.muscle import MuscleModel
+    if actuation_model is None:      # 既定は従来どおり MuscleModel
+        from mimoActuation.muscle import MuscleModel
+        actuation_model = MuscleModel
 
     TE.RECLINE_DEG = float(w["recline_deg"])
     TE.SEAT_FRICTION = float(w["seat_friction"])
@@ -356,7 +366,7 @@ def build(scene, orient=None, vor=True, seed=0, verbose=False):
     ctx = contextlib.nullcontext() if verbose else contextlib.redirect_stdout(buf)
     with ctx:
         env = TE.ToySupineEnv(
-            actuation_model=MuscleModel,
+            actuation_model=actuation_model,
             vision_params=TE.infant_vision_params(acuity_age=b["age_months"]),
             age=float(b["age_months"]),
             toy=bool(toy["enabled"]),

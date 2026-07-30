@@ -56,11 +56,38 @@
    ⇒ 対処は**制御側**（体幹の分節化を新生児期は制限する）。
    詳細は `doc/人間模倣からの逸脱リスト.md` 2026-07-25続き14。
 """
+import json
+import os
+
 import numpy as np
 
 G = 9.81
 REFERENCE_AGE = 18.0        # 比の目標にする月齢（＝この月齢と同じ相対強度まで下げる）
-_CACHE = {}                 # 参照月齢の比。環境構築が重いので月齢ごとに1回だけ測る
+_CACHE = {}                 # 参照月齢の比。プロセス内で1回だけ読む
+
+# ★★【2026-07-29 重大なバグの修正】基準を「その場で測る」のをやめ、保存した値を読む。
+#
+# 【何が起きていたか】この基準は「素の18ヶ月の体」の比でなければならないのに、
+#   以前は apply_limb_inversion_fix の中で **裏に18ヶ月の体を1体作って測って**いた。
+#   ところがそれが呼ばれるのは「太郎の体を作っている最中」＝新生児の体型補正
+#   （手0.70倍・脚0.80倍…）が既に効いた状態で、その補正が裏の18ヶ月の体にも漏れていた。
+#   実測（2026-07-29）：
+#       何も作らずに測った基準            median = 64.00   ← ★正しい
+#       age=4.0 の体を作る途中で測った基準  median = 64.00   （体型補正が無いので無事）
+#       age=0.0 の体を作る途中で測った基準  median = 135.93  ← ★2.1倍ずれ
+#   結果、**0〜3ヶ月の太郎は79個中31個しか筋力を下げられていなかった**
+#   （＝自分の体に対して2倍強い腕を持っていた＝この補正が直そうとした
+#     「発達の向きの逆転」が、新生児でだけ直っていなかった）。
+#
+# 【なぜ定数（保存値）にするか】
+#   ・測る時点の状態に依存しない＝**汚染されない**
+#   ・体を1体作るたびに裏でもう1体作らずに済む（段階的成長で36回作り直すと36体分の無駄）
+#   ・値がファイルに見える＝後から検証・議論できる
+# ⚠️体の定義（体型・質量・関節）を変えたら**基準も測り直す**必要がある。
+#   照合と再生成： `.venv/Scripts/python.exe taro_core/tools/measure_limb_reference.py`
+#   （--update で更新。何も付けなければ保存値と実測を比べるだけ）
+_REF_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                         "limb_reference_18mo.json")
 
 
 def _descendants(model, bid):
@@ -98,15 +125,39 @@ def actuator_ratios(model, data, actuation_model=None):
     return out
 
 
-def _reference_ratios(age_ref):
-    """参照月齢のモデルを1度だけ作り、各アクチュエータの比を測ってキャッシュする。"""
-    if age_ref in _CACHE:
-        return _CACHE[age_ref]
+def measure_reference_ratios(age_ref=REFERENCE_AGE):
+    """参照月齢の素の体を作って比を測る。
+
+    ⚠️★**他の体を1体も作っていない状態で呼ぶこと**。新生児の体型補正が効いた後に
+      呼ぶと、その補正がここで作る体にも漏れて基準が2倍ずれる（上の説明を参照）。
+      通常の実行から呼んではいけない。基準を作り直す tools からだけ呼ぶ。
+    """
     from d_supine_env import SupineMimoEnv     # 循環importを避けるため関数内で
     env = SupineMimoEnv(vision_params=None, age=age_ref)
     env.reset(seed=0)
-    _CACHE[age_ref] = {k: v[2] for k, v in actuator_ratios(env.model, env.data).items()}
+    out = {k: v[2] for k, v in actuator_ratios(env.model, env.data).items()}
     env.close()
+    return out
+
+
+def _reference_ratios(age_ref):
+    """保存してある基準（素の18ヶ月の体の比）を読む。★測り直さない。"""
+    if age_ref in _CACHE:
+        return _CACHE[age_ref]
+    if not os.path.exists(_REF_PATH):
+        raise FileNotFoundError(
+            f"四肢の筋力補正の基準がない: {_REF_PATH}\n"
+            "  作る: .venv/Scripts/python.exe taro_core/tools/measure_limb_reference.py --update\n"
+            "  ⚠️その場で測る実装に戻してはいけない（新生児の体型補正が漏れて基準が2.1倍ずれる）")
+    blob = json.load(open(_REF_PATH, encoding="utf-8"))
+    if abs(float(blob["age"]) - float(age_ref)) > 1e-9:
+        raise ValueError(f"基準の月齢が違う: 保存={blob['age']} 要求={age_ref}。"
+                         "measure_limb_reference.py --update で作り直すこと")
+    _CACHE[age_ref] = {k: float(v) for k, v in blob["ratios"].items()}
+    _vals = list(_CACHE[age_ref].values())
+    print("[limbs-ref] age=%.1f の基準比 median=%.2f n=%d （保存値を使用: %s）" %
+          (age_ref, float(np.median(_vals)), len(_vals),
+           os.path.basename(_REF_PATH)), flush=True)
     return _CACHE[age_ref]
 
 

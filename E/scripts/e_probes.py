@@ -45,8 +45,13 @@ class ProbeContext:
         # 拮抗筋モードでは policy(n_joint) を先に brain.to_env_action で n_env_act に写像する
         # 必要があるので、probe が env.step 前に必ず呼ぶラッパを提供する（拮抗筋OFFなら
         # to_env_action は恒等＝従来と1バイト差なし）。
+        # ⚠️【2026-07-29】ここは以前 引数の `env` を直接捕まえていた。学習の途中で
+        #   体を作り直す（月齢を進める）と env が差し替わるのに、この閉じ込めた env だけが
+        #   古いまま残り、**測定器が古い体で action を作る**ことになる。
+        #   → `self.env` を見る形にして、ctx.env の差し替えに追従させる。
+        #   （差し替えない従来の使い方では self.env は同一オブジェクトなので挙動は不変）
         def _to_env_ctrl(policy_action):
-            return rescale_action(brain.to_env_action(policy_action), env.action_space)
+            return rescale_action(brain.to_env_action(policy_action), self.env.action_space)
         self.rescale_action = rescale_action
         self._to_env_ctrl = _to_env_ctrl
         self.zc = zc

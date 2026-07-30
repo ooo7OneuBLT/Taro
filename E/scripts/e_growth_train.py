@@ -98,6 +98,66 @@ _LOADMODEL = os.environ.get("E_LOADMODEL", "")
 # 【taro-C5】体の月齢（成長モジュール）。0〜24。空=デフォルト18ヶ月児。envのage引数に渡すと
 # MIMoが adjust_mimo_to_age で体格・体重・筋力を実乳児データに合わせて自動調整（構造=関節数は不変）。
 _AGE = os.environ.get("E_AGE", "")
+# ★【2026-07-29】学習を止めずに体を育てる（＝プロセスを分けない成長）。
+#
+# 【なぜ要るか】これまで「0ヶ月で学ぶ → 保存 → 別プロセスで4ヶ月として読み込み」で
+#   体を切り替えていた。ところが保存されるのは**脳の重みだけ**で、
+#   オプティマイザの状態・経験バッファ(goal_buf)・馴化などの内部状態は消える
+#   （落とし穴チェックリスト 項75）。段階的成長を「9回保存・読み込み」で作ると、
+#   その条件だけ内部状態が8回消える＝**載せ替え回数が交絡になる**。
+#   → 同じプロセスの中で env だけ作り直す。脳・オプティマイザ・バッファは
+#     Python の変数のまま残るので、何回体を変えても消えるものが無い。
+#
+# 【使い方】3条件がこの4つの変数だけで書ける（総学習回数 18000 の例）：
+#   ずっと4ヶ月    E_AGE=4.0                                   （体の作り直し 0回）
+#   急に変える     E_AGE=0.0 E_AGE_TO=4.0 E_AGE_START=12000    （1回）
+#   なめらか       E_AGE=0.0 E_AGE_TO=4.0 E_AGE_RAMP=18000     （E_AGE_EVERY ごと）
+#
+# ⚠️E_AGE_TO が空なら月齢は動かない＝**従来と完全に同じ動作**（既存実験は壊れない）。
+# ⚠️触覚ONでは使えない：センサ点が月齢で変わり(0ヶ月1734→4ヶ月4274)、観測の次元が
+#   変わって脳の入力層と合わなくなる。下の assert で止める（既知の構造的限界）。
+# ★【2026-07-30】シーンから環境を作る。空なら従来どおり環境変数で組み立てる。
+#   E_SCENE=リーチング_リクライニング60度 のように名前で指定する（E/scenes/*.json）。
+_SCENE_NAME = os.environ.get("E_SCENE", "")
+if _SCENE_NAME:
+    # シーンは体の月齢（body.age_months）を持っているので、E_AGE を書かずに済ませる。
+    # ⚠️E_AGE も指定されている場合はそちらを使う（E_AGE_TO で月齢を動かす実験では
+    #   開始月齢がシーンと違って当たり前なので、止めずに**食い違いを知らせるだけ**にする）。
+    _sp = os.path.join(_BRIDGE, "scenes", _SCENE_NAME + ".json")
+    if not os.path.exists(_sp):
+        raise FileNotFoundError(f"シーンが見つからない: {_sp}\n"
+                                f"  一覧: {os.path.join(_BRIDGE, 'scenes')}")
+    import json as _json
+    _scene_age = float(_json.load(open(_sp, encoding="utf-8"))["body"]["age_months"])
+    if not _AGE:
+        _AGE = repr(_scene_age)
+        print(f"[scene] 月齢をシーンから取得: {_scene_age}ヶ月"
+              f"（E_AGE 未指定／シーン={_SCENE_NAME}）", flush=True)
+    elif abs(float(_AGE) - _scene_age) > 1e-9:
+        print(f"⚠️[scene] 月齢が食い違う: E_AGE={_AGE} / シーン={_scene_age}"
+              f" → ★E_AGE を使う（体を育てる実験なら正常）", flush=True)
+_AGE_TO = os.environ.get("E_AGE_TO", "")            # 終わりの月齢。空=変えない
+_AGE_START = int(os.environ.get("E_AGE_START", "0"))    # 何回目から変え始めるか
+_AGE_RAMP = int(os.environ.get("E_AGE_RAMP", "0"))      # 何回かけて変えるか。0=一瞬で
+_AGE_EVERY = int(os.environ.get("E_AGE_EVERY", "500"))  # 何回ごとに月齢を見直すか
+
+
+def age_at(step, n_train):
+    """学習が step 回進んだ時点の月齢。E_AGE_TO が空なら常に E_AGE のまま。
+
+    ⚠️[Tier3] 月齢を学習回数の**線形**で進めることに直接の根拠は無い。
+      taro_core 側の体の補正（taper_weight / target_ratio_for_age）が線形なのに
+      合わせてある。主張できるのは「崖が無い」ことだけ。
+    """
+    if not _AGE_TO:
+        return float(_AGE) if _AGE else None
+    a0, a1 = float(_AGE or 0.0), float(_AGE_TO)
+    if _AGE_RAMP <= 0:                       # 一瞬で切り替える（＝「急に変える」条件）
+        return a1 if step >= _AGE_START else a0
+    f = (step - _AGE_START) / float(_AGE_RAMP)
+    return a0 + (a1 - a0) * max(0.0, min(1.0, f))
+
+
 # 【目標E・運動性喃語（脊髄CPG）】既定 white＝白色ガウス探索＝従来と数値完全一致。
 # colored で太郎の脊髄CPG（色付きノイズ1/f^β＋粗いシナジー）を有効化し、探索そのものを
 # 人間の新生児らしくする。βやシナジーは d_c5_motor_quality.py と同じ意味。探索の性質は
@@ -407,21 +467,38 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
     #   → ★入口を使う形に統一する。以後、身体の引数が増えてもここは直さなくてよい。
     #   ⚠️条件を振る実験をしたら **同じシードの2条件でモデルの重みが違うことを必ず確認する**
     #     （E/scripts/e_condition_check.py。チェックリスト項43）。
-    if _AGE is not None:
+    # ★【2026-07-29】月齢から体の引数を組み立てる部分を関数にした。学習の途中で
+    #   体を作り直す（age_at で月齢を進める）ときに、**同じ組み立てを使い回す**ため。
+    #   ⚠️ここを2箇所に書くと、片方だけ引数が増えて条件が食い違う（実際に2026-07-25 に
+    #     `body_scale_custom_from_env` を個別に呼んでいたせいで感度分析が無効になった）。
+    def _body_kwargs_for_age(age):
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         from e_body_config import body_kwargs_from_env, shape_enabled
-        _bk = body_kwargs_from_env(float(_AGE))
+        kw = {"age": float(age)}
+        bk = body_kwargs_from_env(float(age))
         if not shape_enabled():
             # E_SHAPE=0＝素のmimoGrowth体型（アブレーション／過去実験の再現）。
             # ⚠️旧版はこの print が別の条件の else に付いていたため、おもちゃ環境では
             #   補正が効いているのに「補正OFF」と**誤表示**していた。
-            _bk.pop("custom_measurements", None)
-            _bk["head_elongation"] = 1.0
+            bk.pop("custom_measurements", None)
+            bk["head_elongation"] = 1.0
             print("[body] 体型補正OFF（E_SHAPE=0）＝素のmimoGrowth体型", flush=True)
         if not _SUPINE:
             # おもちゃ環境（ToySupineEnv）は自前で楕円化するので渡さない（二重適用を防ぐ）。
-            _bk["head_elongation"] = 1.0
-        _age_kw.update(_bk)
+            bk["head_elongation"] = 1.0
+        kw.update(bk)
+        # ★体を作り直す実験では「同じ月齢なら同じ引数か」が生命線なので必ず出す
+        print("[body-kw] age=%s: %s custom=%s" % (
+            age, {k: v for k, v in kw.items() if k != "custom_measurements"},
+            bool(kw.get("custom_measurements"))), flush=True)
+        return kw
+
+    if _AGE is not None:
+        _age_kw = _body_kwargs_for_age(float(_AGE))
+    # ★シーン経由で作るとき、駆動モデルを**明示的に**渡すために既定を持っておく。
+    #   （e_scene.build は None を渡すと MuscleModel になるので、黙って別の体に
+    #     なるのを防ぐ。行動の次元が変わると学習済みモデルが読めなくなる）
+    from mimoActuation.actuation import SpringDamperModel as _DEFAULT_ACT
     _act_kw = {}
     if _MUSCLE:   # 【筋肉モデル】拮抗筋2本/関節・活性化ダイナミクス・引くだけ
         from mimoActuation.muscle import MuscleModel
@@ -437,13 +514,38 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
         from e_toy_env import ToySupineEnv, infant_vision_params, VISION_RES
         _vp = infant_vision_params() if _E1_VISION else None
         _vres = VISION_RES if _E1_VISION else 0
-        env = HybridEnv(ToySupineEnv(vision_params=_vp, touch_params=_touch_params(),
-                                     **_age_kw, **_act_kw))
+
+    # ★【2026-07-29】環境を作る部分も関数に。学習の途中で体を作り直すときに使い回す。
+    #
+    # ★【2026-07-30 追加】E_SCENE でシーンから環境を作れるようにした。
+    #   【なぜ要るか】学習ループは環境変数だけで環境を組み立てていたので、
+    #     リクライニング角・椅子の固定・四肢の筋緊張・おもちゃの位置が**指定できず**、
+    #     太郎は常に「平らな床に仰向け」でしか学習できなかった。
+    #     ＝リーチング実験（リクライニング60度）を学習ループで回せなかった。
+    #   ⚠️E_SCENE が空なら従来と完全に同じ動作（既存実験は壊れない）。
+    #   ⚠️月齢はシーンの age_months ではなく**学習ループ側の月齢**で上書きする。
+    #     体を育てる（E_AGE_TO）と月齢が学習中に変わるため、シーンの固定値では合わない。
+    #     ＝シーンは「月齢以外の環境」を担い、月齢は成長スケジュールが担う。
+    def _make_env(age_kw):
+        if _SCENE_NAME:
+            import e_scene
+            sc = e_scene.load(_SCENE_NAME)
+            sc["body"]["age_months"] = float(age_kw.get("age", sc["body"]["age_months"]))
+            sc["fingerprint"] = None      # 月齢を差し替えたので保存時の指紋とは一致しない
+            env0, _hands = e_scene.build(
+                sc, orient=False, vor=True, seed=seed, verbose=False,
+                actuation_model=_act_kw.get("actuation_model", _DEFAULT_ACT))
+            return HybridEnv(env0)
+        if _E1:
+            return HybridEnv(ToySupineEnv(vision_params=_vp, touch_params=_touch_params(),
+                                          **age_kw, **_act_kw))
+        return HybridEnv(gym.make(_ENV_ID, vision_params=None, touch_params=_touch_params(),
+                                  **age_kw, **_act_kw))
+
+    env = _make_env(_age_kw)
+    if _E1:
         print(f"[E1] 環境=ToySupineEnv／視覚={'ON' if _E1_VISION else 'OFF'}"
               f"／視覚を予測対象に={'YES(段階2)' if _E1_TARGET else 'NO(段階1)'}")
-    else:
-        env = HybridEnv(gym.make(_ENV_ID, vision_params=None, touch_params=_touch_params(),
-                                 **_age_kw, **_act_kw))
     # 触覚の次元数は「センサ点の総数」＝モデル構築時点で確定しており、reset不要で取れる。
     # ここで touch_dim を知るために env.reset() を足すと**乱数を1回余計に消費して学習の
     # 乱数列がずれる**（落とし穴チェック項3）。触覚なし条件が従来のCと比較不能になるので厳禁。
@@ -943,8 +1045,40 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
             torch.nn.utils.clip_grad_norm_(learner.brain.parameters(), learner.grad_clip)
             learner.optimizer.step()
 
+    # ★【2026-07-29】体を育てる：保存を挟まずに env だけ作り直す。
+    #   脳(brain/fusion/cereb)・オプティマイザ・経験バッファ(goal_buf)・馴化は
+    #   Python の変数のまま残る＝**何回体を変えても内部状態は消えない**（項75）。
+    _cur_age = age_at(0, n_train)
+
+    def _regrow(new_age):
+        nonlocal env
+        old = (int(env.observation_space["observation"].shape[0]),
+               int(env.action_space.shape[0]))
+        env.close()
+        env = _make_env(_body_kwargs_for_age(new_age))
+        new = (int(env.observation_space["observation"].shape[0]),
+               int(env.action_space.shape[0]))
+        # ⚠️触覚ONではセンサ点が月齢で変わる（0ヶ月1734→4ヶ月4274）ので次元が合わなくなる。
+        #   黙って壊れると「体を育てたのに学習が進まない」と読み違えるので、ここで止める。
+        assert old == new, (f"体を作り直したら観測/行動の次元が変わった {old} -> {new}。"
+                            "触覚ONではこの方式は使えない（落とし穴チェックリスト 項75）")
+        ctx.env = env          # 測定器も新しい体を見る（e_probes の _to_env_ctrl は self.env 参照）
+        reset_state()          # 新しい体で立て直す。脳の重みと経験は保持されたまま
+
+    if _AGE_TO:
+        print(f"[body-growth] 月齢 {float(_AGE or 0.0)} → {float(_AGE_TO)}／"
+              f"開始{_AGE_START}回目・{_AGE_RAMP or '一瞬'}回かけて・{_AGE_EVERY}回ごとに見直し",
+              flush=True)
+
     checkpoint(0)
     for i in range(n_train):
+        # 体を育てる（E_AGE_TO 未指定なら何もしない＝従来と完全に同じ）
+        if _AGE_TO and _AGE_EVERY > 0 and i > 0 and i % _AGE_EVERY == 0:
+            _na = age_at(i, n_train)
+            if abs(_na - _cur_age) > 1e-9:
+                _regrow(_na)
+                print(f"[body-growth] {i}回目：月齢 {_cur_age:.3f} → {_na:.3f} ヶ月", flush=True)
+                _cur_age = _na
         sv = fusion.encode(state["obs"]); cf = target_fusion.encode(state["obs"]).detach(); clp = ln_prop(state["obs"])
         z, kl, rc, hn = zc(sv, state["prev_a"], cf, state["hidden"].detach())
         # 行動生成は太郎の中に一元化（brain.motor_drive）。運動野の精密制御＋小脳の自動化
