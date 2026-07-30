@@ -1,0 +1,18 @@
+{
+  "name": "目視：C_なめらか seed0（固まる疑い）⇔ seed1（正常）を★キーで往復",
+  "note": "2026-07-30。★C_seed0 は26回の測定のうち12回で d_action2<0.5（行動の変化量が小さい）、17000回目は 0.044 まで落ちて margin=6.1 / persist=181.4 と崩壊した。C_seed1 は 1.29〜1.54 で最後まで安定し 0.5 を一度も下回っていない。条件・シーン・体は同じで★シードだけ違う。⚠️別プロセスで2本立ち上げて見比べると乱数も姿勢も違って当てにならないので、★同じ体・同じ姿勢のまま ; ' / のキーで脳だけ往復する。★画面右上に今どちらの脳かと dAction2 の平均が出る（学習ログの da2 と同じ量）。",
+  "scene": "新生児_仰向け_柵あり",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 4.0,
+    "model": "E/logs/selfmodel_v2/model_C_なめらか_seed0.pt"
+  },
+  "run": {
+    "type": "view",
+    "steps": 6000,
+    "seed": 0,
+    "view_model_b": "E/logs/selfmodel_v2/model_C_なめらか_seed1.pt",
+    "view_std": 0.174
+  },
+  "plugins": {}
+}

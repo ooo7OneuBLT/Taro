@@ -59,7 +59,34 @@ def view(cfg, *, plugins=(), verbose=True):
     gb = [bool(cfg.view_goal_babbling)]
     gbuf, stat = [], {"goal": 0, "explore": 0}
 
+    # ---- ★2つ目の脳（見比べ用）--------------------------------------------
+    # ★体は1つのまま、脳だけ入れ替える。GRU の記憶（hidden）は脳ごとに別に持つ
+    #   ＝入れ替えたときに相手の記憶を引き継がない。
+    brains = [t]
+    hid_keep = [None]           # 使っていない方の脳の hidden を預かる
+    which, last = [0], [0]
+    da2 = []                    # ★行動の変化量（学習ログの da2 と同じ量）
+    if cfg.view_model_b:
+        import copy
+        from run.taro_setup import Taro
+        cfg_b = copy.copy(cfg)
+        cfg_b.model = cfg.view_model_b
+        # ⚠️★2つ目の脳を作ると乱数を消費する＝Aの動きが「Bを指定したかどうか」で
+        #   変わってしまう（2026-07-30 に直した再現性の問題と同じ罠）。前後で控えて戻す。
+        _rng = torch.get_rng_state()
+        brains.append(Taro(cfg_b, env, seed=cfg.seed, verbose=verbose))
+        torch.set_rng_state(_rng)
+        print(f"[view] ★見比べモード：A={os.path.basename(cfg.model or '(白紙)')} / "
+              f"B={os.path.basename(cfg.view_model_b)}", flush=True)
+        print("       ★ ; ' / のどれかで A ⇔ B を往復（体と姿勢はそのまま）", flush=True)
+
     def _toggle():
+        if len(brains) > 1:
+            which[0] = 1 - which[0]
+            da2.clear()          # ★前の脳の値が混ざらないように捨てる
+            print(f"  [脳の切替] ★いま {'B=' + os.path.basename(cfg.view_model_b) if which[0] else 'A=' + os.path.basename(cfg.model or '(白紙)')}",
+                  flush=True)
+            return
         gb[0] = not gb[0]
         print(f"  [目標指向] {'★ON' if gb[0] else 'OFF'}"
               f"（目標指向 {stat['goal']} 回 / 探索 {stat['explore']} 回）", flush=True)
@@ -67,6 +94,16 @@ def view(cfg, *, plugins=(), verbose=True):
     def _status():
         # ★画面右上に出す文字。Viewerだけ見ていても条件と発動回数が分かるように。
         #   （print だけだと「コンソールなんてない」＝機能しているか分からない）
+        if len(brains) > 1:
+            # ★見比べモード：どちらの脳か＋★行動の変化量（固まっていないか）を出す
+            #   d_action2 = ‖a_t − a_{t-1}‖² の平均＝学習ログの da2 と同じ量。
+            #   ⚠️これを画面に出さないと「動いていない気がする」が主観のままになる。
+            tag = "B" if which[0] else "A"
+            nm = os.path.basename((cfg.view_model_b if which[0] else cfg.model) or "(白紙)")
+            recent = da2[-50:]
+            avg = sum(recent) / len(recent) if recent else 0.0
+            return (f"brain {tag} = {nm}   dAction2 avg={avg:.3f} (n={len(recent)})"
+                    f"   [;] to switch")
         if not gb[0]:
             return "GoalBabbling OFF"
         if len(gbuf) < 64:
@@ -80,6 +117,13 @@ def view(cfg, *, plugins=(), verbose=True):
         # 連続制御の frac は今のモデルでは使わない（policy は境界でのみ再計算）
         if not recompute:
             return prev_a, hidden
+        # ★見比べモード：脳を切り替えた瞬間に GRU の記憶も入れ替える
+        #   （切り替えた脳が★相手の記憶の続きから始めないように）
+        t = brains[which[0]]
+        if which[0] != last[0]:
+            hidden, hid_keep[0] = (hid_keep[0] if hid_keep[0] is not None
+                                   else hidden), hidden
+            last[0] = which[0]
         sv = t.fusion.encode(obs)
         cf = t.target_fusion.encode(obs).detach()
         z, _kl, _rc, hn = t.infer_latent(sv, prev_a, cf, hidden)
@@ -105,8 +149,16 @@ def view(cfg, *, plugins=(), verbose=True):
                 stat["explore"] += 1
         if cfg.view_explore:
             a, _lp = t.brain.explore(mean, torch.full_like(mean, cfg.view_std))
-            return a.detach(), hn.detach()
-        return torch.clamp(mean, -1.0, 1.0).detach(), hn.detach()
+            a = a.detach()
+        else:
+            a = torch.clamp(mean, -1.0, 1.0).detach()
+        # ★行動の変化量を控える＝学習ログの da2（smoothness_cost）と同じ量。
+        #   ⚠️切り替えた直後の1回は前の脳の行動との差になるので捨てる。
+        if which[0] == last[0]:
+            da2.append(float(((a - prev_a) ** 2).mean()))
+            if len(da2) > 400:
+                da2.pop(0)
+        return a, hn.detach()
 
     banner = f"model={os.path.basename(cfg.model) if cfg.model else '(白紙)'}"
     # ⚠️★g は使えない：MuJoCo の組み込みキーと衝突して「世界が暗くなる」。
