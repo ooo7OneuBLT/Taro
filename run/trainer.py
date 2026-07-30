@@ -144,7 +144,14 @@ class Trainer:
 
         self.taro = Taro(cfg, self.env, seed=cfg.seed, verbose=self.verbose)
         self.state = self.taro.init_state(self.taro.first_obs)
-        self.goal_buf = []          # 目標指向の探索が使う（過去に経験した感覚）
+        # 目標指向の探索が使う（過去に経験した感覚）
+        # ⚠️★【逸脱/工学近似・2026-07-30 判明】これは Self-Prior ではない。
+        #   先行研究（Kim, Kanazawa, Yoshida, Kuniyoshi 2025, arXiv:2504.11075）の
+        #   self-prior は「経験した観測の**頻度分布**」を明示的に学習する
+        #   （離散版＝カウント→Categorical／連続版＝正規化フロー NSF を最尤推定）。
+        #   太郎は生ベクトルをFIFOに貯めて**一様ランダムに1つ選ぶだけ**で、
+        #   頻度の重みが完全に消えている。⇒ doc/人間模倣からの逸脱リスト.md
+        self.goal_buf = []
         self._t0 = time.time()
         self._build_probe_ctx()
         self._build_ctx()
@@ -583,6 +590,9 @@ class Trainer:
             a, lp = t.brain.explore(mean, std)
             self.goal_buf.append(clp.detach())
             if len(self.goal_buf) > 2000:
+                # ⚠️★【逸脱・2026-07-30】先行研究は経験のカウントを**一度も捨てない**
+                #   （離散版は 30,000ステップ通して累積し、それで「馴化」が起きる）。
+                #   太郎は古い方から捨てるので、★昔の経験の頻度情報が消える。
                 self.goal_buf.pop(0)
             pred = clp + t.nat_head(torch.cat([z, a.detach()], dim=-1))
             # 拮抗筋モード：a(n_joint) → to_env_action で筋活性化へ写像。OFFなら a_env==a
