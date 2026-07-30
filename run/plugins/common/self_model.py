@@ -63,7 +63,15 @@ class SelfModel(Plugin):
             row["mag_ratio"] = magr
         self.rows.append(row)
         self._last = row
-        ctx.log(row)
+        # ⚠️★ここで ctx.log を呼ばない。学習ループが全プラグインの metrics を
+        #   集めて**1行**にする（道具ごとに行が分裂するのを避ける）。
+
+    def metrics(self, ctx):
+        r = self._last
+        if not r:
+            return None
+        # ★step は学習ループが入れるので、ここでは指標だけ返す
+        return {k: v for k, v in r.items() if k != "step"}
 
     def line(self, ctx):
         r = self._last

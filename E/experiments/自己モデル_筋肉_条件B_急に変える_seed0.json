@@ -1,0 +1,24 @@
+{
+  "name": "自己モデル：B_急に変える（筋肉モード・seed0）",
+  "note": "2026-07-30。★再現性を直したあとの回し直し。7/29〜30の同じ実験は関節モード（逸脱5）だった上、同一シードで再現しない状態だったので使えない（落とし穴 項79）。測定は学習を汚さない（測定の前後で状態を復元する）。",
+  "scene": "新生児_仰向け_柵あり",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 0.0,
+    "age_to": 4.0,
+    "age_start": 12000,
+    "age_ramp": 0,
+    "save": "E/logs/selfmodel_v2/model_B_急に変える_seed0.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 18000,
+    "seed": 0,
+    "checkpoint": 500,
+    "csv": "E/logs/selfmodel_v2/B_急に変える_seed0.csv"
+  },
+  "plugins": {
+    "self_model": true,
+    "hand_in_view": true
+  }
+}

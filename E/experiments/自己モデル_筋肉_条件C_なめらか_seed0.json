@@ -1,0 +1,25 @@
+{
+  "name": "自己モデル：C_なめらか（筋肉モード・seed0）",
+  "note": "2026-07-30。★再現性を直したあとの回し直し。7/29〜30の同じ実験は関節モード（逸脱5）だった上、同一シードで再現しない状態だったので使えない（落とし穴 項79）。測定は学習を汚さない（測定の前後で状態を復元する）。",
+  "scene": "新生児_仰向け_柵あり",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 0.0,
+    "age_to": 4.0,
+    "age_start": 0,
+    "age_ramp": 18000,
+    "age_every": 500,
+    "save": "E/logs/selfmodel_v2/model_C_なめらか_seed0.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 18000,
+    "seed": 0,
+    "checkpoint": 500,
+    "csv": "E/logs/selfmodel_v2/C_なめらか_seed0.csv"
+  },
+  "plugins": {
+    "self_model": true,
+    "hand_in_view": true
+  }
+}

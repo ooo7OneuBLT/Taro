@@ -26,10 +26,23 @@ class HandInView(Plugin):
         self._fn = hand_in_view
         self.hit = 0.0
         self.tot = 0
+        # ★区間ごと（記録の区切りごと）にリセットする分。通しの平均と両方持つ
+        self._seg_hit, self._seg_tot = 0.0, 0
 
     def on_step(self, ctx):
-        self.hit += float(self._fn(ctx.model, ctx.data))
+        v = float(self._fn(ctx.model, ctx.data))
+        self.hit += v
         self.tot += 1
+        self._seg_hit += v
+        self._seg_tot += 1
+
+    def metrics(self, ctx):
+        # ★区間ごとの割合を出して数え直す（通しの平均だと推移が見えない）
+        if not getattr(self, "_seg_tot", 0):
+            return None
+        v = 100.0 * self._seg_hit / self._seg_tot
+        self._seg_hit, self._seg_tot = 0.0, 0
+        return {"hand_in_view": round(v, 3)}
 
     def line(self, ctx):
         if not self.tot:

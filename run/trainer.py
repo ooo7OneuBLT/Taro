@@ -62,6 +62,37 @@ def _mj_arrays(d):
     return out
 
 
+def _release_renderers(env):
+    """★眼球の描画用メモリ（OpenGL）を明示的に返す。体を作り直す前に呼ぶ。
+
+    【なぜ要るか、2026-07-30】体を育てる実験（500回ごとに体を作り直す）で、
+    GPU のメモリが尽きて学習が落ちた（OpenGL error 0x505 → exit 139）。
+    `e_toy_env` は眼球カメラの `mujoco.Renderer` を辞書に持ち、
+    **モデルが変わったときにしか閉じない**。作り直しのたびに古いものが残る。
+    ⚠️`env.close()` はこの辞書を触らないので、ここで自分で閉じる。
+    """
+    u = getattr(env, "unwrapped", env)
+    cache = getattr(u, "_eye_renderers", None)
+    if not cache:
+        return 0
+    n = 0
+    for r in list(cache.values()):
+        try:
+            r.close()
+            n += 1
+        except Exception as e:      # noqa: BLE001
+            # ⚠️握りつぶすが黙らない（閉じ損ねはメモリが残るだけ）
+            print(f"⚠️[renderer] 閉じるのに失敗: {type(e).__name__}: {e}", flush=True)
+    cache.clear()
+    u._eye_renderers = {}
+    u._eye_renderers_model = None
+    # 使い回しのキャッシュも捨てる（次の体で作り直させる）
+    for nm in ("_vision_cache", "_vision_t"):
+        if hasattr(u, nm):
+            setattr(u, nm, None)
+    return n
+
+
 class Trainer:
     """太郎に「生きて学ぶ」をさせる。
 
@@ -179,6 +210,15 @@ class Trainer:
         cfg = self.cfg
         old = (int(self.env.observation_space["observation"].shape[0]),
                int(self.env.action_space.shape[0]))
+        # ★★視覚のレンダラ（OpenGLの描画用メモリ）を**明示的に閉じる**。
+        #   【なぜ、2026-07-30】体を育てる実験で学習が落ちた：
+        #     WARNING: OpenGL error 0x505 in or before mjr_makeContext
+        #     ⇒ 0x505 は GPU のメモリ不足。体を作り直すたびに眼球用の
+        #       `mujoco.Renderer` が新しく作られ、**古いものが解放されずに積み上がる**。
+        #     条件Cは500回ごとに作り直すので36回ぶん溜まり、実測で
+        #     3000回目（6回目の作り直し）で落ちた（exit=139＝メモリアクセス違反）。
+        #   ⚠️`env.close()` では解放されない（レンダラは環境が持つ Python の辞書）。
+        _release_renderers(self.env)
         self.env.close()
         from run.plugins.common import scene as scene_mod
         spec = dict(self._taro_spec)
@@ -395,6 +435,40 @@ class Trainer:
         if "vis_out" in snap and getattr(u, "vision", None) is not None:
             u.vision.sensor_outputs = snap["vis_out"]
 
+    # ------------------------------------------------------------ 記録
+    def _record(self, step):
+        """★全プラグインの値＋太郎の状態を**1行**にして残す。
+
+        【なぜ1行にまとめるか、2026-07-30】以前は各プラグインが自分で `ctx.log(行)` を
+        呼んでいたので、道具を2つ以上使うと**CSVの行が道具ごとに分裂**していた。
+        1行に揃えると、グラフを描く側は**列を決め打ちしなくてよい**
+        （`run/tools/dashboard.py` が列を自動で見つけて全部描く）。
+
+        ⚠️ここに入れるのは「記録」だけ。学習の数値は変えない。
+        """
+        t = self.taro
+        row = {"step": step,
+               # 太郎が生きた時間（判断×K×DT）。★実時間ではない
+               "life_min": round(step * self.cfg.K * DT / 60.0, 3),
+               "age_months": round(float(self._cur_age), 4),
+               "real_min": round((time.time() - self._t0) / 60.0, 2),
+               # 探索の強さ（ノルアドレナリン由来）。0.05 + ne*0.45
+               "noise": round(0.05 + t.ne.get_ne_level() * 0.45, 5),
+               "ne_maturation": round(float(t.ne.maturation), 5)}
+        if self._act_accum:      # 力の出し具合（0付近＝フリーズの警告）
+            row["act_abs"] = round(float(np.mean(self._act_accum[-200:])), 5)
+        if self._caps_accum:     # 行動の変化量（下がりすぎ＝固まった）
+            row["d_action2"] = round(float(np.mean(self._caps_accum[-200:])), 6)
+        if self._eff_accum:      # 努力（代謝コスト）
+            row["effort"] = round(float(np.mean(self._eff_accum[-200:])), 5)
+        if self.cfg.cerebellum:  # 小脳の馴染み度（自動化がどれだけ効くか）
+            row["cereb_err"] = round(float(t.cereb.err_ema.item()), 5)
+        for p in self.plugins:
+            m = p.metrics(self.ctx)
+            if m:
+                row.update(m)
+        self._log_row(row)
+
     # ------------------------------------------------------- チェックポイント
     def _checkpoint(self, step):
         """★測るのはプラグイン。ここは呼ぶだけ。
@@ -409,6 +483,7 @@ class Trainer:
                 p.on_checkpoint(self.ctx)
         finally:
             self._restore(snap)
+        self._record(step)
         life_min = step * self.cfg.K * DT / 60.0
         real_min = (time.time() - self._t0) / 60.0
         t = self.taro
@@ -597,6 +672,7 @@ def close_env(env):
     if env is None:
         return
     try:
+        _release_renderers(env)     # ★描画用メモリを先に返す
         env.close()
     except Exception as e:      # noqa: BLE001
         # ⚠️握りつぶすが黙らない。閉じ損ねはメモリが残るだけで結果は汚さない。

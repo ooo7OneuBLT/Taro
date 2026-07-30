@@ -10,7 +10,7 @@
     .venv/Scripts/python.exe -m run.main E/experiments/<名前>.json
     .venv/Scripts/python.exe -m run.main E/experiments/<名前>.json --steps 600
 
-【実験ファイル（JSON）の3つの欄】★境界を混ぜない
+【実験ファイル（JSON）の4つの欄】★境界を混ぜない
     scene    どんな環境か（E/scenes/*.json の名前）
     taro     ★太郎の中身の設定（本能のON/OFF・月齢・駆動モード）
              → 実装は taro_core にある。ここは「どれを使うか」だけ
@@ -27,20 +27,19 @@ import sys
 import time
 import warnings
 
-# ★★【最重要の未解決事項・2026-07-30】**同じ実験ファイル・同じ seed でも結果がばらつく。**
-#   【実測】seed=0・100回学習・自己モデルの測定ONで7回回した classify（100回目）：
-#       45.6 / 46.7 / 44.5 / 45.7 / 47.0 / 43.9 / 45.6  ＝★幅3.1ポイント
-#     元の経路（E/scripts/e_growth_train.py）でも同じ（49.3 → 43.2）。
-#     ＝**私の組み換えのせいではなく、元からある**。
-#   【切り分けで分かったこと】
-#     ・物理（MuJoCo）は決定的        脳を通さない measure は2回**完全一致**
-#     ・学習だけなら決定的            測る道具を外すと2回**完全一致**
-#     ・★自己モデルの測定を入れると出る  e_probes.evaluate（環境を80判断進める）
-#     ・PYTHONHASHSEED も BLAS のスレッド数も**原因ではない**（固定しても一致しない）
-#   【まだ分かっていないこと】どこで非決定性が生まれるのか。
-#   【★実験するときの守り】「シード間の差」を見る前に、**同じシードを複数回**回して
-#     シード内のばらつきを測る。それより小さい差は主張できない。
-#     → 検証の落とし穴チェックリスト 項79
+# ★【2026-07-30 に解決】「同じシードでも結果がばらつく」問題は直した。
+#   原因は5つ、全部★自分たちのコードだった：
+#     ①内臓（泣く・寝る・うとうと）の乱数に種を撒いていなかった ← 本物のバグ
+#       ＝乱数は4系統（torch / numpy / gym / ★Python標準）ある
+#     ②筋の活性化（MuscleModel.activity＝Python側の配列）が復元されていなかった
+#     ③物理の内部状態（qacc_warmstart＝ソルバの前回解）が復元されていなかった
+#     ④視覚のキャッシュ（辞書）が復元されていなかった
+#     ⑤★測定が学習を8秒ぶん進める構造そのもの
+#   対策＝測定の前後で状態を控えて戻す（`run/trainer.py` の _snapshot/_restore）。
+#   結果 ★350ステップ × 5回すべて完全一致。
+#   ⚠️★過去の実験（margin +58.8 等）は同一シードでも再現しない条件での値。
+#   ⚠️再現性が崩れていないかは `run/tools/check_divergence.py` で確かめられる。
+#     → 検証の落とし穴チェックリスト 項79・項80
 
 warnings.filterwarnings("ignore")
 _ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir))
@@ -58,12 +57,14 @@ def _register():
     from run.plugins.common.hand_in_view import HandInView
     from run.plugins.common.self_model import SelfModel
     from run.plugins.common.trace import Trace
+    from run.plugins.common.dashboard import Dashboard
     PLUGINS["toy_touch"] = ToyTouch
     PLUGINS["hand_in_view"] = HandInView
     PLUGINS["self_model"] = SelfModel
-    PLUGINS["trace"] = Trace       # ★内部の値の指紋を残す（原因追跡用）
-    # ⚠️self_model は★太郎の脳が要る（run.type=train）。脳側との接続は第2段階。
-    #   いまの train は e_growth_train を包んでいるので、測定はそちらで行われる。
+    PLUGINS["trace"] = Trace           # ★内部の値の指紋を残す（原因追跡用）
+    PLUGINS["dashboard"] = Dashboard   # ★学習の様子の絵を自動で作り直す
+    # ⚠️self_model / trace は★太郎の脳が要る（run.type=train のみ）。
+    #   measure（脳を通さず環境だけ進める）では使えない。
 
 
 def load_spec(path):
@@ -84,7 +85,16 @@ def load_spec(path):
 
 
 def build_plugins(spec):
-    """実験ファイルの plugins 欄から、使う道具を組み立てる。"""
+    """実験ファイルの plugins 欄から、使う道具を組み立てる。
+
+    ★`run.csv` を指定した学習には、書かなくても `dashboard`（絵の自動更新）を足す。
+      ⇒「実験を流せば勝手に絵ができる」状態にするため（2026-07-30 の要望）。
+      切りたいときは実験ファイルに `"dashboard": false` と明示する。
+    """
+    r = spec.get("run") or {}
+    if (str(r.get("type", "measure")).lower() == "train" and r.get("csv")
+            and "dashboard" not in spec["plugins"]):
+        spec["plugins"]["dashboard"] = True
     out = []
     for key, cfg in spec["plugins"].items():
         if cfg is False or cfg is None:
@@ -98,24 +108,36 @@ def build_plugins(spec):
 
 
 def _csv_logger(path, spec):
-    """チェックポイントの記録をCSVに残す関数を作る。★列は最初の行で決まる。"""
+    """チェックポイントの記録をCSVに残す関数を作る。
+
+    ⚠️★列は**途中で増える**（学習前は「力の出し具合」がまだ無いなど）。
+      追記だと最初の行で列が固定され、あとから増えた値が永久に落ちる。
+      ⇒ 行を溜めて**毎回すべて書き直す**。記録は数十行なので軽く、
+        走行中に読んでも常に整合した表になっている。
+    """
     import csv
     if not path:
         return (lambda row: None)
     path = path if os.path.isabs(path) else os.path.join(_ROOT, path)
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    state = {"cols": None}
+    rows = []
 
     def log_row(row):
         if not isinstance(row, dict):
             return
-        new = state["cols"] is None
-        if new:
-            state["cols"] = list(row)
-            with open(path, "w", newline="", encoding="utf-8") as fp:
-                csv.writer(fp).writerow(state["cols"])
-        with open(path, "a", newline="", encoding="utf-8") as fp:
-            csv.writer(fp).writerow([row.get(c, "") for c in state["cols"]])
+        rows.append(dict(row))
+        cols = []               # ★出現した順に並べる（step が先頭に来る）
+        for r in rows:
+            for k in r:
+                if k not in cols:
+                    cols.append(k)
+        tmp = path + ".tmp"
+        with open(tmp, "w", newline="", encoding="utf-8") as fp:
+            w = csv.writer(fp)
+            w.writerow(cols)
+            for r in rows:
+                w.writerow([r.get(c, "") for c in cols])
+        os.replace(tmp, path)   # ★書き換え中の半端な表を読ませない
     return log_row
 
 

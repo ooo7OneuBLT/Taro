@@ -38,6 +38,17 @@ class ToyTouch(Plugin):
         if self.probe is not None:
             self.probe.rebind(ctx.model)
 
+    def metrics(self, ctx):
+        if self.probe is None:
+            return None
+        s = self.probe.summary(ctx.dt)
+        out = {"toy_touches": s["touches"], "toy_per_min": round(s["touch_per_min"], 4)}
+        # ★手ごとの最接近（cm）。1e8 は「まだ一度も測っていない」印なので出さない
+        for k, v in s["min_cm"].items():
+            if v < 1e8:
+                out[f"toy_min_cm_{k}"] = round(v, 3)
+        return out
+
     def line(self, ctx):
         return self.probe.line(ctx.dt) if self.probe is not None else None
 

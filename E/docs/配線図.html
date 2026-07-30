@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>太郎の配線図 ── 実装したもの全部（どの実験にも縛られない地図）</title>
+<style>
+ :root { --ink:#1a202c; --sub:#4a5568; --line:#e2e8f0; --bg:#f7f9fc; --card:#fff; }
+ * { box-sizing:border-box; }
+ body { margin:0; padding:18px 16px 40px; background:var(--bg); color:var(--ink);
+   font-family:"Yu Gothic","Hiragino Sans","Meiryo",system-ui,sans-serif; line-height:1.6; }
+ h1 { font-size:1.2rem; margin:0 0 3px; }
+ .sub { color:var(--sub); font-size:.82rem; margin-bottom:12px; }
+ .wrap { background:var(--card); border:1px solid var(--line); border-radius:10px;
+   padding:14px; overflow-x:auto; }
+ @media (prefers-color-scheme: dark) {
+   :root { --ink:#e8eef7; --sub:#a0aec0; --line:#2d3748; --bg:#161b22; --card:#1c2230; }
+ }
+
+ svg.wire { width:100%; height:auto; min-width:900px; }
+ svg.wire text.coljp { font-size:12.5px; fill:var(--ink); font-weight:700; }
+ svg.wire text.coleng { font-size:9.5px; fill:var(--sub); font-style:italic; }
+ svg.wire g.box rect { fill:var(--card); stroke-width:1.6; }
+ svg.wire g.box text.njp { fill:var(--ink); }
+ svg.wire g.box text.neng { fill:var(--sub); font-style:italic; }
+ svg.wire g.box.off { opacity:.30; }
+ svg.wire g.box.off rect { stroke-dasharray:4 3; }
+ svg.wire text.offmark { font-size:8px; fill:#a0aec0; letter-spacing:.5px; }
+ svg.wire path.eOn { fill:none; stroke:#5a6b83; }
+ svg.wire path.eOff { fill:none; stroke:#cfd8e3; stroke-dasharray:3 4; }
+ svg.wire text.elab { font-size:9px; }
+ svg.wire text.elab.on { fill:#4a5568; }
+ svg.wire text.elab.off { fill:#b6c2d1; }
+ .wlegend { margin-top:10px; font-size:.8rem; color:var(--sub); }
+ .wlt { font-weight:700; color:var(--ink); margin-bottom:5px; font-size:.86rem; }
+ .wlt .eng { font-weight:400; font-style:italic; margin-left:7px; color:var(--sub); }
+ .lgw { display:inline-flex; align-items:baseline; gap:5px; margin:0 14px 5px 0; }
+ .lgw i { width:11px; height:11px; border-radius:2px; flex:0 0 auto; position:relative; top:1px; }
+ .lgw em { font-style:italic; opacity:.7; margin-left:4px; }
+ .wnote { margin-top:6px; }
+ .wctl { display:flex; gap:9px; align-items:center; flex-wrap:wrap; margin:0 0 9px; }
+ .wctl button { font:inherit; font-size:.8rem; padding:4px 11px; border-radius:6px;
+   border:1px solid var(--line); background:var(--card); color:var(--ink); cursor:pointer; }
+ .wctl button:hover { border-color:#8fa6c4; }
+ .whelp { font-size:.76rem; color:var(--sub); }
+ .wstat { font-size:.76rem; color:#276749; margin-left:auto; }
+ svg.wire { touch-action:none; cursor:grab; }
+ svg.wire g[id^="n_"] { cursor:move; }
+ @media (prefers-color-scheme: dark) {
+   svg.wire path.eOff { stroke:#3b4757; }
+   svg.wire text.elab.off { fill:#5b6b80; }
+ }
+
+</style></head><body>
+<h1>太郎の中身の配線図 <span class="sub">Taro's internal wiring</span></h1>
+<div class="sub">実装したもの全部（どの実験にも縛られない地図）</div>
+<div class="wrap">
+<div class="wctl">
+  <button id="wReset" type="button">表示を元に戻す</button>
+  <button id="wCopy" type="button">位置を書き出す</button>
+  <span class="whelp">スクロール＝拡大・縮小 ／ 背景をドラッグ＝全体を動かす ／
+    ★箱をドラッグ＝その箱だけ動かす</span>
+  <span id="wStat" class="wstat"></span>
+</div>
+<svg viewBox="0 0 1052 926" class="wire" role="img" aria-label="太郎の中身の配線図" data-w="1052" data-h="926"><defs><marker id="ar" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#8a97ab"/></marker><marker id="arOn" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3d4d63"/></marker></defs><g id="cam"><text x="18" y="34" class="coljp">感覚</text><text x="18" y="47" class="coleng">senses</text><text x="228" y="34" class="coljp">まとめる</text><text x="228" y="47" class="coleng">fusion</text><text x="438" y="34" class="coljp">脳の中</text><text x="438" y="47" class="coleng">brain</text><text x="648" y="34" class="coljp">動きを作る</text><text x="648" y="47" class="coleng">motor</text><text x="858" y="34" class="coljp">体</text><text x="858" y="47" class="coleng">body</text><text x="18" y="522" class="coljp">報酬をつくる</text><text x="18" y="535" class="coleng">reward</text><text x="228" y="522" class="coljp">神経で調節する</text><text x="228" y="535" class="coleng">neuromodulation</text><text x="438" y="522" class="coljp">覚える・固める</text><text x="438" y="535" class="coleng">memory</text><path id="e_prop__fusion" d="M194,87 C211,87 211,149 228,149" class="eOn" stroke-width="1.9" marker-end="url(#arOn)"/><path id="e_vest__fusion" d="M194,149 C211,149 211,149 228,149" class="eOn" stroke-width="1.9" marker-end="url(#arOn)"/><path id="e_touch__soma" d="M194,211 C211,211 211,211 228,211" class="eOn" stroke-width="1.9" marker-end="url(#arOn)"/><path id="e_soma__fusion" d="M316,234 C316,260 316,198 316,172" class="eOn" stroke-width="1.9" marker-end="url(#arOn)"/><path id="e_vision__fusion" d="M194,273 C211,273 211,149 228,149" class="eOn" stroke-width="1.9" marker-end="url(#arOn)"/><path id="e_intero__insula" d="M194,335 C211,335 211,87 228,87" class="eOn" stroke-width="1.9" marker-end="url(#arOn)"/><path id="e_insula__fusion" d="M316,110 C316,136 316,198 316,172" class="eOn" stroke-width="1.9" marker-end="url(#arOn)"/><path id="e_fusion__gru" d="M404,149 C421,149 421,87 438,87" class="eOn" stroke-width="1.9" marker-end="url(#arOn)"/><text id="t_fusion__gru" x="421" y="113" class="elab on" text-anchor="middle">感覚</text><path id="e_gru__pc" d="M526,110 C526,136 526,198 526,172" class="eOn" stroke-width="1.9" marker-end="url(#arOn)"/><path id="e_pc__fwd" d="M526,172 C526,198 526,260 526,234" class="eOn" stroke-width="1.9" marker-end="url(#arOn)"/><path id="e_pc__cortex" d="M614,149 C631,149 631,87 648,87" class="eOn" stroke-width="1.9" marker-end="url(#arOn)"/><path id="e_tgtfuse__target" d="M404,273 C421,273 421,273 438,273" class="eOn" stroke-width="1.9" marker-end="url(#arOn)"/><text id="t_tgtfuse__target" x="421" y="268" class="elab on" text-anchor="middle">正解</text><path id="e_target__blockpe" d="M526,296 C526,322 526,384 526,358" class="eOn" stroke-width="1.9" marker-end="url(#arOn)"/><path id="e_fwd__blockpe" d="M526,234 C526,260 526,384 526,358" class="eOn" stroke-width="1.9" marker-end="url(#arOn)"/><text id="t_fwd__blockpe" x="526" y="378" class="elab on" text-anchor="middle">予測</text><path id="e_cortex__cereb" d="M736,110 C736,136 736,198 736,172" class="eOn" stroke-width="1.9" marker-end="url(#arOn)"/><path id="e_cereb__muscle" d="M824,149 C841,149 841,87 858,87" class="eOn" stroke-width="1.9" marker-end="url(#arOn)"/><text id="t_cereb__muscle" x="841" y="113" class="elab on" text-anchor="middle">自動化</text><path id="e_cortex__muscle" d="M824,87 C841,87 841,87 858,87" class="eOn" stroke-width="1.9" marker-end="url(#arOn)"/><text id="t_cortex__muscle" x="841" y="82" class="elab on" text-anchor="middle">指令</text><path id="e_cortex__joint" d="M824,87 C841,87 841,149 858,149" class="eOn" stroke-width="1.9" marker-end="url(#arOn)"/><text id="t_cortex__joint" x="841" y="113" class="elab on" text-anchor="middle">指令</text><path id="e_cpg__muscle" d="M824,211 C841,211 841,87 858,87" class="eOn" stroke-width="1.9" marker-end="url(#arOn)"/><text id="t_cpg__muscle" x="841" y="144" class="elab on" text-anchor="middle">ゆらぎ</text><path id="e_synergy__cpg" d="M736,296 C736,322 736,260 736,234" class="eOn" stroke-width="1.9" marker-end="url(#arOn)"/><path id="e_antag__cpg" d="M736,358 C736,384 736,260 736,234" class="eOn" stroke-width="1.9" marker-end="url(#arOn)"/><path id="e_goal__inv" d="M736,420 C736,446 736,508 736,482" class="eOn" stroke-width="1.9" marker-end="url(#arOn)"/><path id="e_inv__cortex" d="M736,482 C736,508 736,136 736,110" class="eOn" stroke-width="1.9" marker-end="url(#arOn)"/><text id="t_inv__cortex" x="736" y="502" class="elab on" text-anchor="middle">逆算した行動</text><path id="e_muscle__prop" d="M946,110 C946,161 106,161 106,110" class="eOn" stroke-width="1.9" marker-end="url(#arOn)"/><text id="t_muscle__prop" x="526" y="148" class="elab on" text-anchor="middle">動いた結果</text><path id="e_joint__prop" d="M946,172 C946,223 106,161 106,110" class="eOn" stroke-width="1.9" marker-end="url(#arOn)"/><text id="t_joint__prop" x="526" y="210" class="elab on" text-anchor="middle">動いた結果</text><path id="e_grow__bodyshape" d="M946,296 C946,322 946,260 946,234" class="eOn" stroke-width="1.9" marker-end="url(#arOn)"/><text id="t_grow__bodyshape" x="946" y="316" class="elab on" text-anchor="middle">月齢</text><path id="e_blockpe__progress" d="M526,358 C526,397 106,637 106,598" class="eOn" stroke-width="1.9" marker-end="url(#arOn)"/><text id="t_blockpe__progress" x="316" y="627" class="elab on" text-anchor="middle">予測誤差</text><path id="e_blockpe__predict" d="M526,358 C526,397 106,699 106,660" class="eOn" stroke-width="1.9" marker-end="url(#arOn)"/><text id="t_blockpe__predict" x="316" y="689" class="elab on" text-anchor="middle">予測誤差</text><path id="e_progress__dop" d="M194,575 C211,575 211,575 228,575" class="eOn" stroke-width="1.9" marker-end="url(#arOn)"/><text id="t_progress__dop" x="211" y="570" class="elab on" text-anchor="middle">報酬</text><path id="e_predict__dop" d="M194,637 C211,637 211,575 228,575" class="eOn" stroke-width="1.9" marker-end="url(#arOn)"/><text id="t_predict__dop" x="211" y="601" class="elab on" text-anchor="middle">報酬</text><path id="e_homeo_in__dop" d="M194,699 C211,699 211,575 228,575" class="eOn" stroke-width="1.9" marker-end="url(#arOn)"/><path id="e_effort__dop" d="M194,761 C211,761 211,575 228,575" class="eOn" stroke-width="1.9" marker-end="url(#arOn)"/><text id="t_effort__dop" x="211" y="663" class="elab on" text-anchor="middle">引く</text><path id="e_caps__dop" d="M194,823 C211,823 211,575 228,575" class="eOn" stroke-width="1.9" marker-end="url(#arOn)"/><text id="t_caps__dop" x="211" y="694" class="elab on" text-anchor="middle">引く</text><path id="e_dop__cortex" d="M404,575 C526,575 526,87 648,87" class="eOn" stroke-width="1.9" marker-end="url(#arOn)"/><text id="t_dop__cortex" x="526" y="326" class="elab on" text-anchor="middle">方策を直す</text><path id="e_progress__ne" d="M194,575 C211,575 211,637 228,637" class="eOn" stroke-width="1.9" marker-end="url(#arOn)"/><text id="t_progress__ne" x="211" y="601" class="elab on" text-anchor="middle">タスクの出来</text><path id="e_ne__cpg" d="M404,637 C526,637 526,211 648,211" class="eOn" stroke-width="1.9" marker-end="url(#arOn)"/><text id="t_ne__cpg" x="526" y="419" class="elab on" text-anchor="middle">探索の強さ</text><path id="e_ne__cortex" d="M404,637 C526,637 526,87 648,87" class="eOn" stroke-width="1.9" marker-end="url(#arOn)"/><text id="t_ne__cortex" x="526" y="357" class="elab on" text-anchor="middle">ゆらぎの幅</text><path id="e_mature__ne" d="M316,784 C316,810 316,686 316,660" class="eOn" stroke-width="1.9" marker-end="url(#arOn)"/><path id="e_clock__mature" d="M316,846 C316,872 316,810 316,784" class="eOn" stroke-width="1.9" marker-end="url(#arOn)"/><text id="t_clock__mature" x="316" y="866" class="elab on" text-anchor="middle">発達年齢</text><path id="e_homeo_sc__fusion" d="M316,722 C316,748 316,198 316,172" class="eOn" stroke-width="1.9" marker-end="url(#arOn)"/><text id="t_homeo_sc__fusion" x="316" y="742" class="elab on" text-anchor="middle">活動量を保つ</text><path id="e_hippo__replay" d="M526,598 C526,624 526,686 526,660" class="eOn" stroke-width="1.9" marker-end="url(#arOn)"/><path id="e_replay__fwd" d="M526,660 C526,686 526,260 526,234" class="eOn" stroke-width="1.9" marker-end="url(#arOn)"/><text id="t_replay__fwd" x="526" y="680" class="elab on" text-anchor="middle">復習で固める</text><path id="e_blockpe__hippo" d="M526,358 C526,384 526,624 526,598" class="eOn" stroke-width="1.9" marker-end="url(#arOn)"/><text id="t_blockpe__hippo" x="526" y="618" class="elab on" text-anchor="middle">経験をためる</text><g id="n_prop" class="box" data-x="18" data-y="64"><title>固有感覚（Tier1）
+関節の角度・速度・筋の張り。筋肉モードで801次元、関節モードで621次元</title><rect x="18" y="64" width="176" height="46" rx="7" stroke="#276749"/><rect x="18" y="64" width="5" height="46" rx="2.5" fill="#276749" class="tierbar"/><text x="30" y="83" class="njp" font-size="12.5">固有感覚</text><text x="30" y="97" class="neng" font-size="9.5">proprioception</text></g><g id="n_vest" class="box" data-x="18" data-y="126"><title>前庭感覚（Tier1）
+三半規管（回転）と耳石器（傾き・直線の加速）</title><rect x="18" y="126" width="176" height="46" rx="7" stroke="#276749"/><rect x="18" y="126" width="5" height="46" rx="2.5" fill="#276749" class="tierbar"/><text x="30" y="145" class="njp" font-size="12.5">前庭感覚</text><text x="30" y="159" class="neng" font-size="9.5">vestibular</text></g><g id="n_touch" class="box" data-x="18" data-y="188"><title>触覚（逸脱）
+★体を育てる実験では使えない（センサ点が月齢で変わり観測次元がずれる）</title><rect x="18" y="188" width="176" height="46" rx="7" stroke="#c53030"/><rect x="18" y="188" width="5" height="46" rx="2.5" fill="#c53030" class="tierbar"/><text x="30" y="207" class="njp" font-size="12.5">触覚</text><text x="30" y="221" class="neng" font-size="9.5">touch</text></g><g id="n_vision" class="box" data-x="18" data-y="250"><title>視覚（両眼）（Tier2）
+新生児の視力に合わせてぼかす。★眼球が常に寄り目＝遠くを見られない（既知）</title><rect x="18" y="250" width="176" height="46" rx="7" stroke="#2b6cb0"/><rect x="18" y="250" width="5" height="46" rx="2.5" fill="#2b6cb0" class="tierbar"/><text x="30" y="269" class="njp" font-size="12.5">視覚（両眼）</text><text x="30" y="283" class="neng" font-size="9.5">vision</text></g><g id="n_intero" class="box" data-x="18" data-y="312"><title>内受容感覚（未実装）
+★空腹・眠気・不快・覚醒。E1では中身がほぼ定数（逸脱リストに登録済み）</title><rect x="18" y="312" width="176" height="46" rx="7" stroke="#718096"/><rect x="18" y="312" width="5" height="46" rx="2.5" fill="#718096" class="tierbar"/><text x="30" y="331" class="njp" font-size="12.5">内受容感覚</text><text x="30" y="345" class="neng" font-size="9.5">interoception</text></g><g id="n_insula" class="box" data-x="228" data-y="64"><title>島皮質（Tier2）
+内受容を脳が扱える形に変える</title><rect x="228" y="64" width="176" height="46" rx="7" stroke="#2b6cb0"/><rect x="228" y="64" width="5" height="46" rx="2.5" fill="#2b6cb0" class="tierbar"/><text x="240" y="83" class="njp" font-size="12.5">島皮質</text><text x="240" y="97" class="neng" font-size="9.5">insula</text></g><g id="n_fusion" class="box" data-x="228" data-y="126"><title>感覚をまとめる層（Tier3）
+★各感覚を**等重み**で足す＝理論的な正当化のない仮定（逸脱リストに登録済み）</title><rect x="228" y="126" width="176" height="46" rx="7" stroke="#b7791f"/><rect x="228" y="126" width="5" height="46" rx="2.5" fill="#b7791f" class="tierbar"/><text x="240" y="145" class="njp" font-size="12.5">感覚をまとめる層</text><text x="240" y="159" class="neng" font-size="9.5">sensory fusion</text></g><g id="n_soma" class="box" data-x="228" data-y="188"><title>体性感覚野（Tier2）
+触覚を部位別にまとめる（視床VPL＋S1相当）</title><rect x="228" y="188" width="176" height="46" rx="7" stroke="#2b6cb0"/><rect x="228" y="188" width="5" height="46" rx="2.5" fill="#2b6cb0" class="tierbar"/><text x="240" y="207" class="njp" font-size="12.5">体性感覚野</text><text x="240" y="221" class="neng" font-size="9.5">somatosensory cortex</text></g><g id="n_tgtfuse" class="box" data-x="228" data-y="250"><title>正解側の凍結した層（Tier3）
+★予測の「正解」を作る側。学習中の層を使うと出力を平坦にする抜け道で崩れる（RND式）</title><rect x="228" y="250" width="176" height="46" rx="7" stroke="#b7791f"/><rect x="228" y="250" width="5" height="46" rx="2.5" fill="#b7791f" class="tierbar"/><text x="240" y="269" class="njp" font-size="12.5">正解側の凍結した層</text><text x="240" y="283" class="neng" font-size="9.5">frozen target encoder</text></g><g id="n_gru" class="box" data-x="438" data-y="64"><title>前回の行動を再帰へ（Tier1）
+「自分が出した命令」を次の予測に入れる＝遠心性コピー</title><rect x="438" y="64" width="176" height="46" rx="7" stroke="#276749"/><rect x="438" y="64" width="5" height="46" rx="2.5" fill="#276749" class="tierbar"/><text x="450" y="83" class="njp" font-size="12.5">前回の行動を再帰へ</text><text x="450" y="97" class="neng" font-size="9.5">efference copy → GRU</text></g><g id="n_pc" class="box" data-x="438" data-y="126"><title>予測符号化の潜在変数（Tier1）
+いまの状況を表す内部表現 z を作る</title><rect x="438" y="126" width="176" height="46" rx="7" stroke="#276749"/><rect x="438" y="126" width="5" height="46" rx="2.5" fill="#276749" class="tierbar"/><text x="450" y="145" class="njp" font-size="12.5">予測符号化の潜在変数</text><text x="450" y="159" class="neng" font-size="9.5">predictive coding latent</text></g><g id="n_fwd" class="box" data-x="438" data-y="188"><title>順モデル（Tier1）
+「この行動をしたらこう感じるはず」を予測する。★自己モデルの本体</title><rect x="438" y="188" width="176" height="46" rx="7" stroke="#276749"/><rect x="438" y="188" width="5" height="46" rx="2.5" fill="#276749" class="tierbar"/><text x="450" y="207" class="njp" font-size="12.5">順モデル</text><text x="450" y="221" class="neng" font-size="9.5">forward model</text></g><g id="n_target" class="box" data-x="438" data-y="250"><title>予測する対象（Tier3）
+既定は固有感覚のみ。★予測対象に入っていない感覚は内部表現から捨てられる（実測）</title><rect x="438" y="250" width="176" height="46" rx="7" stroke="#b7791f"/><rect x="438" y="250" width="5" height="46" rx="2.5" fill="#b7791f" class="tierbar"/><text x="450" y="269" class="njp" font-size="12.5">予測する対象</text><text x="450" y="283" class="neng" font-size="9.5">prediction target</text></g><g id="n_blockpe" class="box" data-x="438" data-y="312"><title>次元数の影響を除く（Tier1）
+ブロックごとに平均してから足す（Ohata &amp; Tani 2020 ほか）</title><rect x="438" y="312" width="176" height="46" rx="7" stroke="#276749"/><rect x="438" y="312" width="5" height="46" rx="2.5" fill="#276749" class="tierbar"/><text x="450" y="331" class="njp" font-size="12.5">次元数の影響を除く</text><text x="450" y="345" class="neng" font-size="9.5">per-block error</text></g><g id="n_cortex" class="box" data-x="648" data-y="64"><title>運動野（Tier1）
+内部表現から運動の指令を作る</title><rect x="648" y="64" width="176" height="46" rx="7" stroke="#276749"/><rect x="648" y="64" width="5" height="46" rx="2.5" fill="#276749" class="tierbar"/><text x="660" y="83" class="njp" font-size="12.5">運動野</text><text x="660" y="97" class="neng" font-size="9.5">motor cortex</text></g><g id="n_cereb" class="box" data-x="648" data-y="126"><title>小脳（Tier2）
+うまくいった運動を真似て自動化する（実測で約26%ブレンド）</title><rect x="648" y="126" width="176" height="46" rx="7" stroke="#2b6cb0"/><rect x="648" y="126" width="5" height="46" rx="2.5" fill="#2b6cb0" class="tierbar"/><text x="660" y="145" class="njp" font-size="12.5">小脳</text><text x="660" y="159" class="neng" font-size="9.5">cerebellum</text></g><g id="n_cpg" class="box" data-x="648" data-y="188"><title>脊髄の運動性喃語（Tier1）
+色付きノイズ 1/f^β。β＝0.686(8週)〜0.877(30週)［López et al. 2026・実測］</title><rect x="648" y="188" width="176" height="46" rx="7" stroke="#276749"/><rect x="648" y="188" width="5" height="46" rx="2.5" fill="#276749" class="tierbar"/><text x="660" y="207" class="njp" font-size="12.5">脊髄の運動性喃語</text><text x="660" y="221" class="neng" font-size="9.5">spinal CPG</text></g><g id="n_synergy" class="box" data-x="648" data-y="250"><title>粗いシナジー（Tier1）
+★新生児は手足をまとめてしか動かせない（文献が一致）</title><rect x="648" y="250" width="176" height="46" rx="7" stroke="#276749"/><rect x="648" y="250" width="5" height="46" rx="2.5" fill="#276749" class="tierbar"/><text x="660" y="269" class="njp" font-size="12.5">粗いシナジー</text><text x="660" y="283" class="neng" font-size="9.5">muscle synergy</text></g><g id="n_antag" class="box" data-x="648" data-y="312"><title>拮抗筋の共収縮（Tier1）
+★新生児は拮抗筋を同時に力ませる［Hadders-Algra 1992］</title><rect x="648" y="312" width="176" height="46" rx="7" stroke="#276749"/><rect x="648" y="312" width="5" height="46" rx="2.5" fill="#276749" class="tierbar"/><text x="660" y="331" class="njp" font-size="12.5">拮抗筋の共収縮</text><text x="660" y="345" class="neng" font-size="9.5">co-activation</text></g><g id="n_goal" class="box" data-x="648" data-y="374"><title>目標指向の探索（逸脱）
+★2026-07-30 の実測で**有害**（接触−32%・persist 1000%）。原典と目標空間が違う</title><rect x="648" y="374" width="176" height="46" rx="7" stroke="#c53030"/><rect x="648" y="374" width="5" height="46" rx="2.5" fill="#c53030" class="tierbar"/><text x="660" y="393" class="njp" font-size="12.5">目標指向の探索</text><text x="660" y="407" class="neng" font-size="9.5">goal babbling</text></g><g id="n_inv" class="box" data-x="648" data-y="436"><title>逆モデル（行動を逆算）（Tier3）
+順モデルを反転して「望む感覚に届く行動」を推論する</title><rect x="648" y="436" width="176" height="46" rx="7" stroke="#b7791f"/><rect x="648" y="436" width="5" height="46" rx="2.5" fill="#b7791f" class="tierbar"/><text x="660" y="455" class="njp" font-size="12.5">逆モデル（行動を逆算）</text><text x="660" y="469" class="neng" font-size="9.5">inverse model</text></g><g id="n_muscle" class="box" data-x="858" data-y="64"><title>筋肉モード（拮抗筋2本/関節）（Tier1）
+引くだけ・活性化ダイナミクス・長さと速度で力が変わる。行動180次元[0,1]</title><rect x="858" y="64" width="176" height="46" rx="7" stroke="#276749"/><rect x="858" y="64" width="5" height="46" rx="2.5" fill="#276749" class="tierbar"/><text x="870" y="83" class="njp" font-size="10.9">筋肉モード（拮抗筋2本/関節）</text><text x="870" y="97" class="neng" font-size="9.5">muscle model</text></g><g id="n_joint" class="box" data-x="858" data-y="126"><title>★関節モード（逸脱）
+★90関節を独立に駆動＝逸脱リスト 逸脱5。新生児は拮抗筋を同時に力ませる[Tier1]</title><rect x="858" y="126" width="176" height="46" rx="7" stroke="#c53030"/><rect x="858" y="126" width="5" height="46" rx="2.5" fill="#c53030" class="tierbar"/><text x="870" y="145" class="njp" font-size="12.5">★関節モード</text><text x="870" y="159" class="neng" font-size="9.5">torque model</text></g><g id="n_bodyshape" class="box" data-x="858" data-y="188"><title>新生児の体つき（Tier1）
+頭が大きく四肢が短い。上肢/下肢＝1.07（成人は0.77）</title><rect x="858" y="188" width="176" height="46" rx="7" stroke="#276749"/><rect x="858" y="188" width="5" height="46" rx="2.5" fill="#276749" class="tierbar"/><text x="870" y="207" class="njp" font-size="12.5">新生児の体つき</text><text x="870" y="221" class="neng" font-size="9.5">infant body proportions</text></g><g id="n_grow" class="box" data-x="858" data-y="250"><title>体が育つ（Tier3）
+★月齢を学習回数の線形で進める（直接の根拠は無い。言えるのは「崖が無い」だけ）</title><rect x="858" y="250" width="176" height="46" rx="7" stroke="#b7791f"/><rect x="858" y="250" width="5" height="46" rx="2.5" fill="#b7791f" class="tierbar"/><text x="870" y="269" class="njp" font-size="12.5">体が育つ</text><text x="870" y="283" class="neng" font-size="9.5">body growth</text></g><g id="n_progress" class="box" data-x="18" data-y="552"><title>学習進度（好奇心）（Tier1）
+予測誤差が**減っている**ことを求める（Oudeyer の内発的動機）</title><rect x="18" y="552" width="176" height="46" rx="7" stroke="#276749"/><rect x="18" y="552" width="5" height="46" rx="2.5" fill="#276749" class="tierbar"/><text x="30" y="571" class="njp" font-size="12.5">学習進度（好奇心）</text><text x="30" y="585" class="neng" font-size="9.5">learning progress</text></g><g id="n_predict" class="box" data-x="18" data-y="614"><title>★予測しやすさ（逸脱）
+★大行動バイアス（大きく動くほど得＝暴れる）。実測でうつ伏せ57.5%</title><rect x="18" y="614" width="176" height="46" rx="7" stroke="#c53030"/><rect x="18" y="614" width="5" height="46" rx="2.5" fill="#c53030" class="tierbar"/><text x="30" y="633" class="njp" font-size="12.5">★予測しやすさ</text><text x="30" y="647" class="neng" font-size="9.5">predictability</text></g><g id="n_homeo_in" class="box" data-x="18" data-y="676"><title>内臓の恒常性（Tier2）
+つらさが下がったら報酬。空腹・眠気・不快から作る</title><rect x="18" y="676" width="176" height="46" rx="7" stroke="#2b6cb0"/><rect x="18" y="676" width="5" height="46" rx="2.5" fill="#2b6cb0" class="tierbar"/><text x="30" y="695" class="njp" font-size="12.5">内臓の恒常性</text><text x="30" y="709" class="neng" font-size="9.5">interoceptive homeostasis</text></g><g id="n_effort" class="box" data-x="18" data-y="738"><title>努力コスト（Tier3）
+★活性化の二乗×筋サイズ。二乗の形とλは恣意的（Selinger 2015 が動機）</title><rect x="18" y="738" width="176" height="46" rx="7" stroke="#b7791f"/><rect x="18" y="738" width="5" height="46" rx="2.5" fill="#b7791f" class="tierbar"/><text x="30" y="757" class="njp" font-size="12.5">努力コスト</text><text x="30" y="771" class="neng" font-size="9.5">effort cost</text></g><g id="n_caps" class="box" data-x="18" data-y="800"><title>行動の滑らかさ（Tier3）
+★急に違うことをするのは損［Mysore et al. 2021］。λは恣意的</title><rect x="18" y="800" width="176" height="46" rx="7" stroke="#b7791f"/><rect x="18" y="800" width="5" height="46" rx="2.5" fill="#b7791f" class="tierbar"/><text x="30" y="819" class="njp" font-size="12.5">行動の滑らかさ</text><text x="30" y="833" class="neng" font-size="9.5">action smoothing (CAPS)</text></g><g id="n_dop" class="box" data-x="228" data-y="552"><title>ドーパミン（Tier1）
+報酬予測誤差（思ったより良かったか）で方策を学ぶ</title><rect x="228" y="552" width="176" height="46" rx="7" stroke="#276749"/><rect x="228" y="552" width="5" height="46" rx="2.5" fill="#276749" class="tierbar"/><text x="240" y="571" class="njp" font-size="12.5">ドーパミン</text><text x="240" y="585" class="neng" font-size="9.5">dopamine</text></g><g id="n_ne" class="box" data-x="228" data-y="614"><title>ノルアドレナリン（青斑核）（Tier1）
+探索と活用の切り替え［Aston-Jones &amp; Cohen 2005］。探索の揺らぎ＝0.05+ne×0.45</title><rect x="228" y="614" width="176" height="46" rx="7" stroke="#276749"/><rect x="228" y="614" width="5" height="46" rx="2.5" fill="#276749" class="tierbar"/><text x="240" y="633" class="njp" font-size="11.8">ノルアドレナリン（青斑核）</text><text x="240" y="647" class="neng" font-size="9.5">locus coeruleus / NE</text></g><g id="n_homeo_sc" class="box" data-x="228" data-y="676"><title>恒常性スケーリング（Tier1）
+神経の活動量を一定に保つ（暴走も沈黙も防ぐ）</title><rect x="228" y="676" width="176" height="46" rx="7" stroke="#276749"/><rect x="228" y="676" width="5" height="46" rx="2.5" fill="#276749" class="tierbar"/><text x="240" y="695" class="njp" font-size="12.5">恒常性スケーリング</text><text x="240" y="709" class="neng" font-size="9.5">homeostatic scaling</text></g><g id="n_mature" class="box" data-x="228" data-y="738"><title>探索の結晶化（Tier3）
+★学習が進むほど探索を減らす。成熟までの回数にその実験の長さを流用している</title><rect x="228" y="738" width="176" height="46" rx="7" stroke="#b7791f"/><rect x="228" y="738" width="5" height="46" rx="2.5" fill="#b7791f" class="tierbar"/><text x="240" y="757" class="njp" font-size="12.5">探索の結晶化</text><text x="240" y="771" class="neng" font-size="9.5">NE maturation</text></g><g id="n_clock" class="box" data-x="228" data-y="800"><title>発達時計（Tier2）
+★時間を3軸に分ける（現実の秒／シミュレーションの秒／★学習回数＝発達年齢）</title><rect x="228" y="800" width="176" height="46" rx="7" stroke="#2b6cb0"/><rect x="228" y="800" width="5" height="46" rx="2.5" fill="#2b6cb0" class="tierbar"/><text x="240" y="819" class="njp" font-size="12.5">発達時計</text><text x="240" y="833" class="neng" font-size="9.5">developmental clock</text></g><g id="n_hippo" class="box" data-x="438" data-y="552"><title>海馬（Tier1）
+直近の経験をためる（上限つき）</title><rect x="438" y="552" width="176" height="46" rx="7" stroke="#276749"/><rect x="438" y="552" width="5" height="46" rx="2.5" fill="#276749" class="tierbar"/><text x="450" y="571" class="njp" font-size="12.5">海馬</text><text x="450" y="585" class="neng" font-size="9.5">hippocampus</text></g><g id="n_replay" class="box" data-x="438" data-y="614"><title>睡眠中の経験リプレイ（逸脱）
+★睡眠そのものは実装しない判断。定着だけを周期的なリプレイで行う</title><rect x="438" y="614" width="176" height="46" rx="7" stroke="#c53030"/><rect x="438" y="614" width="5" height="46" rx="2.5" fill="#c53030" class="tierbar"/><text x="450" y="633" class="njp" font-size="12.5">睡眠中の経験リプレイ</text><text x="450" y="647" class="neng" font-size="9.5">sleep replay</text></g></g></svg><script id="wireData" type="application/json">{"nodes": {"prop": [18, 64], "vest": [18, 126], "touch": [18, 188], "vision": [18, 250], "intero": [18, 312], "insula": [228, 64], "fusion": [228, 126], "soma": [228, 188], "tgtfuse": [228, 250], "gru": [438, 64], "pc": [438, 126], "fwd": [438, 188], "target": [438, 250], "blockpe": [438, 312], "cortex": [648, 64], "cereb": [648, 126], "cpg": [648, 188], "synergy": [648, 250], "antag": [648, 312], "goal": [648, 374], "inv": [648, 436], "muscle": [858, 64], "joint": [858, 126], "bodyshape": [858, 188], "grow": [858, 250], "progress": [18, 552], "predict": [18, 614], "homeo_in": [18, 676], "effort": [18, 738], "caps": [18, 800], "dop": [228, 552], "ne": [228, 614], "homeo_sc": [228, 676], "mature": [228, 738], "clock": [228, 800], "hippo": [438, 552], "replay": [438, 614]}, "edges": [["prop", "fusion"], ["vest", "fusion"], ["touch", "soma"], ["soma", "fusion"], ["vision", "fusion"], ["intero", "insula"], ["insula", "fusion"], ["fusion", "gru"], ["gru", "pc"], ["pc", "fwd"], ["pc", "cortex"], ["tgtfuse", "target"], ["target", "blockpe"], ["fwd", "blockpe"], ["cortex", "cereb"], ["cereb", "muscle"], ["cortex", "muscle"], ["cortex", "joint"], ["cpg", "muscle"], ["synergy", "cpg"], ["antag", "cpg"], ["goal", "inv"], ["inv", "cortex"], ["muscle", "prop"], ["joint", "prop"], ["grow", "bodyshape"], ["blockpe", "progress"], ["blockpe", "predict"], ["progress", "dop"], ["predict", "dop"], ["homeo_in", "dop"], ["effort", "dop"], ["caps", "dop"], ["dop", "cortex"], ["progress", "ne"], ["ne", "cpg"], ["ne", "cortex"], ["mature", "ne"], ["clock", "mature"], ["homeo_sc", "fusion"], ["hippo", "replay"], ["replay", "fwd"], ["blockpe", "hippo"]], "boxW": 176, "boxH": 46, "w": 1052, "h": 926}</script><div class="wlegend"><div class="wlt">枠の色＝根拠の段階<span class="eng">evidence level</span></div><span class="lgw"><i style="background:#276749"></i><b>Tier1</b> 一次文献の実測値がある<em>grounded in measured data</em></span><span class="lgw"><i style="background:#2b6cb0"></i><b>Tier2</b> 定性的な裏付けはあるが数値は自分で決めた<em>qualitative support</em></span><span class="lgw"><i style="background:#b7791f"></i><b>Tier3</b> ★恣意的（工学的な近似）＝感度を確かめる対象<em>arbitrary</em></span><span class="lgw"><i style="background:#c53030"></i><b>逸脱</b> ★人間模倣から外れていると自覚している<em>known deviation</em></span><span class="lgw"><i style="background:#718096"></i><b>未実装</b> 中身が無い／繋がっていない<em>not implemented</em></span><span class="lgw"><i style="background:#a0aec0"></i><b>未記載</b> 根拠が未記載＝★確かめる宿題<em>unlabeled</em></span><div class="wnote">⚠️薄い箱＝この実験では使っていない機構（実装はある）。箱にマウスを乗せると説明が出ます。根拠が「未記載」のものは★確かめる宿題です。</div></div></div>
+
+<script>
+(function(){
+  const svg = document.querySelector('svg.wire');
+  if (!svg) return;
+  const cam = svg.querySelector('#cam');
+  const D = JSON.parse(document.getElementById('wireData').textContent);
+  const BW = D.boxW, BH = D.boxH;
+  const P = D.nodes;                       // 箱の位置（動かすとここが変わる）
+  let sc = 1, tx = 0, ty = 0;              // 拡大率と移動量
+  const moved = {};                        // 人が動かした箱だけ覚える
+
+  function applyCam(){ cam.setAttribute('transform',
+      'translate('+tx.toFixed(1)+','+ty.toFixed(1)+') scale('+sc.toFixed(3)+')'); }
+
+  // ★Python の _edge_path と同じ式（片方だけ直さない）
+  function edgePath(p1, p2){
+    let x1 = p1[0]+BW, y1 = p1[1]+BH/2, x2 = p2[0], y2 = p2[1]+BH/2;
+    if (x2 < x1){
+      x1 = p1[0]+BW/2; y1 = p1[1]+BH;
+      x2 = p2[0]+BW/2; y2 = p2[1]+BH;
+      const dy = 26 + Math.abs(x2-x1)*0.03;
+      return ['M'+x1.toFixed(0)+','+y1.toFixed(0)+' C'+x1.toFixed(0)+','+(y1+dy).toFixed(0)
+              +' '+x2.toFixed(0)+','+(y2+dy).toFixed(0)+' '+x2.toFixed(0)+','+y2.toFixed(0),
+              (x1+x2)/2, Math.max(y1,y2)+dy*0.75];
+    }
+    const mx = (x1+x2)/2;
+    return ['M'+x1.toFixed(0)+','+y1.toFixed(0)+' C'+mx.toFixed(0)+','+y1.toFixed(0)
+            +' '+mx.toFixed(0)+','+y2.toFixed(0)+' '+x2.toFixed(0)+','+y2.toFixed(0),
+            mx, (y1+y2)/2-5];
+  }
+  function redraw(nid){
+    const g = document.getElementById('n_'+nid);
+    if (g) g.setAttribute('transform',
+        'translate('+(P[nid][0]-(+g.dataset.x))+','+(P[nid][1]-(+g.dataset.y))+')');
+    D.edges.forEach(function(e){
+      if (e[0]!==nid && e[1]!==nid) return;
+      const path = document.getElementById('e_'+e[0]+'__'+e[1]);
+      if (!path) return;
+      const r = edgePath(P[e[0]], P[e[1]]);
+      path.setAttribute('d', r[0]);
+      const t = document.getElementById('t_'+e[0]+'__'+e[1]);
+      if (t){ t.setAttribute('x', r[1].toFixed(0)); t.setAttribute('y', r[2].toFixed(0)); }
+    });
+  }
+
+  // ---- スクロールで拡大・縮小 ------------------------------------------
+  svg.addEventListener('wheel', function(ev){
+    ev.preventDefault();
+    const r = svg.getBoundingClientRect();
+    const k = D.w / r.width;                       // 画面の1pxが図の何単位か
+    const mx = (ev.clientX - r.left) * k, my = (ev.clientY - r.top) * k;
+    const s2 = Math.min(4, Math.max(0.3, sc * (ev.deltaY < 0 ? 1.12 : 1/1.12)));
+    tx = mx - (mx - tx) * (s2/sc); ty = my - (my - ty) * (s2/sc);
+    sc = s2; applyCam();
+  }, {passive:false});
+
+  // ---- ドラッグ（背景＝全体を移動 ／ 箱＝その箱だけ移動）-----------------
+  let drag = null;
+  svg.addEventListener('pointerdown', function(ev){
+    const r = svg.getBoundingClientRect(), k = D.w / r.width;
+    const g = ev.target.closest ? ev.target.closest('g[id^="n_"]') : null;
+    drag = {x: ev.clientX, y: ev.clientY, k: k,
+            nid: g ? g.id.slice(2) : null,
+            ox: g ? P[g.id.slice(2)][0] : tx, oy: g ? P[g.id.slice(2)][1] : ty};
+    svg.setPointerCapture(ev.pointerId);
+    svg.style.cursor = 'grabbing';
+  });
+  svg.addEventListener('pointermove', function(ev){
+    if (!drag) return;
+    const dx = (ev.clientX - drag.x) * drag.k, dy = (ev.clientY - drag.y) * drag.k;
+    if (drag.nid){
+      P[drag.nid] = [drag.ox + dx/sc, drag.oy + dy/sc];
+      moved[drag.nid] = P[drag.nid];
+      redraw(drag.nid);
+    } else { tx = drag.ox + dx; ty = drag.oy + dy; applyCam(); }
+  });
+  svg.addEventListener('pointerup', function(ev){
+    drag = null; svg.style.cursor = '';
+    const n = Object.keys(moved).length;
+    const s = document.getElementById('wStat');
+    if (s) s.textContent = n ? ('動かした箱: ' + n + '個') : '';
+  });
+
+  // ---- ボタン ----------------------------------------------------------
+  const btnReset = document.getElementById('wReset');
+  if (btnReset) btnReset.onclick = function(){
+    sc = 1; tx = 0; ty = 0; applyCam();
+  };
+  const btnCopy = document.getElementById('wCopy');
+  if (btnCopy) btnCopy.onclick = function(){
+    // ★人が動かした箱だけを Python に貼れる形で出す
+    const lines = Object.keys(P).sort().map(function(k){
+      return '    "' + k + '": (' + Math.round(P[k][0]) + ', ' + Math.round(P[k][1]) + '),';
+    });
+    const txt = 'POSITIONS = {\n' + lines.join('\n') + '\n}';
+    navigator.clipboard.writeText(txt).then(function(){
+      btnCopy.textContent = '★コピーしました（run/wiring_map.py の POSITIONS に貼る）';
+      setTimeout(function(){ btnCopy.textContent = '位置を書き出す'; }, 4000);
+    }, function(){
+      const w = window.open('', '_blank');
+      w.document.write('<pre>' + txt.replace(/</g,'&lt;') + '</pre>');
+    });
+  };
+})();
+</script>
+
+</body></html>
