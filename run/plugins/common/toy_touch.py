@@ -33,6 +33,11 @@ class ToyTouch(Plugin):
         if self.probe is not None:
             self.probe.update(ctx.model, ctx.data)
 
+    def on_body_change(self, ctx):
+        # ★体を作り直したら geom の id を引き直す（溜めた回数は保つ）
+        if self.probe is not None:
+            self.probe.rebind(ctx.model)
+
     def line(self, ctx):
         return self.probe.line(ctx.dt) if self.probe is not None else None
 

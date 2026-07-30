@@ -27,6 +27,21 @@ import sys
 import time
 import warnings
 
+# ★★【最重要の未解決事項・2026-07-30】**同じ実験ファイル・同じ seed でも結果がばらつく。**
+#   【実測】seed=0・100回学習・自己モデルの測定ONで7回回した classify（100回目）：
+#       45.6 / 46.7 / 44.5 / 45.7 / 47.0 / 43.9 / 45.6  ＝★幅3.1ポイント
+#     元の経路（E/scripts/e_growth_train.py）でも同じ（49.3 → 43.2）。
+#     ＝**私の組み換えのせいではなく、元からある**。
+#   【切り分けで分かったこと】
+#     ・物理（MuJoCo）は決定的        脳を通さない measure は2回**完全一致**
+#     ・学習だけなら決定的            測る道具を外すと2回**完全一致**
+#     ・★自己モデルの測定を入れると出る  e_probes.evaluate（環境を80判断進める）
+#     ・PYTHONHASHSEED も BLAS のスレッド数も**原因ではない**（固定しても一致しない）
+#   【まだ分かっていないこと】どこで非決定性が生まれるのか。
+#   【★実験するときの守り】「シード間の差」を見る前に、**同じシードを複数回**回して
+#     シード内のばらつきを測る。それより小さい差は主張できない。
+#     → 検証の落とし穴チェックリスト 項79
+
 warnings.filterwarnings("ignore")
 _ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir))
 if _ROOT not in sys.path:
@@ -41,9 +56,12 @@ def _register():
     """プラグインを登録する。import が重いものは使うときだけ読む。"""
     from run.plugins.common.toy_touch import ToyTouch
     from run.plugins.common.hand_in_view import HandInView
+    from run.plugins.common.self_model import SelfModel
     PLUGINS["toy_touch"] = ToyTouch
     PLUGINS["hand_in_view"] = HandInView
-    # ⚠️view（目視）と self_model は第2段階で足す（設計 §7）
+    PLUGINS["self_model"] = SelfModel
+    # ⚠️self_model は★太郎の脳が要る（run.type=train）。脳側との接続は第2段階。
+    #   いまの train は e_growth_train を包んでいるので、測定はそちらで行われる。
 
 
 def load_spec(path):
@@ -77,6 +95,28 @@ def build_plugins(spec):
     return out
 
 
+def _csv_logger(path, spec):
+    """チェックポイントの記録をCSVに残す関数を作る。★列は最初の行で決まる。"""
+    import csv
+    if not path:
+        return (lambda row: None)
+    path = path if os.path.isabs(path) else os.path.join(_ROOT, path)
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    state = {"cols": None}
+
+    def log_row(row):
+        if not isinstance(row, dict):
+            return
+        new = state["cols"] is None
+        if new:
+            state["cols"] = list(row)
+            with open(path, "w", newline="", encoding="utf-8") as fp:
+                csv.writer(fp).writerow(state["cols"])
+        with open(path, "a", newline="", encoding="utf-8") as fp:
+            csv.writer(fp).writerow([row.get(c, "") for c in state["cols"]])
+    return log_row
+
+
 def run(spec, *, steps_override=None, verbose=False):
     from run.context import Ctx
     from run.plugins.common import scene as scene_mod
@@ -94,27 +134,42 @@ def run(spec, *, steps_override=None, verbose=False):
     print(f"  動かし方 {kind} / {n_steps}ステップ / seed={seed}")
     print(f"  道具     {sorted(k for k, v in spec['plugins'].items() if v)}")
 
+    plugins = build_plugins(spec)
+
+    # --- ★train：太郎の脳を通して学習する（run/trainer.py）------------------
+    if kind == "train":
+        from run.config import Config
+        from run import trainer
+        cfg = Config.from_spec(spec, steps_override=steps_override)
+        print(f"  設定     {cfg.summary()}")
+        log_row = _csv_logger(r.get("csv"), spec)
+        out = trainer.train(cfg, plugins=plugins, verbose=verbose, log_row=log_row)
+        print("-" * 74)
+        for k, v in out.items():
+            print(f"  {k}: {json.dumps(v, ensure_ascii=False)}")
+        return out
+
+    # --- view：等倍速で太郎を見る（run/viewer.py）----------------------------
+    if kind == "view":
+        from run.config import Config
+        from run import viewer
+        cfg = Config.from_spec(spec, steps_override=steps_override)
+        print(f"  設定     {cfg.summary()}")
+        return viewer.view(cfg, plugins=plugins, verbose=verbose)
+
+    if kind not in ("measure",):
+        raise ValueError(f"run.type が不明: {kind}（measure / train / view）")
+
+    # --- measure：太郎の脳を通さず、環境をそのまま進めて測る ---
+    import numpy as np
     env, sc, _hands = scene_mod.build(spec["scene"], taro=spec["taro"],
                                       seed=seed, verbose=verbose)
     u = env.unwrapped
-    # 1ステップの秒数。K は「1判断あたりの物理ステップ数」（学習ループと同じ既定10）
     K = int(r.get("K", 10))
     dt = float(u.model.opt.timestep) * int(u.frame_skip) * K
-
-    plugins = build_plugins(spec)
     ctx = Ctx(env=env, spec=spec, scene=sc, n_steps=n_steps, dt=dt)
     for p in plugins:
         p.setup(ctx)
-
-    if kind not in ("measure",):
-        raise NotImplementedError(
-            f"run.type={kind} はまだ（第1段階は measure だけ）。"
-            "学習は第2段階で取り込む＝ E/docs/実行基盤_設計.md §7")
-
-    # --- measure：太郎の脳を通さず、環境をそのまま進めて測る ---
-    #   ⚠️脳を通す（学習する／学習済みモデルで動かす）のは第2段階。
-    #     いまは「環境と測る道具が正しく繋がっているか」を確かめる最小版。
-    import numpy as np
     obs, _ = env.reset(seed=seed)
     zero = np.zeros(env.action_space.shape[0], dtype=np.float32)
     if float(env.action_space.low[0]) >= 0.0:

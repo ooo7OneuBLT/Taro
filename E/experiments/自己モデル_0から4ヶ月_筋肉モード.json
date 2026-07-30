@@ -1,0 +1,23 @@
+{
+  "name": "自己モデル：新生児の体で学んでから4ヶ月へ（★筋肉モード）",
+  "note": "2026-07-30。7/29〜30の同じ実験は★関節モード（逸脱5）で回っていたので作り直す。0ヶ月で12000回 → 12000回目に4ヶ月へ載せ替え → 6000回。保存を忘れない。",
+  "scene": "新生児_仰向け_柵あり",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 0.0,
+    "age_to": 4.0,
+    "age_start": 12000,
+    "age_ramp": 0,
+    "goal_babbling": false,
+    "vision": true,
+    "save": "E/logs/selfmodel/selfmodel_muscle_0to4mo_seed0.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 18000,
+    "seed": 0,
+    "checkpoint": 250,
+    "log": "E/logs/selfmodel/run_muscle_0to4mo_seed0.log"
+  },
+  "plugins": {}
+}

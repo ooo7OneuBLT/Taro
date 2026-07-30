@@ -1,0 +1,17 @@
+{
+  "name": "リーチング：自己モデルを持った太郎が おもちゃに触れるか",
+  "note": "2026-07-30。関節モードで 25回/10分 だった実験を、★筋肉モード（既定）で回し直す。前回は駆動モードが食い違っていたので比較できない。",
+  "scene": "リーチング_リクライニング60度",
+  "taro": {
+    "goal_babbling": false,
+    "vision": true
+  },
+  "run": {
+    "type": "train",
+    "steps": 6000,
+    "seed": 0,
+    "checkpoint": 500,
+    "log": "E/logs/reach/run_reach_nogb_muscle_seed0.log"
+  },
+  "plugins": {}
+}

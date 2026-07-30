@@ -28,13 +28,19 @@ for _p in (os.path.join(_ROOT, "E", "scripts"),
         sys.path.insert(0, _p)
 
 
-def build(scene_name, *, taro=None, seed=0, verbose=False):
+def build(scene_name, *, taro=None, seed=0, verbose=False, hybrid=False):
     """シーンの名前から環境を作る。
 
     Args:
         scene_name: E/scenes/<名前>.json の名前
         taro: 実験ファイルの `taro` 欄（月齢の上書き・駆動モードの指定に使う）
         seed: リセットの乱数の種
+        hybrid: ★内臓（内受容感覚）を足すか。**学習では必須**。
+            【なぜ、2026-07-30】太郎の融合層（MinimalFusion）は観測の
+            `interoception`（空腹・眠気・不快・覚醒）を島皮質(insula)経由で使う。
+            HybridEnv で包まないとこのキーが観測に無く、脳の入力次元が合わない。
+            ⚠️measure（脳を通さず環境だけ進める）では不要なので既定 False。
+            ★包むと観測が変わる＝**包む/包まないで別の実験**になる。
     Returns:
         (env, scene, hands)
     """
@@ -62,4 +68,8 @@ def build(scene_name, *, taro=None, seed=0, verbose=False):
     env, hands = e_scene.build(sc, orient=bool(taro.get("orienting_reflex", False)),
                                vor=bool(taro.get("vor", True)),
                                seed=seed, verbose=verbose, actuation_model=act)
+    if hybrid:
+        # ⚠️内臓を足す（内受容感覚が観測に入る）。学習ではこれが要る。
+        from hybrid_env import HybridEnv
+        env = HybridEnv(env)
     return env, sc, hands

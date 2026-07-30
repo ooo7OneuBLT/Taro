@@ -73,6 +73,32 @@ class ToyTouchProbe:
         self.min_dist = {s: 1e9 for s in self.hand_geoms}
         self._prev = False
 
+    def rebind(self, model):
+        """★体を作り直したあとに id を引き直す。溜めた回数・最接近は**消さない**。
+
+        【なぜ要るか、2026-07-30】体を育てる実験（月齢を進める）では学習の途中で
+        env を作り直す。そのとき geom / body の id は原理的に変わりうるので、
+        引き直さないと「接触を1回も検出しない」という静かな失敗になる。
+        ⚠️元の学習ループ（e_growth_train.py）はここを引き直しておらず、
+          さらに `env.unwrapped` を作り直し前のまま参照していた。
+        """
+        if not self.ok:
+            return
+        try:
+            self.toy_bid = int(model.body(TOY_BODY).id)
+        except Exception:
+            self.ok = False
+            return
+        self.toy_geoms = _geoms_of_body(model, self.toy_bid, include_children=True)
+        for hb in HAND_BODIES:
+            try:
+                bid = int(model.body(hb).id)
+            except Exception:
+                continue
+            side = hb.split("_")[0]
+            self.hand_bid[side] = bid
+            self.hand_geoms[side] = _geoms_of_body(model, bid, include_children=True)
+
     def update(self, model, data):
         if not self.ok:
             return
@@ -113,6 +139,9 @@ class ToyTouchProbe:
         s = self.summary(dt_per_step)
         if not s["ok"]:
             return "toy=なし"
-        mn = " ".join(f"{k[0]}{v:.1f}cm" for k, v in sorted(s["min_cm"].items()))
+        # ⚠️まだ1回も測っていないと min_dist は 1e9 のまま＝「1000億cm」と表示されて
+        #   意味不明になる（2026-07-30 の試運転で実際に出た）。未測定は "-" と出す。
+        mn = " ".join(f"{k[0]}{'-' if v > 1e8 else f'{v:.1f}cm'}"
+                      for k, v in sorted(s["min_cm"].items()))
         return (f"toy_touch={s['touches']}回({s['touch_per_min']:.2f}/分) "
                 f"min[{mn}] sim={s['sim_sec']:.0f}s")

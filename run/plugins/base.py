@@ -43,6 +43,13 @@ class Plugin:
     def on_step(self, ctx):
         """毎ステップ。★重い処理は書かない（学習が遅くなる）。"""
 
+    def on_body_change(self, ctx):
+        """★体を作り直した直後（体を育てる実験）。model/data が別物になっている。
+
+        ⚠️setup で覚えた geom / body の id は**作り直しで変わりうる**。
+          ここで引き直す。累積した測定値は**消さない**（消すと推移が読めない）。
+        """
+
     def on_checkpoint(self, ctx):
         """記録の区切りごと。評価など重い測定はここで。"""
 
