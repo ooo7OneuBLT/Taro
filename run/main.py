@@ -58,9 +58,11 @@ def _register():
     from run.plugins.common.self_model import SelfModel
     from run.plugins.common.trace import Trace
     from run.plugins.common.dashboard import Dashboard
+    from run.plugins.common.movement_units import MovementUnits
     PLUGINS["toy_touch"] = ToyTouch
     PLUGINS["hand_in_view"] = HandInView
     PLUGINS["self_model"] = SelfModel
+    PLUGINS["movement_units"] = MovementUnits   # 動きが滑らかか（リーチングの指標）
     PLUGINS["trace"] = Trace           # 内部の値の指紋を残す（原因追跡用）
     PLUGINS["dashboard"] = Dashboard   # 学習の様子の絵を自動で作り直す
     # 注意：self_model / trace は太郎の脳が要る（run.type=train のみ）。
