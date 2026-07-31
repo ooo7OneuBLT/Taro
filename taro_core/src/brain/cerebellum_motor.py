@@ -13,7 +13,7 @@
   よく練習した（＝小脳が方針をよく再現できる）状態ほど自動化重み w を上げ、滑らかな
   小脳出力で行動を置き換え、探索ノイズも下げる＝"状態ごと"の結晶化。NEの全体調整とは別。
 
-【工学近似 ⚠️】自動化重み w の形（自己正規化した馴染み度の指数）と上限 w_max は暫定。
+【工学近似 注意】自動化重み w の形（自己正規化した馴染み度の指数）と上限 w_max は暫定。
 恣意的な絶対スケール定数を避けるため、馴染み度は誤差の走行平均(err_ema)で自己正規化する
 （Bの当てずっぽう K=2000 より一歩改善）。
 
@@ -34,7 +34,7 @@ class MotorCerebellum(nn.Module):
             nn.Linear(latent_dim, hidden), nn.SiLU(),
             nn.LayerNorm(hidden), nn.Linear(hidden, n_actuators),
         )
-        self.w_max = w_max          # ⚠️自動化の上限（この割合まで小脳に任せる）
+        self.w_max = w_max          # 注意自動化の上限（この割合まで小脳に任せる）
         self.ema_beta = ema_beta    # 馴染み度の自己正規化に使う走行平均の時定数
         self.register_buffer("err_ema", torch.tensor(1.0))
 

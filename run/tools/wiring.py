@@ -1,4 +1,4 @@
-"""★太郎の中身の配線図を描く（SVG）。実装したもの全部を出し、使っていないものは薄く。
+"""太郎の中身の配線図を描く（SVG）。実装したもの全部を出し、使っていないものは薄く。
 
 【なぜ要るか、2026-07-30】ユーザーの要望：
 
@@ -10,18 +10,18 @@
 実際そこで事故が起きた（学習は関節モード・測定は筋肉モードという**別の体**）。
 
 【何が見えるか】
-    ・実装したもの**全部**（37個）が並ぶ。この実験で効いていないものは★薄い
-    ・枠の色＝根拠の段階（Tier1 一次文献の実測 ／ Tier3 恣意的 ／ ★逸脱 ／ 未実装）
+    ・実装したもの**全部**（37個）が並ぶ。この実験で効いていないものは薄い
+    ・枠の色＝根拠の段階（Tier1 一次文献の実測 ／ Tier3 恣意的 ／ 逸脱 ／ 未実装）
       ⇒ **どこが人間模倣で、どこが自分の決めごとか**が一目で分かる
     ・日本語をメインに、英語を小さく添える（発表・論文で使い回せるように）
-    ・★通った回数（段階3）：counters を渡すと線の太さと数字に反映する
+    ・通った回数（段階3）：counters を渡すと線の太さと数字に反映する
 
 【使い方】
     .venv/Scripts/python.exe -m run.tools.wiring E/experiments/<名前>.json
     → 同じフォルダに 配線図.html を作る（単体で開ける）
   ダッシュボード（run/tools/dashboard.py）にも埋め込まれ、30秒ごとに最新になる。
 
-⚠️中身の定義（機構の一覧・繋がり・根拠のラベル）は `run/wiring_map.py`。
+注意：中身の定義（機構の一覧・繋がり・根拠のラベル）は `run/wiring_map.py`。
   ここは**描くだけ**。機構を足すときは定義側を直す。
 """
 import argparse
@@ -46,13 +46,13 @@ LOWER_GAP = 54          # 上段と下段のあいだ
 
 
 def _order_in_columns(order, rounds=12):
-    """★列の中の並び順を「繋がる相手の平均の高さ」に寄せて決める。
+    """列の中の並び順を「繋がる相手の平均の高さ」に寄せて決める。
 
     【なぜ、2026-07-30】最初は定義に書いた順に上から並べていたので、
     線が別の箱を35件横切り、線どうしの交差が51箇所あった（＝読みにくい）。
     ⇒ グラフ描画の標準的な手法（バリセンター法：Sugiyama らの層別描画の一部）で、
       **各ノードを「繋がっている相手の平均の高さ」に近づける**ように並べ替える。
-    ⚠️列（感覚／脳／体…）の割り当ては**変えない**。意味で決めた区分なので、
+    注意：列（感覚／脳／体…）の割り当ては**変えない**。意味で決めた区分なので、
       並び順だけを機械的に整える。
     """
     nb = {}          # ノード → 繋がっている相手
@@ -65,7 +65,7 @@ def _order_in_columns(order, rounds=12):
             def bary(nid):
                 ns = [rank[o] for o in nb.get(nid, ()) if o in rank]
                 return sum(ns) / len(ns) if ns else rank[nid]
-            # ★安定に並べる（同じ値なら元の順を保つ）＝実行ごとに絵が変わらない
+            # 安定に並べる（同じ値なら元の順を保つ）＝実行ごとに絵が変わらない
             order[col] = sorted(ids, key=lambda n: (bary(n), rank[n]))
     return order
 
@@ -77,7 +77,7 @@ def layout():
     order = {}
     for key, jp, eng in list(COLUMNS) + list(LOWER):
         order[key] = [n[0] for n in NODES if n[3] == key]
-    # ⚠️★自動での並べ替え（バリセンター法）は**試したが悪化した**：
+    # 注意：自動での並べ替え（バリセンター法）は**試したが悪化した**：
     #   線が別の箱を横切る 35→42件、線どうしの交差 51→57箇所（2026-07-30 実測）。
     #   理由＝この図は綺麗な層構造ではない（報酬の輪が下段から上段へ長く飛ぶ、
     #   多対多の繋がりが多い）ので、層別描画の前提が成り立たない。
@@ -108,7 +108,7 @@ def layout():
             y += BOX_H + ROW_GAP
         lower_h = max(lower_h, y)
         x += BOX_W + COL_GAP
-    # ★人が決めた位置があれば上書きする（HTMLの「位置を書き出す」で作った値）
+    # 人が決めた位置があれば上書きする（HTMLの「位置を書き出す」で作った値）
     try:
         from run.wiring_map import POSITIONS
     except ImportError:
@@ -123,7 +123,7 @@ def layout():
 
 
 def _edge_path(p1, p2):
-    """箱と箱を結ぶ線。★横に離れているときは曲線、縦に近いときは直角に近い形。"""
+    """箱と箱を結ぶ線。横に離れているときは曲線、縦に近いときは直角に近い形。"""
     x1, y1 = p1[0] + BOX_W, p1[1] + BOX_H / 2      # 右端から出る
     x2, y2 = p2[0], p2[1] + BOX_H / 2              # 左端に入る
     if x2 < x1:        # 戻る線（体→感覚など）は下に回す
@@ -138,7 +138,7 @@ def _edge_path(p1, p2):
 
 
 def _fit(text, width, size):
-    """字が箱から出ないよう、長ければ文字を小さくする（★字が重なるのを防ぐ）。"""
+    """字が箱から出ないよう、長ければ文字を小さくする（字が重なるのを防ぐ）。"""
     # 日本語は1文字≒size、英数字は≒size*0.55 として見積もる
     w = sum(size if ord(c) > 0x2000 else size * 0.55 for c in text)
     return size if w <= width else max(7.5, size * width / w)
@@ -161,7 +161,7 @@ def build_svg(cfg, counters=None):
                '<marker id="arOn" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" '
                'markerHeight="6" orient="auto"><path d="M0,0 L8,4 L0,8 z" '
                'fill="#3d4d63"/></marker></defs>')
-    # ★ここから下は「カメラ」の中。JS が transform で拡大・移動する
+    # ここから下は「カメラ」の中。JS が transform で拡大・移動する
     out.append('<g id="cam">')
 
     # ---- 列の見出し --------------------------------------------------------
@@ -176,7 +176,7 @@ def build_svg(cfg, counters=None):
         live = on.get(a, True) and on.get(b, True)
         d, lx, ly = _edge_path(pos[a], pos[b])
         n = counters.get(ckey) if ckey else None
-        # ★通った回数（counters）が分かっている線は太くする。
+        # 通った回数（counters）が分かっている線は太くする。
         #   基準は「その値がどれだけ大きいか」ではなく**0か0でないか**に留める
         #   ＝単位が違う量（回数・割合・平均）を同じ物差しで太さにすると嘘になる。
         if not live:
@@ -211,7 +211,7 @@ def build_svg(cfg, counters=None):
                    f'<title>{html.escape(title)}</title>')
         out.append(f'<rect x="{x}" y="{y}" width="{BOX_W}" height="{BOX_H}" rx="7" '
                    f'stroke="{color}"/>')
-        # 左端に根拠の色帯（★枠だけだと薄いときに見分けづらい）
+        # 左端に根拠の色帯（枠だけだと薄いときに見分けづらい）
         out.append(f'<rect x="{x}" y="{y}" width="5" height="{BOX_H}" rx="2.5" '
                    f'fill="{color}" class="tierbar"/>')
         fs = _fit(jp, BOX_W - 22, 12.5)
@@ -245,9 +245,9 @@ def legend_html():
                     f'<em>{html.escape(en)}</em></span>')
     return ('<div class="wlegend"><div class="wlt">枠の色＝根拠の段階'
             '<span class="eng">evidence level</span></div>' + "".join(rows) +
-            '<div class="wnote">⚠️薄い箱＝この実験では使っていない機構（実装はある）。'
+            '<div class="wnote">注意薄い箱＝この実験では使っていない機構（実装はある）。'
             '箱にマウスを乗せると説明が出ます。'
-            '根拠が「未記載」のものは★確かめる宿題です。</div></div>')
+            '根拠が「未記載」のものは確かめる宿題です。</div></div>')
 
 
 CSS = """
@@ -314,8 +314,8 @@ def html_page(cfg, spec_name, counters=None):
 </body></html>"""
 
 
-# ★操作のためのスクリプト。ダッシュボードに埋め込むときも同じものを使う。
-#   ⚠️線を引く式は Python の `_edge_path` と**同じもの**をここにも書いている。
+# 操作のためのスクリプト。ダッシュボードに埋め込むときも同じものを使う。
+#   注意：線を引く式は Python の `_edge_path` と**同じもの**をここにも書いている。
 #     箱を動かしたら線も追いかける必要があるため。片方だけ直すと形が食い違う。
 SCRIPT = r"""
 <script>
@@ -332,7 +332,7 @@ SCRIPT = r"""
   function applyCam(){ cam.setAttribute('transform',
       'translate('+tx.toFixed(1)+','+ty.toFixed(1)+') scale('+sc.toFixed(3)+')'); }
 
-  // ★Python の _edge_path と同じ式（片方だけ直さない）
+  // Python の _edge_path と同じ式（片方だけ直さない）
   function edgePath(p1, p2){
     let x1 = p1[0]+BW, y1 = p1[1]+BH/2, x2 = p2[0], y2 = p2[1]+BH/2;
     if (x2 < x1){
@@ -408,13 +408,13 @@ SCRIPT = r"""
   };
   const btnCopy = document.getElementById('wCopy');
   if (btnCopy) btnCopy.onclick = function(){
-    // ★人が動かした箱だけを Python に貼れる形で出す
+    // 人が動かした箱だけを Python に貼れる形で出す
     const lines = Object.keys(P).sort().map(function(k){
       return '    "' + k + '": (' + Math.round(P[k][0]) + ', ' + Math.round(P[k][1]) + '),';
     });
     const txt = 'POSITIONS = {\n' + lines.join('\n') + '\n}';
     navigator.clipboard.writeText(txt).then(function(){
-      btnCopy.textContent = '★コピーしました（run/wiring_map.py の POSITIONS に貼る）';
+      btnCopy.textContent = 'コピーしました（run/wiring_map.py の POSITIONS に貼る）';
       setTimeout(function(){ btnCopy.textContent = '位置を書き出す'; }, 4000);
     }, function(){
       const w = window.open('', '_blank');
@@ -430,7 +430,7 @@ CONTROLS = """
   <button id="wReset" type="button">表示を元に戻す</button>
   <button id="wCopy" type="button">位置を書き出す</button>
   <span class="whelp">スクロール＝拡大・縮小 ／ 背景をドラッグ＝全体を動かす ／
-    ★箱をドラッグ＝その箱だけ動かす</span>
+    箱をドラッグ＝その箱だけ動かす</span>
   <span id="wStat" class="wstat"></span>
 </div>
 """

@@ -14,7 +14,7 @@ HybridEnv — MIMo（外側の身体）と太郎の内臓（内側の身体）�
   - insula（内受容→脳への変換）は「脳側」の部品なのでここでは動かさない。生の内受容ベクトル
     [hunger, sleepiness, discomfort, arousal] を観測に足すだけ。insula変換は脳と繋ぐPhase 5で。
   - 授乳（親）は本来 parent_sim の役割。Phase 4ではまだ脳も親も繋がないので、「空腹が高い時に
-    自動で授乳する」簡易スタンドインを置く（★後で本物の親シミュレータに差し替える）。
+    自動で授乳する」簡易スタンドインを置く（後で本物の親シミュレータに差し替える）。
 
 内臓の毎秒の配線は Taro の core_b.py tick_body() を忠実に再現：
   胃.tick → 血糖.receive_glucose(吸収量×効率) → 血糖.tick → 内受容.update_from_body → 内受容.tick → 胃.grow
@@ -45,7 +45,7 @@ class HybridEnv(gymnasium.Wrapper):
     #: Taro core_b.py の既定値（血糖効率）
     GLUCOSE_EFFICIENCY = 3.0
 
-    #: 簡易授乳（★スタンドイン）：空腹がこの値を超え、授乳中でなければ授乳する
+    #: 簡易授乳（スタンドイン）：空腹がこの値を超え、授乳中でなければ授乳する
     FEED_THRESHOLD = 0.6
     FEED_AMOUNT = 0.6
 
@@ -111,7 +111,7 @@ class HybridEnv(gymnasium.Wrapper):
         self.internal_state.tick(adenosine=self.adenosine)
         self.stomach.grow()
 
-        # --- 簡易授乳（★後で本物の親シミュレータに差し替える） ---
+        # --- 簡易授乳（後で本物の親シミュレータに差し替える） ---
         if (self.internal_state.hunger > self.FEED_THRESHOLD
                 and not self.stomach.is_feeding()):
             self._feed(self.FEED_AMOUNT)

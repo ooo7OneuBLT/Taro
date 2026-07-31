@@ -180,7 +180,7 @@ def build(mode_actuation, age=None):
     # それまでは vision_params=None / touch_dim=0 で、太郎は内受容+固有感覚+前庭覚の
     # 3つだけ（sdim=192）で動いていた＝「視覚を入力に足した」という以前の記述は**誤り**で、
     # 環境側にパラメータを用意しただけで build から渡していなかった。
-    # ⚠️sdimが192→320に変わるので、C5のチェックポイントは**一部の層が作り直しになる**
+    # 注意：sdimが192→320に変わるので、C5のチェックポイントは**一部の層が作り直しになる**
     #   （load_matching が形の合う層だけ読む）。E1は「視覚を使って自分の手を学ぶ」段階なので、
     #   視覚なしで学んだ重みをそのまま持ち越すほうが不自然、という判断で許容する。
     #   E_VISION=0 / E_TOUCH=0 で個別に切れる（アブレーション用）。E_TOY=0 なら従来と完全同一。
@@ -279,7 +279,7 @@ def make_policy(brain, fusion, emb_proj, cereb, n_act, babble,
             z = z.detach()
             # 【2026-07-25】太郎の motor_drive を呼ぶだけに変更（core へ一元化）。
             # 旧実装は同じ式を手書きしていた＝**数値は完全に同一**。
-            # ★ACTION_SCALEなし＝Cで学習した素の方策、という性質も変わらない。
+            # ACTION_SCALEなし＝Cで学習した素の方策、という性質も変わらない。
             _mean, _std, _, _ = brain.motor_drive(z, ne_level, cerebellum=cereb)
             cache["mean"] = _mean.detach()
             cache["std"] = _std.detach()
@@ -409,7 +409,7 @@ def run_view(mode_actuation, babble):
         passive viewer から直接触れないため、**ウィンドウのタイトル**に出す方式にする
         （常に画面上部に見え、カメラ操作の影響を受けない）。
         """
-        # ★「要求倍率」と「実効倍率」を**両方**出す。第1版は要求だけを出していたが、
+        # 「要求倍率」と「実効倍率」を**両方**出す。第1版は要求だけを出していたが、
         #   実測で x2 以上は計算が追いつかず頭打ち（1物理ステップの計算6.46ms > sim 10ms/倍率）
         #   と判明した＝x64と表示しながら実際は約1.5倍速だった。要求だけの表示は嘘になる。
         req = (f"x{speed[0]:.4g}" if speed[0] > 0 else "MAX")
@@ -625,7 +625,7 @@ def run_eyeview(mode_actuation, n, babble):
     try:
         eye_cid = int(m.camera("eye_left").id)
     except Exception:
-        print("⚠️ eye_left カメラが見つからず一人称は録画できません（第三者のみ）"); eye_cid = None
+        print("注意 eye_left カメラが見つからず一人称は録画できません（第三者のみ）"); eye_cid = None
     eye_ren = eye_cam = None
     if eye_cid is not None:
         eye_ren = mujoco.Renderer(m, height=64, width=64)

@@ -9,7 +9,7 @@
 
 A2-10：旧learning.pyから改名。人間の脳の部品名に合わせた。
 
-⚠️ 逸脱：重み更新にbackpropを使用【既存AI研究・⚠️逸脱】。
+注意：逸脱：重み更新にbackpropを使用【既存AI研究・注意逸脱】。
 """
 
 import torch
@@ -90,7 +90,7 @@ class TaroLearner:
         B2-2：従来は発話全体に単一のδしか与えず、系列内のどの文字が
         良かったかを区別できなかった（クレジット割り当て問題）。
         creditsを渡すと、文字ごとの一致度（compute_alignment_credit、
-        ⚠️逸脱：詳細はimitation.py参照）でδを重み付けし、良かった文字は
+        注意：逸脱：詳細はimitation.py参照）でδを重み付けし、良かった文字は
         より強く強化し、目標語にない余分な文字は抑制する。
 
         loss = -Σ (δ * credit_i) * log_prob(生成したi番目のトークン)
@@ -117,7 +117,7 @@ class TaroLearner:
         """
         知覚・行動・価値・満腹予期の損失を合算し、重みを1回更新する。
 
-        ⚠️ ここで誤差逆伝播（backprop）を使う【⚠️逸脱】。
+        注意：ここで誤差逆伝播（backprop）を使う【注意逸脱】。
         """
         total_loss = perception_loss + policy_loss
         if value_loss is not None:

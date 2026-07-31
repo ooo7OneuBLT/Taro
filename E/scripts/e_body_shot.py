@@ -11,7 +11,7 @@ mimoGrowth の custom は geom の大きさしか変えないため、body の�
 
 【2026-07-25 改修】
 - 任意の体型係数を渡せるようにした（旧版は leg/trunk しか振れなかった）。
-- ★**`e_body_measure.measure()` とまったく同じ経路で体を作る**ようにした。
+- **`e_body_measure.measure()` とまったく同じ経路で体を作る**ようにした。
   旧版は `d_c5_motor_quality.build`（おもちゃ環境）を使っており、
   「測った体」と「写した体」が同じである保証がなかった。
 - 姿勢は測定と同じ `qpos0`（基準姿勢）に固定＝物理の落ち着き方で見え方が変わらない。
@@ -23,14 +23,14 @@ mimoGrowth の custom は geom の大きさしか変えないため、body の�
 出力: E/logs/video/bodyshot_compare.png
 """
 
-# ⚠️★古い方式（2026-07-30 に整理）。新しい実験は `run/main.py` を通す。
+# 注意：古い方式（2026-07-30 に整理）。新しい実験は `run/main.py` を通す。
 #   【経緯】目標Eの実験スクリプトが118本あり、うち66本が**独立に環境を組み立てていた**。
 #     そのため「学習は関節モード（90関節を独立に駆動＝逸脱リスト 逸脱5）、
 #     測定とViewerは筋肉モード（拮抗筋2本/関節）」という**別の体で動く**事故が起きた
 #     （ユーザーの目視「視線誘導反射の実験の時とは動きが全然違う」で発覚。
 #      実測で動きが人間の新生児の約3.3倍速かった）。
 #   【設計と移行計画】`E/docs/実行基盤_設計.md`
-#   ⚠️このファイルは**記録として残す**（削除しない方針）。
+#   注意：このファイルは**記録として残す**（削除しない方針）。
 #     中の測り方は再利用できるので、プラグインへ移すときの元にする。
 import json
 import os
@@ -48,7 +48,7 @@ import os, sys, json, warnings
 warnings.filterwarnings("ignore")
 sys.path.insert(0, r"{here}")
 import numpy as np, mujoco, cv2
-import e_body_measure as M        # ★測定とまったく同じ経路で体を作る
+import e_body_measure as M        # 測定とまったく同じ経路で体を作る
 from d_supine_env import SupineMimoEnv
 from mimoActuation.muscle import MuscleModel
 from infant_body import body_scale_custom, HEAD_ELONGATION
@@ -61,7 +61,7 @@ if custom:
 env = SupineMimoEnv(actuation_model=MuscleModel, vision_params=None, age=0.0,
                     head_elongation=HEAD_ELONGATION, **kw)
 m, d = env.unwrapped.model, env.unwrapped.data
-# ★測定と同じく基準姿勢に固定（物理の落ち着き方で見え方が変わらない）
+# 測定と同じく基準姿勢に固定（物理の落ち着き方で見え方が変わらない）
 d.qpos[:] = m.qpos0
 d.qvel[:] = 0
 mujoco.mj_forward(m, d)

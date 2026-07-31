@@ -1,4 +1,4 @@
-"""★図の「機械的に確かめられること」を検査する。見た目の主観は人が見る。
+"""図の「機械的に確かめられること」を検査する。見た目の主観は人が見る。
 
 【なぜ要るか、2026-07-30】ユーザーの問い：
 
@@ -7,11 +7,11 @@
 私（AI）はブラウザの画面を撮れない環境なので、**絵を目で見られない**。
 そこで役割を分ける：
 
-    機械で確かめられる  箱の重なり／はみ出し／★字が箱に収まるか／線の交差の数
+    機械で確かめられる  箱の重なり／はみ出し／字が箱に収まるか／線の交差の数
                         線が箱を横切っていないか
-    ★人が見るしかない  見やすいか・美しいか・AIっぽくないか
+    人が見るしかない  見やすいか・美しいか・AIっぽくないか
 
-⚠️この検査を通っても「見やすい」保証にはならない。**問題が無いことの確認**だけ。
+注意：この検査を通っても「見やすい」保証にはならない。**問題が無いことの確認**だけ。
 
 【使い方】
     .venv/Scripts/python.exe -m run.tools.check_figure
@@ -66,7 +66,7 @@ def main():
     ks = list(pos)
     over = [(a, b) for i, a in enumerate(ks) for b in ks[i + 1:]
             if abs(pos[a][0] - pos[b][0]) < BOX_W and abs(pos[a][1] - pos[b][1]) < BOX_H]
-    print(f"\n【①】箱の重なり : {'なし' if not over else f'★{len(over)}組'}")
+    print(f"\n【①】箱の重なり : {'なし' if not over else f'{len(over)}組'}")
     for a, b in over[:5]:
         print(f"      {a} と {b}")
     ng += len(over)
@@ -74,7 +74,7 @@ def main():
     # ---- ② はみ出し ---------------------------------------------------------
     out = [k for k, (x, y) in pos.items()
            if x < 0 or y < 0 or x + BOX_W > W or y + BOX_H > H]
-    print(f"【②】画面からのはみ出し : {'なし' if not out else f'★{out}'}")
+    print(f"【②】画面からのはみ出し : {'なし' if not out else f'{out}'}")
     ng += len(out)
 
     # ---- ③ 字が箱に収まるか --------------------------------------------------
@@ -86,14 +86,14 @@ def main():
             avail = BOX_W - 22
             if w > avail:
                 shrunk = max(7.5, base * avail / w)
-                if shrunk <= 8.0:      # ★これ以下は読めない
+                if shrunk <= 8.0:      # これ以下は読めない
                     tight.append((nid, text, round(shrunk, 1)))
-    print(f"【③】字が小さすぎる : {'なし' if not tight else f'★{len(tight)}件'}")
+    print(f"【③】字が小さすぎる : {'なし' if not tight else f'{len(tight)}件'}")
     for nid, t, s in tight[:6]:
         print(f"      {nid}: 「{t}」→ {s}px")
     ng += len(tight)
 
-    # ---- ④ 線が箱を横切るか（★読みにくさの主因）------------------------------
+    # ---- ④ 線が箱を横切るか（読みにくさの主因）------------------------------
     hit = []
     for a, b, label, ck in EDGES:
         if a not in pos or b not in pos:
@@ -105,7 +105,7 @@ def main():
                 continue
             if _seg_rect(p1, p2, (x, y, BOX_W, BOX_H)):
                 hit.append((a, b, nid))
-    print(f"【④】線が別の箱を横切る : {'なし' if not hit else f'★{len(hit)}件'}")
+    print(f"【④】線が別の箱を横切る : {'なし' if not hit else f'{len(hit)}件'}")
     for a, b, n in hit[:8]:
         print(f"      {a}→{b} が {n} を横切る")
 
@@ -130,9 +130,9 @@ def main():
 
     print("\n" + "-" * 78)
     if ng == 0 and not hit:
-        print("  ★機械で分かる問題はありません（見やすさは人が見る必要あり）")
+        print("  機械で分かる問題はありません（見やすさは人が見る必要あり）")
     else:
-        print(f"  ⚠️直すべき点 {ng + len(hit)} 件")
+        print(f"  注意直すべき点 {ng + len(hit)} 件")
         print("     ④が多いときは、箱の並び順や列の割り当てを変えると減ります")
     return 0
 

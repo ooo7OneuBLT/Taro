@@ -9,7 +9,7 @@
 満腹予期のTD学習に使う（＝合図"まんま"へ後退させる燃料）。快は経験の答えを書くのではなく、
 生得の報酬信号を出すだけ＝理解は依然TDで創発する。
 
-⚠️ 快の強さ pleasure_gain は未検証の定数（人間模倣ではない。後で感度確認して調節）。
+注意：快の強さ pleasure_gain は未検証の定数（人間模倣ではない。後で感度確認して調節）。
 """
 
 
@@ -17,7 +17,7 @@ class Hedonic:
     """味シグナル → 即時の快(liking)。ドーパミン(wanting)とは別の信号として持つ。"""
 
     def __init__(self, pleasure_gain=1.0):
-        self.pleasure_gain = pleasure_gain   # ⚠️未検証：甘み→快の強さ
+        self.pleasure_gain = pleasure_gain   # 注意未検証：甘み→快の強さ
         self.last_pleasure = 0.0
 
     def evaluate(self, sweetness):

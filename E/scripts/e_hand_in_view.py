@@ -12,8 +12,8 @@ E1の問いは「**新しい本能を足さずに、既存のprogress報酬だ�
  ・視線＝カメラのz軸の逆（MuJoCoのカメラは-z方向を見る）
  ・画角の半角＝fovy/2（正方形レンダなので水平も同じ）
  ・**両目とも**に入っている場合を「視野内」とする（片目だけなら人間でも両眼視は成立しない）
-⚠️**遮蔽（体や柵に隠れて実際には見えない）は考慮していない**＝これは幾何的な上限値。
-⚠️手のbody中心だけで判定＝指先が入っていても中心が外なら「外」になる（過小評価側の誤差）。
+注意：**遮蔽（体や柵に隠れて実際には見えない）は考慮していない**＝これは幾何的な上限値。
+注意：手のbody中心だけで判定＝指先が入っていても中心が外なら「外」になる（過小評価側の誤差）。
 
 【この指標をどう使うか】
  (1) **学習前のベースライン**（このスクリプトの用途）＝偶然どれだけ入るか
@@ -51,7 +51,7 @@ VISION_FOVY_HALF = te.VISION_FOVY / 2.0     # 視野の半角[度]（fovyは全�
 
 
 def hand_in_view(model, data, half_fov=None, mode=None):
-    """★E1の主指標の判定：手が視野に入っているか（左右どちらかの眼でよい）。
+    """E1の主指標の判定：手が視野に入っているか（左右どちらかの眼でよい）。
 
     【なぜ"どちらかの眼"か（2026-07-20 変更）】
     第1版は「**両目とも**の視野内」を条件にしていたが、切り出し動画を目視したところ、
@@ -59,8 +59,8 @@ def hand_in_view(model, data, half_fov=None, mode=None):
     そうした場面が全部カウントから漏れていた。
     人間側の観察研究は「手を見ている」を**目視で判定**しており、両眼視かどうかは問わない。
     ＝両目を要求するほうが恣意的だったので、**片目でも視野内なら"見ている"**とする。
-    ⚠️mode="both" で旧基準に戻せる（アブレーション用。E_HV_MODE 環境変数でも切替可）。
-    ⚠️遮蔽（体に隠れて実際には見えない）は考慮しない幾何的な上限値。
+    注意：mode="both" で旧基準に戻せる（アブレーション用。E_HV_MODE 環境変数でも切替可）。
+    注意：遮蔽（体に隠れて実際には見えない）は考慮しない幾何的な上限値。
 
     Returns: 1.0（どちらかの手が視野内） / 0.0
     """
@@ -112,7 +112,7 @@ def main():
         rich.append("おもちゃ")
     if getattr(raw, "_fence", False):
         rich.append("柵")
-    print(f"\n=== 環境: {'／'.join(rich) if rich else '★何もない（貧しい環境）'}"
+    print(f"\n=== 環境: {'／'.join(rich) if rich else '何もない（貧しい環境）'}"
           f"  視野の半角 {half_fov:.0f}° ===")
 
     torch.manual_seed(seed); np.random.seed(seed)
@@ -149,7 +149,7 @@ def main():
               f"   視線からのずれ mean {ag.mean():5.1f}° / min {ag.min():5.1f}°"
               f"   目からの距離 mean {ds.mean()*100:4.1f}cm")
     both_any = np.asarray(rec["left_hand"]["both"]) | np.asarray(rec["right_hand"]["both"])
-    print(f"  ★どちらかの手が両目の視野内: {both_any.mean()*100:.1f}% のtick")
+    print(f"  どちらかの手が両目の視野内: {both_any.mean()*100:.1f}% のtick")
     # 目からの距離が「見える距離」かも併記（新生児は中央値19cmにしかピントが合わない）
     allds = np.concatenate([np.asarray(dist[h]) for h in HANDS])
     print(f"  参考: 手と目の距離 全体 mean {allds.mean()*100:.1f}cm / max {allds.max()*100:.1f}cm"

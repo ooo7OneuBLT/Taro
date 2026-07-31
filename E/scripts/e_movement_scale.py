@@ -1,14 +1,14 @@
-"""★太郎の動きは writhing なのか fidgety なのかを数値で判定する（学習なし）。
+"""太郎の動きは writhing なのか fidgety なのかを数値で判定する（学習なし）。
 
 【なぜ・2026-07-25】ユーザーの目視：
 > やっぱり運動が細かい。僕が見た自発運動の動画はもうちょっと**ゆっくり大きく**動いてた
 > （腕を上下に動かす、足を伸ばしたり縮めたりする）
 
-★Prechtl の General Movements の分類（⚠️定義は一次文献で要確認）：
+Prechtl の General Movements の分類（注意定義は一次文献で要確認）：
     writhing movements（新生児〜約2ヶ月）… **中等度の振幅・遅い〜中等度の速さ**
     fidgety movements（約3〜5ヶ月）      … **小さい振幅・中等度の速さ・変動する加速度**
 ＝ユーザーの記述は writhing の定義と一致し、太郎は fidgety 寄りに見える
-＝★月齢が先に進んだ動きをしている疑い。
+＝月齢が先に進んだ動きをしている疑い。
 
 【ユーザーの仮説】「0.1秒ごとに命令が変わるのが一番よくない気がする」
 → K（何physics-stepごとに指令を更新するか）を振って検証する。
@@ -17,33 +17,33 @@
 【もう一つの候補】90関節に独立なノイズが流れている（シナジーOFF）
 → シナジー ON/OFF でも比べる。「まとまれば大きくなる」かどうか。
 
-【★第三の候補（未検証・重要）】國吉研は**振動子**で動かしている
+【第三の候補（未検証・重要）】國吉研は**振動子**で動かしている
     Kuniyoshi & Sangawa (2006) Biol Cybern 95:589-605
     ＝予め与えたのは①脊髄の伸張反射 ②各筋に個別接続された medulla の**BVP振動子**のみ
     → 「rolling over と crawling-like motion が創発した」
-★振動子は周期的にゆっくり大きく動く。ランダムノイズでは反復的な動きが出にくい。
+振動子は周期的にゆっくり大きく動く。ランダムノイズでは反復的な動きが出にくい。
 ＝「腕を上下に動かす」という**反復**は、原理的にノイズでは作れない可能性がある。
-⚠️このスクリプトでは振動子は試さない（未実装）。まず現状を測る。
+注意：このスクリプトでは振動子は試さない（未実装）。まず現状を測る。
 
 【測る量】
-  1. 自己相関の時定数 … 関節角速度が同じ向きを保つ時間（★動きの「ゆっくりさ」）
-  2. スペクトル指数 β … ★López et al. 2026 の実測（8週 β=0.686 / 30週 0.877）と直接比較
+  1. 自己相関の時定数 … 関節角速度が同じ向きを保つ時間（動きの「ゆっくりさ」）
+  2. スペクトル指数 β … López et al. 2026 の実測（8週 β=0.686 / 30週 0.877）と直接比較
   3. 振幅（ROM）と速さ（|qvel|）を**分けて**見る
      writhing = 振幅 大 / 速さ 小   ／   fidgety = 振幅 小 / 速さ 大
-  4. ★「1往復の時間」… ピークからピークまでの間隔（腕を上下させる周期に相当）
+  4. 「1往復の時間」… ピークからピークまでの間隔（腕を上下させる周期に相当）
 
 使い方:
     python E/scripts/e_movement_scale.py
 """
 
-# ⚠️★古い方式（2026-07-30 に整理）。新しい実験は `run/main.py` を通す。
+# 注意：古い方式（2026-07-30 に整理）。新しい実験は `run/main.py` を通す。
 #   【経緯】目標Eの実験スクリプトが118本あり、うち66本が**独立に環境を組み立てていた**。
 #     そのため「学習は関節モード（90関節を独立に駆動＝逸脱リスト 逸脱5）、
 #     測定とViewerは筋肉モード（拮抗筋2本/関節）」という**別の体で動く**事故が起きた
 #     （ユーザーの目視「視線誘導反射の実験の時とは動きが全然違う」で発覚。
 #      実測で動きが人間の新生児の約3.3倍速かった）。
 #   【設計と移行計画】`E/docs/実行基盤_設計.md`
-#   ⚠️このファイルは**記録として残す**（削除しない方針）。
+#   注意：このファイルは**記録として残す**（削除しない方針）。
 #     中の測り方は再利用できるので、プラグインへ移すときの元にする。
 import os
 import sys
@@ -93,7 +93,7 @@ def autocorr_time(x, dt, max_lag=200):
 
 
 def spectral_beta(x, dt):
-    """パワースペクトルの傾き -β を推定（1/f^β）。★López 2026 と比較する量。"""
+    """パワースペクトルの傾き -β を推定（1/f^β）。López 2026 と比較する量。"""
     x = np.asarray(x, dtype=float)
     x = x - x.mean()
     if np.std(x) < 1e-12:
@@ -180,7 +180,7 @@ def main():
     print(f"  limb_scale={LIMB}  std={STD}  beta_target={BETA}  steps={N_STEP}")
     print("  writhing (newborn-2mo) = LARGE amplitude, SLOW")
     print("  fidgety  (3-5mo)       = small amplitude, moderate speed")
-    print("  ★reference: Lopez et al. 2026 measured spectral index beta = 0.686 at 8 weeks\n")
+    print("  reference: Lopez et al. 2026 measured spectral index beta = 0.686 at 8 weeks\n")
 
     conds = [("K=10  syn OFF", 10, False),
              ("K=10  syn ON ", 10, True),
@@ -204,7 +204,7 @@ def main():
     print("  ROM   = range of motion (amplitude)")
     print("  speed = mean |angular velocity| (deg/s)")
     print("  tau   = autocorrelation time of velocity (how long it keeps the same direction)")
-    print("  ★cycle = mean peak-to-peak interval ~ 'one back-and-forth' of the joint")
+    print("  cycle = mean peak-to-peak interval ~ 'one back-and-forth' of the joint")
     print("\n  [!] If cycle is much shorter than a few seconds, the movement is")
     print("      too rapid for writhing regardless of amplitude.")
 

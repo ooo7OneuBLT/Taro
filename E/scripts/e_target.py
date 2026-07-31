@@ -12,7 +12,7 @@ progress報酬は「**予測が上達したぶん**」なので、**予測対象
 そして**自分の手**が相手なら、Dで問題だったegomotionは邪魔者ではなく**学習の材料そのもの**になる
 （自分の運動と完全に対応して動く唯一の視覚対象）。
 
-【★2つの設計判断】
+【2つの設計判断】
 (1) **視覚エンコーダは凍結する（RND式）**
     予測する側と正解側が同じ学習中のエンコーダだと、「エンコーダが出力を平坦にすれば予測が当たる」
     という抜け道ができて学習が崩壊する。目標Cで実際に踏んだ罠（`fusion.freeze()`）。
@@ -23,7 +23,7 @@ progress報酬は「**予測が上達したぶん**」なので、**予測対象
     （621次元では効果量 d=-0.005 だが腕の次元だけ見ると d=-0.22 だった）。
     → ブロックごとに正規化して、少なくとも**スケールでは薄まらない**ようにする。
 
-【⚠️それでも残る「薄まり」】
+【注意それでも残る「薄まり」】
 MSEを取ると寄与は次元数比のまま（視覚 64/685 = 9.3%）。これを重み付けで補正するのは
 **恣意的**なので今はしない。まず等重みで実装し、**視覚が予測誤差に信号として現れるか**を
 測ってから判断する（接触のときと同じ「関門」の測り方）。
@@ -58,24 +58,24 @@ class PredictionTarget:
 
     def __call__(self, obs):
         v = torch.as_tensor(np.asarray(obs["observation"]), dtype=torch.float32)
-        prop = F.layer_norm(v, v.shape)              # ★従来の ln_prop と完全に同じ処理
+        prop = F.layer_norm(v, v.shape)              # 従来の ln_prop と完全に同じ処理
         if not self.use_vision:
             return prop.detach()
         if "eye_left" not in obs or "eye_right" not in obs:
             if not self._warned:
-                print("⚠️ obsに視覚が無いので予測対象は固有感覚のみになります")
+                print("注意 obsに視覚が無いので予測対象は固有感覚のみになります")
                 self._warned = True
             return prop.detach()
         with torch.no_grad():                        # 正解側は勾配を流さない（RND式）
             e = self.fusion.vision(obs["eye_left"], obs["eye_right"])
-        vis = F.layer_norm(e, e.shape)               # ★視覚は別に正規化＝スケールで埋もれない
+        vis = F.layer_norm(e, e.shape)               # 視覚は別に正規化＝スケールで埋もれない
         return torch.cat([prop, vis], dim=-1).detach()
 
 
 def make_frozen_fusion(like_fusion, touch_dim=0, vision_res=0):
     """正解側専用の**凍結した**融合層を作る（学習側とは別インスタンス・別の初期重み）。
 
-    ⚠️同じ重みをコピーしてはいけない。RNDの要点は「正解側が学習に引きずられないこと」で、
+    注意：同じ重みをコピーしてはいけない。RNDの要点は「正解側が学習に引きずられないこと」で、
     別インスタンスかつ requires_grad=False であればよい。初期重みが違っても問題ない
     （むしろ予測側が正解側を"当てにいく"対象として機能する）。
     """

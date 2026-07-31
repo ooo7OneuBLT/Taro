@@ -6,7 +6,7 @@
 それが呼ばれるのは太郎の体を作っている最中で、新生児の体型補正（手0.70倍など）が
 既に効いた状態だった。補正が裏の18ヶ月にも漏れ、基準が2.1倍ずれていた：
 
-    何も作らずに測る               median = 64.00   ← ★正しい
+    何も作らずに測る               median = 64.00   ← 正しい
     age=0.0 を作る途中で測る       median = 135.93  ← 汚染
 
 その結果、**0〜3ヶ月の太郎は79個中31個しか筋力が下がっていなかった**。
@@ -16,7 +16,7 @@
 → 基準は測り直さず、`taro_core/src/body/limb_reference_18mo.json` に保存した値を使う。
    このスクリプトだけが、**他の体を1体も作っていない状態で**測って保存する。
 
-⚠️体の定義（体型・質量・関節・アクチュエータ）を変えたら必ず走らせて照合すること。
+注意：体の定義（体型・質量・関節・アクチュエータ）を変えたら必ず走らせて照合すること。
 
 使い方:
     # 保存値と実測を比べるだけ（変更しない）
@@ -45,7 +45,7 @@ TOL = 0.01              # 相対差の許容（1%）。これを超えたら「�
 
 def main():
     update = "--update" in sys.argv
-    # ★import はここまでで、体はまだ1体も作っていない。この順序が生命線。
+    # import はここまでで、体はまだ1体も作っていない。この順序が生命線。
     import infant_limbs as il
 
     print("=" * 70)
@@ -71,9 +71,9 @@ def main():
         print(f"\n  保存値: median={np.median([float(v) for v in o.values()]):.2f} "
               f"n={len(o)}（{old.get('measured_note', '')}）")
         if miss:
-            print(f"  ⚠️アクチュエータの顔ぶれが違う: {miss[:6]}{'...' if len(miss) > 6 else ''}")
+            print(f"  注意アクチュエータの顔ぶれが違う: {miss[:6]}{'...' if len(miss) > 6 else ''}")
         if bad:
-            print(f"  ⚠️★{len(bad)} 個が {TOL*100:.0f}% を超えてずれている（体の定義が変わった？）")
+            print(f"  注意{len(bad)} 個が {TOL*100:.0f}% を超えてずれている（体の定義が変わった？）")
             for k, a, b, r in sorted(bad, key=lambda d: -d[3])[:8]:
                 print(f"      {k:<28} 保存={a:8.2f} → 実測={b:8.2f}  ({r*100:+.1f}%)")
         if not miss and not bad:
@@ -88,9 +88,9 @@ def main():
         with open(path, "w", encoding="utf-8") as fp:
             json.dump(blob, fp, ensure_ascii=False, indent=1, sort_keys=True)
         print(f"\n  → 保存した: {os.path.relpath(path, _ROOT)}")
-        print("  ⚠️基準が変わると**太郎の体が変わる**。既存の学習結果と混ぜないこと。")
+        print("  注意基準が変わると**太郎の体が変わる**。既存の学習結果と混ぜないこと。")
     elif old is None:
-        print("\n  ⚠️保存値がまだない。--update を付けて作ること")
+        print("\n  注意保存値がまだない。--update を付けて作ること")
         return 1
     return 0
 

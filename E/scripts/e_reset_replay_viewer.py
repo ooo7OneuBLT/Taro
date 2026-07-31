@@ -15,7 +15,7 @@
     python E/scripts/e_reset_replay_viewer.py
 
   パネルで条件を切り替えて「もう一度最初から」を押すと、その条件で再生し直す。
-  ★等倍速で再生する（実時間と同じ速さ）。
+  等倍速で再生する（実時間と同じ速さ）。
 
 【環境変数】
     E_TOY_DELAY     何秒待っておもちゃを運ぶか（0 で従来＝最初から置く）
@@ -23,14 +23,14 @@
     E_SPEED         再生速度。0.25 で4分の1のスロー再生（既定 1.0）
 """
 
-# ⚠️★古い方式（2026-07-30 に整理）。新しい実験は `run/main.py` を通す。
+# 注意：古い方式（2026-07-30 に整理）。新しい実験は `run/main.py` を通す。
 #   【経緯】目標Eの実験スクリプトが118本あり、うち66本が**独立に環境を組み立てていた**。
 #     そのため「学習は関節モード（90関節を独立に駆動＝逸脱リスト 逸脱5）、
 #     測定とViewerは筋肉モード（拮抗筋2本/関節）」という**別の体で動く**事故が起きた
 #     （ユーザーの目視「視線誘導反射の実験の時とは動きが全然違う」で発覚。
 #      実測で動きが人間の新生児の約3.3倍速かった）。
 #   【設計と移行計画】`E/docs/実行基盤_設計.md`
-#   ⚠️このファイルは**記録として残す**（削除しない方針）。
+#   注意：このファイルは**記録として残す**（削除しない方針）。
 #     中の測り方は再利用できるので、プラグインへ移すときの元にする。
 import os, sys, time, warnings
 warnings.filterwarnings("ignore")
@@ -184,12 +184,12 @@ def main():
 
             info.config(text=f"経過 {t_sim:5.2f} 秒   {phase}\n"
                              f"視線のズレ {gz:6.1f}°  "
-                             f"{'視界の中' if gz < HALF_FOV else '★視界の外'}\n"
+                             f"{'視界の中' if gz < HALF_FOV else '視界の外'}\n"
                              f"頭の角速度 {w:6.3f} rad/s"
-                             f"{'   ★弾かれています' if w > 1.0 else ''}",
+                             f"{'   弾かれています' if w > 1.0 else ''}",
                         fg="#070" if gz < HALF_FOV else "#a00")
             if worst > 0.01:
-                pen_label.config(text=f"★めり込み {worst:.2f} mm（{worst_name}）",
+                pen_label.config(text=f"めり込み {worst:.2f} mm（{worst_name}）",
                                  fg="#a00")
             else:
                 pen_label.config(text="めり込みなし", fg="#070")

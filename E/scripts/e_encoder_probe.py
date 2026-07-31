@@ -132,7 +132,7 @@ def main():
             hidden = brain.init_motor_hidden(); prev_a = torch.zeros(n_act)
 
     if not rows:
-        print("⚠️手が視野に入る場面を1つも集められませんでした")
+        print("注意手が視野に入る場面を1つも集められませんでした")
         env.close(); return
     R = np.asarray(rows, dtype=float)
     print(f"\n--- {len(rows)} 場面（{tick} tick 走査）---")
@@ -148,11 +148,11 @@ def main():
     print("\n=== 判定 ===")
     rel = R[:, 3].mean() / max(R[:, 4].mean(), 1e-9)
     if R[:, 0].mean() < 20:
-        print("  (C) ★手が画像上で小さすぎる（20px未満）＝そもそも情報がほとんど無い")
+        print("  (C) 手が画像上で小さすぎる（20px未満）＝そもそも情報がほとんど無い")
     if R[:, 1].mean() > 1e-3 and R[:, 2].mean() < R[:, 1].mean() * 0.3:
-        print("  (B) ★視力フィルタが手の情報を大きく削っている")
+        print("  (B) 視力フィルタが手の情報を大きく削っている")
     if rel < 0.02:
-        print("  (A) ★エンコーダの出力がほとんど変わらない＝64次元への圧縮で手が消えている")
+        print("  (A) エンコーダの出力がほとんど変わらない＝64次元への圧縮で手が消えている")
     if rel >= 0.02 and R[:, 0].mean() >= 20:
         print("  → エンコーダは手の有無を残している。関門②のNGは別の原因（予測の側）の可能性")
     env.close()

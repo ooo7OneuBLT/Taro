@@ -62,12 +62,12 @@ def _segment_length(model, data, a, b):
 def measure(scales=None, verbose=False, head_elong=None):
     """指定した体型係数で身体を作り、寸法と質量を測る。
 
-    ★姿勢に依存しないよう `qpos0`（モデルの基準姿勢）に固定してから測る。
+    姿勢に依存しないよう `qpos0`（モデルの基準姿勢）に固定してから測る。
 
     Args:
         head_elong: 頭の楕円化率。**None なら実運用と同じ既定値**（HEAD_ELONGATION=1.16）。
             1.0 を渡すと球のまま＝アブレーション。
-            ⚠️【2026-07-25 に発見したバグ】この引数が無かったため、測定器は
+            注意：【2026-07-25 に発見したバグ】この引数が無かったため、測定器は
             `SupineMimoEnv` の既定（head_elongation=1.0＝球）で測っていた。
             一方 **学習で走る太郎は楕円**（`e_body_config.head_elongation_from_env`
             が 1.16 を渡す）＝**測定器と実物が違う体だった**。そのため日誌に載せた
@@ -83,7 +83,7 @@ def measure(scales=None, verbose=False, head_elong=None):
     env = SupineMimoEnv(actuation_model=MuscleModel, vision_params=None, age=0.0, **kw)
     m, d = env.unwrapped.model, env.unwrapped.data
 
-    # ★基準姿勢に固定（リセットの揺らぎ・物理の落ち着きを経ない＝再現性がある）
+    # 基準姿勢に固定（リセットの揺らぎ・物理の落ち着きを経ない＝再現性がある）
     d.qpos[:] = m.qpos0
     d.qvel[:] = 0
     mujoco.mj_forward(m, d)
@@ -111,7 +111,7 @@ def measure(scales=None, verbose=False, head_elong=None):
     leg = _segment_length(m, d, "right_upper_leg", "right_foot")
 
     # 頭の長さ（体軸方向）＝「何頭身か」を出すため。人間の新生児は約4頭身（頭/身長0.25）で、
-    # 成人の約7.5頭身と大きく違う。★「赤ちゃんらしい見た目」の主因はここなので、
+    # 成人の約7.5頭身と大きく違う。「赤ちゃんらしい見た目」の主因はここなので、
     # 見た目の議論をするときは必ずこの数字を見る（印象だけで決めると頭を盛りすぎる）。
     _hg = [g for g in range(m.ngeom) if m.geom_bodyid[g] == m.body("head").id]
     head_len_cm = 2 * max(float(np.max(m.geom_size[g])) for g in _hg) * 100 if _hg else float("nan")
@@ -137,7 +137,7 @@ def _fmt(r, label):
 
 
 def main():
-    print("身体の測定（★基準姿勢 qpos0 に固定＝姿勢に依存しない）\n")
+    print("身体の測定（基準姿勢 qpos0 に固定＝姿勢に依存しない）\n")
     hdr = f"{'条件':<14}{'身長cm':>8}{'体重kg':>9}{'頭の%':>9}{'上肢cm':>8}{'下肢cm':>8}{'上肢/下肢':>9}"
     print(hdr); print("-" * len(hdr.encode('utf-8')) // 2 * "-" if False else "-" * 66)
 
@@ -145,7 +145,7 @@ def main():
     print(_fmt(r_off, "補正OFF"))
     r_on = measure(NEWBORN_SHAPE_DEFAULTS)
     print(_fmt(r_on, "補正ON"))
-    print(f"{'★人間の新生児':<13}{HUMAN['height_cm']:>8.1f}{HUMAN['mass_kg']:>9.3f}"
+    print(f"{'人間の新生児':<13}{HUMAN['height_cm']:>8.1f}{HUMAN['mass_kg']:>9.3f}"
           f"{HUMAN['head_frac']*100:>9.1f}{20.96:>8.1f}{19.60:>8.1f}"
           f"{HUMAN['arm_leg_ratio']:>9.3f}")
 

@@ -64,7 +64,7 @@ class SupineMimoEnv(LeanMimoEnv):
         self._jitter = jitter
         # 【2026-07-25】頭の楕円化。MIMoの頭は球で、頭囲は正しいが真上から見た長さが
         # 人間より15%短い（10.8cm、人間12.0cm）。体軸方向にだけ伸ばして人間に合わせる。
-        # ⚠️この処理は従来 e_toy_env.py（おもちゃ環境）にしかなく、**学習に使うこの環境では
+        # 注意：この処理は従来 e_toy_env.py（おもちゃ環境）にしかなく、**学習に使うこの環境では
         # 頭が球のまま**だった。体型補正と同じ「身体の設定が環境に散らばっている」問題。
         # 処理の実体は taro_core の infant_body.elongate_head（＝太郎の身体そのもの）。
         self._head_elongation = float(head_elongation)
@@ -95,7 +95,7 @@ class SupineMimoEnv(LeanMimoEnv):
         # 【2026-07-25】筋力の補正（首・四肢）を太郎の身体定義（core）から適用する。
         # MIMoは gear を geom の体積から計算するため、頭が大きい新生児ほど首も強くなり
         # **発達の向きが逆転**する（age=0で持ち上げ能力比4.21倍 > 18ヶ月の3.00倍）。
-        # ⚠️従来この補正は ToySupineEnv（おもちゃ環境）にしかなく、**環境ごとに違う体**
+        # 注意：従来この補正は ToySupineEnv（おもちゃ環境）にしかなく、**環境ごとに違う体**
         # になっていた（実測で3種類以上）。身体は環境の性質ではないので core に集約した。
         if self._body_corrections and kwargs.get("age") is not None:
             import os as _os, sys as _sys
@@ -110,16 +110,16 @@ class SupineMimoEnv(LeanMimoEnv):
                                       distal_mass=self._distal_mass,
                                       flexion=self._flexion,
                                       flexion_stiffness=self._flexion_stiffness,
-                                      # ★筋肉モデルでは筋力が fmax にあり、gear は毎ステップ
+                                      # 筋肉モデルでは筋力が fmax にあり、gear は毎ステップ
                                       #   上書きされる。補正が実効を持つよう渡す（2026-07-25）。
                                       actuation_model=getattr(self, "actuation_model", None))
 
         # 【2026-07-25】床のころがり摩擦（感度分析用）。既定は触らない。
-        # ★MIMoの床は friction=[1.0, 0.005, 0.0001]・condim=3 ＝「すべり摩擦しか
+        # MIMoの床は friction=[1.0, 0.005, 0.0001]・condim=3 ＝「すべり摩擦しか
         #   計算しない」＝**転がることへの抵抗が事実上ゼロ**。実際の新生児は
         #   服＋寝具（布と布）の上にいて、転がるとき布が引っかかる。
         #   太郎が新生児にできない寝返りをする原因の候補として振れるようにした。
-        # ⚠️2026-07-23 に「床摩擦を人工的に上げる補正は入れない」と決めているが、
+        # 注意：2026-07-23 に「床摩擦を人工的に上げる補正は入れない」と決めているが、
         #   それは**対処**への判断。ここは**原因かどうかの検証**のための仕組み。
         _roll = os.environ.get("E_FLOOR_ROLL")
         if _roll is not None:

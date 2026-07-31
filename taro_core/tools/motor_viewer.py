@@ -38,7 +38,7 @@ import torch
 
 
 def _make_key_callback(speed_ref, reset_ref=None, extra_keys=None):
-    """キー操作。★BACKSPACE（MuJoCo組み込みのリセット）を横取りする。
+    """キー操作。BACKSPACE（MuJoCo組み込みのリセット）を横取りする。
 
     【なぜ必要か、2026-07-25】MuJoCoのpassive viewerはBACKSPACEで `mj_resetData` を
     呼ぶ。これは**環境のresetではなくモデルの基準姿勢への復帰**で、太郎の場合は
@@ -60,10 +60,10 @@ def _make_key_callback(speed_ref, reset_ref=None, extra_keys=None):
             ch = chr(keycode)
         except ValueError:
             return
-        # ★【2026-07-30】呼び出し側が独自のキーを差し込めるようにした。
+        # 【2026-07-30】呼び出し側が独自のキーを差し込めるようにした。
         #   条件を切り替えながら**同じ状態のまま**見比べるため
         #   （例：Goal Babbling の ON/OFF を1キーで往復する）。
-        #   ⚠️別プロセスで2回起動して見比べると、乱数も姿勢も違うので
+        #   注意：別プロセスで2回起動して見比べると、乱数も姿勢も違うので
         #     「どちらが速いか」のような主観の比較が当てにならない。
         if extra_keys and ch in extra_keys:
             extra_keys[ch]()
@@ -86,7 +86,7 @@ def _make_key_callback(speed_ref, reset_ref=None, extra_keys=None):
 def _show_speed_overlay(viewer, speed_ref, eff, status=""):
     """右上に速度オーバーレイ表示。d_c5 の実装から流用（3D空間でなくオーバーレイ）。
 
-    ★status: 呼び出し側の状態（例 "GoalBabbling ON"）。
+    status: 呼び出し側の状態（例 "GoalBabbling ON"）。
       【なぜ要るか、2026-07-30】条件の ON/OFF をキーで切り替えられるようにしたが、
       状態は print で出していたので**Viewerだけ見ているユーザーには見えなかった**。
       ユーザー：「コンソールなんてないけど／ちゃんと機能しているのかがわからない」
@@ -129,11 +129,11 @@ def run_viewer(env, brain, policy_fn, rescale_action, *,
         n_act: 行動次元(reset時にprev_aを作るため)
         reflex_fns: [callable(action) -> action] のリスト。把握反射・ATNR等を差し込む
         banner: 起動時に表示するメモ(条件表示など)
-        status_fn: callable() -> str 。★毎フレーム呼ばれ、返した文字列を画面右上に
+        status_fn: callable() -> str 。毎フレーム呼ばれ、返した文字列を画面右上に
             表示する（例 "GoalBabbling ON"）。Viewerだけ見ていても条件が分かるように
-        extra_keys: {"文字": callable()} 。★条件を切り替えながら同じ状態のまま
+        extra_keys: {"文字": callable()} 。条件を切り替えながら同じ状態のまま
             見比べるためのキー（例：Goal Babbling の ON/OFF）。
-            ⚠️別プロセスで2回起動して比べると乱数も姿勢も違うので、
+            注意：別プロセスで2回起動して比べると乱数も姿勢も違うので、
               「どちらが速いか」のような主観の比較が当てにならない
 
     環境変数：E_REALTIME, E4_CONTINUOUS, E_CTRL_M
@@ -157,7 +157,7 @@ def run_viewer(env, brain, policy_fn, rescale_action, *,
     print("  キー操作: . = 速く / , = 遅く / 0 = 等倍 / M = 最速（待たない）"
           " / R or BackSpace = リセット", flush=True)
     if extra_keys:
-        print("  ★追加キー: " + " / ".join(sorted(extra_keys)), flush=True)
+        print("  追加キー: " + " / ".join(sorted(extra_keys)), flush=True)
 
     obs, _ = env.reset(seed=0)
     hidden = brain.init_motor_hidden()
@@ -208,7 +208,7 @@ def run_viewer(env, brain, policy_fn, rescale_action, *,
                         t_wall = time.perf_counter()
                 else:
                     t_wall = now
-                # ★キーでのリセット要求は、MuJoCo組み込みの mj_resetData（＝空中に戻る）を
+                # キーでのリセット要求は、MuJoCo組み込みの mj_resetData（＝空中に戻る）を
                 #   env.reset()（＝接地状態）で上書きする。上のコールバックのコメント参照。
                 if te or tr or want_reset[0]:
                     want_reset[0] = False

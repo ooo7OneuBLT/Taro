@@ -2,7 +2,7 @@
 
 判定の実体は `E/scripts/e_toy_touch.py` にある（2026-07-30 に一本化したもの）。
 ここはそれをプラグインの形に**包むだけ**。
-⚠️判定を2箇所に書かない。中身を直すときは e_toy_touch.py を直す。
+注意：判定を2箇所に書かない。中身を直すときは e_toy_touch.py を直す。
 
 実験ファイルでの書き方:
     "plugins": {"toy_touch": true}
@@ -24,15 +24,15 @@ class ToyTouch(Plugin):
 
     def setup(self, ctx):
         from e_toy_touch import ToyTouchProbe
-        # ⚠️シーンで「おもちゃなし」を指定していたら、ここで止める。
+        # 注意：シーンで「おもちゃなし」を指定していたら、ここで止める。
         #   【なぜ、2026-07-31】`toy.enabled=false` にしても MuJoCo のモデルからは
         #   `test_object1` という body が**消えない**（遠くへ退避されるだけ）。
         #   そのため ToyTouchProbe の ok 判定（body があるか）が True になり、
-        #   ★4m 先の物体との距離を「おもちゃへの最接近 404cm」として記録し続けていた。
+        #   4m 先の物体との距離を「おもちゃへの最接近 404cm」として記録し続けていた。
         #   ⇒ シーンの指定を見て判断する。
         toy = ((getattr(ctx, "scene", None) or {}).get("world", {}) or {}).get("toy", {})
         if isinstance(toy, dict) and toy.get("enabled") is False:
-            print("[toy_touch] シーンが★おもちゃなし＝接触は測らない", flush=True)
+            print("[toy_touch] シーンがおもちゃなし＝接触は測らない", flush=True)
             self.probe = None
             return
         self.probe = ToyTouchProbe(ctx.model, ctx.data)
@@ -45,7 +45,7 @@ class ToyTouch(Plugin):
             self.probe.update(ctx.model, ctx.data)
 
     def on_body_change(self, ctx):
-        # ★体を作り直したら geom の id を引き直す（溜めた回数は保つ）
+        # 体を作り直したら geom の id を引き直す（溜めた回数は保つ）
         if self.probe is not None:
             self.probe.rebind(ctx.model)
 
@@ -54,7 +54,7 @@ class ToyTouch(Plugin):
             return None
         s = self.probe.summary(ctx.dt)
         out = {"toy_touches": s["touches"], "toy_per_min": round(s["touch_per_min"], 4)}
-        # ★手ごとの最接近（cm）。1e8 は「まだ一度も測っていない」印なので出さない
+        # 手ごとの最接近（cm）。1e8 は「まだ一度も測っていない」印なので出さない
         for k, v in s["min_cm"].items():
             if v < 1e8:
                 out[f"toy_min_cm_{k}"] = round(v, 3)

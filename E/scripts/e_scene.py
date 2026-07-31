@@ -14,7 +14,7 @@
 `E_FLEXION` の既定は "0" なので、Viewer は False、測定側は `kw["flexion"]=True` と
 手で上書きしていた。＝**Viewerで見ていた太郎と、測っていた太郎は手足の姿勢が違う体**。
 
-⚠️同じ型の事故は 2026-07-25 にも起き、`body_kwargs_from_env` はその対策だった。
+注意：同じ型の事故は 2026-07-25 にも起き、`body_kwargs_from_env` はその対策だった。
   しかし**返り値を呼び出し側が上書きできる**ので、同じ罠が `flexion` で再発した。
   ⇒ 入口を1つにするだけでは足りない。**上書きできない形**にする必要がある。
   このファイルの `build()` は環境変数も呼び出し側の引数も見ず、
@@ -56,7 +56,7 @@ SCENE_DIR = os.path.join(_ROOT, "E", "scenes")
 SCHEMA = 1
 
 # 指紋の許容ずれ。ここを超えたら「別の環境」と判定して止める。
-# ⚠️[Tier3] 文献値ではない。物理の再現性から決めた実務的な値：
+# 注意：[Tier3] 文献値ではない。物理の再現性から決めた実務的な値：
 #   同じ qpos を入れて mj_forward するだけなら誤差は 1e-9 のオーダーなので、
 #   下の値はどれも桁違いに緩い。それでも引っかかるなら本当に別物。
 TOL = {
@@ -68,7 +68,7 @@ TOL = {
 }
 
 # 姿勢が「保てる」と判定する上限。保存時の安定確認で使う。
-# ⚠️[Tier3・ARBITRARY] 2026-07-28 の実測（首が30度→63度に倒れた／30秒で0.52cm ずれた）
+# 注意：[Tier3・ARBITRARY] 2026-07-28 の実測（首が30度→63度に倒れた／30秒で0.52cm ずれた）
 #   を踏まえ、「実験の結論が変わらない程度」として置いた目安。
 SETTLE_LIMIT = {"angle_deg": 3.0, "pos_m": 0.01}
 
@@ -97,8 +97,8 @@ def default_scene(name="無題"):
             "distal_mass": 1.0,
             "neck_fix": True,            # 首の筋力補正
             "eye_rest_vertical_deg": 0.0,
-            # ★視線誘導反射の実装バージョン（2026-07-29 追加）。
-            #   ⚠️`e_toy_env` の既定は "1"（旧版）で、16個の測定スクリプトが
+            # 視線誘導反射の実装バージョン（2026-07-29 追加）。
+            #   注意：`e_toy_env` の既定は "1"（旧版）で、16個の測定スクリプトが
             #     それぞれ `E_ORIENT_V=2` を指定していた＝設定の散らばりそのもの。
             #     指定を忘れると**黙って旧版で走る**（実際に踏んだ）。
             #   v1 は構造的な穴が6つ見つかっている旧版。比較・アブレーション用に残す。
@@ -113,7 +113,7 @@ def default_scene(name="無題"):
             "plain": True,
             "floor_dim": 1.0,
             "static_tex": False,         # 背景のテクスチャを固定するか
-            # 床の物理。⚠️体の滑り方が変わるので実験条件として効く
+            # 床の物理。注意体の滑り方が変わるので実験条件として効く
             "floor_roll": None,          # None なら環境の既定
             "floor_condim": None,
             "toy": {
@@ -134,23 +134,23 @@ def default_scene(name="無題"):
 
         # ③ 実験開始前の設定。モデルを作ったあとに効かせる
         "setup": {
-            # 首の筋緊張（弱いバネ）。⚠️減衰は apply_neck_tone が臨界減衰を
+            # 首の筋緊張（弱いバネ）。注意減衰は apply_neck_tone が臨界減衰を
             #   自分で計算するので、ここでは指定しない（文献値が無いため）。
             "neck_tone": None,           # {"target_deg":30, "stiffness":0.6}
-            # ★四肢の筋緊張（2026-07-29 追加）。脱力しても腕が体の前に保たれる。
+            # 四肢の筋緊張（2026-07-29 追加）。脱力しても腕が体の前に保たれる。
             #   {"hold_deg":20, "groups":["arm","leg"]}
             #   target_deg を書かなければ**シーンの姿勢が戻る先**になる
             #   ＝Viewer で作った姿勢がそのまま筋緊張の落ち着き先。
-            #   ⚠️乳児の四肢の筋緊張の実測値は文献に存在しない（Tier3）。
+            #   注意：乳児の四肢の筋緊張の実測値は文献に存在しない（Tier3）。
             #     詳細と間接根拠は `taro_core/src/body/infant_limbs.py` の
             #     `apply_limb_tone` 冒頭。
             "limb_tone": None,
             "head_hold": None,           # {"stiffness":200, "target_deg":{"head_tilt":60}}
-            # ★体を支える範囲（2026-07-29 追加）。
+            # 体を支える範囲（2026-07-29 追加）。
             #   {"stiffness":200, "free":["arm","finger"]}
             #   ＝「肩から手先」と指と眼球は自由、それ以外は椅子とベルトが支える。
             #   人間のリーチ実験は乳児を椅子に固定して行う（von Hofsten 1982）。
-            #   ⚠️脚の固定は人間からの逸脱（実験の測定条件）。逸脱リスト参照。
+            #   注意：脚の固定は人間からの逸脱（実験の測定条件）。逸脱リスト参照。
             #   "pin_root": true を足すと、体そのものも空間に留める
             #   （関節のバネでは体が椅子から転がり落ちるのを止められないため）。
             "body_support": None,
@@ -222,12 +222,12 @@ def save(scene, name=None, env=None, hands=None, settle_seconds=3.0,
 
     drift = None
     if env is not None:
-        # ⚠️実験者の手を「今の角度で支える」設定にしている場合、目標角は
+        # 注意：実験者の手を「今の角度で支える」設定にしている場合、目標角は
         #   build した直後（リセット直後の姿勢）で決まっている。そのまま保存すると
         #   **保存する姿勢と、支える目標角がずれる**。読み込み側は保存された姿勢で
         #   支え直すので、指紋が一致しなくなる（2026-07-29 の自己テストで検出。差0.13度）。
         #   ⇒ 保存する姿勢に合わせて支え直してから記録する。
-        # ★★【2026-07-29】眼球は**基準位置に戻してから**保存する。
+        # 【2026-07-29】眼球は**基準位置に戻してから**保存する。
         #
         # 【なぜ】シーンは qpos を丸ごと記録するので、眼球の向きもそのまま残る。
         #   Viewer で姿勢を整えているあいだに反射やVORが眼球を動かしているので、
@@ -240,7 +240,7 @@ def save(scene, name=None, env=None, hands=None, settle_seconds=3.0,
         #   Hunter & Richards (2003) は「中心を見ていない試行は除外」と明記している。
         #   ＝眼球を基準位置にそろえるのは、人間の実験の作法に合わせることでもある。
         #
-        # ⚠️`eye_rest_vertical_deg`（顎を引く代わりに眼球を下げる設定）は意図的な
+        # 注意：`eye_rest_vertical_deg`（顎を引く代わりに眼球を下げる設定）は意図的な
         #   条件なので、その角度を基準として使う。
         try:
             from infant_body import center_eyes
@@ -249,8 +249,8 @@ def save(scene, name=None, env=None, hands=None, settle_seconds=3.0,
                         vertical_deg=float(scene["body"]["eye_rest_vertical_deg"]))
             mujoco.mj_forward(_u.model, _u.data)
         except Exception as e:
-            print(f"[scene] ⚠️眼球を基準位置に戻せなかった: {e}")
-        # ⚠️支え直すのは**眼球を戻したあと**。支えの減衰は今の姿勢から計算するので、
+            print(f"[scene] 注意眼球を基準位置に戻せなかった: {e}")
+        # 注意：支え直すのは**眼球を戻したあと**。支えの減衰は今の姿勢から計算するので、
         #   順序が違うと読み込み側とわずかにずれる（2026-07-29：0.023 の差で
         #   再現性テストが落ちた）。頭だけでなく椅子も取り直すこと。
         _rehold(env, scene, hands)
@@ -289,12 +289,12 @@ def build(scene, orient=None, vor=True, seed=0, verbose=False, actuation_model=N
         orient: 視線誘導反射のON/OFF（実験の条件なのでシーンには入れない）
         vor: 前庭動眼反射のON/OFF（同上）
         seed: リセットの乱数の種（同上）
-        actuation_model: 筋の駆動モデル。★None なら MuscleModel（従来どおり）。
+        actuation_model: 筋の駆動モデル。None なら MuscleModel（従来どおり）。
             【なぜ渡せるようにしたか、2026-07-30】学習ループ
             （`e_growth_train.py`）は既定で SpringDamperModel を使うのに、
             ここが MuscleModel 固定だったため、シーンで学習しようとすると
             **行動の次元が食い違って学習済みモデルを読み込めなかった**。
-            ⚠️駆動モデルは「体の性質」なので本来シーンに入れるべきだが、
+            注意：駆動モデルは「体の性質」なので本来シーンに入れるべきだが、
             既存シーン3つを壊さないため、まず引数で受ける形にした。
             → やることリストに「シーンに actuation を入れる」を積むこと。
     Returns:
@@ -304,7 +304,7 @@ def build(scene, orient=None, vor=True, seed=0, verbose=False, actuation_model=N
     toy = w["toy"]
 
     # --- 1. モジュールの定数として読まれる値を先に決める ---------------------
-    #   ⚠️`e_toy_env` は import した瞬間に環境変数を読んで定数を固める作りなので、
+    #   注意：`e_toy_env` は import した瞬間に環境変数を読んで定数を固める作りなので、
     #     import より前に環境変数を置き、import 後にも定数を直接上書きする
     #     （既に import 済みでも効くようにするため）。
     os.environ["E_RECLINE"] = str(w["recline_deg"])
@@ -356,7 +356,7 @@ def build(scene, orient=None, vor=True, seed=0, verbose=False, actuation_model=N
     IB.EYE_REST_VERTICAL_DEG = float(b["eye_rest_vertical_deg"])
 
     # --- 2. 身体の設定を**シーンから直接**作る -------------------------------
-    #   ⚠️`body_kwargs_from_env` は使わない。環境変数を見る関数を通すと、
+    #   注意：`body_kwargs_from_env` は使わない。環境変数を見る関数を通すと、
     #     呼び出し側が返り値を上書きできる余地が残り、2026-07-25／07-28 と
     #     同じ事故（Viewer と測定で別の体）が再発する。
     kw = _body_kwargs(b, verbose=verbose)
@@ -398,7 +398,7 @@ def build(scene, orient=None, vor=True, seed=0, verbose=False, actuation_model=N
 def _apply_limb_tone(env, scene, verbose=False):
     """四肢の筋緊張を効かせる。**姿勢を入れたあとに呼ぶ**。
 
-    ⚠️目標角を書かなければ「今の姿勢」が落ち着き先になる。だから
+    注意：目標角を書かなければ「今の姿勢」が落ち着き先になる。だから
       シーンの姿勢を復元する前に呼ぶと、リセット直後の**伸びきった腕**が
       戻る先になってしまい、まったく意味が逆になる。
     """
@@ -419,7 +419,7 @@ def _apply_limb_tone(env, scene, verbose=False):
 def _rehold(env, scene, hands=None):
     """支えの目標角を、いまの姿勢で取り直す。
 
-    ⚠️【なぜ要るか】実験者の手も椅子も「今の角度で支える」設定のとき、目標角は
+    注意：【なぜ要るか】実験者の手も椅子も「今の角度で支える」設定のとき、目標角は
       **支え始めた時点**で決まる。シーンの姿勢を流し込んだあとに取り直さないと、
       バネが**復元前の角度へ引き戻し続ける**。
       実測（2026-07-29）：椅子の取り直しを忘れていたため、リクライニング60度で
@@ -440,7 +440,7 @@ def _rehold(env, scene, hands=None):
 def _repin(env, scene, verbose=False):
     """体そのものを、いまの位置・向きで空間に留める。
 
-    ⚠️必ず**姿勢を復元したあと**に呼ぶ。先に留めるとリセット直後の位置で固まり、
+    注意：必ず**姿勢を復元したあと**に呼ぶ。先に留めるとリセット直後の位置で固まり、
       シーンの姿勢とずれる（＝体だけ別の場所にいる状態になる）。
     """
     sup = (scene.get("setup") or {}).get("body_support")
@@ -450,8 +450,8 @@ def _repin(env, scene, verbose=False):
     q = u.pin_root(True) if sup.get("pin_root", True) else None
     if verbose and q is not None:
         print("[support] 体そのものも留めた（ベルト相当）"
-              " ⚠️工学的な固定＝人間からの逸脱。逸脱リスト参照")
-    # ★体幹・脚も完全固定する（2026-07-29、ユーザーの判断）。
+              " 注意工学的な固定＝人間からの逸脱。逸脱リスト参照")
+    # 体幹・脚も完全固定する（2026-07-29、ユーザーの判断）。
     #   バネ（200N·m/rad）では体幹がゆっくり動き続け、VOR が打ち消そうとして
     #   **眼球が可動域の上限に張り付いた**。視線の実験が成立しないため。
     if sup.get("pin_joints", True):
@@ -462,7 +462,7 @@ def _repin(env, scene, verbose=False):
         n = u.pin_joints(joints_to_support(u.model, free=free), on=True)
         if verbose and n:
             print(f"[support] 体幹・脚を完全固定した（{n}関節）"
-                  " ⚠️工学的な固定＝人間からの逸脱。逸脱リスト参照")
+                  " 注意工学的な固定＝人間からの逸脱。逸脱リスト参照")
     return q
 
 
@@ -502,13 +502,13 @@ def _apply_setup(env, s, age, verbose=False):
         apply_neck_tone(u.model, float(age), target=tone.get("target_deg"),
                         stiffness=tone.get("stiffness"),
                         data=u.data, verbose=verbose)
-    # ★体を支える（椅子とベルト）。首より先に効かせる
+    # 体を支える（椅子とベルト）。首より先に効かせる
     #   ＝首の目標角を「支えたあとの姿勢」で取れるようにするため。
     sup = s.get("body_support")
     if sup:
         from e_head_hold import joints_to_support, GROUP_JP
         free = tuple(sup.get("free") or ("arm", "finger"))
-        # ⚠️首は「実験者の手」が担当するので、二重に支えない（役割を分ける）。
+        # 注意：首は「実験者の手」が担当するので、二重に支えない（役割を分ける）。
         #   両方が同じ `jnt_stiffness` を書くので、混ざると
         #   「どちらの設定が効いているのか」が分からなくなる（落とし穴 項62 の型）。
         if s.get("head_hold") and "head" not in free:
@@ -524,12 +524,12 @@ def _apply_setup(env, s, age, verbose=False):
                 print(f"[support] 椅子とベルトが体を支える: {len(names)}関節 "
                       f"強さ={chair.stiffness:.1f}N·m/rad  自由なのは {jp}と眼球 "
                       f"[人間のリーチ実験も乳児を椅子に固定する＝von Hofsten 1982]")
-        # ⚠️体そのものを留めるのは**姿勢を復元したあと**（`_repin`）。
+        # 注意：体そのものを留めるのは**姿勢を復元したあと**（`_repin`）。
         #   ここで留めるとリセット直後の位置で固まり、シーンの姿勢とずれる。
     hold = s.get("head_hold")
     if not hold:
         return None
-    # ⚠️四肢の筋緊張は `apply_state` の**あと**に効かせる（`_apply_limb_tone`）。
+    # 注意：四肢の筋緊張は `apply_state` の**あと**に効かせる（`_apply_limb_tone`）。
     #   目標角を「今の姿勢」にするので、シーンの姿勢を入れる前だと
     #   リセット直後の伸びきった姿勢が落ち着き先になってしまう。
     hands = CaregiverHands(u.model, u.data, stiffness=hold.get("stiffness"))
@@ -566,7 +566,7 @@ def snapshot_state(env):
 def reset_to_scene(env, scene, hands=None, seed=0, toy_offset=None):
     """シーンの状態に戻す。測定が `env.reset()` を呼ぶ代わりにこれを使う。
 
-    ⚠️【なぜ要るか】`env.reset()` だけだと**シーンの姿勢が失われる**。
+    注意：【なぜ要るか】`env.reset()` だけだと**シーンの姿勢が失われる**。
       測定スクリプトは条件ごとに reset するので（反射ON/OFF、シードごと）、
       そのたびにシーンへ戻さないと「1回目だけシーンの姿勢、2回目からは既定の姿勢」
       という状態になる。これは Viewer と測定の食い違いと同じ型のバグ。
@@ -578,7 +578,7 @@ def reset_to_scene(env, scene, hands=None, seed=0, toy_offset=None):
     env.reset(seed=seed)
     if scene.get("state"):
         apply_state(env, scene["state"])
-    # ⚠️実験者の手も椅子も、いまの姿勢で支え直す（片方だけだと崩れる）
+    # 注意：実験者の手も椅子も、いまの姿勢で支え直す（片方だけだと崩れる）
     hold = scene["setup"].get("head_hold") or {}
     if hands is not None and hold.get("target_deg"):
         hands.hold(target=hold["target_deg"], stiffness=hold.get("stiffness"))
@@ -586,8 +586,8 @@ def reset_to_scene(env, scene, hands=None, seed=0, toy_offset=None):
         _rehold(env, scene, hands)
     if toy_offset is not None:
         place_toy(env, np.asarray(toy_offset, dtype=float), relative=True)
-    _apply_limb_tone(env, scene)   # ⚠️姿勢を戻したので、筋緊張の目標も取り直す
-    _repin(env, scene)             # ⚠️留める位置も取り直す
+    _apply_limb_tone(env, scene)   # 注意姿勢を戻したので、筋緊張の目標も取り直す
+    _repin(env, scene)             # 注意留める位置も取り直す
     u = env.unwrapped
     mujoco.mj_forward(u.model, u.data)
     return env
@@ -596,7 +596,7 @@ def reset_to_scene(env, scene, hands=None, seed=0, toy_offset=None):
 def place_toy(env, pos, relative=False):
     """おもちゃを置く。「親が手に持っている」モードでも固定位置ごと動かす。
 
-    ⚠️`d.qpos` を書くだけでは足りない。`hold` モードは毎ステップ `_rest_pos` の位置へ
+    注意：`d.qpos` を書くだけでは足りない。`hold` モードは毎ステップ `_rest_pos` の位置へ
       戻すので、次の step で元の場所に引き戻される（2026-07-28 に踏んだ）。
     """
     u = env.unwrapped
@@ -648,11 +648,11 @@ def apply_state(env, state):
 def fingerprint(env, scene=None):
     """この環境の状態を表す数値。読み込みが正しく効いたかの照合に使う。
 
-    ⚠️どれか1つでも合わなければ「別の環境」＝測定を始めてはいけない。
+    注意：どれか1つでも合わなければ「別の環境」＝測定を始めてはいけない。
       2026-07-28 に実際に起きた食い違い（首30度で保存したのに60度で測っていた／
       Viewer と測定で四肢の屈曲が違った）は、いずれもこの指紋で止まる。
 
-    ★【2026-07-29・自己テストで判明した穴】最初の版は「今の姿勢から計算した量」
+    【2026-07-29・自己テストで判明した穴】最初の版は「今の姿勢から計算した量」
       （首の角度・目の位置・おもちゃが見えるか）しか見ていなかった。
       ところがシーンは **qpos を丸ごと流し込む**ので、
       四肢の屈曲を反転しても・リクライニングを20度変えても・首を支える角度を
@@ -714,7 +714,7 @@ def fingerprint(env, scene=None):
         fp["toy_angle_deg"] = round(float(np.degrees(np.arccos(
             np.clip(float(np.dot(v / max(r, 1e-9), fwd)), -1, 1)))), 2)
         # 遮蔽込みで実際に見えるか
-        #   ⚠️幾何的な角度だけで「見える」と言ってはいけない。2026-07-28 に
+        #   注意：幾何的な角度だけで「見える」と言ってはいけない。2026-07-28 に
         #     角度だけで判定して「見えて届く」と報告した12件が、実際は
         #     すべて自分の体に隠れていた。
         try:
@@ -769,7 +769,7 @@ def _model_fingerprint(m):
     except Exception:
         out["seat"] = None
     # 体の自由関節の初期姿勢（リクライニングはここを書き換えて体を起こす）
-    # ⚠️★【2026-07-29 修正】**関節名**に "mimo_location" が含まれるかで探していたが、
+    # 注意：【2026-07-29 修正】**関節名**に "mimo_location" が含まれるかで探していたが、
     #   MIMo では body 名が "mimo_location" で**関節名は "mimo_orientation"** なので
     #   一度も一致せず、この指紋は常に None だった＝**照合項目が1つ死んでいた**。
     #   （リクライニングの違いは背もたれの板の位置で検知できていたので気づかなかった）
@@ -792,7 +792,7 @@ def _model_fingerprint(m):
 def config_hash(scene):
     """シーンの設定（体・環境・実験前の設定）の指紋。
 
-    ⚠️シーンファイルを手で書き換えたのに指紋を作り直し忘れた場合を捕まえる。
+    注意：シーンファイルを手で書き換えたのに指紋を作り直し忘れた場合を捕まえる。
       数値を直接編集する運用を想定しているので、これが無いと
       「ファイルには新しい値、指紋には古い値」という状態が黙って通る。
     """
@@ -819,7 +819,7 @@ def compare(recorded, current):
         diffs.append(f"関節の数: 記録={recorded.get('nq')} / 今={current.get('nq')}"
                      f"  ← 体か環境の条件が違う")
         return diffs        # ここが違うと以降の比較は意味を持たない
-    # ⚠️柵・背もたれは geom を足すだけで関節を増やさないので、nq では捕まらない
+    # 注意：柵・背もたれは geom を足すだけで関節を増やさないので、nq では捕まらない
     #   （2026-07-29 の自己テストで「柵の有無を反転」がすり抜けて判明）。
     if recorded.get("ngeom") != current.get("ngeom"):
         diffs.append(f"物体の数: 記録={recorded.get('ngeom')} / 今={current.get('ngeom')}"
@@ -854,11 +854,11 @@ def compare(recorded, current):
             f" / 今={_seen(current.get('toy_visible_left'))}")
 
     # --- モデルそのもの（姿勢を入れ替えても変わらない値）---------------------
-    #   ⚠️ここが無いと、四肢の屈曲・リクライニング角・頭を支える角度の食い違いが
+    #   注意：ここが無いと、四肢の屈曲・リクライニング角・頭を支える角度の食い違いが
     #     すり抜ける（2026-07-29 の自己テストで3件見逃した）。
     ra, ca = recorded.get("model") or {}, current.get("model") or {}
     if ra or ca:
-        # ⚠️許容値は項目ごとに変える。**一律 1e-3 では厳しすぎる**：
+        # 注意：許容値は項目ごとに変える。**一律 1e-3 では厳しすぎる**：
         #   減衰は「今の姿勢から臨界減衰を計算」して入るので、Viewer で保存した
         #   瞬間と読み込んだ瞬間で末尾がわずかに変わる。2026-07-29 に実測 0.016
         #   （0.014%）の差で測定が止まった＝実害のない差で実験を妨げていた。
@@ -983,7 +983,7 @@ def settle_check(env, seconds=3.0, restore=True):
 
     head_drift = {k: round(abs(v - (fp1["head_angles_deg"] or {}).get(k, v)), 2)
                   for k, v in (fp0["head_angles_deg"] or {}).items()}
-    # ⚠️ここは `abs(a or 0.0 - (b or 0.0))` と書くと `or` の方が `-` より弱いため
+    # 注意：ここは `abs(a or 0.0 - (b or 0.0))` と書くと `or` の方が `-` より弱いため
     #   `a or (0.0 - b)` になり、**差ではなく傾きそのもの**が入る（最初の版のバグ）。
     t0 = fp0.get("trunk_tilt_deg")
     t1 = fp1.get("trunk_tilt_deg")
@@ -997,7 +997,7 @@ def settle_check(env, seconds=3.0, restore=True):
     eye_drift = float(np.linalg.norm(np.array(fp1["eye_pos"])
                                      - np.array(fp0["eye_pos"])))
 
-    # ⚠️おもちゃを「紐で吊るす」モード（tether）は**揺れるのが仕様**なので、
+    # 注意：おもちゃを「紐で吊るす」モード（tether）は**揺れるのが仕様**なので、
     #   動いたことを崩れと判定しない（2026-07-29：新生児のシーンが
     #   おもちゃの揺れ20.9cm だけを理由に「保てません」と出ていた）。
     try:
@@ -1015,7 +1015,7 @@ def settle_check(env, seconds=3.0, restore=True):
     if toy_drift is not None:
         parts.append(f"おもちゃ {toy_drift*100:.2f}cm"
                      + ("" if _toy_fixed else "（紐で吊るす設定なので揺れて当然）"))
-    parts.append("→ 姿勢は保てます" if ok else "→ ⚠️この姿勢は保てません")
+    parts.append("→ 姿勢は保てます" if ok else "→ 注意この姿勢は保てません")
     out = {"seconds": seconds, "head_drift_deg": head_drift,
            "trunk_tilt_before": fp0.get("trunk_tilt_deg"),
            "trunk_tilt_after": fp1.get("trunk_tilt_deg"),
@@ -1038,11 +1038,11 @@ def settle_check(env, seconds=3.0, restore=True):
 def capture_eye(env, path, cam="eye_left", size=None):
     """左目に映っている景色を1枚保存する。
 
-    ⚠️落とし穴チェックリスト 項70「位置・姿勢の問題は数値より先に絵を撮る」を
+    注意：落とし穴チェックリスト 項70「位置・姿勢の問題は数値より先に絵を撮る」を
       仕組みにしたもの。2026-07-28 は数値だけで1時間・7回失敗し、
       画像1枚で即座に解決した。
 
-    ★【2026-07-29】`size` の既定を「モデルが持っている描画バッファに収める」に変えた。
+    【2026-07-29】`size` の既定を「モデルが持っている描画バッファに収める」に変えた。
       【なぜ】以前は 256 を要求し、足りなければ `m.vis.global_.offwidth/offheight` を
       **その場で広げていた**。Viewer が動いている最中にこれをやると、既に作られた
       OpenGL のコンテキストと食い違ってプロセスごと落ちうる
@@ -1112,6 +1112,6 @@ if __name__ == "__main__":
         print(f"      {sc['body']['age_months']:g}ヶ月 / "
               f"リクライニング{sc['world']['recline_deg']:g}度 / "
               f"柵{'あり' if sc['world']['fence'] else 'なし'} / {st}"
-              f"{'' if se is None else ('  姿勢は保てる' if se else '  ⚠️姿勢が崩れる')}")
+              f"{'' if se is None else ('  姿勢は保てる' if se else '  注意姿勢が崩れる')}")
         if sc.get("note"):
             print(f"      {sc['note']}")

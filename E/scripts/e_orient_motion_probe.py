@@ -23,14 +23,14 @@
 本当の46%しか拾えないことが分かっているため（落とし穴チェックリスト 項55）。
 """
 
-# ⚠️★古い方式（2026-07-30 に整理）。新しい実験は `run/main.py` を通す。
+# 注意：古い方式（2026-07-30 に整理）。新しい実験は `run/main.py` を通す。
 #   【経緯】目標Eの実験スクリプトが118本あり、うち66本が**独立に環境を組み立てていた**。
 #     そのため「学習は関節モード（90関節を独立に駆動＝逸脱リスト 逸脱5）、
 #     測定とViewerは筋肉モード（拮抗筋2本/関節）」という**別の体で動く**事故が起きた
 #     （ユーザーの目視「視線誘導反射の実験の時とは動きが全然違う」で発覚。
 #      実測で動きが人間の新生児の約3.3倍速かった）。
 #   【設計と移行計画】`E/docs/実行基盤_設計.md`
-#   ⚠️このファイルは**記録として残す**（削除しない方針）。
+#   注意：このファイルは**記録として残す**（削除しない方針）。
 #     中の測り方は再利用できるので、プラグインへ移すときの元にする。
 import os, sys, warnings
 warnings.filterwarnings("ignore")
@@ -63,7 +63,7 @@ SHAKE_AMP = 0.008
 N_FRAMES = 40
 OFFSETS = [float(x) for x in
            os.environ.get("E_ORIENT_OFFSETS", "-0.05,-0.03,-0.015,0,0.015,0.03,0.05").split(",")]
-# ★どの軸を診るか。E_ORIENT_AXIS=v で上下方向。
+# どの軸を診るか。E_ORIENT_AXIS=v で上下方向。
 AXIS = os.environ.get("E_ORIENT_AXIS", "h")
 IS_V = (AXIS == "v")
 THRESHES = [0.0, 0.10, 0.20, 0.35, 0.50]
@@ -125,7 +125,7 @@ def main():
         env.step(a)
     frozen = d.qpos.copy()
     _R = np.array(d.cam_xmat[cam_id], dtype=float).reshape(3, 3)
-    right = _R[:, 1] if IS_V else _R[:, 0]     # ★IS_V なら上方向へずらす
+    right = _R[:, 1] if IS_V else _R[:, 0]     # IS_V なら上方向へずらす
     eye = np.array(d.cam_xpos[cam_id], dtype=float)
     fwd = -_R[:, 2]
     dist = float(np.linalg.norm(np.array(u._rest_pos, dtype=float) - eye))
@@ -133,7 +133,7 @@ def main():
 
     print(f"=== 動き検出（ステップ1）の切り分け（{'上下' if IS_V else '左右'}方向）===")
     print(f"  顔からおもちゃまで {dist*100:.1f} cm  揺れ幅 {SHAKE_AMP*100:.1f} cm")
-    print("  ★中心バイアス・競合を通す**前**の生の動きマップだけを見る\n")
+    print("  中心バイアス・競合を通す**前**の生の動きマップだけを見る\n")
 
     print("--- 1. 閾値を変えて重心を測る ---")
     hdr = "".join(f"{t:>8.2f}" for t in THRESHES)
@@ -170,7 +170,7 @@ def main():
         outside = float(mp[~grown].sum())
         frac_out = outside / max(inside + outside, 1e-12)
 
-        # ★おもちゃの真の重心を境に、動きを左右に分けて明るさを比べる。
+        # おもちゃの真の重心を境に、動きを左右に分けて明るさを比べる。
         #   おもちゃが揺れて光るのは「左の縁が掃いた帯」と「右の縁が掃いた帯」。
         #   本来この2本は同じ明るさのはずで、重心はおもちゃの中心に来る。
         if not np.isnan(truth):
@@ -182,7 +182,7 @@ def main():
             lft = rgt = float("nan")
         sides.append((lft, rgt))
 
-        # ★上丘の格子に活動が写っているか（写らなければ向きが出るはずがない）
+        # 上丘の格子に活動が写っているか（写らなければ向きが出るはずがない）
         sm = getattr(reflex, "_smap", None)
         sci = getattr(reflex, "sc_input", None)
         if sm is not None and sci is not None:

@@ -1,16 +1,16 @@
 # -*- coding: utf-8 -*-
-"""★触覚センサーが「体を育てても同じ部位に属し続けるか」を確かめる。
+"""触覚センサーが「体を育てても同じ部位に属し続けるか」を確かめる。
 
 【なぜ要るか、2026-07-31】太郎は触覚を諦めていた。理由は
 「体を育てるとセンサー点が 0ヶ月1734点 → 4ヶ月4274点 に変わり、
   観測の次元がずれる」（落とし穴チェックリスト 項75）。
 `run/config.py` も触覚ONで体を育てようとすると**エラーで止める**作りになっている。
 
-⇒ ★Baby Sophia（arXiv:2511.09727）は触覚17,175次元を**解剖学的68部位に分けて平均**
+⇒ Baby Sophia（arXiv:2511.09727）は触覚17,175次元を**解剖学的68部位に分けて平均**
   するだけで扱えるようにしている。オートエンコーダも次元圧縮も使っていない。
-  ★部位の数は体が育っても変わらないはず。それを確かめる。
+  部位の数は体が育っても変わらないはず。それを確かめる。
 
-★確かめること
+確かめること
   ① 月齢を変えても「センサーを持つ部位（body）の集合」が同じか
   ② 部位ごとの点数は変わってよい（平均を取るので次元は部位の数で固定される）
   ③ 部位ごとに平均すると、月齢によらず同じ次元になるか
@@ -48,49 +48,55 @@ for age in ages:
 
     touch = getattr(u, "touch", None)
     if touch is None:
-        print(f"⚠️月齢{age}: 触覚が有効になっていない。"
+        print(f"注意月齢{age}: 触覚が有効になっていない。"
               "シーンかenvの設定で触覚をONにする必要がある")
         env.close()
         continue
 
     m = u.model
     # センサー点は geom ごとに持たれる。その geom がどの body に属するかを見る
+    # 注意：【2026-07-31 修正】`sensor_positions` のキーは触覚クラスで意味が違う。
+    #   DiscreteTouch は geom_id、TrimeshTouch は body_id（MIMo v2 の既定はこちら）。
+    #   geom_id と決め打ちして geom_bodyid で変換すると、別の部位に点数が入る。
+    #   これで「左右で点数が桁違い」「脚にセンサーが無い」という
+    #   存在しない現象を報告してしまった（落とし穴チェックリスト 項85）。
+    keys_are_body = type(touch).__name__ == "TrimeshTouch"
     per_body = {}
     total = 0
-    for geom_id, pts in touch.sensor_positions.items():
+    for key, pts in touch.sensor_positions.items():
         n = int(pts.shape[0])
         total += n
-        bid = int(m.geom_bodyid[geom_id])
+        bid = int(key) if keys_are_body else int(m.geom_bodyid[key])
         bname = m.body(bid).name
         per_body[bname] = per_body.get(bname, 0) + n
     result[age] = per_body
     print(f"\n--- 月齢 {age:.1f} ヶ月")
     print(f"  センサー点の合計 {total:,} 点")
-    print(f"  ★センサーを持つ部位（body）の数 {len(per_body)}")
+    print(f"  センサーを持つ部位（body）の数 {len(per_body)}")
     env.close()
 
 if len(result) >= 2:
     keys = sorted(result)
     base = set(result[keys[0]])
     print("\n" + "=" * 78)
-    print(" ★★判定")
+    print(" 判定")
     print("=" * 78)
     same = all(set(result[a]) == base for a in keys)
-    print(f"  部位の集合が全月齢で同じか  ★{'はい' if same else 'いいえ'}")
+    print(f"  部位の集合が全月齢で同じか  {'はい' if same else 'いいえ'}")
     for a in keys:
         s = set(result[a])
         print(f"    月齢{a:.1f}: {len(s)}部位  "
               f"点数{sum(result[a].values()):,}"
-              + ("" if s == base else f"  ⚠️差分 {sorted(s ^ base)}"))
+              + ("" if s == base else f"  注意差分 {sorted(s ^ base)}"))
     if same:
-        print(f"\n  ⇒ ★部位ごとに平均すれば、月齢によらず**{len(base)}次元**で固定できる")
+        print(f"\n  ⇒ 部位ごとに平均すれば、月齢によらず**{len(base)}次元**で固定できる")
         print("     ＝ 触覚を「体が育つ実験」で使えるようになる")
     else:
-        print("\n  ⇒ ⚠️部位の集合が月齢で変わる。★別の方法が要る")
+        print("\n  ⇒ 注意部位の集合が月齢で変わる。別の方法が要る")
 
     # 部位ごとの点数の変化（上位10部位）
     print("\n" + "-" * 78)
-    print(" 部位ごとの点数（★数は変わってよい。平均を取るので次元は部位数で固定）")
+    print(" 部位ごとの点数（数は変わってよい。平均を取るので次元は部位数で固定）")
     print("-" * 78)
     top = sorted(base, key=lambda b: -result[keys[-1]].get(b, 0))[:10]
     print(f"{'部位':<24}" + "".join(f"{a:>10.1f}ヶ月" for a in keys))

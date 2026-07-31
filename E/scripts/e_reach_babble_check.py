@@ -6,25 +6,25 @@
 【切り分ける候補】
   1. 自発運動の振幅が小さい      Viewer は 0.174（学習初期の実効値）
   2. 四肢の筋力が弱すぎる        4ヶ月の補正で **×0.047（1/21）** にしている
-                                 ⚠️この補正の目標値には文献の根拠が無い
+                                 注意：この補正の目標値には文献の根拠が無い
                                  （`taro_core/src/body/infant_limbs.py` 冒頭）
   3. おもちゃが遠い              手から22.7cm・可動域の端でやっと届く位置
 
-⚠️「動かない」はまず計測器を疑う（落とし穴）。指令が本当に関節に届いているかも見る。
+注意：「動かない」はまず計測器を疑う（落とし穴）。指令が本当に関節に届いているかも見る。
 
 使い方:
     .venv/Scripts/python.exe E/scripts/e_reach_babble_check.py
     E_SECONDS=30 E_SCENE=名前 で変えられる
 """
 
-# ⚠️★古い方式（2026-07-30 に整理）。新しい実験は `run/main.py` を通す。
+# 注意：古い方式（2026-07-30 に整理）。新しい実験は `run/main.py` を通す。
 #   【経緯】目標Eの実験スクリプトが118本あり、うち66本が**独立に環境を組み立てていた**。
 #     そのため「学習は関節モード（90関節を独立に駆動＝逸脱リスト 逸脱5）、
 #     測定とViewerは筋肉モード（拮抗筋2本/関節）」という**別の体で動く**事故が起きた
 #     （ユーザーの目視「視線誘導反射の実験の時とは動きが全然違う」で発覚。
 #      実測で動きが人間の新生児の約3.3倍速かった）。
 #   【設計と移行計画】`E/docs/実行基盤_設計.md`
-#   ⚠️このファイルは**記録として残す**（削除しない方針）。
+#   注意：このファイルは**記録として残す**（削除しない方針）。
 #     中の測り方は再利用できるので、プラグインへ移すときの元にする。
 import os
 import sys
@@ -33,7 +33,7 @@ import warnings
 warnings.filterwarnings("ignore")
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.abspath(os.path.join(_HERE, os.pardir, os.pardir))
-# ⚠️自発運動の生成器は `taro_core/src/brain/spinal_cord/cpg.py`（脊髄）にある
+# 注意：自発運動の生成器は `taro_core/src/brain/spinal_cord/cpg.py`（脊髄）にある
 for _p in [os.path.join(_ROOT, "taro_core", "src", "brain"), _HERE]:
     if _p not in sys.path:
         sys.path.insert(0, _p)
@@ -138,7 +138,7 @@ def main():
     print("=" * 74)
     print(f" 自発運動で腕はどれだけ動くか（{SCENE} / {SECONDS:g}秒）")
     print("=" * 74)
-    print("  ⚠️おもちゃの半径は0.5cm。最接近が1cm以内なら「触れうる」")
+    print("  注意おもちゃの半径は0.5cm。最接近が1cm以内なら「触れうる」")
     rows = [run(*c) for c in CASES]
     print("\n" + "=" * 74)
     print(" まとめ")

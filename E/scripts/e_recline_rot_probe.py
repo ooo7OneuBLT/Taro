@@ -1,4 +1,4 @@
-"""★体を「起こす」正しい回転を総当たりで見つける。
+"""体を「起こす」正しい回転を総当たりで見つける。
 
 【なぜ要るか、2026-07-28】リクライニングのために体を y軸まわりに回したが、
 +70度でも -70度でも**頭が下がった**（体幹 -37.5度 / -19.4度）。
@@ -13,14 +13,14 @@
     .venv/Scripts/python.exe E/scripts/e_recline_rot_probe.py
 """
 
-# ⚠️★古い方式（2026-07-30 に整理）。新しい実験は `run/main.py` を通す。
+# 注意：古い方式（2026-07-30 に整理）。新しい実験は `run/main.py` を通す。
 #   【経緯】目標Eの実験スクリプトが118本あり、うち66本が**独立に環境を組み立てていた**。
 #     そのため「学習は関節モード（90関節を独立に駆動＝逸脱リスト 逸脱5）、
 #     測定とViewerは筋肉モード（拮抗筋2本/関節）」という**別の体で動く**事故が起きた
 #     （ユーザーの目視「視線誘導反射の実験の時とは動きが全然違う」で発覚。
 #      実測で動きが人間の新生児の約3.3倍速かった）。
 #   【設計と移行計画】`E/docs/実行基盤_設計.md`
-#   ⚠️このファイルは**記録として残す**（削除しない方針）。
+#   注意：このファイルは**記録として残す**（削除しない方針）。
 #     中の測り方は再利用できるので、プラグインへ移すときの元にする。
 import os
 import sys
@@ -53,7 +53,7 @@ def main():
     kw["flexion"] = True
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
-        # ★背もたれを作らない（recline_deg=0）＝置き方だけを見る
+        # 背もたれを作らない（recline_deg=0）＝置き方だけを見る
         env = ToySupineEnv(actuation_model=MuscleModel,
                            vision_params=infant_vision_params(acuity_age=AGE),
                            age=AGE, toy=True, vor=True, orient=False,
@@ -64,7 +64,7 @@ def main():
 
     hip_bid = int(m.body("hip").id)
     head_bid = int(m.body("head").id)
-    # ★体全体を動かす free joint を探す（hip には無い＝2026-07-28 に判明）。
+    # 体全体を動かす free joint を探す（hip には無い＝2026-07-28 に判明）。
     #   おもちゃ（test_object1）も free joint を持つので除外する。
     qadr, root_name = None, None
     for j in range(m.njnt):
@@ -79,7 +79,7 @@ def main():
     print(" 体を起こす回転の総当たり（背もたれなし・物理を進めない）")
     print("=" * 78)
     print(f"  体の自由関節: {root_name}（qpos adr={qadr}）" if qadr is not None
-          else "  ⚠️自由関節が見つからない")
+          else "  注意自由関節が見つからない")
 
     q_base = (np.array(d.qpos[qadr + 3:qadr + 7], dtype=float).copy()
               if qadr is not None else np.array(m.body_quat[hip_bid], dtype=float).copy())
@@ -125,14 +125,14 @@ def main():
                     d.qpos[qadr + 3:qadr + 7] = qn
                 t, hp, hd = trunk_deg()
                 err = abs(t - TARGET)
-                mark = "★" if err < 10 else ("〇" if err < 25 else "")
+                mark = "" if err < 10 else ("〇" if err < 25 else "")
                 if best is None or err < best[0]:
                     best = (err, an, sign, side, t)
                 print(f"{an:>4}{sign:>+6}{side:>10}{t:>13.1f}度{hd[2]:>11.3f}{mark:>10}")
 
     print("\n" + "=" * 78)
     if best:
-        print(f" ★最も近い：{best[1]}軸 まわり {best[2]*TARGET:+.0f}度 を"
+        print(f" 最も近い：{best[1]}軸 まわり {best[2]*TARGET:+.0f}度 を"
               f"{best[3]}から掛ける → 体幹 {best[4]:.1f}度（目標 {TARGET:g}度）")
     print("=" * 78)
     env.close()

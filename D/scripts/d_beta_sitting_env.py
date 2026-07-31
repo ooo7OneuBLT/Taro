@@ -9,7 +9,7 @@ egomotion研究の実際のパラダイム（moving room：支えられて座っ
 【座位＋倒れない、の作り方】MIMo公式 `MIMoSelfBody-v0`(`selfbody.py`)の技術をそのまま流用：
   ・equality weld body1="mimo_location" ＝体の"根っこ"(自由関節)だけを固定＝倒れない
   ・SITTING_POSITION ＝股関節を曲げた座位の初期角度（既製品）
-  ★自己接触タスクと違い、根っこの溶接以外は**全関節を自由なまま**にする（1本の腕だけに
+  自己接触タスクと違い、根っこの溶接以外は**全関節を自由なまま**にする（1本の腕だけに
     制限しない）＝本物の運動性喃語（ランダム探索）で全身を自由に動かせる、Cの仰向け版と
     同じ自由度。
 
@@ -51,14 +51,14 @@ _BETA_RANGE = 2.0
 class BetaSittingEnv(MIMoV2DummyEnv):
     """座位で安定したアルファ（全関節自由）＋左右に動く操り人形ベータ。"""
 
-    # ★較正済み(2026-07-18)：ユーザーが対話ビューア（d_viewer_quicktest.py）でベータを直接
+    # 較正済み(2026-07-18)：ユーザーが対話ビューア（d_viewer_quicktest.py）でベータを直接
     # ドラッグして「しっくりくる」位置を目視で決定＝直感的なUnity風の配置（口頭較正でなく
     # 実際に置いて確認）。保存値：目からの相対位置[前方1.249, 横-0.004, 高さ+0.051]・距離1.25m。
     # BETA_HOME は「ベータの実際の絶対位置（静止時）」そのものを表す（＝この値を見れば
     # そのまま実世界の座標として読める）。内部実装の都合（下記オフセット）はここでは
     # 一切考慮しなくてよい設計にしてある。
     BETA_HOME = np.array([1.322, -0.020, 0.341])
-    # ★実装上の注意（2026-07-17に発見・2026-07-18に整理）：attach_body されたベータ自身の
+    # 実装上の注意（2026-07-17に発見・2026-07-18に整理）：attach_body されたベータ自身の
     # 体(mimo_location)は、元シーン由来の pos=[0,0,0.4] を内蔵したまま複製される。
     # つまり「フレームの位置 + [0,0,0.4] = ベータの実際の絶対位置」（実測で確認済み、旧
     # z=0.45指定→実測0.85 のズレの正体）。BETA_HOMEを「見たままの絶対位置」として使える
@@ -67,7 +67,7 @@ class BetaSittingEnv(MIMoV2DummyEnv):
     # 混ぜ込むと「BETA_HOME[2]が実際の高さを意味しない」という紛らわしい状態になるため、
     # オフセット補正はこの1箇所（フレーム組み立て時）だけに閉じ込める。
     _BETA_LOCAL_OFFSET = np.array([0.0, 0.0, 0.4])
-    # ★同時に較正(2026-07-18)：ベータは元の太郎の体をそのまま複製しており、回転させない限り
+    # 同時に較正(2026-07-18)：ベータは元の太郎の体をそのまま複製しており、回転させない限り
     # 太郎と同じ「+X方向を向く」姿勢を引き継ぐ。ベータがアルファより+X側（前方）に置かれた
     # ため、顔がアルファから離れる方向を向き、背中を向けてしまっていた（ユーザー指摘）。
     # ベータには回転の関節が無い（平行移動3自由度のみ、d_beta_env.pyの設計）ため、対話的な
@@ -85,7 +85,7 @@ class BetaSittingEnv(MIMoV2DummyEnv):
         valid_names = {mujoco.mj_id2name(probe, mujoco.mjtObj.mjOBJ_JOINT, i) for i in range(probe.njnt)}
         sitting = {k: v for k, v in SITTING_POSITION.items() if k in valid_names}
 
-        # ★訂正：股関節/胸の曲げ角度は溶接と綱引きして矛盾する（実測で発覚）。
+        # 訂正：股関節/胸の曲げ角度は溶接と綱引きして矛盾する（実測で発覚）。
         # hip/lower_body/upper_body/chestを個別に溶接すると、それらを繋ぐ関節
         # (hip_bend/hip_lean/hip_rot/chest_lean/chest_rot)は「各体を初期姿勢のまま
         # 固定する」という制約により**実質ゼロに固定**される。ここでSITTING_POSITIONの
@@ -98,7 +98,7 @@ class BetaSittingEnv(MIMoV2DummyEnv):
                    "robot:hip_rot1", "robot:hip_rot2", "robot:chest_lean", "robot:chest_rot"):
             sitting.pop(jn, None)
 
-        # ★長座位（足を伸ばして座る）へ訂正。SITTING_POSITION既定は膝を深く曲げた姿勢
+        # 長座位（足を伸ばして座る）へ訂正。SITTING_POSITION既定は膝を深く曲げた姿勢
         # （右膝-106°等）で、動画で見ると脚が浮いて不自然だった。乳児の座位でも比較的
         # 早期に見られる姿勢（足を前に伸ばす＝股関節の回旋・外転を使わず単純な屈曲だけで
         # 座れる、より基本的な座り方）。胴体は骨盤〜胸の溶接で既に支えているため、脚の
@@ -119,17 +119,17 @@ class BetaSittingEnv(MIMoV2DummyEnv):
 
     # 座位に必要な下げ幅(m)。元シーンのmimo_locationは立位用の高さのまま＝関節角度だけ
     # 座位にしても宙に浮く（実測：体の最下点z=0.289＝29cm浮いていた）。溶接前に根っこの
-    # 位置そのものを下げて、床に接地させてから固定する。⚠️経験的な定数＝感度確認が要る。
+    # 位置そのものを下げて、床に接地させてから固定する。注意経験的な定数＝感度確認が要る。
     SIT_DROP_Z = 0.30
 
     def _initialize_simulation(self):
         spec = mujoco.MjSpec.from_file(self.fullpath)
 
-        # ★根っこの位置を座位の高さまで下げる（溶接で"その場"に固定する前に）。
+        # 根っこの位置を座位の高さまで下げる（溶接で"その場"に固定する前に）。
         mimo_body = spec.body("mimo_location")
         mimo_body.pos = [mimo_body.pos[0], mimo_body.pos[1], mimo_body.pos[2] - self.SIT_DROP_Z]
 
-        # ★座位で倒れないための溶接。
+        # 座位で倒れないための溶接。
         # 【訂正・2026-07-17】骨盤(mimo_location)だけを固定する版を動画で確認したところ、
         # 骨盤の数値は安定でも**上半身（胴体）がその場に崩れ落ちて床に倒れ込んでいた**
         # （骨盤という土台が動かなくても、土台の上の建物＝胴体を支える力ではなかった）。
@@ -207,7 +207,7 @@ class BetaSittingEnv(MIMoV2DummyEnv):
 
     def set_beta_target(self, xyz):
         rel = np.asarray(xyz, dtype=np.float64) - self.BETA_HOME
-        # ★180度(Z軸)回転により、関節のローカルX/Y軸はワールド座標上で反転している
+        # 180度(Z軸)回転により、関節のローカルX/Y軸はワールド座標上で反転している
         # （Z軸まわりの回転はZ軸自身には影響しない）。符号を戻して従来通り
         # 「ワールド座標のx,yをそのまま指定できる」インターフェースを保つ。
         rel[0] *= -1.0

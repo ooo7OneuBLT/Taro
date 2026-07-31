@@ -499,7 +499,7 @@ def run_simulation_b(max_sim_seconds=None, verbose=True, run_name=None,
             # 従来は発声内容と無関係の固定確率で「気づくか」を決めていた（＝docstringの
             # 主旨と実装がズレていた）。最も近い語への音韻的類似度 word_sim（言葉らしさ、
             # まんま/ねんね/だっこ いずれかへの近さ＝母語の語らしさ）で気づく確率を高める。
-            # ⚠️定数0.5＝語らしさに依らない基礎反応の割合（未検証・除去テスト可）。
+            # 注意：定数0.5＝語らしさに依らない基礎反応の割合（未検証・除去テスト可）。
             word_sim = 0.0
             if schedule.words:
                 word_sim = max(env.word_similarity(result["tokens"], w)

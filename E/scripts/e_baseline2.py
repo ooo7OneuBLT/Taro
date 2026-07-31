@@ -22,14 +22,14 @@
   環境変数 C5_CKPT で測るモデルを指定（例：C/models/e1_stage1_seed0.pt）
 """
 
-# ⚠️★古い方式（2026-07-30 に整理）。新しい実験は `run/main.py` を通す。
+# 注意：古い方式（2026-07-30 に整理）。新しい実験は `run/main.py` を通す。
 #   【経緯】目標Eの実験スクリプトが118本あり、うち66本が**独立に環境を組み立てていた**。
 #     そのため「学習は関節モード（90関節を独立に駆動＝逸脱リスト 逸脱5）、
 #     測定とViewerは筋肉モード（拮抗筋2本/関節）」という**別の体で動く**事故が起きた
 #     （ユーザーの目視「視線誘導反射の実験の時とは動きが全然違う」で発覚。
 #      実測で動きが人間の新生児の約3.3倍速かった）。
 #   【設計と移行計画】`E/docs/実行基盤_設計.md`
-#   ⚠️このファイルは**記録として残す**（削除しない方針）。
+#   注意：このファイルは**記録として残す**（削除しない方針）。
 #     中の測り方は再利用できるので、プラグインへ移すときの元にする。
 import os
 import sys
@@ -99,7 +99,7 @@ def main():
     print(f"\n=== 段階2のベースライン（{os.path.basename(os.environ.get('C5_CKPT','?'))} / seed{seed}）===")
     print(f"  hand_in_view       : {s.mean()*100:.2f}%  ({s.sum()}/{len(s)} tick)")
     if len(runs):
-        print(f"  ★視野内が続く長さ  : mean {runs.mean():.2f} tick / median {np.median(runs):.0f}"
+        print(f"  視野内が続く長さ  : mean {runs.mean():.2f} tick / median {np.median(runs):.0f}"
               f" / max {runs.max():.0f}  （{len(runs)} 回）")
         n_eff = len(s) / max(runs.mean(), 1.0)
         p = s.mean()
@@ -108,7 +108,7 @@ def main():
               f"（600tick区間なら実効 {n_eff/(len(s)/W):.0f}）")
         print(f"  → 理論上のSD(600tick区間) : {sd_eff:.2f}%")
     else:
-        print("  ★視野内になった回数 : 0")
+        print("  視野内になった回数 : 0")
     if len(chunks) > 1:
         print(f"  実測のSD(600tick区間): {chunks.std(ddof=1):.2f}%   区間値 {np.round(chunks,2)}")
     env.close()

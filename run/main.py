@@ -1,4 +1,4 @@
-"""シミュレーションシステム ── 実験・学習・目視の★唯一の入口。
+"""シミュレーションシステム ── 実験・学習・目視の唯一の入口。
 
 【なぜ作ったか、2026-07-30】目標Eの実験スクリプトが118本あり、そのうち66本が
 **それぞれ独立に環境を組み立てていた**。そのため「学習は関節モード、測定・Viewerは
@@ -10,14 +10,14 @@
     .venv/Scripts/python.exe -m run.main E/experiments/<名前>.json
     .venv/Scripts/python.exe -m run.main E/experiments/<名前>.json --steps 600
 
-【実験ファイル（JSON）の4つの欄】★境界を混ぜない
+【実験ファイル（JSON）の4つの欄】境界を混ぜない
     scene    どんな環境か（E/scenes/*.json の名前）
-    taro     ★太郎の中身の設定（本能のON/OFF・月齢・駆動モード）
+    taro     太郎の中身の設定（本能のON/OFF・月齢・駆動モード）
              → 実装は taro_core にある。ここは「どれを使うか」だけ
     run      動かし方（type / steps / seed）
-    plugins  ★外から測る・見る道具（太郎を変えない）
+    plugins  外から測る・見る道具（太郎を変えない）
 
-⚠️env を直接作るコードを**新しく書かない**。ここを通す。
+注意：env を直接作るコードを**新しく書かない**。ここを通す。
   （検査は run/tools/check_entry.py）
 """
 import argparse
@@ -27,18 +27,18 @@ import sys
 import time
 import warnings
 
-# ★【2026-07-30 に解決】「同じシードでも結果がばらつく」問題は直した。
-#   原因は5つ、全部★自分たちのコードだった：
+# 【2026-07-30 に解決】「同じシードでも結果がばらつく」問題は直した。
+#   原因は5つ、全部自分たちのコードだった：
 #     ①内臓（泣く・寝る・うとうと）の乱数に種を撒いていなかった ← 本物のバグ
-#       ＝乱数は4系統（torch / numpy / gym / ★Python標準）ある
+#       ＝乱数は4系統（torch / numpy / gym / Python標準）ある
 #     ②筋の活性化（MuscleModel.activity＝Python側の配列）が復元されていなかった
 #     ③物理の内部状態（qacc_warmstart＝ソルバの前回解）が復元されていなかった
 #     ④視覚のキャッシュ（辞書）が復元されていなかった
-#     ⑤★測定が学習を8秒ぶん進める構造そのもの
+#     ⑤測定が学習を8秒ぶん進める構造そのもの
 #   対策＝測定の前後で状態を控えて戻す（`run/trainer.py` の _snapshot/_restore）。
-#   結果 ★350ステップ × 5回すべて完全一致。
-#   ⚠️★過去の実験（margin +58.8 等）は同一シードでも再現しない条件での値。
-#   ⚠️再現性が崩れていないかは `run/tools/check_divergence.py` で確かめられる。
+#   結果 350ステップ × 5回すべて完全一致。
+#   注意：過去の実験（margin +58.8 等）は同一シードでも再現しない条件での値。
+#   注意：再現性が崩れていないかは `run/tools/check_divergence.py` で確かめられる。
 #     → 検証の落とし穴チェックリスト 項79・項80
 
 warnings.filterwarnings("ignore")
@@ -46,7 +46,7 @@ _ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-# ★プラグインの登録表。実験ファイルのキーとクラスの対応はここだけ。
+# プラグインの登録表。実験ファイルのキーとクラスの対応はここだけ。
 #   新しい測る道具を作ったら、ここに1行足す。
 PLUGINS = {}
 
@@ -61,14 +61,14 @@ def _register():
     PLUGINS["toy_touch"] = ToyTouch
     PLUGINS["hand_in_view"] = HandInView
     PLUGINS["self_model"] = SelfModel
-    PLUGINS["trace"] = Trace           # ★内部の値の指紋を残す（原因追跡用）
-    PLUGINS["dashboard"] = Dashboard   # ★学習の様子の絵を自動で作り直す
-    # ⚠️self_model / trace は★太郎の脳が要る（run.type=train のみ）。
+    PLUGINS["trace"] = Trace           # 内部の値の指紋を残す（原因追跡用）
+    PLUGINS["dashboard"] = Dashboard   # 学習の様子の絵を自動で作り直す
+    # 注意：self_model / trace は太郎の脳が要る（run.type=train のみ）。
     #   measure（脳を通さず環境だけ進める）では使えない。
 
 
 def load_spec(path):
-    """実験ファイルを読む。★書き間違いをここで止める。"""
+    """実験ファイルを読む。書き間違いをここで止める。"""
     with open(path, encoding="utf-8") as fp:
         spec = json.load(fp)
     known = {"name", "note", "scene", "taro", "run", "plugins"}
@@ -87,7 +87,7 @@ def load_spec(path):
 def build_plugins(spec):
     """実験ファイルの plugins 欄から、使う道具を組み立てる。
 
-    ★`run.csv` を指定した学習には、書かなくても `dashboard`（絵の自動更新）を足す。
+    `run.csv` を指定した学習には、書かなくても `dashboard`（絵の自動更新）を足す。
       ⇒「実験を流せば勝手に絵ができる」状態にするため（2026-07-30 の要望）。
       切りたいときは実験ファイルに `"dashboard": false` と明示する。
     """
@@ -110,7 +110,7 @@ def build_plugins(spec):
 def _csv_logger(path, spec):
     """チェックポイントの記録をCSVに残す関数を作る。
 
-    ⚠️★列は**途中で増える**（学習前は「力の出し具合」がまだ無いなど）。
+    注意：列は**途中で増える**（学習前は「力の出し具合」がまだ無いなど）。
       追記だと最初の行で列が固定され、あとから増えた値が永久に落ちる。
       ⇒ 行を溜めて**毎回すべて書き直す**。記録は数十行なので軽く、
         走行中に読んでも常に整合した表になっている。
@@ -126,7 +126,7 @@ def _csv_logger(path, spec):
         if not isinstance(row, dict):
             return
         rows.append(dict(row))
-        cols = []               # ★出現した順に並べる（step が先頭に来る）
+        cols = []               # 出現した順に並べる（step が先頭に来る）
         for r in rows:
             for k in r:
                 if k not in cols:
@@ -137,7 +137,7 @@ def _csv_logger(path, spec):
             w.writerow(cols)
             for r in rows:
                 w.writerow([r.get(c, "") for c in cols])
-        os.replace(tmp, path)   # ★書き換え中の半端な表を読ませない
+        os.replace(tmp, path)   # 書き換え中の半端な表を読ませない
     return log_row
 
 
@@ -160,7 +160,7 @@ def run(spec, *, steps_override=None, verbose=False):
 
     plugins = build_plugins(spec)
 
-    # --- ★train：太郎の脳を通して学習する（run/trainer.py）------------------
+    # --- train：太郎の脳を通して学習する（run/trainer.py）------------------
     if kind == "train":
         from run.config import Config
         from run import trainer
@@ -181,11 +181,11 @@ def run(spec, *, steps_override=None, verbose=False):
         print(f"  設定     {cfg.summary()}")
         return viewer.view(cfg, plugins=plugins, verbose=verbose)
 
-    # --- ★edit：編集ウィンドウ付きの Viewer（E/scripts/e_viewer.py）を開く ---
+    # --- edit：編集ウィンドウ付きの Viewer（E/scripts/e_viewer.py）を開く ---
     #   【なぜ実験ファイルから開けるようにしたか、2026-07-31】
     #   e_viewer は環境変数で設定する古い作りで、「どの条件で開いたか」が
-    #   ★コマンドの履歴にしか残らなかった。実験ファイルにすれば記録が残る。
-    #   ⚠️中身は e_viewer.py のまま（統合の第4段階・ステップ2）。
+    #   コマンドの履歴にしか残らなかった。実験ファイルにすれば記録が残る。
+    #   注意：中身は e_viewer.py のまま（統合の第4段階・ステップ2）。
     #     環境変数での起動も残す（急に壊さない）。
     if kind == "edit":
         import subprocess
@@ -201,7 +201,7 @@ def run(spec, *, steps_override=None, verbose=False):
             if v is not None:
                 envv[name] = str(v)
         script = os.path.join(_ROOT, "E", "scripts", "e_viewer.py")
-        print(f"  ★編集ウィンドウ付き Viewer を開きます\n"
+        print(f"  編集ウィンドウ付き Viewer を開きます\n"
               f"     シーン {envv['E_SCENE']}"
               + (f" ／ 月齢 {envv['E_AGE']}ヶ月" if "E_AGE" in envv else "")
               + (f"\n     脳A {envv['E_VIEW_MODEL']}" if "E_VIEW_MODEL" in envv else "")
@@ -252,7 +252,7 @@ def run(spec, *, steps_override=None, verbose=False):
         if rep:
             out[p.name] = rep
             print(f"  {p.name}: {json.dumps(rep, ensure_ascii=False)}")
-    # ⚠️閉じ損ねると MuJoCo の描画コンテキストが残り、次の実行が不安定になる
+    # 注意：閉じ損ねると MuJoCo の描画コンテキストが残り、次の実行が不安定になる
     from run.trainer import close_env
     close_env(env)
     return out

@@ -70,7 +70,7 @@ with open(log_path, "w", encoding="utf-8") as logf:
                 contrib = sm - sa
                 if hname == "満腹":
                     full_contribs.append(contrib)
-                mark = "  ★語で食べ物を先取り" if contrib > 0.05 else "  （語の寄与ほぼ無し）"
+                mark = "  語で食べ物を先取り" if contrib > 0.05 else "  （語の寄与ほぼ無し）"
                 log(f"    [{hname}] まんま={sm:.4f} ままん={ss:.4f} あうあ={sa:.4f} "
                     f"→ 語の寄与={contrib:+.4f}{mark if hname=='満腹' else ''}")
 

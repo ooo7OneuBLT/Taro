@@ -59,7 +59,7 @@ _REPLAY = os.environ.get("C_REPLAY", "1") == "1"  # 既定ON＝睡眠中の経�
 _CEREB = os.environ.get("C_CEREBELLUM", "1") == "1"  # 0で無効化可
 # 【taro-C5】努力コスト＝運動の代謝コストを報酬から引く。報酬=予測のうまさ − C_EFFORT×(筋活動)²。
 # 既定0＝OFF＝従来と完全に同一。人間は代謝エネルギー最小になるよう動く（Selinger 2015 等）＝
-# 大きな力＝損、を入れると自分で力を加減する。⚠️二乗の形・λの値は恣意的（cost()=Σu²·Tmaxを流用、
+# 大きな力＝損、を入れると自分で力を加減する。注意二乗の形・λの値は恣意的（cost()=Σu²·Tmaxを流用、
 # 生理の正確な代謝式ではない）＝感度確認の対象。フリーズ（motor collapse, 逸脱リストB1）と背中
 # 合わせなので、|行動|の低下と自己モデル(margin/agency)の生存を必ず併せて確認する。
 _EFFORT = float(os.environ.get("C_EFFORT", "0"))
@@ -149,7 +149,7 @@ CSV_COLUMNS = ["life_min", "train_step", "classify", "margin", "corr", "persist"
 
 
 def hand_in_view_rate(model, data):
-    """★E1の主指標：手が視野に入っているか（1tickの判定）。
+    """E1の主指標：手が視野に入っているか（1tickの判定）。
 
     判定の実体は `E/scripts/e_hand_in_view.py` の `hand_in_view()` に**一本化**してある
     （測定スクリプトと学習ループで基準がズレると比較不能になるため）。
@@ -157,9 +157,9 @@ def hand_in_view_rate(model, data):
       切り出し動画の目視で「右目には大きく映っているのに左目には映っていない」場面が
       多いと分かったため。人間側の観察研究も両眼視は問わない）
     - `E_HV_MODE=both` で旧基準（両目とも）に戻せる＝アブレーション用
-    ⚠️人間側に比較できる実測値は存在しないので、判定は**太郎の中での前後比較**で行う。
+    注意：人間側に比較できる実測値は存在しないので、判定は**太郎の中での前後比較**で行う。
     """
-    # ⚠️import失敗を握りつぶさない。黙って0.0を返すと「手が一度も視野に入らなかった」という
+    # 注意：import失敗を握りつぶさない。黙って0.0を返すと「手が一度も視野に入らなかった」という
     #   結果が静かに出て、E1の結論を誤らせる（＝今日9件出したバグと同じ構造の事故）。
     from e_hand_in_view import hand_in_view
     return float(hand_in_view(model, data))
@@ -175,13 +175,13 @@ from fusion import MinimalFusion  # noqa: F401  （再エクスポート）
 _TGT_FUSION = None      # 正解側の**凍結**融合層（run内で設定）。C_E1_TARGET=1 のとき視覚に使う
 _PROP_DIM = None        # 固有感覚の次元数（予測対象の先頭ブロックの長さ）。run内で設定
 _BLOCKS = None          # 予測対象のブロック境界 [(start, end, 名前), ...]。ln_prop が構築
-# 各ブロックの重み λ。★段階1では全部 1.0（＝感覚ごとに平等）から動かさない。
+# 各ブロックの重み λ。段階1では全部 1.0（＝感覚ごとに平等）から動かさない。
 # 段階2で振って比較する予定（doc/やることリスト.md）。C_LAM_V は視覚ブロック専用の指定。
 _LAM_V = float(os.environ.get("C_LAM_V", "1.0"))
 
 
 def block_pe(pred, target):
-    """★予測誤差＝**ブロックごとに平均してから足す**（次元数の影響を除く）。
+    """予測誤差＝**ブロックごとに平均してから足す**（次元数の影響を除く）。
 
     【なぜ（2026-07-20・段階1）】
     従来は連結したベクトル全体を1回で平均していたので、**寄与が次元数比で決まっていた**：
@@ -196,10 +196,10 @@ def block_pe(pred, target):
       Ichiwara & Ogata 2022（各項を `1/(H·W·C)` で正規化）、MoPoE-VAE（次元比でスケール）。
       [参考文献リスト §目標E-17](../../doc/参考文献リスト.md)
 
-    ⚠️(1+λ_v) で割るのは**全体のスケールを保つ**ため。割らないと視覚を足したときだけ
+    注意：(1+λ_v) で割るのは**全体のスケールを保つ**ため。割らないと視覚を足したときだけ
       誤差が約2倍になり、他の損失（KL・恒常性）との比が変わって「視覚を足した効果」と
       「学習率が実質変わった効果」が混ざる（＝交絡）。
-    ⚠️次元を無理に揃える案は**採らない**。どの文献もやっておらず、1,150倍差でも
+    注意：次元を無理に揃える案は**採らない**。どの文献もやっておらず、1,150倍差でも
       正規化だけで扱えている実例がある。
     """
     if not _BLOCKS or len(_BLOCKS) <= 1:
@@ -218,15 +218,15 @@ def ln_prop(obs):
     C_TOUCH=1 かつ C_TOUCH_MODE=target のときだけ触覚を予測対象に加える。
     C_TOUCH_MODE=input なら触覚は fusion の入力にだけ入り、予測対象は固有感覚のまま。
 
-    【★C_E1_TARGET=1（目標E1・段階2）】視覚エンコーダの出力64次元を予測対象に**足す**。
+    【C_E1_TARGET=1（目標E1・段階2）】視覚エンコーダの出力64次元を予測対象に**足す**。
     これが hand regard（自分の手を見る）の実験の本体：予測対象に入っていないものは
     progress報酬を生まないので、視覚を入れて初めて「手を見ると得をする」状態になる。
-    ★2つの設計判断（詳細は E/scripts/e_target.py）：
+    2つの設計判断（詳細は E/scripts/e_target.py）：
       (1) **凍結した別インスタンス**のエンコーダを使う（RND式）。予測側と正解側が同じ
           学習中のエンコーダだと「出力を平坦にすれば当たる」抜け道で崩壊する（目標Cで実際に踏んだ）。
       (2) **固有感覚と視覚を別々に layer_norm** してから連結する。全体を一度に正規化すると
           621次元が平均・分散を支配して64次元が埋もれる（D0・E1で3回踏んだ希釈の罠）。
-    ⚠️それでもMSEへの寄与は次元数比のまま（64/685=9.3%）。重み付けは**恣意的になる**ので
+    注意：それでもMSEへの寄与は次元数比のまま（64/685=9.3%）。重み付けは**恣意的になる**ので
       今はしない。まず等重みで回し、足りなければ精度(precision)の議論として扱う。
     """
     ln = torch.nn.functional.layer_norm
@@ -239,12 +239,12 @@ def ln_prop(obs):
     if _E1_TARGET and f is not None:
         with torch.no_grad():                   # 正解側は勾配を流さない（RND式）
             # 条件C＝固有感覚 + 前庭 + 触覚 + 視覚。
-            # ★内受容は入れない（2026-07-20 の文献調査による判断）：
+            # 内受容は入れない（2026-07-20 の文献調査による判断）：
             #   人間は内受容の予測誤差を**自律反射**（心拍・血管）で解消するが、太郎には
             #   その出力が無い＝**誤差を減らす手段が構造的に存在しない**ので、予測対象に
             #   入れても progress報酬（＝予測が上達した分）が生まれない。
             #   加えてE1の interoception は定数 [0.3,0,0,0.3] で中身が無い（逸脱リスト参照）。
-            #   ⚠️内受容は既に homeostasis.py で**報酬系**に使われており、予測対象にも
+            #   注意：内受容は既に homeostasis.py で**報酬系**に使われており、予測対象にも
             #   入れると同じ信号が二重に効く。
             if _E1_TARGET_ALL:
                 for nm, enc, key in (("vest", getattr(f, "vestibular", None), "vestibular"),
@@ -326,20 +326,20 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
     # 予測ヘッドの出力次元＝予測対象の次元。実際に ln_prop を1回通して**測る**
     # （手計算だと視覚64次元の足し忘れ等でズレる。ここは合わせないと学習が壊れる）。
     global _PROP_DIM
-    _PROP_DIM = prop_dim          # ★ブロック分割の境目（固有感覚の次元数）
+    _PROP_DIM = prop_dim          # ブロック分割の境目（固有感覚の次元数）
     out_dim = int(ln_prop(obs).shape[0])
     if _E1_TARGET:
         _bd = "／".join(f"{nm}:{e-s_}" for (s_, e, nm) in (_BLOCKS or []))
         print(f"[E1] 予測対象={_E1_TGT} → 全{out_dim}次元  内訳 {_bd}")
-        print(f"     ★誤差はブロックごとに平均してから足す（次元数の影響を除く。λ_v={_LAM_V}）")
+        print(f"     誤差はブロックごとに平均してから足す（次元数の影響を除く。λ_v={_LAM_V}）")
     brain = TaroBrainWithMotor(vocab_size=3, sensory_dim=sdim, n_actuators=n_act, proprio_dim=out_dim)
     emb_dim = brain.sensory_proj.out_features  # GRUの入力次元(=64)
 
     # D-a: [感覚, 前回行動] → GRU入力。brain.sensory_proj の代わりに使う自前の射影。
-    # 【★2026-07-25】D-a/D-b の層を**太郎の中（core）のものに一本化**した。
+    # 【2026-07-25】D-a/D-b の層を**太郎の中（core）のものに一本化**した。
     # 従来はここで別に作っており、core の motor_input_proj / forward_model_head は
     # 作られるだけで一度も使われていなかった＝脳が二重に存在していた（構造監査で発覚）。
-    # 構造・初期化とも core 側と完全に同型。⚠️層名が変わるので旧チェックポイントは
+    # 構造・初期化とも core 側と完全に同型。注意層名が変わるので旧チェックポイントは
     # 読めない＝学習しなおし前提（ユーザー判断 2026-07-25）。
     emb_proj = brain.motor_input_proj      # 旧名を別名として残す
     # D-b: 非線形MLPの予測ヘッド（[z, 今の行動] → 固有感覚の変化）。
@@ -670,7 +670,7 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
         ag, magr = agency_probe()
         life_min = step * K * DT / 60.0
         real_min = (time.time() - t0) / 60.0
-        # ★E1の主指標：直近区間で手が視野に入っていた割合（段階1では記録のみ・報酬に不使用）
+        # E1の主指標：直近区間で手が視野に入っていた割合（段階1では記録のみ・報酬に不使用）
         _hv = (100.0 * hv["hit"] / hv["tot"]) if hv["tot"] else float("nan")
         log_row([f"{life_min:.1f}", step, f"{cl:.2f}", f"{mg:.2f}", f"{co:.4f}",
                  f"{pr:.2f}", f"{ag:.2f}", f"{magr:.1f}", f"{real_min:.1f}", f"{_hv:.2f}"])
@@ -688,7 +688,7 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
               f"noise={noise:.3f}(mat={ne.maturation:.2f}){cereb_tag}{act_tag} real={real_min:.0f}min", flush=True)
 
     # 経験バッファ（睡眠中リプレイ用）。各ステップの予測に必要な材料を貯める。
-    # 【★2026-07-25】睡眠リプレイのバッファを太郎の海馬（core: brain/hippocampus.py の
+    # 【2026-07-25】睡眠リプレイのバッファを太郎の海馬（core: brain/hippocampus.py の
     # MotorHippocampus）に一元化。**旧実装は独自のdictで、core にある FIFO容量上限(3600)も
     # clear() も無く、学習全期間ぶん無制限に増え続けていた**＝「直近の覚醒経験を再生する」
     # という睡眠リプレイの意味から外れた劣化コピーだった（構造監査で発覚）。
@@ -699,7 +699,7 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
     # 【2026-07-25】太郎の中（core）へ一元化。時定数(0.9/0.99)も core が持つ。
     _lp = LearningProgress()
     pe_fast, pe_slow = _lp.pe_fast, _lp.pe_slow
-    hv = {"hit": 0, "tot": 0}    # ★E1：手が視野内だったtickの数（checkpointごとにリセット）
+    hv = {"hit": 0, "tot": 0}    # E1：手が視野内だったtickの数（checkpointごとにリセット）
     mj = env.unwrapped           # モデル/データへの参照（hand_in_view_rate 用）
     reach_goal, reach_prev_dist = None, 0.0  # 閉ループreaching訓練：保持中の目標と直前の距離
 
@@ -720,7 +720,7 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
             out, _ = brain.motor_gru(emb, hb)  # out (bs,1,hidden)
             z, kl, rc = brain.pc_latent.infer(hb[-1], out[:, 0], CF[idx])
             pred = CLP[idx] + nat_head(torch.cat([z, AA[idx]], dim=-1))
-            loss = block_pe(pred, NLP[idx]) + kl + rc   # ★学習ループと同じ基準
+            loss = block_pe(pred, NLP[idx]) + kl + rc   # 学習ループと同じ基準
             learner.optimizer.zero_grad(); loss.backward()
             torch.nn.utils.clip_grad_norm_(learner.brain.parameters(), learner.grad_clip)
             learner.optimizer.step()
@@ -749,7 +749,7 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
             elif _GB_SWITCH == "ne":
                 goal_step = torch.rand(1).item() < (1.0 - ne.get_ne_level())
             else:  # "pe"：予測誤差(驚き)を主役＋NEを下駄、で探索/目標を創発
-                # 【逸脱/工学近似 ⚠️】向き（驚き大・NE大→探索、＝分かる所は狙い分からぬ所は探る）
+                # 【逸脱/工学近似 注意】向き（驚き大・NE大→探索、＝分かる所は狙い分からぬ所は探る）
                 # はEFE/LC-NE/予測符号化に基づく人間模倣だが、"足し算・等重み・この正規化・確率への
                 # 写像"という具体式には生物学的根拠なし＝恣意的。逸脱リスト参照。要感度確認・アブレーション。
                 rel = min(pe_fast / (pe_slow + 1e-6), 2.0) / 2.0     # [0,1], 0.5=平常の驚き
@@ -783,10 +783,10 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
         if _REPLAY:
             hippo.record(sv.detach(), state["prev_a"].detach(), a.detach(), cf.detach(),
                          clp.detach(), nlp.detach(), state["hidden"].detach())
-        if _E1:      # ★E1：手が視野に入っているかを毎tick数える（記録のみ。報酬には効かない）
+        if _E1:      # E1：手が視野に入っているかを毎tick数える（記録のみ。報酬には効かない）
             hv["hit"] += hand_in_view_rate(mj.model, mj.data)
             hv["tot"] += 1
-        pe = block_pe(pred, nlp)   # ★次元数の影響を除く（段階1）
+        pe = block_pe(pred, nlp)   # 次元数の影響を除く（段階1）
         # 【2026-07-25】学習進度を太郎の中（core: brain/learning_progress.py）へ一元化。
         # 旧実装は同じ式・同じ時定数(0.9/0.99)を3ファイルにコピペしていた＝数値は完全に同一。
         _progress = _lp.update(pe.item())
@@ -795,7 +795,7 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
         # rew_task＝タスクの出来そのもの（努力コストを引く前）。NE（探索）にはこちらを見せる。
         rew_task = _progress if _REWARD == "progress" else brain.sensorimotor_reward(pe.item())
         # 【taro-C5】努力コスト：活性化²の筋力重み付き平均（∈[0,1]）を報酬から引く。＝大きな力ほど
-        # 損→自分で加減する（Selinger 2015等の代謝最小化。⚠️二乗・λ・重みは近似＝感度確認対象）。既定OFF。
+        # 損→自分で加減する（Selinger 2015等の代謝最小化。注意二乗・λ・重みは近似＝感度確認対象）。既定OFF。
         rew = rew_task
         if _EFFORT:
             effort = float((a.detach() ** 2 * eff_w).sum())

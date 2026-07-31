@@ -1,4 +1,4 @@
-"""おもちゃに手が触れたか・手とおもちゃの距離を測る。★判定の実体はここだけ。
+"""おもちゃに手が触れたか・手とおもちゃの距離を測る。判定の実体はここだけ。
 
 【なぜ分けたか、2026-07-30】リーチングが起きたかを測るのに、
   ・`e_reach_babble_check.py` は色付きノイズで自発運動を作るだけ＝**脳を使わない**
@@ -6,7 +6,7 @@
 という状態だった。学習済みの太郎で測るには学習ループ側に記録が要るが、
 判定を2箇所に書くと食い違う（`e_hand_in_view.py` に一本化したのと同じ理由）。
 
-⚠️「触れた」の定義：**おもちゃのgeom と 手のgeom の接触**。
+注意：「触れた」の定義：**おもちゃのgeom と 手のgeom の接触**。
   おもちゃのgeomが接触リストに入っているかだけを見ると、体や床に当たったのも
   数えてしまう（このシーンではおもちゃは胸の上に浮いているので床には触れないが、
   胸には触れうる）。＝手であることを必ず確かめる。
@@ -20,7 +20,7 @@
 """
 import numpy as np
 
-TOY_BODY = "test_object1"          # ★おもちゃ。名指しで取る（落とし穴 項67）
+TOY_BODY = "test_object1"          # おもちゃ。名指しで取る（落とし穴 項67）
 HAND_BODIES = ("right_hand", "left_hand")
 # 指まで含めるか。手のひらだけだと「指先が触れた」を落とす
 FINGER_HINTS = ("_ff_", "_mf_", "_rf_", "_lf_", "_th_", "_thumb", "hand")
@@ -74,12 +74,12 @@ class ToyTouchProbe:
         self._prev = False
 
     def rebind(self, model):
-        """★体を作り直したあとに id を引き直す。溜めた回数・最接近は**消さない**。
+        """体を作り直したあとに id を引き直す。溜めた回数・最接近は**消さない**。
 
         【なぜ要るか、2026-07-30】体を育てる実験（月齢を進める）では学習の途中で
         env を作り直す。そのとき geom / body の id は原理的に変わりうるので、
         引き直さないと「接触を1回も検出しない」という静かな失敗になる。
-        ⚠️元の学習ループ（e_growth_train.py）はここを引き直しておらず、
+        注意：元の学習ループ（e_growth_train.py）はここを引き直しておらず、
           さらに `env.unwrapped` を作り直し前のまま参照していた。
         """
         if not self.ok:
@@ -111,7 +111,7 @@ class ToyTouchProbe:
         hit = False
         for c in range(int(data.ncon)):
             g1, g2 = int(data.contact.geom1[c]), int(data.contact.geom2[c])
-            # ★おもちゃ側と手側の**両方**が揃っていることを確かめる
+            # おもちゃ側と手側の**両方**が揃っていることを確かめる
             if ((g1 in self.toy_geoms and any(g2 in gs for gs in self.hand_geoms.values()))
                     or (g2 in self.toy_geoms and any(g1 in gs for gs in self.hand_geoms.values()))):
                 hit = True
@@ -139,7 +139,7 @@ class ToyTouchProbe:
         s = self.summary(dt_per_step)
         if not s["ok"]:
             return "toy=なし"
-        # ⚠️まだ1回も測っていないと min_dist は 1e9 のまま＝「1000億cm」と表示されて
+        # 注意：まだ1回も測っていないと min_dist は 1e9 のまま＝「1000億cm」と表示されて
         #   意味不明になる（2026-07-30 の試運転で実際に出た）。未測定は "-" と出す。
         mn = " ".join(f"{k[0]}{'-' if v > 1e8 else f'{v:.1f}cm'}"
                       for k, v in sorted(s["min_cm"].items()))

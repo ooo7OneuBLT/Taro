@@ -178,7 +178,7 @@
     <tr><th>Stage</th><th>名前</th><th>成功基準</th><th>結果</th></tr>
     <tr><td>1</td><td>クーイング</td><td>3種類以上の母音を出せる</td><td style="color:var(--good);font-weight:700;">20ターンで達成 ✅</td></tr>
     <tr><td>2</td><td>声の探索</td><td>5種類以上の文字＋子音が出始める</td><td style="color:var(--good);font-weight:700;">達成 ✅</td></tr>
-    <tr><td>3</td><td>規準喃語</td><td>子音＋母音の組み合わせが安定</td><td style="color:var(--warn);font-weight:700;">形式上は達成だが固着 ⚠️</td></tr>
+    <tr><td>3</td><td>規準喃語</td><td>子音＋母音の組み合わせが安定</td><td style="color:var(--warn);font-weight:700;">形式上は達成だが固着 注意</td></tr>
     <tr><td>4</td><td>オウム返し</td><td>親との類似度≥0.8が10回連続</td><td>未達成（Stage 3が不十分）</td></tr>
   </table>
   <div class="ok"><strong>Stage 1が20ターンで達成</strong>。以前は「失敗」と見なしていた母音の出力が、実は「クーイングの成功」だった。<strong>見方を変えたら成功していた。</strong></div>
@@ -217,7 +217,7 @@
 │   └── 体力（stamina.py）     ← 口の筋肉の成熟度
 └── 脳（brain/）
     ├── 基本構造（core.py）    ← 予測する再帰ネット（GRU）
-    ├── 学習（learning.py）    ← ⚠️backpropを使用（逸脱）
+    ├── 学習（learning.py）    ← 注意backpropを使用（逸脱）
     └── 本能（instincts/）
         ├── 模倣衝動           ← 親に似せたい
         ├── 予測               ← 次を予測したい

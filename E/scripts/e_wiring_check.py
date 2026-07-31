@@ -23,14 +23,14 @@
 使い方: python e_wiring_check.py
 """
 
-# ⚠️★古い方式（2026-07-30 に整理）。新しい実験は `run/main.py` を通す。
+# 注意：古い方式（2026-07-30 に整理）。新しい実験は `run/main.py` を通す。
 #   【経緯】目標Eの実験スクリプトが118本あり、うち66本が**独立に環境を組み立てていた**。
 #     そのため「学習は関節モード（90関節を独立に駆動＝逸脱リスト 逸脱5）、
 #     測定とViewerは筋肉モード（拮抗筋2本/関節）」という**別の体で動く**事故が起きた
 #     （ユーザーの目視「視線誘導反射の実験の時とは動きが全然違う」で発覚。
 #      実測で動きが人間の新生児の約3.3倍速かった）。
 #   【設計と移行計画】`E/docs/実行基盤_設計.md`
-#   ⚠️このファイルは**記録として残す**（削除しない方針）。
+#   注意：このファイルは**記録として残す**（削除しない方針）。
 #     中の測り方は再利用できるので、プラグインへ移すときの元にする。
 import os
 import sys
@@ -92,13 +92,13 @@ def main():
     else:
         check("感覚 vision が融合に効く", False, "obsに eye_left が無い＝視覚が繋がっていない")
 
-    # ★測定の前提：視界が**単色**だと「ぼかしても変わらない／左右も同じ」になり、
+    # 測定の前提：視界が**単色**だと「ぼかしても変わらない／左右も同じ」になり、
     #   配線が生きていても NG と出る（偽陰性）。実際に一度これで誤判定した。
     #   → 構造（柵など）が視野に入る向きへ頭を回してから測る。
     import mujoco
 
     def _variance():
-        """視界の**空間的な**分散。⚠️RGBのチャンネル間の差を拾ってはいけない。
+        """視界の**空間的な**分散。注意RGBのチャンネル間の差を拾ってはいけない。
 
         第1版は画像全体の std を見ていたが、視界が単色 PLAIN_RGBA(140,158,178) で
         埋まっていても std=15.5 になる（＝RGBの3値の散らばり）ので「構造あり」と
@@ -120,15 +120,15 @@ def main():
                 break
     _v = _variance()
     print(f"  （視界の空間分散 {_v:.1f}"
-          f"{'＝構造が写っている状態で測定' if _v >= 3.0 else ' ★単色のまま＝以下の視覚テストは判定不能'}）")
+          f"{'＝構造が写っている状態で測定' if _v >= 3.0 else ' 単色のまま＝以下の視覚テストは判定不能'}）")
 
     # --- 2. 視力フィルタが効いているか ---------------------------------------
     if raw.vision is not None:
         af = getattr(raw.vision, "_acuity_functions", {}).get("eye_left")
         if af is None:
-            check("視力フィルタ(acuity)", False, "★_acuity_functions が None＝フィルタ無効")
+            check("視力フィルタ(acuity)", False, "_acuity_functions が None＝フィルタ無効")
         else:
-            # ★実際のパイプライン同士で比べる：生の描画 vs 太郎が受け取るobs（acuity適用済み）
+            # 実際のパイプライン同士で比べる：生の描画 vs 太郎が受け取るobs（acuity適用済み）
             ren = mujoco.Renderer(m, height=te.VISION_RES, width=te.VISION_RES)
             cam = mujoco.MjvCamera(); cam.type = mujoco.mjtCamera.mjCAMERA_FIXED
             cam.fixedcamid = int(m.camera("eye_left").id)
@@ -140,7 +140,7 @@ def main():
             dd = float(np.abs(plain - taro).mean())
             check("視力フィルタ(acuity)", dd > 0.5,
                   f"生の描画 vs 太郎の入力 の平均画素差 {dd:.2f}（MTF平均={float(np.mean(af)):.3f}）")
-            # ⚠️ここで ren.close() を呼んではいけない。MuJoCoのRendererはOpenGLコンテキストを
+            # 注意：ここで ren.close() を呼んではいけない。MuJoCoのRendererはOpenGLコンテキストを
             #   共有しており、片方を閉じると**以降の描画がすべて同じ画を返す**（実際、これで
             #   「左右の眼が同じ」「頭を回しても変わらない」という2つの偽NGが出た。
             #   同じ手順を単独で実行すると左右差26.5で正常だったことから切り分けた）。
@@ -218,7 +218,7 @@ def main():
 
     n_ng = sum(1 for _, p in results if not p)
     print(f"\n=== 結果: {len(results)-n_ng}/{len(results)} 通過"
-          f"{'  ★NGあり＝配線が死んでいる' if n_ng else '  すべて配線が生きている'} ===")
+          f"{'  NGあり＝配線が死んでいる' if n_ng else '  すべて配線が生きている'} ===")
     env.close()
 
 

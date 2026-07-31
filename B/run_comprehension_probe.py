@@ -85,7 +85,7 @@ with open(log_path, "w", encoding="utf-8") as logf:
             if sm is not None:
                 log(f"  [{hname}固定] まんま={sm:.4f}  ままん={ss:.4f}  あうあ={sa:.4f}  "
                     f"→ 語の寄与 まんま−あうあ={sm-sa:+.4f}"
-                    f"{'  ★語で食べ物を先取り' if sm-sa > 0.05 else '  （語の寄与ほぼ無し＝まだ理解せず）'}")
+                    f"{'  語で食べ物を先取り' if sm-sa > 0.05 else '  （語の寄与ほぼ無し＝まだ理解せず）'}")
 
         log("\n[Rung1：認識] 聞いた直後の隠れ状態が語ごとに区別できるか（コサイン類似, 1に近い=似てる）")
         for hv, hname in hungers:

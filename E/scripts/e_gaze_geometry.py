@@ -16,14 +16,14 @@
 使い方: python e_gaze_geometry.py [n_ticks] [distance_m]
 """
 
-# ⚠️★古い方式（2026-07-30 に整理）。新しい実験は `run/main.py` を通す。
+# 注意：古い方式（2026-07-30 に整理）。新しい実験は `run/main.py` を通す。
 #   【経緯】目標Eの実験スクリプトが118本あり、うち66本が**独立に環境を組み立てていた**。
 #     そのため「学習は関節モード（90関節を独立に駆動＝逸脱リスト 逸脱5）、
 #     測定とViewerは筋肉モード（拮抗筋2本/関節）」という**別の体で動く**事故が起きた
 #     （ユーザーの目視「視線誘導反射の実験の時とは動きが全然違う」で発覚。
 #      実測で動きが人間の新生児の約3.3倍速かった）。
 #   【設計と移行計画】`E/docs/実行基盤_設計.md`
-#   ⚠️このファイルは**記録として残す**（削除しない方針）。
+#   注意：このファイルは**記録として残す**（削除しない方針）。
 #     中の測り方は再利用できるので、プラグインへ移すときの元にする。
 import os
 import sys
@@ -84,12 +84,12 @@ def main():
     v = toy - hp
     print(f"  頭→おもちゃ 距離     : {np.linalg.norm(v)*100:.1f} cm")
     print(f"  視線からのずれ       : {angle_deg(g, v):.1f}°   (視野の半角 {half_fov:.0f}°)")
-    print(f"  →  {'視界内' if angle_deg(g, v) <= half_fov else '★視界の外（頭が正面でも見えない）'}")
+    print(f"  →  {'視界内' if angle_deg(g, v) <= half_fov else '視界の外（頭が正面でも見えない）'}")
     print(f"  今の TOY_OFFSET(頭ローカル) = {np.round(te.TOY_OFFSET, 3)}")
 
     print(f"\n=== (3) 視線の正面・距離{dist*100:.0f}cm に置くなら ===")
     new_local = R.T @ (g * dist)
-    print(f"  ★ TOY_OFFSET = [{new_local[0]:+.4f}, {new_local[1]:+.4f}, {new_local[2]:+.4f}]  (頭ローカル)")
+    print(f"   TOY_OFFSET = [{new_local[0]:+.4f}, {new_local[1]:+.4f}, {new_local[2]:+.4f}]  (頭ローカル)")
 
     print(f"\n=== (4) babbling中に頭が振れても視界に残るか（{n} tick） ===")
     hidden = brain.init_motor_hidden(); prev_a = torch.zeros(n_act)

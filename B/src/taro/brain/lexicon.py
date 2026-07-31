@@ -27,7 +27,7 @@ class Lexicon:
 
     def __init__(self, min_len=2):
         # min_len：単位として登録する最短の長さ（1音は語の型とみなさない）。
-        # ⚠️構造的な下限であって調整用の恣意的定数ではない（1にすると全単音が語になる）。
+        # 注意：構造的な下限であって調整用の恣意的定数ではない（1にすると全単音が語になる）。
         self.min_len = min_len
         self.counts = {}
         # B6-4：語↔内的状態の連合（cross-situational statistical learning, Smith & Yu）。

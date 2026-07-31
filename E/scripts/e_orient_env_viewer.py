@@ -8,7 +8,7 @@
 
 操作: 左ドラッグ=視点回転／右ドラッグ=平行移動／スクロール=ズーム
 
-★編集モード（E_EDIT=1）
+編集モード（E_EDIT=1）
   おもちゃをマウスでつかんで動かし、置きたい位置を探せる。
     ダブルクリックでおもちゃを選択 → Ctrl+右ドラッグ で移動
     （Ctrl+左ドラッグ で回転）
@@ -17,11 +17,11 @@
   それを見ながら良い位置を探す。決まったら数値を控えて TOY_DISTANCE 等に反映する。
 
 環境変数:
-  E_EDIT=1        ★編集モード（ドラッグでおもちゃを動かせる。揺れは止まる）
+  E_EDIT=1        編集モード（ドラッグでおもちゃを動かせる。揺れは止まる）
   E_SHAKE=0       おもちゃを揺らさない（既定は揺らす）
   E_SHAKE_AMP     振幅[m]（既定 0.015 = 1.5cm）
   E_SHAKE_HZ      周波数[Hz]（既定 2.5）
-  E_FLEXION=1     ★生理的屈曲をON（既定OFF。OFFだと膝が伸びきる）
+  E_FLEXION=1     生理的屈曲をON（既定OFF。OFFだと膝が伸びきる）
   E_VOR=0         前庭動眼反射をOFF（既定ON。ONだと脱力時に目が下を向く）
   E_TOY_OBJ=0     おもちゃを消す
   E_FENCE=0       柵を消す
@@ -30,14 +30,14 @@
     E_FLEXION=1 E_VOR=0 E_EDIT=1 .venv/Scripts/python.exe E/scripts/e_orient_env_viewer.py
 """
 
-# ⚠️★古い方式（2026-07-30 に整理）。新しい実験は `run/main.py` を通す。
+# 注意：古い方式（2026-07-30 に整理）。新しい実験は `run/main.py` を通す。
 #   【経緯】目標Eの実験スクリプトが118本あり、うち66本が**独立に環境を組み立てていた**。
 #     そのため「学習は関節モード（90関節を独立に駆動＝逸脱リスト 逸脱5）、
 #     測定とViewerは筋肉モード（拮抗筋2本/関節）」という**別の体で動く**事故が起きた
 #     （ユーザーの目視「視線誘導反射の実験の時とは動きが全然違う」で発覚。
 #      実測で動きが人間の新生児の約3.3倍速かった）。
 #   【設計と移行計画】`E/docs/実行基盤_設計.md`
-#   ⚠️このファイルは**記録として残す**（削除しない方針）。
+#   注意：このファイルは**記録として残す**（削除しない方針）。
 #     中の測り方は再利用できるので、プラグインへ移すときの元にする。
 import os, sys, warnings
 warnings.filterwarnings("ignore")
@@ -74,7 +74,7 @@ def main():
     env.reset(seed=0)
 
     if EDIT:
-        # ★吊り紐を無効化する。_apply_tether() は env.step の中で毎step
+        # 吊り紐を無効化する。_apply_tether() は env.step の中で毎step
         #   おもちゃを支点へ引き戻す力を xfrc_applied に書くので、
         #   これを止めないとドラッグしても元の位置に戻ってしまう
         #   （＝「Ctrl+右ドラッグで動かない」の原因）。
@@ -99,7 +99,7 @@ def main():
 
     print(flush=True)
     print("=" * 64, flush=True)
-    print("  モード         :", "★編集（ドラッグで動かせる）" if EDIT else "観察", flush=True)
+    print("  モード         :", "編集（ドラッグで動かせる）" if EDIT else "観察", flush=True)
     print("  おもちゃ初期位置:", np.round(toy_center, 3), "[m]", flush=True)
     print("  生理的屈曲     :", "ON" if kw.get("flexion") else "OFF（E_FLEXION=1でON）", flush=True)
     print("  VOR            :", "OFF" if os.environ.get("E_VOR") == "0" else "ON（E_VOR=0でOFF）",
@@ -133,7 +133,7 @@ def main():
                 # 重力を打ち消して、離した場所にとどまるようにする
                 d.xfrc_applied[toy_bid, 2] = toy_mass * 9.81
                 # 減衰（ドラッグを離したあとすぐ静止させる）。
-                # ⚠️強すぎるとドラッグ自体が効かなくなるので控えめに。
+                # 注意：強すぎるとドラッグ自体が効かなくなるので控えめに。
                 d.qvel[toy_dof:toy_dof + 6] *= 0.97
             elif SHAKE:
                 off = SHAKE_AMP * np.sin(2 * np.pi * SHAKE_HZ * t)

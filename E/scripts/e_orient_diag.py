@@ -11,14 +11,14 @@
   3. reflex._direction を手動で呼んで h_dir が出るか
 """
 
-# ⚠️★古い方式（2026-07-30 に整理）。新しい実験は `run/main.py` を通す。
+# 注意：古い方式（2026-07-30 に整理）。新しい実験は `run/main.py` を通す。
 #   【経緯】目標Eの実験スクリプトが118本あり、うち66本が**独立に環境を組み立てていた**。
 #     そのため「学習は関節モード（90関節を独立に駆動＝逸脱リスト 逸脱5）、
 #     測定とViewerは筋肉モード（拮抗筋2本/関節）」という**別の体で動く**事故が起きた
 #     （ユーザーの目視「視線誘導反射の実験の時とは動きが全然違う」で発覚。
 #      実測で動きが人間の新生児の約3.3倍速かった）。
 #   【設計と移行計画】`E/docs/実行基盤_設計.md`
-#   ⚠️このファイルは**記録として残す**（削除しない方針）。
+#   注意：このファイルは**記録として残す**（削除しない方針）。
 #     中の測り方は再利用できるので、プラグインへ移すときの元にする。
 import os, sys, warnings
 warnings.filterwarnings("ignore")
@@ -71,7 +71,7 @@ def main():
     # 元の位置で描画
     d.qpos[toy_qadr:toy_qadr+3] = toy_center
     d.qvel[toy_dof:toy_dof+6] = 0
-    mujoco.mj_forward(m, d)     # ★ここが重要：qpos書き換え後は forward が要る
+    mujoco.mj_forward(m, d)     # ここが重要：qpos書き換え後は forward が要る
     # キャッシュを飛ばすため time を進める
     env.unwrapped._vision_t = None
     img_before = env.unwrapped.get_vision_obs()
@@ -89,7 +89,7 @@ def main():
         print(f"  画像の差: mean={diff.mean():.4f}, max={diff.max():.2f}, "
               f"変化画素% ={100*(diff > 5).mean():.1f}")
         if diff.max() < 1:
-            print("  ⚠️ 画像がほぼ変わっていない ＝ おもちゃの位置が視覚に反映されていない")
+            print("  注意 画像がほぼ変わっていない ＝ おもちゃの位置が視覚に反映されていない")
         else:
             print("  ○ 画像が変化している ＝ 視覚は正しく更新されている")
 
@@ -101,9 +101,9 @@ def main():
         reflex.prev_eye = eye_before
         h_dir, v_dir = reflex._direction(eye_after)
         print(f"  h_dir={h_dir:.4f}, v_dir={v_dir:.4f}  "
-              f"（★おもちゃが右に動いたので h_dir が負の大きい値になるべき）")
+              f"（おもちゃが右に動いたので h_dir が負の大きい値になるべき）")
         if abs(h_dir) < 0.01 and abs(v_dir) < 0.01:
-            print("  ⚠️ 方向計算がゼロを返す ＝ 残差法が働いていない")
+            print("  注意 方向計算がゼロを返す ＝ 残差法が働いていない")
         else:
             print("  ○ 方向計算が値を返している ＝ 反射のロジックは動く")
 
@@ -117,7 +117,7 @@ def main():
         env.step(zero)
     print(f"  30step後: h_dir={reflex.h_dir:.4f}, v_dir={reflex.v_dir:.4f}")
     if abs(reflex.h_dir) < 0.001 and abs(reflex.v_dir) < 0.001:
-        print("  ⚠️ step()を経由すると発火しない ＝ update が呼ばれていない or キャッシュされ続けている")
+        print("  注意 step()を経由すると発火しない ＝ update が呼ばれていない or キャッシュされ続けている")
     else:
         print("  ○ step()経由でも反射が発火 ＝ 元テストの qpos 書き換えタイミングが問題")
 

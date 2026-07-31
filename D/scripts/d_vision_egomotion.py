@@ -1,5 +1,5 @@
 """
-★egomotion割引の門番：自己運動で崩れた視覚を、体の感覚で立て直せるか。
+egomotion割引の門番：自己運動で崩れた視覚を、体の感覚で立て直せるか。
 
 【なぜ・2026-07-16】昨日 d_vision_selfmove.py で、太郎が動くと「近づく/遠ざかる」が
 98%→54%(チャンス)に崩壊した。原因は egomotion（自己運動）＝自分が動くと視界全体がズレ、
@@ -52,7 +52,7 @@ register(id="CarerEgo-v0", entry_point="d1_carer_vision_env:CarerVisionEnv", max
 RES = 32
 FACE_X = 0.37
 K = 4
-# ★距離レンジは「相手が必ず写る帯」(z≈0.32〜0.45)の内側に収める。較正でz≤0.28は狭い上向き
+# 距離レンジは「相手が必ず写る帯」(z≈0.32〜0.45)の内側に収める。較正でz≤0.28は狭い上向き
 #   視野から外れて0pxになると判明。この帯内なら近いほど大きく写り looming が読める。
 Z_MID_LO, Z_MID_HI = 0.37, 0.40
 SPAN_LO, SPAN_HI = 0.03, 0.05
@@ -99,7 +99,7 @@ def collect(self_move, n_clip, scale=SELF_SCALE, size=CARER_SIZE, movable=MOVABL
 
     self_move=True のとき、各コマ(25サブステップ)につき1つの運動命令を引いて保持
     （＝遠心性コピーが1コマ1本にきれいに対応する）。運動は相手の動きと完全に独立。
-    ★相手が全コマに写っている(各コマ赤>=RED_MIN)クリップだけ採用＝相手が画面外に出た
+    相手が全コマに写っている(各コマ赤>=RED_MIN)クリップだけ採用＝相手が画面外に出た
     「見失い」を除外し、純粋に egomotion による見かけの乱れだけを測る。
     save_examples>0 なら最初の数クリップの[第三者視点+一人称視界]を動画用に貯めて返す。
     """
@@ -111,7 +111,7 @@ def collect(self_move, n_clip, scale=SELF_SCALE, size=CARER_SIZE, movable=MOVABL
     na = u.action_space.shape[0]
     rng = np.random.default_rng(0)
     torch.manual_seed(0)
-    # ★第三者視点レンダラは必要なときだけ生成（常時生成すると目の描画とGL衝突し赤が消える）
+    # 第三者視点レンダラは必要なときだけ生成（常時生成すると目の描画とGL衝突し赤が消える）
     tp_ren = mujoco.Renderer(u.model, 240, 240) if save_examples > 0 else None
     imgs, props, vests, acts, Y = [], [], [], [], []
     examples = []
@@ -126,7 +126,7 @@ def collect(self_move, n_clip, scale=SELF_SCALE, size=CARER_SIZE, movable=MOVABL
         f_img, f_prop, f_vest, f_act = [], [], [], []
         reds, big_eye, big_tp = [], [], []
         want_ex = len(examples) < save_examples
-        # ★自己運動は「こちらが命令する」＝ランダムなバタつきでなく、1クリップ内で一方向へ
+        # 自己運動は「こちらが命令する」＝ランダムなバタつきでなく、1クリップ内で一方向へ
         #   なめらかに漂う運動(コヒーレントなドリフト)。向き・振幅はラベル(approach)を見ずに抽選
         #   ＝相手の遠近と自己運動は独立(体の感覚だけでは当たらない＝50%対照が保たれる)。
         #   ctrl経由で動かすので固有感覚・遠心性コピーは物理的に正常なまま。
@@ -242,7 +242,7 @@ def save_dual_video(examples, out, fps=10):
 
 def main():
     n_clip = int(sys.argv[1]) if len(sys.argv) > 1 else 400
-    print("=== ★egomotion割引の門番：体の感覚で自己運動を割り引けるか ===")
+    print("=== egomotion割引の門番：体の感覚で自己運動を割り引けるか ===")
     print(f"自己運動条件で入力の中身だけ変えて比較。相手が全コマ写るクリップを{n_clip}本ずつ採用。\n")
 
     print("--- 収集①：静止（天井の基準）---")
@@ -259,7 +259,7 @@ def main():
     save_dual_video(ex_st, out_st)
     save_dual_video(ex_mv, out_mv)
 
-    tr_s, te_s = split(len(st["y"]))         # ★実際に採れた本数で分割（フィルタで目標数に届かない場合に対応）
+    tr_s, te_s = split(len(st["y"]))         # 実際に採れた本数で分割（フィルタで目標数に届かない場合に対応）
     tr_m, te_m = split(len(mv["y"]))
     print(f"\n実際に採れた本数: 静止{len(st['y'])} / 自己運動{len(mv['y'])}")
     print("\n=== 判定 ===")
@@ -285,9 +285,9 @@ def main():
 
     print("\n=== 解釈 ===")
     if a_body > 0.62:
-        print("⚠ 体の感覚だけで当たっている＝カンニング(相手の動きが体の感覚に漏れている)。設計見直し。")
+        print("注意 体の感覚だけで当たっている＝カンニング(相手の動きが体の感覚に漏れている)。設計見直し。")
     elif a_all - a_img > 0.15 and a_all - a_all_sh > 0.12:
-        print("★体の感覚を足すと、自己運動下でも読めるようになった＝egomotionは体の感覚で割り引ける。")
+        print("体の感覚を足すと、自己運動下でも読めるようになった＝egomotionは体の感覚で割り引ける。")
         print("  → 情報は在ると確定。本物の脳(前庭・固有感覚・遠心性コピーを持つ)につなぐ意味が出た。")
     elif a_all - a_img > 0.05:
         print("△ 体の感覚で多少改善するが不十分。運動の強さ・入力の選び方を調整して再検証。")

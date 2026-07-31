@@ -18,14 +18,14 @@ Ctrl+右ドラッグは**カメラ平面内にしか動かせない**（奥行�
     E_VOR=0       前庭動眼反射をOFF
 """
 
-# ⚠️★古い方式（2026-07-30 に整理）。新しい実験は `run/main.py` を通す。
+# 注意：古い方式（2026-07-30 に整理）。新しい実験は `run/main.py` を通す。
 #   【経緯】目標Eの実験スクリプトが118本あり、うち66本が**独立に環境を組み立てていた**。
 #     そのため「学習は関節モード（90関節を独立に駆動＝逸脱リスト 逸脱5）、
 #     測定とViewerは筋肉モード（拮抗筋2本/関節）」という**別の体で動く**事故が起きた
 #     （ユーザーの目視「視線誘導反射の実験の時とは動きが全然違う」で発覚。
 #      実測で動きが人間の新生児の約3.3倍速かった）。
 #   【設計と移行計画】`E/docs/実行基盤_設計.md`
-#   ⚠️このファイルは**記録として残す**（削除しない方針）。
+#   注意：このファイルは**記録として残す**（削除しない方針）。
 #     中の測り方は再利用できるので、プラグインへ移すときの元にする。
 import os, sys, json, warnings
 warnings.filterwarnings("ignore")
@@ -43,7 +43,7 @@ import mujoco
 import mujoco.viewer
 import tkinter as tk
 
-# ★腕のリーチ [m]。⚠️2026-07-26 修正：以前は 0.158（上腕7.9 + 前腕8.5cm）としていたが、
+# 腕のリーチ [m]。注意2026-07-26 修正：以前は 0.158（上腕7.9 + 前腕8.5cm）としていたが、
 #   **手そのものの長さ（指先までの2.2cm）が抜けていた**ため、届く距離を短く見積もり、
 #   パネルに「腕の275%」のような誤った割合を表示していた（ユーザー指摘「絶対届くはずなのに」）。
 #   実測（`right_upper_arm`→`right_lower_arm`→`right_hand` の距離＋手のgeomの広がり）。
@@ -64,7 +64,7 @@ def main():
     from e_body_config import body_kwargs_from_env
 
     kw = body_kwargs_from_env(0.0, verbose=True)
-    # ★orient=True で反射を生成しておき、実際に効かせるかはパネルのトグルで切り替える
+    # orient=True で反射を生成しておき、実際に効かせるかはパネルのトグルで切り替える
     env = ToySupineEnv(actuation_model=MuscleModel,
                        vision_params=infant_vision_params(),
                        age=0.0, toy=True, orient=True, **kw)
@@ -92,7 +92,7 @@ def main():
             break
     HALF_FOV = 30.0   # 視野角60度の半分。この角度を超えると視界の外
 
-    # ★前回保存した設定があれば読み込む（作業をやり直さなくて済むように）
+    # 前回保存した設定があれば読み込む（作業をやり直さなくて済むように）
     saved = None
     if os.path.exists(SAVE_PATH):
         try:
@@ -179,7 +179,7 @@ def main():
     dist_label = tk.Label(root, text="", font=("Consolas", 10), justify="left")
     dist_label.pack(pady=(6, 4))
 
-    # ★一人称視点（太郎の目に映る映像）。視線がどこを向いているかを直接見る。
+    # 一人称視点（太郎の目に映る映像）。視線がどこを向いているかを直接見る。
     #   第三者視点だけだと「おもちゃが見えているつもり」が起きる（2026-07-26）。
     tk.Label(root, text="太郎の目に映っているもの（左目）",
              font=("", 10, "bold")).pack(pady=(4, 2))
@@ -190,17 +190,17 @@ def main():
     tk.Label(root, text="関節の角度 [度]（左右まとめて）",
              font=("", 11, "bold")).pack(pady=(4, 2))
     def _on_freeze_toggle(*_):
-        # ★物理を回すときは「角度で固定する」を自動で外す。
+        # 物理を回すときは「角度で固定する」を自動で外す。
         #   両方ONだと、毎ステップ関節角と速度を強制 → 物理が反力を出す →
         #   また強制、を繰り返してエネルギーが溜まり**太郎が暴れる**
         #   （ユーザーの目視「すごい物理を進めると太郎が暴れる」で発覚）。
         if not state["freeze"].get():
             state["hold_pose"].set(False)
 
-    tk.Checkbutton(root, text="★物理演算を止める（姿勢編集モード。重力も衝突も無し）",
+    tk.Checkbutton(root, text="物理演算を止める（姿勢編集モード。重力も衝突も無し）",
                    variable=state["freeze"], fg="#a30",
                    command=_on_freeze_toggle).pack()
-    tk.Checkbutton(root, text="この角度で固定する（★物理ONのまま使うと暴れます）",
+    tk.Checkbutton(root, text="この角度で固定する（物理ONのまま使うと暴れます）",
                    variable=state["hold_pose"]).pack()
     joint_vars = []
     for jd in joints:
@@ -214,9 +214,9 @@ def main():
     tk.Checkbutton(root, text="おもちゃを小さく激しく揺らす（1.5cm / 2.5Hz）",
                    variable=state["shake"]).pack(pady=(8, 2))
 
-    # ★2026-07-26 追加：問題を切り替えて目視で確認するためのトグル。
+    # 2026-07-26 追加：問題を切り替えて目視で確認するためのトグル。
     #   ここまでの測定で見つかった3つの問題を、Viewer で直接見られるようにする。
-    tk.Label(root, text="★問題の切り替え（目視で確認する）",
+    tk.Label(root, text="問題の切り替え（目視で確認する）",
              font=("", 10, "bold"), fg="#a30").pack(pady=(8, 2))
     state["babble"] = tk.BooleanVar(value=False)
     state["reflex"] = tk.BooleanVar(value=False)
@@ -224,7 +224,7 @@ def main():
                    variable=state["babble"]).pack(anchor="w", padx=24)
     tk.Checkbutton(root, text="視線誘導反射を効かせる（問題2：逆効果の疑い）",
                    variable=state["reflex"]).pack(anchor="w", padx=24)
-    # ★問題3：屈筋トーンのバネに減衰がなく、手足が振動して頭が揺れる疑い
+    # 問題3：屈筋トーンのバネに減衰がなく、手足が振動して頭が揺れる疑い
     #   （数値では頭部角速度が 0.011 → 0.094 rad/s と8倍になる。目視は未確認）
     state["tone"] = tk.BooleanVar(value=True)
     tk.Checkbutton(root, text="屈筋トーンのバネを効かせる（問題3：振動の疑い）",
@@ -232,7 +232,7 @@ def main():
     head_label = tk.Label(root, text="", font=("Consolas", 9), fg="#a30")
     head_label.pack()
 
-    # ★2026-07-26：めり込みの表示。物理を止めていると「おもちゃが顔にめり込んでいる」
+    # 2026-07-26：めり込みの表示。物理を止めていると「おもちゃが顔にめり込んでいる」
     #   ことが見た目では分からず、物理を回した瞬間に巨大な反力で弾き飛ばされる。
     #   実測：おもちゃが頭に 15.6mm・右目に 13.4mm めり込み、拘束反力 1461+502 Nm。
     #   首の筋力 0.066 Nm の2万倍。0.4秒で首が64度回っていた。
@@ -241,7 +241,7 @@ def main():
     pen_label = tk.Label(root, text="", font=("Consolas", 9), justify="left")
     pen_label.pack()
 
-    # ★2026-07-26：測定器（e_visibility）の判定をその場で見せる。
+    # 2026-07-26：測定器（e_visibility）の判定をその場で見せる。
     #   「見えている」を角度だけで測っていて、柵の向こうのおもちゃを
     #   「視界内100%」と数えていた（落とし穴 項51）。目で確かめられるようにする。
     tk.Label(root, text="測定器の判定（3つを突き合わせる）",
@@ -322,7 +322,7 @@ def main():
     # 体の根元（胴体の自由関節）の初期位置を覚えておく＝編集中に流れないように
     root_qadr = None
     for j in range(m.njnt):
-        # ⚠️★【2026-07-29 修正】「おもちゃ以外の自由関節」で探すと、MIMo本家の
+        # 注意：【2026-07-29 修正】「おもちゃ以外の自由関節」で探すと、MIMo本家の
         #   シーンに元からある **test_object2**（使っていない球）を掴む。
         #   太郎の体は body 名 "mimo_location"（関節名は "mimo_orientation"）。
         #   落とし穴 項67 の再発。名指しで取ること。
@@ -333,7 +333,7 @@ def main():
     root_qpos0 = d.qpos[root_qadr:root_qadr + 7].copy() if root_qadr is not None else None
 
     print("\nパネルとビューアを開きました。", flush=True)
-    print("★既定で『物理演算を止める』がONです（重力も衝突も効かないので、",
+    print("既定で『物理演算を止める』がONです（重力も衝突も効かないので、",
           flush=True)
     print("  関節を動かしても飛んでいきません）。物理を見たいときはチェックを外してください。\n",
           flush=True)
@@ -349,7 +349,7 @@ def main():
                                       0.015 * np.sin(2 * np.pi * 2.5 * t), 0.0])
             d.qpos[toy_qadr:toy_qadr + 3] = pos
             d.qvel[toy_dof:toy_dof + 6] = 0.0
-            # ★TOY_MODE="hold"（親が手に持っている）は step のたびに `_rest_pos` へ
+            # TOY_MODE="hold"（親が手に持っている）は step のたびに `_rest_pos` へ
             #   位置を書き戻すので、ここで qpos を書いても**上書きされて効かない**
             #   （ユーザーの目視「物理をONにするとおもちゃがスライダーで変更できない」）。
             #   スライダーの値を `_rest_pos` 側にも入れて、親が持つ位置ごと動かす。
@@ -370,14 +370,14 @@ def main():
                         d.qpos[qadr] = ang
                         d.qvel[m.jnt_dofadr[jid]] = 0.0
 
-            # ★問題3の切り替え：屈筋トーンのバネを効かせるかどうか
+            # 問題3の切り替え：屈筋トーンのバネを効かせるかどうか
             want_tone = state["tone"].get()
             if want_tone != _tone_on[0]:
                 for jid in _tone_joints:
                     m.jnt_stiffness[jid] = _tone_k[jid] if want_tone else 0.0
                 _tone_on[0] = want_tone
 
-            # ★問題の切り替え：反射を効かせるかどうか（環境側の apply を止める）
+            # 問題の切り替え：反射を効かせるかどうか（環境側の apply を止める）
             rf = env.unwrapped._orienting
             if rf is not None:
                 env.unwrapped._orienting = rf if state["reflex"].get() else None
@@ -386,7 +386,7 @@ def main():
                 env.unwrapped._orienting = _saved_reflex[0]
 
             if freeze:
-                # ★物理を回さない。関節角から体の位置を計算するだけ（純粋な運動学）。
+                # 物理を回さない。関節角から体の位置を計算するだけ（純粋な運動学）。
                 #   衝突も重力も効かないので、膝を曲げても柵にぶつかって飛ばない。
                 if root_qpos0 is not None:
                     d.qpos[root_qadr:root_qadr + 7] = root_qpos0   # 体が流れないよう固定
@@ -394,7 +394,7 @@ def main():
                 d.qacc[:] = 0.0
                 mujoco.mj_forward(m, d)
             else:
-                # ★問題1を見るためのトグル：自発運動を流すか
+                # 問題1を見るためのトグル：自発運動を流すか
                 if state["babble"].get():
                     if tick % 10 == 0:
                         _act[0] = np.clip(0.5 + 0.174 * _gen[0].sample(0.7), 0.0, 1.0
@@ -421,7 +421,7 @@ def main():
                 de = np.linalg.norm(toy - d.xpos[eye_bid]) * 100
                 ds = np.linalg.norm(toy - d.xpos[sh_bid]) * 100
                 dh = np.linalg.norm(toy - d.xpos[hand_bid]) * 100
-                # ★視線とおもちゃのなす角＝視界に入っているかの判定
+                # 視線とおもちゃのなす角＝視界に入っているかの判定
                 gaze_txt = ""
                 if cam_id is not None:
                     cpos = d.cam_xpos[cam_id]
@@ -433,7 +433,7 @@ def main():
                             np.clip(np.dot(fwd, v / nv), -1, 1))))
                         inside = ang < HALF_FOV
                         gaze_txt = (f"\n視線からのズレ  {ang:6.1f}°  "
-                                    f"{'視界の中' if inside else '★視界の外'}"
+                                    f"{'視界の中' if inside else '視界の外'}"
                                     f"（限界 {HALF_FOV:.0f}°）")
                         dist_label.config(fg="#070" if inside else "#a00")
                 dist_label.config(
@@ -444,12 +444,12 @@ def main():
                     hw = np.array(_head_w)
                     warn = ""
                     if not freeze and state["hold_pose"].get():
-                        warn = "\n★「この角度で固定する」がONのまま物理を回しています＝暴れます"
+                        warn = "\n「この角度で固定する」がONのまま物理を回しています＝暴れます"
                     head_label.config(
                         text=f"頭の角速度  平均 {hw.mean():.3f}  最大 {hw.max():.3f} rad/s"
                              f"（直近3秒。落ち着いていれば 0.01〜0.03 が目安）{warn}")
 
-                # ★太郎の体とおもちゃのめり込みを列挙する（床どうしは除く）
+                # 太郎の体とおもちゃのめり込みを列挙する（床どうしは除く）
                 pen = []
                 for ci in range(d.ncon):
                     c = d.contact[ci]
@@ -464,7 +464,7 @@ def main():
                     pen.append((other, -c.dist * 1000))
                 if pen:
                     pen.sort(key=lambda x: -x[1])
-                    txt = "★おもちゃがめり込んでいる：\n" + "\n".join(
+                    txt = "おもちゃがめり込んでいる：\n" + "\n".join(
                         f"   {nm:<16} {mm:6.2f} mm" for nm, mm in pen[:4])
                     pen_label.config(text=txt, fg="#a00")
                 else:
@@ -473,7 +473,7 @@ def main():
                 # 一人称視点を更新（重いので5tickに1回＝約20Hz相当より粗く）
                 if tick % 20 == 0:
                     try:
-                        # ★視覚は VISION_MIN_DT(0.1秒) のキャッシュを持つ。
+                        # 視覚は VISION_MIN_DT(0.1秒) のキャッシュを持つ。
                         #   物理を止めていると data.time が進まないので
                         #   **キャッシュが永久に切れず、最初の1枚が出続ける**
                         #   （ユーザーの目視「最初は緑になってたのに途中から
@@ -488,18 +488,18 @@ def main():
                             if arr.dtype != np.uint8:
                                 arr = np.clip(arr, 0, 255).astype(np.uint8)
 
-                            # ★測定器の3つの判定をその場で出す
+                            # 測定器の3つの判定をその場で出す
                             rep = VIS.report(m, d, toy_bid, arr)
                             j = f"①角度   {rep['angle']:5.1f}°  " \
-                                f"{'視野内' if rep['in_fov'] else '★視野外'}\n"
+                                f"{'視野内' if rep['in_fov'] else '視野外'}\n"
                             j += ("②光線   遮蔽なし\n" if rep["ray_ok"]
-                                  else f"②光線   ★{rep['ray_hit']}に遮られている\n")
+                                  else f"②光線   {rep['ray_hit']}に遮られている\n")
                             if rep["pix_seen"]:
                                 j += (f"③画像   {rep['n_pixels']:4d}画素"
                                       f"（画面の{rep['frac']*100:.1f}%）  "
                                       f"中心からのずれ {np.hypot(rep['cx'], rep['cy']):.2f}")
                             else:
-                                j += "③画像   ★映っていない"
+                                j += "③画像   映っていない"
                             judge_label.config(
                                 text=j,
                                 fg="#070" if rep.get("pix_seen") else "#a00")

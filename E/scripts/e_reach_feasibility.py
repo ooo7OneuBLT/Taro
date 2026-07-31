@@ -9,19 +9,19 @@ Goal Babbling 以前に、**物理的に届くか**が未確認だった。
   1. 自発運動の振幅が小さい（Viewer 実効値 0.174）
   2. 四肢の筋力が弱すぎる（4ヶ月で ×0.047＝1/21 と記録されていた）
   3. おもちゃが遠い（手から22.7cm・可動域の端でやっと届く）
-⚠️2 は 2026-07-29 の**基準の汚染バグ**（落とし穴 項76）の影響を受けている
+注意：2 は 2026-07-29 の**基準の汚染バグ**（落とし穴 項76）の影響を受けている
   可能性があるので、直した後の値を測り直す。
 
 【測ること／判定を先に決めておく】
   ① 筋力 ÷ 重力モーメント（＝relative strength）
        > 1  重力に逆らって動かせる
-       ≦ 1  ★その関節は自重で動かせない＝リーチング以前の問題
-       ⚠️重力モーメントは「軸に垂直な距離×重さ」の**姿勢によらない上界**で計算。
+       ≦ 1  その関節は自重で動かせない＝リーチング以前の問題
+       注意：重力モーメントは「軸に垂直な距離×重さ」の**姿勢によらない上界**で計算。
          ＝ここで > 1 なら、どんな姿勢でも動かせる（控えめな見積もり）
   ② 肩からおもちゃまでの距離 と 腕の長さ
        距離 ≦ 腕の長さ    幾何学的には届く
-       距離 > 腕の長さ    ★絶対に届かない
-       ⚠️幾何学的に届いても**可動域**で届かないことがあるので、必ず絵を見る
+       距離 > 腕の長さ    絶対に届かない
+       注意：幾何学的に届いても**可動域**で届かないことがあるので、必ず絵を見る
          （落とし穴 項70「位置・姿勢は数値より先に絵を撮る」）
 
 使い方:
@@ -31,14 +31,14 @@ Goal Babbling 以前に、**物理的に届くか**が未確認だった。
     E/logs/reach/届くかの確認_<シーン名>.png
 """
 
-# ⚠️★古い方式（2026-07-30 に整理）。新しい実験は `run/main.py` を通す。
+# 注意：古い方式（2026-07-30 に整理）。新しい実験は `run/main.py` を通す。
 #   【経緯】目標Eの実験スクリプトが118本あり、うち66本が**独立に環境を組み立てていた**。
 #     そのため「学習は関節モード（90関節を独立に駆動＝逸脱リスト 逸脱5）、
 #     測定とViewerは筋肉モード（拮抗筋2本/関節）」という**別の体で動く**事故が起きた
 #     （ユーザーの目視「視線誘導反射の実験の時とは動きが全然違う」で発覚。
 #      実測で動きが人間の新生児の約3.3倍速かった）。
 #   【設計と移行計画】`E/docs/実行基盤_設計.md`
-#   ⚠️このファイルは**記録として残す**（削除しない方針）。
+#   注意：このファイルは**記録として残す**（削除しない方針）。
 #     中の測り方は再利用できるので、プラグインへ移すときの元にする。
 import os
 import sys
@@ -61,7 +61,7 @@ from mimoActuation.actuation import SpringDamperModel   # noqa: E402
 SCENE = os.environ.get("E_SCENE", "リーチング_リクライニング60度")
 OUT = os.path.join(_ROOT, "E", "logs", "reach")
 # 腕の**アクチュエータ**（左右）。この順で表示する。
-# ⚠️★関節名とアクチュエータ名は違う（2026-07-30 にここで踏んだ）：
+# 注意：関節名とアクチュエータ名は違う（2026-07-30 にここで踏んだ）：
 #     関節 robot:right_shoulder_ad_ab   ← アクチュエータ act:right_shoulder_abduction
 #     関節 robot:right_shoulder_rotation ← アクチュエータ act:right_shoulder_internal
 #   関節名で照合すると全部 nan になり、「動かせない」と読み違える。
@@ -103,15 +103,15 @@ def main():
             hit = [v[2] for k, v in ratios.items()
                    if k.split(":")[-1] == f"{side}_{base}"]
             vals[side] = hit[0] if hit else float("nan")
-        # ⚠️nan は「動かせない」ではなく「★測れなかった」。名前の照合ミスを
+        # 注意：nan は「動かせない」ではなく「測れなかった」。名前の照合ミスを
         #   「動かせない」と読み違えると、原因の切り分けを丸ごと間違える。
         if any(np.isnan(v) for v in vals.values()):
-            judge = "★測れなかった（名前を確認）"
+            judge = "測れなかった（名前を確認）"
             ng += 1
         elif all(v > 1.0 for v in vals.values()):
             judge = "OK"
         else:
-            judge = "★動かせない"
+            judge = "動かせない"
             ng += 1
         print(f"  {jp:<24}{vals['right']:>10.2f}{vals['left']:>10.2f}   {judge}")
     print(f"  → OK でない関節: {ng} 個")
@@ -121,7 +121,7 @@ def main():
     toy_bid = next((b for b in range(m.nbody)
                     if (m.body(b).name or "").startswith("test_object1")), None)
     if toy_bid is None:
-        print("  ⚠️おもちゃ(test_object1)が見つからない＝この環境にはおもちゃが無い")
+        print("  注意おもちゃ(test_object1)が見つからない＝この環境にはおもちゃが無い")
         toy = None
     else:
         toy = np.array(d.xpos[toy_bid], dtype=float)
@@ -135,12 +135,12 @@ def main():
         if toy is not None:
             dist = float(np.linalg.norm(toy - sh))
             hand_d = float(np.linalg.norm(toy - ha))
-            mark = "★届かない" if dist > arm else f"届く（余裕 {(arm-dist)*100:.1f}cm）"
+            mark = "届かない" if dist > arm else f"届く（余裕 {(arm-dist)*100:.1f}cm）"
             line += (f" / 肩→おもちゃ {dist*100:6.1f}cm  {mark}"
                      f" / いまの手→おもちゃ {hand_d*100:5.1f}cm")
         print(line)
     if toy is not None:
-        print("  ⚠️幾何学的に届いても**可動域**で届かないことがある。必ず絵を見る（項70）")
+        print("  注意幾何学的に届いても**可動域**で届かないことがある。必ず絵を見る（項70）")
 
     # ---- 絵 -----------------------------------------------------------------
     from PIL import Image

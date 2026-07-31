@@ -1,4 +1,4 @@
-"""★`env.reset()` を繰り返すと、毎回同じ状態になるかを調べる。
+"""`env.reset()` を繰り返すと、毎回同じ状態になるかを調べる。
 
 【なぜ要るか、2026-07-30】同じ設定・同じ乱数の種で学習を2回回すと結果が一致しない
 （落とし穴チェックリスト 項79）。切り分けで「自己モデルの測定（`e_probes.evaluate`）を
@@ -16,9 +16,9 @@
 【使い方】
     .venv/Scripts/python.exe -m run.tools.check_reset            （1回目）
     .venv/Scripts/python.exe -m run.tools.check_reset            （2回目）
-  2回の出力を比べる。同じなら reset は決定的。違えば★ここが原因。
+  2回の出力を比べる。同じなら reset は決定的。違えばここが原因。
 
-⚠️出力は「人が読んで比べる」ためのもの。数字が長いので、
+注意：出力は「人が読んで比べる」ためのもの。数字が長いので、
   最後に載せる要約（ハッシュ）だけを比べればよい。
 """
 import hashlib
@@ -66,9 +66,9 @@ def main():
     rows = []
     for k in range(N_RESET):
         if k == 0:
-            obs, _ = env.reset(seed=0)      # ★1回目だけ種を渡す（学習と同じ）
+            obs, _ = env.reset(seed=0)      # 1回目だけ種を渡す（学習と同じ）
         else:
-            obs, _ = env.reset()            # ★2回目以降は種なし（evaluate と同じ）
+            obs, _ = env.reset()            # 2回目以降は種なし（evaluate と同じ）
         h0 = _h(d.qpos)
         for _ in range(N_TICK):
             obs, _r, te, tr, _i = env.step(zero)
@@ -78,18 +78,18 @@ def main():
         print(f"  {k:>3} {h0:>16} {h1:>16} {hand_z:>12.3f} {int(d.ncon):>9}")
 
     print("-" * 78)
-    # ★1回目と2回目以降で「reset 直後の姿勢」が同じか
+    # 1回目と2回目以降で「reset 直後の姿勢」が同じか
     same0 = len({r[0] for r in rows}) == 1
-    print(f"  reset直後の姿勢が全回同じ : {'はい' if same0 else '★いいえ（回ごとに違う）'}")
+    print(f"  reset直後の姿勢が全回同じ : {'はい' if same0 else 'いいえ（回ごとに違う）'}")
     if not same0:
-        print("    ⚠️種なし reset は姿勢を揺らす（jitter）ので、これは異常ではない。"
-              "★大事なのは**2回実行したときに同じ列が出るか**")
-    # ⚠️★ここで Python の組み込み `hash()` を使ってはいけない。
+        print("    注意種なし reset は姿勢を揺らす（jitter）ので、これは異常ではない。"
+              "大事なのは**2回実行したときに同じ列が出るか**")
+    # 注意：ここで Python の組み込み `hash()` を使ってはいけない。
     #   文字列のハッシュは**起動ごとに変わる**（PYTHONHASHSEED）ので、
     #   中身が同じでも要約が違い、「非決定的だ」と誤診する。
     #   2026-07-30 に実際にこれで誤診した（落とし穴 項81の同型・同じ日に2回目）。
     #   → 比べるものは必ず**中身から**作る（sha1 など、実行に依らないもの）。
-    print(f"\n  ★この実行の要約（2回実行して**この行だけ**比べる）")
+    print(f"\n  この実行の要約（2回実行して**この行だけ**比べる）")
     print(f"    {_h([int(r[0], 16) for r in rows] + [r[2] for r in rows])}")
     print(f"    詳細: " + " ".join(f"{r[0]}/{r[1]}" for r in rows))
     env.close()

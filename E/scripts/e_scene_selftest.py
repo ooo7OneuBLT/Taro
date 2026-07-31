@@ -17,14 +17,14 @@
     .venv/Scripts/python.exe E/scripts/e_scene_selftest.py [シーン名]
 """
 
-# ⚠️★古い方式（2026-07-30 に整理）。新しい実験は `run/main.py` を通す。
+# 注意：古い方式（2026-07-30 に整理）。新しい実験は `run/main.py` を通す。
 #   【経緯】目標Eの実験スクリプトが118本あり、うち66本が**独立に環境を組み立てていた**。
 #     そのため「学習は関節モード（90関節を独立に駆動＝逸脱リスト 逸脱5）、
 #     測定とViewerは筋肉モード（拮抗筋2本/関節）」という**別の体で動く**事故が起きた
 #     （ユーザーの目視「視線誘導反射の実験の時とは動きが全然違う」で発覚。
 #      実測で動きが人間の新生児の約3.3倍速かった）。
 #   【設計と移行計画】`E/docs/実行基盤_設計.md`
-#   ⚠️このファイルは**記録として残す**（削除しない方針）。
+#   注意：このファイルは**記録として残す**（削除しない方針）。
 #     中の測り方は再利用できるので、プラグインへ移すときの元にする。
 import os
 import sys
@@ -45,7 +45,7 @@ _results = []
 
 def check(label, ok, detail=""):
     _results.append((label, ok))
-    print(f"  {'OK  ' if ok else '★NG '} {label}" + (f"   {detail}" if detail else ""))
+    print(f"  {'OK  ' if ok else 'NG '} {label}" + (f"   {detail}" if detail else ""))
     return ok
 
 
@@ -97,7 +97,7 @@ def main():
         ("柵の有無を反転",
          lambda s: s["world"].update(fence=not s["world"]["fence"])),
     ]
-    # ★四肢の屈曲は3ヶ月までしか効かない（infant_body.FLEXION_UNTIL_MO = 3.0）。
+    # 四肢の屈曲は3ヶ月までしか効かない（infant_body.FLEXION_UNTIL_MO = 3.0）。
     #   4ヶ月のシーンで反転しても**本当に何も変わらない**ので、テストにならない。
     #   ⇒ 2026-07-28 に見つけた「Viewerと測定で flexion が違う」という食い違いは、
     #     4ヶ月の実験には実害がなく、影響するのは0〜3ヶ月の実験（運動性喃語の学習など）。
@@ -120,7 +120,7 @@ def main():
         try:
             d2 = e_scene.verify(scene, env2, strict=False, verbose=False)
             check(label, bool(d2), f"{len(d2)}件のずれを検知"
-                  if d2 else "★見逃した（照合をすり抜けた）")
+                  if d2 else "見逃した（照合をすり抜けた）")
             for t in d2[:3]:
                 print(f"        {t}")
         finally:
@@ -130,7 +130,7 @@ def main():
     ng = [l for l, ok in _results if not ok]
     print("\n" + "=" * 78)
     if ng:
-        print(f" ★{len(ng)}件が不合格 — 仕組みが効いていない")
+        print(f" {len(ng)}件が不合格 — 仕組みが効いていない")
         for l in ng:
             print(f"    {l}")
     else:

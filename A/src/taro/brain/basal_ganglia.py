@@ -6,7 +6,7 @@
 
 A2-10：旧learning.pyから改名。人間の脳の部品名に合わせた。
 
-⚠️ 逸脱：重み更新にbackpropを使用【既存AI研究・⚠️逸脱】。
+注意：逸脱：重み更新にbackpropを使用【既存AI研究・注意逸脱】。
 """
 
 import torch
@@ -79,7 +79,7 @@ class TaroLearner:
         """
         知覚と行動の損失を合算し、重みを1回更新する。
 
-        ⚠️ ここで誤差逆伝播（backprop）を使う【⚠️逸脱】。
+        注意：ここで誤差逆伝播（backprop）を使う【注意逸脱】。
         """
         total_loss = perception_loss + policy_loss
 

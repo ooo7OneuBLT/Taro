@@ -1,4 +1,4 @@
-"""★同じ設定を2回回して「どこで最初に食い違うか」を突き止める。
+"""同じ設定を2回回して「どこで最初に食い違うか」を突き止める。
 
 【なぜ要るか、2026-07-30】同じ設定・同じ乱数の種で学習を2回回すと結果が違う
 （落とし穴チェックリスト 項79）。「結果が違う」しか分かっていないので推測で原因を
@@ -7,21 +7,21 @@
   最初に食い違ったステップと、そのステップで最初に食い違った量を出す。
 
 食い違った量から原因の性質が決まる：
-    obs_in.interoception → ★内臓（泣く・寝る・うとうと）
-    obs_in.eye_*         → ★視覚のレンダリング
-    obs_in.observation   → ★物理（関節の状態）
+    obs_in.interoception → 内臓（泣く・寝る・うとうと）
+    obs_in.eye_*         → 視覚のレンダリング
+    obs_in.observation   → 物理（関節の状態）
     sv                   → 感覚をまとめる層（fusion）
     z                    → 脳の内部（予測符号化の乱数）
     mean / std           → 行動を作るところ
     a                    → 探索のゆらぎ
-    ★W だけ違う          → 学習の計算（浮動小数の足し算の順序）
+    W だけ違う          → 学習の計算（浮動小数の足し算の順序）
 
 【使い方】
     .venv/Scripts/python.exe -m run.tools.check_divergence
     .venv/Scripts/python.exe -m run.tools.check_divergence --steps 300 --probe
 
   --probe を付けると自己モデルの測定（e_probes.evaluate）も入れる。
-  ★測定を入れると一致しなくなる、というのがここまでに分かっていること。
+  測定を入れると一致しなくなる、というのがここまでに分かっていること。
 """
 import argparse
 import csv
@@ -57,10 +57,10 @@ def main():
     ap.add_argument("--steps", type=int, default=150)
     ap.add_argument("--ckpt", type=int, default=50)
     ap.add_argument("--probe", action="store_true",
-                    help="自己モデルの測定も入れる（★これを入れると一致しなくなる）")
-    # ★2回では足りない。ずれは**稀にしか起きない**（実測で3回中1回）。
+                    help="自己モデルの測定も入れる（これを入れると一致しなくなる）")
+    # 2回では足りない。ずれは**稀にしか起きない**（実測で3回中1回）。
     #   n=2 の一致を根拠に「直った」と判断して外したことが今日2回ある（項79）。
-    ap.add_argument("--runs", type=int, default=5, help="何回回して比べるか（★3以上）")
+    ap.add_argument("--runs", type=int, default=5, help="何回回して比べるか（3以上）")
     a = ap.parse_args()
 
     import json
@@ -82,7 +82,7 @@ def main():
                            cwd=_ROOT, env=env, capture_output=True, text=True,
                            errors="replace")
         if r.returncode != 0:
-            print("⚠️実行が失敗した")
+            print("注意実行が失敗した")
             print(r.stdout[-2000:])
             print(r.stderr[-2000:])
             return 1
@@ -94,14 +94,14 @@ def main():
           f"測定{'あり' if a.probe else 'なし'}）")
     print("=" * 78)
     if len({len(r) for r in runs}) != 1:
-        print(f"⚠️★行数が違う {[len(r) for r in runs]}＝比べられない")
+        print(f"注意行数が違う {[len(r) for r in runs]}＝比べられない")
         return 1
     if len(runs[0]) == 0:
-        print("⚠️★記録が空＝比べられない（trace プラグインが動いていない）")
+        print("注意記録が空＝比べられない（trace プラグインが動いていない）")
         return 1
 
     cols = [c for c in runs[0][0] if c != "step"]
-    # ★1本目を基準に、他のどれかが食い違った最初のステップを探す
+    # 1本目を基準に、他のどれかが食い違った最初のステップを探す
     A = runs[0]
     first_step, first_cols, which = None, [], None
     for idx in range(len(A)):
@@ -114,14 +114,14 @@ def main():
             break
 
     if first_step is None:
-        print(f"  ★{len(runs)}回すべて、{len(A)} ステップ全部が完全一致")
+        print(f"  {len(runs)}回すべて、{len(A)} ステップ全部が完全一致")
         print("    ⇒ この条件では再現している")
-        print("    ⚠️ずれは稀にしか起きないので、回数を増やしてまだ探す価値がある")
+        print("    注意ずれは稀にしか起きないので、回数を増やしてまだ探す価値がある")
         return 0
 
-    print(f"  ★最初に食い違ったステップ : {first_step} / {len(A)}"
+    print(f"  最初に食い違ったステップ : {first_step} / {len(A)}"
           f"（1本目 vs {which}本目）")
-    print(f"  ★そのステップで食い違った量:")
+    print(f"  そのステップで食い違った量:")
     for c in first_cols:
         print(f"      {c:22s} {A[int(first_step)-1].get(c)} vs "
               f"{runs[which-1][int(first_step)-1].get(c)}")
@@ -131,20 +131,20 @@ def main():
     ok = [c for c in cols if ra.get(c) == rb.get(c)]
     print("      " + ("  ".join(ok) if ok else "（なし）"))
 
-    # ★「どの量が最初に壊れたか」で原因の場所を言い当てる
+    # 「どの量が最初に壊れたか」で原因の場所を言い当てる
     print("\n  " + "-" * 74)
     hints = [
-        ("obs_in.interoception", "★内臓（泣く・寝る・うとうと）。内受容感覚が違う"),
-        ("obs_in.eye_left", "★視覚のレンダリング"),
-        ("obs_in.eye_right", "★視覚のレンダリング"),
-        ("obs_in.observation", "★物理（関節の状態）または前のステップの行動"),
-        ("obs_in.vestibular", "★前庭感覚（体の傾き）"),
+        ("obs_in.interoception", "内臓（泣く・寝る・うとうと）。内受容感覚が違う"),
+        ("obs_in.eye_left", "視覚のレンダリング"),
+        ("obs_in.eye_right", "視覚のレンダリング"),
+        ("obs_in.observation", "物理（関節の状態）または前のステップの行動"),
+        ("obs_in.vestibular", "前庭感覚（体の傾き）"),
         ("sv", "感覚をまとめる層（fusion）"),
         ("z", "脳の内部（予測符号化の乱数など）"),
         ("mean", "行動を作るところ（運動野＋小脳）"),
         ("std", "ノルアドレナリン（探索の強さ）"),
         ("a", "探索のゆらぎ（explore）"),
-        ("W", "★学習の計算だけが違う＝浮動小数の足し算の順序"),
+        ("W", "学習の計算だけが違う＝浮動小数の足し算の順序"),
     ]
     said = False
     for key, msg in hints:

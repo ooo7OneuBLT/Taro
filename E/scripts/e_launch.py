@@ -59,7 +59,7 @@ def describe(sc):
         warn.append(f"おもちゃに手が届かない（腕の{float(fp['toy_reach_ratio'])*100:.0f}%）")
     line = " / ".join(bits)
     if warn:
-        line += "   ⚠️" + "、".join(warn)
+        line += "   注意" + "、".join(warn)
     return line
 
 
@@ -120,7 +120,7 @@ def main():
     envv = dict(os.environ)
     envv["E_SCENE"] = pick
     envv["PYTHONIOENCODING"] = "utf-8"
-    # ⚠️シーンが全部を決めるので、古い個別指定は消す
+    # 注意：シーンが全部を決めるので、古い個別指定は消す
     #   （残っていると「シーンの値と環境変数のどちらが効くのか」が曖昧になる）
     for k in ("E_AGE", "E_HEAD_HOLD", "E_FENCE", "E_TOY_RADIUS", "E_RECLINE",
               "E_EYE_REST_V", "E_HOLD_TILT", "E_TOY_POS", "E_SEAT_FRICTION",

@@ -1,4 +1,4 @@
-"""★太郎を見るための統一ビューア。おもちゃ・姿勢・反射・測定器・再生を1枚にまとめる。
+"""太郎を見るための統一ビューア。おもちゃ・姿勢・反射・測定器・再生を1枚にまとめる。
 
 【なぜ作ったか】ビューアが3つに分かれていて、それぞれ別のパネルを持っていた。
 ユーザーの要望（2026-07-26）：
@@ -21,7 +21,7 @@
     おもちゃ    位置・大きさ・揺らす
     姿勢        関節の角度・物理のON/OFF・仰向けに戻す
     反射        視線誘導（間隔・閾値）・前庭動眼反射・屈筋トーン
-    測定器      3つの判定・一人称視点（★検出画素を緑で表示）
+    測定器      3つの判定・一人称視点（検出画素を緑で表示）
     再生        速度・やり直し・自発運動
 
 【環境変数】
@@ -127,7 +127,7 @@ class Section:
         self._label()
 
     def _show(self):
-        # ★`after=self.head` が必須。pack_forget したフレームをそのまま pack すると
+        # `after=self.head` が必須。pack_forget したフレームをそのまま pack すると
         #   **元の位置ではなく一番下に付く**ので、閉じて開くと区画が末尾へ飛び、
         #   見た目には「展開できない」ように見える（ユーザーの目視 2026-07-26）。
         self.body.pack(fill="x", padx=4, after=self.head)
@@ -161,7 +161,7 @@ def main():
     import e_orienting_v2 as OR
     import e_toy_env as TE
 
-    # ★【2026-07-28】測定スクリプト（e_orient_converge_test.py）と条件を揃える。
+    # 【2026-07-28】測定スクリプト（e_orient_converge_test.py）と条件を揃える。
     #   揃えないと「Viewerで見ている太郎と、測っている太郎が別物」になる
     #   （2026-07-25 に実際に起きた問題＝身体の設定が散らばる）。
     #     体年齢4ヶ月  … この反射を使うリーチングの月齢に揃えた
@@ -171,7 +171,7 @@ def main():
     import e_scene
 
     # ========================================================================
-    # ★シーン方式（2026-07-29 新設）— E_SCENE=名前 でシーンから始める
+    # シーン方式（2026-07-29 新設）— E_SCENE=名前 でシーンから始める
     # ------------------------------------------------------------------------
     # 【なぜ】環境の条件が4か所（コードの定数／環境変数／プリセット／保存ファイル）に
     # 散らばっており、Viewer で見ている太郎と測定している太郎が食い違っていた。
@@ -182,16 +182,16 @@ def main():
     _scene_name = os.environ.get("E_SCENE")
     if _scene_name:
         _scene = e_scene.load(_scene_name)
-        # ★月齢だけは E_AGE で上書きできる（2026-07-31）。
+        # 月齢だけは E_AGE で上書きできる（2026-07-31）。
         #   【なぜ要るか】シーンは「新生児（0ヶ月）」で作ってあるが、
-        #   ★体を育てる実験の学習済みモデルは**終わりの月齢（4ヶ月）の体**で学んでいる。
+        #   体を育てる実験の学習済みモデルは**終わりの月齢（4ヶ月）の体**で学んでいる。
         #   シーンの月齢のまま脳を読むと「4ヶ月の脳が新生児の体を動かす」ことになり、
         #   見たいものと違う状態を見ることになる（2026-07-31 に実際に起きた）。
-        #   ⚠️上書きしたらシーンの指紋とは一致しないので照合を外す。
+        #   注意：上書きしたらシーンの指紋とは一致しないので照合を外す。
         if os.environ.get("E_AGE"):
             _ov = float(os.environ["E_AGE"])
             if abs(_ov - float(_scene["body"]["age_months"])) > 1e-9:
-                print(f"[scene] ★月齢を上書き: "
+                print(f"[scene] 月齢を上書き: "
                       f"{_scene['body']['age_months']} → {_ov} ヶ月"
                       f"（E_AGE の指定。指紋の照合は外します）", flush=True)
                 _scene["body"]["age_months"] = _ov
@@ -217,10 +217,10 @@ def main():
         e_scene.verify(_scene, env, strict=False, verbose=True)
     else:
         # ---- 従来の起動（環境変数で条件を指定する）--------------------------
-        # ⚠️こちらは順次たたむ予定。新しい実験はシーンを使うこと。
+        # 注意：こちらは順次たたむ予定。新しい実験はシーンを使うこと。
         _AGE = float(os.environ.get("E_AGE", "4.0"))
         _HEAD_HOLD = os.environ.get("E_HEAD_HOLD", "1") == "1"
-        # ★リクライニングの角度[度]。0=仰向け。モデル構築時に決まるので実行中は変えられない
+        # リクライニングの角度[度]。0=仰向け。モデル構築時に決まるので実行中は変えられない
         _RECLINE = float(os.environ.get("E_RECLINE", "0"))
         _EYE_REST_V = float(os.environ.get("E_EYE_REST_V", "0"))
         kw = body_kwargs_from_env(_AGE, verbose=True)
@@ -232,7 +232,7 @@ def main():
         m, d = u.model, u.data
         env.reset(seed=0)
         hands = CaregiverHands(m, d)
-        # ★支える角度。指定しなければ「今の角度」で支える。
+        # 支える角度。指定しなければ「今の角度」で支える。
         #   リクライニングでは顎を引かせないと視線が上を向いてしまうので、
         #   前後（head_tilt）だけ指定できるようにした（2026-07-28）。
         _HOLD_TILT = os.environ.get("E_HOLD_TILT")
@@ -274,7 +274,7 @@ def main():
     NECK_I = float(m.body_inertia[_hb][0]) + float(m.body_mass[_hb]) * _neck_arm ** 2
 
     # 体の根元（胴体の自由関節）＝「仰向けに戻す」で使う
-    # ⚠️★【2026-07-29 修正】以前は「おもちゃ（test_object1）以外の自由関節」で
+    # 注意：【2026-07-29 修正】以前は「おもちゃ（test_object1）以外の自由関節」で
     #   探していたが、このモデルには**使っていない予備の物体 test_object2**があり、
     #   そちらを先に拾っていた（位置 3.5, 3.0, 0.05）。
     #   ＝「仰向けに戻す」はずっと**体ではなく予備の物体**を動かしていた。
@@ -286,13 +286,13 @@ def main():
             root_qadr = int(m.jnt_qposadr[j])
             break
     if root_qadr is None:
-        print(f"[viewer] ⚠️体（body='{TE.ROOT_BODY}'）の自由関節が見つからない。"
+        print(f"[viewer] 注意体（body='{TE.ROOT_BODY}'）の自由関節が見つからない。"
               "「仰向けに戻す」は姿勢だけ戻します", flush=True)
     root_qpos0 = (d.qpos[root_qadr:root_qadr + 7].copy()
                   if root_qadr is not None else None)
 
     # ---- 前回の保存を読む（旧ファイルからも引き継ぐ）--------------------
-    # ⚠️★シーンから始めたときは旧保存を読まない（2026-07-29）。
+    # 注意：シーンから始めたときは旧保存を読まない（2026-07-29）。
     #   読むと、シーンの姿勢で立ち上げたのにスライダーの初期値だけ旧ファイルの
     #   値になり、姿勢保持がONの瞬間に**別の姿勢へ書き換わる**。
     #   ＝「散らばった設定が競合する」問題そのものなので、入口を1つに保つ。
@@ -308,7 +308,7 @@ def main():
                 print(f"[load] 読み込み失敗 {path}: {e}", flush=True)
 
     # ---- 姿勢を作る関節を集める（2026-07-29 に全身へ拡張）------------------
-    #   ★左右がある関節は**別々のスライダー**にする。以前は必ず同じ角度に
+    #   左右がある関節は**別々のスライダー**にする。以前は必ず同じ角度に
     #     なっていたので、片手だけ口に持っていくような姿勢が作れなかった。
     def _find_joint(name):
         """関節を名前で探す。見つからなければ None（モデルによって無い関節がある）。"""
@@ -345,7 +345,7 @@ def main():
     print(f"[pose] 姿勢を作れる関節 {len(joints)} 個", flush=True)
 
     toy_pos0 = d.qpos[toy_qadr:toy_qadr + 3].copy()
-    # ⚠️リセット直後のおもちゃは**退避位置 [3,3,0.05]**（登場を1秒遅らせる仕組み）。
+    # 注意：リセット直後のおもちゃは**退避位置 [3,3,0.05]**（登場を1秒遅らせる仕組み）。
     #   そのままスライダーの初期値にすると、範囲（X:-0.1〜0.5 / Y:-0.3〜0.3）の外なので
     #   少し動かした瞬間に範囲内へクランプされ、**おもちゃが突然どこかへ飛ぶ**
     #   （ユーザーの目視「スライダーで位置を変えるとどこからか出てきた」2026-07-27）。
@@ -358,7 +358,7 @@ def main():
             toy_pos0 = np.array([0.28, 0.0, 0.18], dtype=float)
     if saved and "toy_pos" in saved:
         toy_pos0 = np.array(saved["toy_pos"], dtype=float)
-    # ★プリセットが持つおもちゃの位置（E_TOY_POS）は保存値より優先する。
+    # プリセットが持つおもちゃの位置（E_TOY_POS）は保存値より優先する。
     #   ＝「この環境ではここに置く」という条件の一部なので（2026-07-28）。
     if os.environ.get("E_TOY_POS"):
         try:
@@ -367,7 +367,7 @@ def main():
         except Exception:
             pass
     size0 = float(m.geom_size[toy_gadr][0])
-    # ⚠️E_TOY_RADIUS を明示したときは保存値で上書きしない。
+    # 注意：E_TOY_RADIUS を明示したときは保存値で上書きしない。
     #   上書きすると、環境変数で指定した大きさが黙って無視される
     #   （実際 E_TOY_RADIUS=0.010 が保存値 0.02 に置き換わっていた）。
     if saved and "toy_half_size" in saved and "E_TOY_RADIUS" not in os.environ:
@@ -375,7 +375,7 @@ def main():
         m.geom_size[toy_gadr] = [size0, size0, size0]
 
     # ================= パネル =================
-    # ★【2026-07-28 レイアウト改訂】1列（幅520px）で6区画を縦に積んでいたため
+    # 【2026-07-28 レイアウト改訂】1列（幅520px）で6区画を縦に積んでいたため
     #   画面からはみ出して縦に長すぎた（ユーザーの指摘）。**2列**に変え、
     #   目の映像も左右そろえて出す。
     win = tk.Tk()
@@ -383,7 +383,7 @@ def main():
     _h = min(980, win.winfo_screenheight() - 80)
     _w = min(1080, win.winfo_screenwidth() - 60)
     win.geometry(f"{_w}x{_h}+20+10")
-    # ⚠️★最前面に固定しない（2026-07-28、ユーザーの要望）。他の窓を見るたびに
+    # 注意：最前面に固定しない（2026-07-28、ユーザーの要望）。他の窓を見るたびに
     #   ビューアが邪魔になるため。MuJoCoの3D窓とパネルは別窓なので、必要なら
     #   タスクバーから前面に出せる。
 
@@ -399,9 +399,9 @@ def main():
     cv.bind("<Configure>", lambda e: cv.itemconfigure(wid, width=e.width))
     cv.bind_all("<MouseWheel>", lambda e: cv.yview_scroll(int(-e.delta / 120), "units"))
 
-    # ★2列。左＝環境と条件（いじる物）／右＝見る物（映像・数値）
+    # 2列。左＝環境と条件（いじる物）／右＝見る物（映像・数値）
     #
-    # ⚠️★【2026-07-28 修正】最初 `pack` + `pack_propagate(False)` + `width=520` で
+    # 注意：【2026-07-28 修正】最初 `pack` + `pack_propagate(False)` + `width=520` で
     #   組んだところ、**幅だけ固定されて高さが潰れ**、列の中身が1つも表示されなかった
     #   （ユーザーの報告「一番下のボタン以外表示されない」）。
     #   pack_propagate(False) は「子に合わせてリサイズしない」＝高さも指定しないと
@@ -415,27 +415,27 @@ def main():
     colR = tk.Frame(cols); colR.grid(row=0, column=1, sticky="nsew", padx=(4, 0))
 
     op = (saved or {}).get("open", {})
-    # ★2026-07-27：既定を「物理を動かす」に変えた（それまでは止まって起動）。
+    # 2026-07-27：既定を「物理を動かす」に変えた（それまでは止まって起動）。
     #   反射が目を動かすのは env.step() の中なので、物理を止めていると
     #   **方向は正しく計算されているのにサッケードが1発も撃たれない**
     #   （ユーザーの目視：強さ0.406＞閾値、ずれ0.95 なのに 0発。2026-07-27）。
     #   Viewer の主目的は反射の観察なので、止めたい人が自分でONにする形にする。
     freeze0 = os.environ.get("E_FREEZE", "0") == "1"
 
-    # ---- 区画0：環境（プリセット）★2026-07-28 新設 -----------------------
+    # ---- 区画0：環境（プリセット）2026-07-28 新設 -----------------------
     #
     # 【なぜ要るか】ユーザーの要望「環境をいくつかバージョン用意して、プルダウンで選んで
     # 最初からやり直しを押したらその環境で始まる」。実験ごとに条件（月齢・柵・頭の支え）を
     # 手で合わせるのは間違いのもとで、実際に「Viewerで見ている太郎と測っている太郎が
     # 別物」という問題が起きていた（2026-07-25、体型補正が環境ごとにバラバラだった件）。
     #
-    # ⚠️**月齢だけはモデルを作るときに決まる**（geomの寸法・質量が変わる）ので、
+    # 注意：**月齢だけはモデルを作るときに決まる**（geomの寸法・質量が変わる）ので、
     #   実行中に変えられない。月齢が変わるプリセットを選んだときは**プロセスを
     #   作り直す**（環境変数を設定して自分を起動し直す）。それ以外は即反映。
     sec_env = Section(colL, "シーン（環境）", op.get("env", True))
 
     # ------------------------------------------------------------------
-    # ★シーン一覧（2026-07-29）。旧 PRESETS を置き換えたもの。
+    # シーン一覧（2026-07-29）。旧 PRESETS を置き換えたもの。
     #   プリセットは Viewer の中にしか無く、測定スクリプトからは使えなかった。
     #   シーンはファイルなので、Viewer で作ったものをそのまま測定が読める。
     # ------------------------------------------------------------------
@@ -455,7 +455,7 @@ def main():
                           wraplength=460, justify="left")
     scene_note.pack(anchor="w", padx=14)
     tk.Label(sec_env.body,
-             text="★「最初からやり直す」を押すと、選んだシーンで始まります\n"
+             text="「最初からやり直す」を押すと、選んだシーンで始まります\n"
                   "　 別のシーンに切り替えるときは体を作り直すので数十秒かかります",
              fg="#a30", font=("", 8), justify="left").pack(anchor="w", padx=14)
 
@@ -469,7 +469,7 @@ def main():
     def on_scene_pick(*_a):
         """選んだシーンが**成立しているか**を、始める前に見せる。
 
-        ⚠️「姿勢が崩れる」「おもちゃが体に隠れて見えない」は、
+        注意：「姿勢が崩れる」「おもちゃが体に隠れて見えない」は、
           実際に走らせてからでは気づきにくい（2026-07-28 に両方とも起きた）。
           保存時に記録した指紋と安定確認の結果をここに出す。
         """
@@ -493,19 +493,19 @@ def main():
             warn = warn or not se.get("ok", True)
         if fp.get("toy_visible_left") is not None:
             lines.append("おもちゃは見えています" if fp["toy_visible_left"]
-                         else "⚠️おもちゃが体に隠れて見えません")
+                         else "注意おもちゃが体に隠れて見えません")
             warn = warn or not fp["toy_visible_left"]
         if fp.get("toy_reach_ratio") is not None:
             r = float(fp["toy_reach_ratio"])
             lines.append(f"おもちゃは肩から腕の{r*100:.0f}%"
-                         + ("（届く）" if r <= 1.0 else "（★届かない）"))
+                         + ("（届く）" if r <= 1.0 else "（届かない）"))
             warn = warn or r > 1.0
         scene_note.config(text="\n".join(t for t in lines if t),
                           fg=("#a30" if warn else "#666"))
     scene_var.trace_add("write", on_scene_pick)
 
     # 旧プリセット（削除予定）。シーンへ移し終えたら消す。
-    # ⚠️2026-07-29 現在、下の PRESETS はどこからも参照していない。
+    # 注意：2026-07-29 現在、下の PRESETS はどこからも参照していない。
     #   条件の由来をたどれるようにするためだけに残している。
     _OLD_PRESETS = {
         "視線誘導反射の測定（4ヶ月・仰向け・頭を抑える）": dict(
@@ -522,7 +522,7 @@ def main():
         "自由に動く（4ヶ月・柵あり・反射なし）": dict(
             age=4.0, head_hold=False, fence=True, orient=False, toy_radius=0.0056,
             note="自発運動の観察用。柵に当たるかもここで見る"),
-        "★リーチング（リクライニング60度・顎を引く）": dict(
+        "リーチング（リクライニング60度・顎を引く）": dict(
             age=4.0, head_hold=True, fence=False, orient=True, toy_radius=0.0056,
             recline=60.0, hold_tilt=60.0, eye_rest_v=-15.0,
             toy_pos=(-0.048, -0.115, 0.113),
@@ -550,7 +550,7 @@ def main():
     env_label.pack(anchor="w", padx=14)
 
     # シーンを選んだら、そのシーンの説明とスイッチを反映する
-    #   ⚠️柵と頭の支えは**実行中に切り替えられる**ので即反映してよい。
+    #   注意：柵と頭の支えは**実行中に切り替えられる**ので即反映してよい。
     #     月齢・リクライニング角・眼球の基準角はモデル構築時に決まるので、
     #     「最初からやり直す」でプロセスごと作り直す。
     def on_scene_switches(*_a):
@@ -575,8 +575,8 @@ def main():
     fence_on = [True]
 
     def apply_fence(want):
-        """柵を実行時に消す／戻す。★geomを消せないので当たり判定と色で表現する。"""
-        # ⚠️★環境側のフラグも合わせる。おもちゃの置き場所は `_set_anchor` が
+        """柵を実行時に消す／戻す。geomを消せないので当たり判定と色で表現する。"""
+        # 注意：環境側のフラグも合わせる。おもちゃの置き場所は `_set_anchor` が
         #   「柵の内側」にクランプするので、ここを切らないと**柵を消しても
         #   おもちゃだけ柵の枠に押し込まれる**（2026-07-28 に発覚）。
         u._fence = bool(want)
@@ -593,7 +593,7 @@ def main():
 
     # ---- 区画1：おもちゃ ------------------------------------------------
     sec_toy = Section(colL, "おもちゃ", op.get("toy", True))
-    # ★スライダーを動かしたら自動で「固定する」に切り替える。
+    # スライダーを動かしたら自動で「固定する」に切り替える。
     #   そうしないと、既定（環境まかせ）のときスライダーが効かず、
     #   「動かせない」ように見える（ユーザーの目視 2026-07-26）。
     _ui_ready = [False]
@@ -615,30 +615,30 @@ def main():
     shake_var = tk.BooleanVar(value=bool((saved or {}).get("shake", True)))
     tk.Checkbutton(sec_toy.body, text=f"小さく激しく揺らす（{SHAKE_HZ}Hz・{SHAKE_AMP*100:.1f}cm）",
                    variable=shake_var).pack(anchor="w", padx=14)
-    # ★既定は「環境まかせ」＝環境が視線の正面に置く。
+    # 既定は「環境まかせ」＝環境が視線の正面に置く。
     #   保存された位置は**あなたが手で置いたもの**で、視線の正面とは限らない
     #   （実際 X=0.155 は目 X≈0.20 より頭側＝視線の後ろだった。2026-07-26）。
     #   反射を試すときは環境まかせにしないと、条件が変わって比べられない。
     follow_var = tk.BooleanVar(value=bool((saved or {}).get("follow", False)))
     tk.Checkbutton(sec_toy.body,
-                   text="★スライダーの位置に固定する（外すと環境が視線の正面に置く）",
+                   text="スライダーの位置に固定する（外すと環境が視線の正面に置く）",
                    variable=follow_var).pack(anchor="w", padx=14)
     tk.Label(sec_toy.body,
              text=f"持たせ方 {TE.TOY_MODE} ／ 登場 {TE.TOY_APPEAR_DELAY:.1f}秒後に"
                   f"{TE.TOY_APPROACH_SEC:.1f}秒かけて{TE.TOY_APPROACH_FROM}から",
              fg="#666", font=("", 8)).pack(anchor="w", padx=14)
 
-    # ---- ★あなたが「親」をやる ------------------------------------------
+    # ---- あなたが「親」をやる ------------------------------------------
     #   人間の親は、赤ちゃんの顔の向きを見ておもちゃをその前に持っていく。
     #   太郎にはそれが無いので、首が動くとおもちゃが視界から外れたままになる。
     #   自動化する前に**手で試して、必要な介入の性質を掴む**のが目的。
-    #   ⚠️瞬間移動はしない（ワープは随伴性の学習を壊す。_apply_tether の注記と同じ）。
-    tk.Label(sec_toy.body, text="★あなたが「親」をやる",
+    #   注意：瞬間移動はしない（ワープは随伴性の学習を壊す。_apply_tether の注記と同じ）。
+    tk.Label(sec_toy.body, text="あなたが「親」をやる",
              font=("", 10, "bold")).pack(anchor="w", padx=14, pady=(8, 0))
     tk.Label(sec_toy.body, justify="left", fg="#555", font=("", 8),
              text="人間の親は赤ちゃんの顔の向きに合わせておもちゃを見せる。\n"
                   "太郎にはそれが無いので、首が動くと視界から外れたままになる。\n"
-                  "⚠️手動は「何が必要か」を掴むためのもの。数値の比較には使えない。"
+                  "注意手動は「何が必要か」を掴むためのもの。数値の比較には使えない。"
              ).pack(anchor="w", padx=18)
     carry_sec = tk.DoubleVar(value=1.0)
     slider(sec_toy.body, "運ぶ秒数", carry_sec, 0.2, 3.0, 0.1, width=9, length=250,
@@ -657,14 +657,14 @@ def main():
                 pass
         origin = np.mean(eyes, axis=0) if eyes else np.array(d.cam_xpos[cid], dtype=float)
         fwd = -np.array(d.cam_xmat[cid], dtype=float).reshape(3, 3)[:, 2]
-        # ★距離はスライダーの値を使う（2026-07-28。それまで環境の固定値だった）
+        # 距離はスライダーの値を使う（2026-07-28。それまで環境の固定値だった）
         dist = float(dist_var.get())
         u._toy_dist = dist          # 環境側（_set_anchor）にも反映
         goal = origin + fwd * dist
-        # ★柵の内側にとどめる。人間の親は柵の外に手を出さない。
+        # 柵の内側にとどめる。人間の親は柵の外に手を出さない。
         #   首が横を向いていると「視線の正面」が柵の外になり、
         #   おもちゃが柵に遮られて見えなくなる（ユーザーの報告 2026-07-27）。
-        # ⚠️★【2026-07-28 修正】**柵があるときだけ**にした。柵は新生児の体に合わせた
+        # 注意：【2026-07-28 修正】**柵があるときだけ**にした。柵は新生児の体に合わせた
         #   寸法なので、4ヶ月の体では顔の前が枠の外になり、おもちゃが胸元へ落ちていた
         #   （ユーザーの目視「顔の前にもっていくを押しても視界に来ないで胸元に来る」）。
         if fence_on[0]:
@@ -679,7 +679,7 @@ def main():
         parent_log.append(None)   # 時刻はループ側で埋める
         msg.config(text=f"親が顔の前へ運んでいます（{len(parent_log)}回目）")
 
-    # ★【2026-07-28 新設】目からおもちゃまでの距離。
+    # 【2026-07-28 新設】目からおもちゃまでの距離。
     #
     # 【なぜ要るか】従来 `TOY_DISTANCE = 0.086`（8.6cm）の固定値で、これは
     # **0ヶ月の腕の長さ（18.6cm）を基準に決めた暫定値**だった。しかも e_toy_env.py の
@@ -687,7 +687,7 @@ def main():
     # 書いてあるのに、既定値が更新されていなかった。体年齢を上げると腕が伸びるので、
     # 距離も見直す必要がある。
     #
-    # ⚠️★近すぎると**輻輳（寄り目）**が要る。太郎は両目に同じ指令を出す実装
+    # 注意：近すぎると**輻輳（寄り目）**が要る。太郎は両目に同じ指令を出す実装
     # （Hering の等神経支配の法則）で、輻輳は実装していない。
     #     距離8.6cm・瞳孔間4.5cm → 必要な寄り目 約29度
     #     距離15cm              → 約17度
@@ -696,7 +696,7 @@ def main():
     dist_var = tk.DoubleVar(value=float((saved or {}).get(
         "toy_dist", getattr(u, "_toy_dist", 0.086))))
     slider(sec_toy.body, "目からの距離[m]", dist_var, 0.05, 0.40, 0.005,
-           note="★「顔の前へ持っていく」を押すとこの距離に置く")
+           note="「顔の前へ持っていく」を押すとこの距離に置く")
     vergence_label = tk.Label(sec_toy.body, text="", font=("Consolas", 9),
                               justify="left", fg="#06a")
     vergence_label.pack(anchor="w", padx=14)
@@ -709,7 +709,7 @@ def main():
     except Exception:
         IPD = 0.045
 
-    tk.Button(sec_toy.body, text="★顔の前へ持っていく", command=bring_to_face,
+    tk.Button(sec_toy.body, text="顔の前へ持っていく", command=bring_to_face,
               width=22, bg="#a63", fg="white").pack(pady=4)
     parent_label = tk.Label(sec_toy.body, text="", font=("Consolas", 9),
                             justify="left")
@@ -725,13 +725,13 @@ def main():
         if not st_freeze.get():
             st_hold.set(False)
 
-    tk.Checkbutton(sec_pose.body, text="★物理演算を止める（編集モード。重力も衝突も無し）",
+    tk.Checkbutton(sec_pose.body, text="物理演算を止める（編集モード。重力も衝突も無し）",
                    variable=st_freeze, fg="#a30", command=on_freeze).pack(anchor="w", padx=14)
-    tk.Checkbutton(sec_pose.body, text="この角度で固定する（★物理ONのまま使うと暴れます）",
+    tk.Checkbutton(sec_pose.body, text="この角度で固定する（物理ONのまま使うと暴れます）",
                    variable=st_hold).pack(anchor="w", padx=14)
 
     # ---- 左右対称スイッチ ------------------------------------------------
-    #   ★既定はOFF（左右を別々に動かせる）。以前は必ず同じ角度になっていて、
+    #   既定はOFF（左右を別々に動かせる）。以前は必ず同じ角度になっていて、
     #     片手だけ口へ持っていくような**非対称の姿勢が作れなかった**。
     st_sym = tk.BooleanVar(value=False)
     tk.Checkbutton(sec_pose.body, text="左右を対称に動かす（片方を動かすともう片方も同じ角度）",
@@ -748,7 +748,7 @@ def main():
     tk.Button(_pf2, text="右→左に写す",
               command=lambda: pose_mirror_rl(), width=13).pack(side="left", padx=2)
     tk.Label(sec_pose.body,
-             text="★首を動かすと、実験者の手が支える目標角も一緒に動きます\n"
+             text="首を動かすと、実験者の手が支える目標角も一緒に動きます\n"
                   "　 姿勢を作る手順： ①物理を止める ②角度を決める ③固定をON ④保存",
              fg="#666", font=("", 8), justify="left").pack(anchor="w", padx=14)
 
@@ -761,7 +761,7 @@ def main():
     #
     # 【使い方】姿勢を作る → このスイッチをON → その姿勢が「戻る先」になる。
     #   自発運動でバネより強い力が出れば腕は動き、力を抜けば戻る。
-    # ⚠️意思ではなく**身体の性質**。太郎の脳（方策）は通らない。
+    # 注意：意思ではなく**身体の性質**。太郎の脳（方策）は通らない。
     _lt0 = ((_scene or {}).get("setup") or {}).get("limb_tone") or {}
     st_tone_limb = tk.BooleanVar(value=bool(_lt0))
     lt_hold = tk.DoubleVar(value=float(_lt0.get("hold_deg", 10.0)))
@@ -803,7 +803,7 @@ def main():
                    variable=st_tone_limb, fg="#06a",
                    command=on_limb_tone).pack(anchor="w", padx=14)
     slider(sec_pose.body, "  許すずれ[度]", lt_hold, 2, 40, 1, width=13, length=200,
-           note="　 小さいほど硬い。⚠️乳児の四肢の筋緊張の実測値は文献に存在しない"
+           note="　 小さいほど硬い。注意乳児の四肢の筋緊張の実測値は文献に存在しない"
                 "（Tier3・感度分析の対象）")
     tk.Button(sec_pose.body, text="いまの姿勢を筋緊張の目標にする",
               command=limb_tone_apply, width=28).pack(anchor="w", padx=14, pady=(0, 2))
@@ -838,7 +838,7 @@ def main():
         jd["var"].trace_add("write", _make_sym_hook(jd, jd["var"]))
 
     def pose_from_body():
-        """★いまの体の角度をスライダーへ取り込む。
+        """いまの体の角度をスライダーへ取り込む。
 
         【なぜ要るか】物理を回して落ち着いた姿勢を土台にして手直ししたい。
         取り込みが無いと、スライダーは起動時の値のままなので「固定」を押した
@@ -873,7 +873,7 @@ def main():
     slider(sec_ref.body, "  間隔[秒]", lat_var, 0.1, 1.5, 0.1,
            note="0.2＝旧設定（撃ちすぎて視界から追い出す）／0.5〜0.9＝新生児の実測")
     thr_var = tk.DoubleVar(value=float((saved or {}).get("threshold", OR.SACCADE_MIN_STRENGTH)))
-    # ⚠️範囲を 0〜0.5 から 0〜0.06 に狭めた。実測で決めた値は 0.015 で、
+    # 注意：範囲を 0〜0.5 から 0〜0.06 に狭めた。実測で決めた値は 0.015 で、
     #   0.25 のような値にすると**動きの強さが届かず一度も撃たない**。
     slider(sec_ref.body, "  発火の閾値", thr_var, 0.0, 0.06, 0.0025,
            note="0.02＝旧設定（低すぎて常に発火）／0.25前後で動きを選べる")
@@ -884,7 +884,7 @@ def main():
     tk.Checkbutton(sec_ref.body, text=f"屈筋トーンのバネ（四肢 {len(tone_joints)}関節）",
                    variable=st_tone).pack(anchor="w", padx=14)
 
-    # ---- 区画3b：首のバネ（★調整中。値が決まったら core に実装する）----------
+    # ---- 区画3b：首のバネ（調整中。値が決まったら core に実装する）----------
     sec_neck = Section(colL, "首のバネ（調整中）", op.get("neck", True))
     tk.Label(sec_neck.body, justify="left", fg="#555", font=("", 8),
              text="首にはバネが無く（stiffness=0）、重力で60秒かけて60度倒れ続ける。\n"
@@ -892,7 +892,7 @@ def main():
                   "／Amiel-Tison 1977）。死後標本の剛性は屈曲0.175・伸展0.40 Nm/rad\n"
                   "（筋を含まない下限値／Luck 2008）。生体の実測値は存在しない。"
              ).pack(anchor="w", padx=14, pady=(2, 4))
-    # ★2026-07-27修正：初期値は**core が実際に設定した値**から読む。
+    # 2026-07-27修正：初期値は**core が実際に設定した値**から読む。
     #   保存ファイルの古い値（バネOFF・剛性0.2・目標-25度）を初期値にしていたため、
     #   起動しただけで core の実装（剛性0.40・目標-45度）が上書きされて消えていた。
     #   ユーザーの報告「首のバネ OFF」で発覚。
@@ -905,7 +905,7 @@ def main():
              text=f"起動時に core が設定した値：剛性{_k0:.2f} 目標{_t0:+.0f}度 減衰{_c0:.4f}"
              ).pack(anchor="w", padx=14)
     st_neck = tk.BooleanVar(value=(_k0 > 0.0))
-    tk.Checkbutton(sec_neck.body, text="★首にバネを効かせる（外すと core の設定を消します）",
+    tk.Checkbutton(sec_neck.body, text="首にバネを効かせる（外すと core の設定を消します）",
                    variable=st_neck, fg="#a30").pack(anchor="w", padx=14)
     nk_k = tk.DoubleVar(value=(_k0 if _k0 > 0 else 0.4))
     slider(sec_neck.body, "剛性[Nm/rad]", nk_k, 0.0, 0.6, 0.01,
@@ -913,17 +913,17 @@ def main():
     nk_c = tk.DoubleVar(value=_c0)
     slider(sec_neck.body, "減衰", nk_c, 0.0, 0.2, 0.005,
            note="臨界減衰（振動しない最小値）は下に表示")
-    # ★目標角の範囲と既定を姿勢に合わせる（2026-07-28）。
+    # 目標角の範囲と既定を姿勢に合わせる（2026-07-28）。
     #   仰向けは -45度（重力を織り込んだ実効値）だが、リクライニングでは
     #   顎を引く側（正）にしないと視線が上を向いてしまう。
     _nk_lo, _nk_hi = (-60.0, 30.0) if _RECLINE <= 0 else (-30.0, 70.0)
     _nk_def = -45.0 if _RECLINE <= 0 else 30.0
     nk_t = tk.DoubleVar(value=(_t0 if _k0 > 0 else _nk_def))
     slider(sec_neck.body, "目標角[度]", nk_t, _nk_lo, _nk_hi, 1.0,
-           note=("★重力を織り込んだ実効値。-45度で実際は-25度あたりに落ち着く"
+           note=("重力を織り込んだ実効値。-45度で実際は-25度あたりに落ち着く"
                  if _RECLINE <= 0 else
-                 "★正が前屈（顎を引く）。リクライニングでは顎を引かないと視線が上を向く"))
-    # ★★リクライニングでは既定でON。
+                 "正が前屈（顎を引く）。リクライニングでは顎を引かないと視線が上を向く"))
+    # リクライニングでは既定でON。
     #   首のバネは前後（head_tilt）だけに入れる設計だったが、これは**仰向け前提**。
     #   体を起こすと頭の重さが左右方向にも効くので、前後だけだと
     #   **頭が横を向いて倒れる**（実測：視線が真横 y=0.83。2026-07-28）。
@@ -931,7 +931,7 @@ def main():
     nk_all = tk.BooleanVar(value=(_RECLINE > 0))
     tk.Checkbutton(sec_neck.body,
                    text="3軸すべてに効かせる（外すと前後の傾きだけ）"
-                        "★リクライニングでは必要",
+                        "リクライニングでは必要",
                    variable=nk_all, fg=("#a30" if _RECLINE > 0 else "black")
                    ).pack(anchor="w", padx=14)
     neck_label = tk.Label(sec_neck.body, text="", font=("Consolas", 9), justify="left")
@@ -955,9 +955,9 @@ def main():
 
     # ---- 区画4：測定器 --------------------------------------------------
     sec_mes = Section(colR, "測定器", op.get("measure", True))
-    # ★【2026-07-28】右目も出す（ユーザーの要望）。それまで左目だけだった。
+    # 【2026-07-28】右目も出す（ユーザーの要望）。それまで左目だけだった。
     #   両眼を並べると「片方にしか映っていない」ことに気づける。
-    #   ⚠️太郎の反射は**両眼の画像を使う**（左目だけ使っていた旧実装は 2026-07-26 に修正済み）
+    #   注意：太郎の反射は**両眼の画像を使う**（左目だけ使っていた旧実装は 2026-07-26 に修正済み）
     #     ので、片目だけ見ていると反射が見ているものと食い違う。
     tk.Label(sec_mes.body, text="太郎の目に映っているもの（検出画素は緑）",
              font=("", 9, "bold")).pack(pady=(4, 2))
@@ -997,15 +997,15 @@ def main():
     run_label = tk.Label(sec_run.body, text="", font=("Consolas", 9), justify="left")
     run_label.pack(anchor="w", padx=14)
 
-    # ---- 区画6：★脳（学習したモデルで動かす）2026-07-31 新設 --------------
+    # ---- 区画6：脳（学習したモデルで動かす）2026-07-31 新設 --------------
     # 【なぜ足したか】ユーザーの要望「すべてを編集ウィンドウ付きの Viewer に統合したい」。
     #   これまで「学習した太郎を見る」のは run/viewer.py にしかなく、
-    #   ★編集パネルを使いながら学習後の動きを見ることができなかった。
+    #   編集パネルを使いながら学習後の動きを見ることができなかった。
     #   設計は E/docs/実行基盤_設計.md §7.5（第4段階）。
-    # ⚠️★モデルを指定して起動したときは**開いた状態**にする。
+    # 注意：モデルを指定して起動したときは**開いた状態**にする。
     #   【なぜ、2026-07-31】既定で畳んでいたら、ユーザーが区画の存在に気づけず
     #   「チェックを入れていないので太郎が動かない」状態になった。
-    #   ★見えないものは使えない。指定があるときは最初から見せる。
+    #   見えないものは使えない。指定があるときは最初から見せる。
     sec_brain = Section(colR, "脳（学習したモデル）",
                         op.get("brain", bool(os.environ.get("E_VIEW_MODEL"))))
     brain_a_var = tk.StringVar(value=os.environ.get("E_VIEW_MODEL", ""))
@@ -1016,11 +1016,11 @@ def main():
 
     tk.Label(sec_brain.body, justify="left", fg="#666", font=("", 8),
              text="学習したモデル(.pt)を読むと、自発運動の代わりに\n"
-                  "★その脳が行動を決めます。2つ入れると見比べられます。").pack(
+                  "その脳が行動を決めます。2つ入れると見比べられます。").pack(
         anchor="w", padx=14, pady=(0, 3))
 
     def _pick_model(var):
-        """ファイル選択のダイアログ。★手で打ち込むのも残す（長いパス対策）。"""
+        """ファイル選択のダイアログ。手で打ち込むのも残す（長いパス対策）。"""
         from tkinter import filedialog
         p = filedialog.askopenfilename(
             title="学習したモデルを選ぶ", initialdir=os.path.join(_ROOT, "E", "logs"),
@@ -1037,23 +1037,23 @@ def main():
     slider(sec_brain.body, "探索の揺らぎ", brain_std_var, 0.0, 0.5, 0.001,
            note="学習中の実効値≒0.174。0にすると迷いのない動きになる")
     _bf2 = tk.Frame(sec_brain.body); _bf2.pack(anchor="w", padx=14, pady=2)
-    tk.Checkbutton(_bf2, text="★この脳で動かす", variable=st_brain).pack(side="left")
-    # ★押したら必ず何か起きる。command を付けないと「切り替わったのか分からない」
+    tk.Checkbutton(_bf2, text="この脳で動かす", variable=st_brain).pack(side="left")
+    # 押したら必ず何か起きる。command を付けないと「切り替わったのか分からない」
     #   （2026-07-31：ユーザーの「Bのラジオを押しても表示が変わらない」）
     _switch_hook = [lambda: None]      # 中身は下（脳の準備のあと）で差し替える
     tk.Radiobutton(_bf2, text="A", variable=brain_which, value=0,
                    command=lambda: _switch_hook[0]()).pack(side="left")
     tk.Radiobutton(_bf2, text="B", variable=brain_which, value=1,
                    command=lambda: _switch_hook[0]()).pack(side="left")
-    # ★目標指向の探索（Goal Babbling）。run/viewer.py から移した（2026-07-31）
-    #   ⚠️2026-07-30 の実測で**有害**と判明（おもちゃ接触−32%・persist 1000%）。
+    # 目標指向の探索（Goal Babbling）。run/viewer.py から移した（2026-07-31）
+    #   注意：2026-07-30 の実測で**有害**と判明（おもちゃ接触−32%・persist 1000%）。
     #     さらに 2026-07-31 に「太郎の実装は Self-Prior ではなかった」と分かった
-    #     （頻度分布を持たず一様ランダムに選ぶ）。★作り直す予定の機能。
+    #     （頻度分布を持たず一様ランダムに選ぶ）。作り直す予定の機能。
     #     見比べのために残す＝直したときに「前と何が違うか」を目で見るため。
     st_gb = tk.BooleanVar(value=False)
     gb_rate_var = tk.DoubleVar(value=0.5)
     tk.Checkbutton(sec_brain.body, variable=st_gb,
-                   text="目標指向の探索を混ぜる（⚠️今の実装は有害と判明・作り直し予定）"
+                   text="目標指向の探索を混ぜる（注意今の実装は有害と判明・作り直し予定）"
                    ).pack(anchor="w", padx=14)
     slider(sec_brain.body, "目標指向の割合", gb_rate_var, 0.0, 1.0, 0.05,
            note="学習ループとは違う近似。0.5＝半分の判断で過去の感覚を目標にする")
@@ -1079,7 +1079,7 @@ def main():
     _restart = [True]
 
     # ========================================================================
-    # ★シーンとして保存する（2026-07-29）
+    # シーンとして保存する（2026-07-29）
     # ------------------------------------------------------------------------
     # 【なぜ変えたか】旧 `viewer_saved.json` は**一部の項目しか保存していなかった**。
     #   実物には preset 名に「リクライニング60度」と書いてあるのに、
@@ -1099,7 +1099,7 @@ def main():
         sc["world"]["fence"] = bool(st_fence.get())
         sc["world"]["toy"]["radius"] = float(size_var.get())
         sc["world"]["toy"]["dist"] = float(dist_var.get())
-        # ⚠️首のバネと実験者の手は**同じ `jnt_stiffness` を使う**ので排他。
+        # 注意：首のバネと実験者の手は**同じ `jnt_stiffness` を使う**ので排他。
         #   頭を抑えているあいだ Viewer はスライダーを適用しない（落とし穴 項62）。
         if st_hold_head.get():
             sc["setup"]["head_hold"] = {"stiffness": float(hands.stiffness),
@@ -1111,7 +1111,7 @@ def main():
             sc["setup"]["neck_tone"] = ({"target_deg": float(nk_t.get()),
                                          "stiffness": float(nk_k.get())}
                                         if st_neck.get() else None)
-        # ★四肢の筋緊張。目標角は書かない＝**保存した姿勢が戻る先**になる
+        # 四肢の筋緊張。目標角は書かない＝**保存した姿勢が戻る先**になる
         #   （読み込み側は `apply_state` のあとに効かせるので、これで一致する）
         sc["setup"]["limb_tone"] = ({"hold_deg": float(lt_hold.get()),
                                      "groups": ["arm", "leg"]}
@@ -1141,7 +1141,7 @@ def main():
             parts.append(drift["summary"].replace("　", " "))
         if seen is not None:
             parts.append("おもちゃは見えています" if seen
-                         else "⚠️おもちゃが体に隠れて見えません")
+                         else "注意おもちゃが体に隠れて見えません")
         msg.config(text="\n".join(parts), fg=("#0a7" if ok and seen else "#a30"))
         # 保存し直したときに一覧を最新にする
         try:
@@ -1152,7 +1152,7 @@ def main():
     def save():
         data = {"toy_pos": [float(v.get()) for v in toy_vars],
                 "toy_half_size": float(size_var.get()),
-                # ★2026-07-28 追加。距離・環境の条件も保存する。
+                # 2026-07-28 追加。距離・環境の条件も保存する。
                 #   これが無いと「保存した位置」を再現しても距離の設定が失われる。
                 "toy_dist": float(dist_var.get()),
                 "age": float(_AGE), "head_hold": bool(st_hold_head.get()),
@@ -1163,7 +1163,7 @@ def main():
                 "latency": float(lat_var.get()), "threshold": float(thr_var.get()),
                 "neck_on": bool(st_neck.get()), "neck_k": float(nk_k.get()),
                 "neck_c": float(nk_c.get()), "neck_target": float(nk_t.get()),
-                # ★【2026-07-28 追加】スイッチの状態も残す。
+                # 【2026-07-28 追加】スイッチの状態も残す。
                 #   これが無いと、保存された位置を測るときに**別の姿勢の太郎**を
                 #   測ってしまう（実際、首のバネ30度で調整した設定を
                 #   「実験者が60度で支える」条件で測って、まったく違う値が出た）。
@@ -1194,7 +1194,7 @@ def main():
         mujoco.mj_forward(m, d)
         msg.config(text="仰向けに戻しました")
 
-    # ★「今どうなっているか」をまとめてクリップボードへ（ユーザーの提案 2026-07-27）。
+    # 「今どうなっているか」をまとめてクリップボードへ（ユーザーの提案 2026-07-27）。
     #   설定だけでなく**測定値も**入れる。「こうしたらこうなった」を正確に伝えるため。
     _snapshot = [""]
 
@@ -1226,10 +1226,10 @@ def main():
     gen = [ColoredNoiseGenerator(n_act, seed=0)]
     act = [zero.copy()]
 
-    # ================= ★脳（学習したモデル）2026-07-31 =====================
+    # ================= 脳（学習したモデル）2026-07-31 =====================
     # 【なぜここか】メインループの直前。太郎一式（脳・小脳・神経調節）は
     #   `run/taro_setup.Taro` が組み立てるので、ここでは**呼ぶだけ**にする。
-    # ⚠️★内受容感覚（空腹・眠気・不快・覚醒）が観測に無いと脳の入力次元が合わない。
+    # 注意：内受容感覚（空腹・眠気・不快・覚醒）が観測に無いと脳の入力次元が合わない。
     #   ⇒ HybridEnv で包む。e_viewer は `env.step()` の戻り値を使っていないので、
     #     包んでも既存の編集機能は壊れない（2026-07-31 に確認）。
     brains = {}          # {"A": (taro, hidden, prev_a), "B": ...}
@@ -1237,7 +1237,7 @@ def main():
     brain_da2 = []       # 行動の変化量（学習ログの da2 と同じ量）
     gbuf = []            # 目標指向の探索が使う「過去に経験した感覚」
     gb_stat = [0, 0]     # [目標指向にした回数, 探索のままにした回数]
-    last_obs = [None]    # ★いちばん新しい観測（脳を切り替えたときに渡し直す）
+    last_obs = [None]    # いちばん新しい観測（脳を切り替えたときに渡し直す）
     babble_da2 = []      # もがき運動の変化量（学習済みと見比べるため）
 
     def _load_brain(tag, path):
@@ -1246,7 +1246,7 @@ def main():
             return None
         p = path if os.path.isabs(path) else os.path.join(_ROOT, path)
         if not os.path.exists(p):
-            brain_label.config(text=f"⚠️見つかりません: {path}", fg="#a33")
+            brain_label.config(text=f"注意見つかりません: {path}", fg="#a33")
             return None
         try:
             if _ROOT not in sys.path:
@@ -1257,7 +1257,7 @@ def main():
                 from hybrid_env import HybridEnv
                 hybrid_env[0] = HybridEnv(env)
                 hybrid_env[0].reset(seed=0)
-            # ⚠️★学習時と同じ設定で作らないと、層の形が合わず**黙って白紙**になる
+            # 注意：学習時と同じ設定で作らないと、層の形が合わず**黙って白紙**になる
             #   （Taro._load は形の合う層だけ読む strict=False）。
             #   駆動モードはシーンが決めた実物（筋肉/関節）に合わせる。
             cfg = Config({"actuation": "muscle" if n_act > 90 else "joint",
@@ -1268,8 +1268,8 @@ def main():
             st = t.init_state(t.first_obs)
             return {"taro": t, "state": st}
         except Exception as e:      # noqa: BLE001
-            brain_label.config(text=f"⚠️読めません: {type(e).__name__}: {e}", fg="#a33")
-            print(f"⚠️[脳] 読めません: {type(e).__name__}: {e}", flush=True)
+            brain_label.config(text=f"注意読めません: {type(e).__name__}: {e}", fg="#a33")
+            print(f"注意[脳] 読めません: {type(e).__name__}: {e}", flush=True)
             return None
 
     def _ensure_brains():
@@ -1285,27 +1285,27 @@ def main():
         return [k for k in ("A", "B") if brains.get(k, {}).get("taro")]
 
     def _update_brain_label():
-        """★いまどちらの脳を使っているかを、押した瞬間に画面へ出す。"""
+        """いまどちらの脳を使っているかを、押した瞬間に画面へ出す。"""
         ok = [k for k in ("A", "B") if brains.get(k, {}).get("taro")]
         now = "B" if brain_which.get() else "A"
         if not ok:
             brain_label.config(text="（まだ読み込んでいません）", fg="#666")
         elif now in ok:
             brain_label.config(
-                text=f"★いま {now} で動かしています（読み込み済み: {', '.join(ok)}）",
+                text=f"いま {now} で動かしています（読み込み済み: {', '.join(ok)}）",
                 fg="#0a7")
         else:
             brain_label.config(
-                text=f"⚠️{now} は読み込めていません（読み込み済み: {', '.join(ok)}）",
+                text=f"注意{now} は読み込めていません（読み込み済み: {', '.join(ok)}）",
                 fg="#a33")
 
     def _on_brain_switch():
-        """★A ⇔ B を切り替えたとき。
+        """A ⇔ B を切り替えたとき。
 
-        ⚠️切り替えた側の脳に「いまの観測」を渡し直す。
+        注意：切り替えた側の脳に「いまの観測」を渡し直す。
           【なぜ、2026-07-31】観測は**選んでいる方だけ**更新していたので、
           切り替えると相手は「前に選ばれていたときの観測」から再開してしまう。
-          ★体は動いているのに脳だけ過去を見ている状態になる。
+          体は動いているのに脳だけ過去を見ている状態になる。
         """
         brain_da2.clear()          # 前の脳の値が混ざらないように捨てる
         gb_stat[0] = gb_stat[1] = 0
@@ -1320,14 +1320,14 @@ def main():
     _switch_hook[0] = _on_brain_switch
 
     def _brain_action():
-        """★いま選んでいる脳に、次の行動を決めてもらう。"""
+        """いま選んでいる脳に、次の行動を決めてもらう。"""
         tag = "B" if brain_which.get() else "A"
         b = brains.get(tag) or {}
         t, stt = b.get("taro"), b.get("state")
         if not t or stt is None:
             return None
         import torch
-        # ⚠️★`torch.no_grad()` で囲んではいけない。
+        # 注意：`torch.no_grad()` で囲んではいけない。
         #   太郎の潜在推論（予測符号化）は**中で torch.autograd.grad を使う**ので、
         #   勾配を切ると「element 0 of tensors does not require grad」で落ちる。
         #   （2026-07-31 に単体テストで踏んだ。run/viewer.py も no_grad を使っていない）
@@ -1337,7 +1337,7 @@ def main():
         z, _kl, _rc, hn = t.infer_latent(sv, stt["prev_a"], cf, stt["hidden"])
         z = z.detach()
         mean = t.act_mean(z)
-        # ★目標指向の探索。⚠️経験のバッファは**常に**溜める。
+        # 目標指向の探索。注意経験のバッファは**常に**溜める。
         #   （ONのときだけ溜める実装にしたら、切り替えるたび64件たまる前にOFFになり
         #     一度も発動しなかった。2026-07-30 のユーザー報告「g押してもなんも変わってない」）
         clp = t.encode_target(stt["obs"]).detach()
@@ -1369,13 +1369,13 @@ def main():
     fire_until = [-1.0]
 
     with mujoco.viewer.launch_passive(m, d) as viewer:
-        # ★2026-07-27：初期カメラを太郎の顔に寄せる。
+        # 2026-07-27：初期カメラを太郎の顔に寄せる。
         #   これが無いと MuJoCo の既定カメラ（シーン全体を引きで映す）になり、
         #   柵の外から見下ろす画になる。顔の前にある直径2cmのおもちゃは
         #   小さすぎて柵に隠れ、**「おもちゃが出てこない」ように見えた**
         #   （ユーザーの目視 2026-07-27。実際には正しい位置にあった）。
         try:
-            # ★真上寄りから見下ろす。仰向けの太郎と、顔の前のおもちゃが
+            # 真上寄りから見下ろす。仰向けの太郎と、顔の前のおもちゃが
             #   両方いちどに入る角度（実測で選んだ）。
             _look = np.array(d.body("head").xpos, dtype=float)
             try:
@@ -1400,23 +1400,23 @@ def main():
                 break
 
             if _restart[0]:
-                # ★★【2026-07-29】シーン方式。選んだシーンが今と違うなら、
+                # 【2026-07-29】シーン方式。選んだシーンが今と違うなら、
                 #   体そのものを作り直す必要がある（geomの寸法・質量・リクライニング角は
                 #   モデル構築時に決まるので実行中には変えられない）。
                 #   ⇒ E_SCENE を設定して自分を起動し直す。
-                #   ★旧版は条件を1つずつ環境変数に詰め直していたため、詰め忘れると
+                #   旧版は条件を1つずつ環境変数に詰め直していたため、詰め忘れると
                 #     「別の条件で立ち上がる」ことが起きていた。シーン名1つで済む。
                 _pick = scene_var.get()
                 _need_rebuild = bool(_pick) and (_scene is None
                                                  or _pick != _scene.get("name"))
                 if _need_rebuild:
-                    msg.config(text=f"★シーン「{_pick}」で体を作り直します。"
+                    msg.config(text=f"シーン「{_pick}」で体を作り直します。"
                                     "新しい窓が開いたら、この窓は閉じます")
                     win.update_idletasks()
                     win.after(0, lambda: None)
                     _envv = dict(os.environ)
                     _envv["E_SCENE"] = _pick
-                    # ⚠️シーンが全部を決めるので、古い個別指定は消しておく
+                    # 注意：シーンが全部を決めるので、古い個別指定は消しておく
                     #   （残っていると「シーンの値と環境変数のどちらが効くのか」が
                     #     曖昧になり、散らばりが復活する）。
                     for _k in ("E_AGE", "E_HEAD_HOLD", "E_FENCE", "E_TOY_RADIUS",
@@ -1424,7 +1424,7 @@ def main():
                                "E_TOY_POS", "E_SEAT_FRICTION", "E_TOY_MODE",
                                "E_TOY_SHAPE", "E_TOY_DIST"):
                         _envv.pop(_k, None)
-                    # ★★【2026-07-28 修正】`os.execve` をやめた。
+                    # 【2026-07-28 修正】`os.execve` をやめた。
                     #   Windows には本当の exec が無く、Python は「新プロセスを作って
                     #   自分は終了する」動作になる。その結果、新プロセスが親のコンソールを
                     #   失って管理から外れ、**見た目にはアプリが消えた**ように見えた
@@ -1434,7 +1434,7 @@ def main():
                     _flags = 0
                     if os.name == "nt":
                         # 新しいコンソールを開く＝完全に独立したプロセスになる。
-                        # ⚠️DETACHED_PROCESS だとログが見えず、失敗しても気づけない
+                        # 注意：DETACHED_PROCESS だとログが見えず、失敗しても気づけない
                         _flags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
                     try:
                         subprocess.Popen(
@@ -1444,7 +1444,7 @@ def main():
                                         "別の窓が開くまで少し待ってください")
                         win.update_idletasks()
                     except Exception as _e:
-                        msg.config(text=f"⚠️起動に失敗しました: {_e}")
+                        msg.config(text=f"注意起動に失敗しました: {_e}")
                         _restart[0] = False
                         continue
                     try:
@@ -1457,7 +1457,7 @@ def main():
                         pass
                     return
 
-                # ★★【2026-07-29 修正・重大】シーンから起動したときは
+                # 【2026-07-29 修正・重大】シーンから起動したときは
                 #   `env.reset()` **だけ**では駄目。リセットは既定の姿勢に戻すので、
                 #   シーンの姿勢もおもちゃの位置も消える。
                 #   `_restart` の初期値は True なので**起動直後に必ずここを通る**＝
@@ -1473,7 +1473,7 @@ def main():
                     toy_pos0 = np.array(d.qpos[toy_qadr:toy_qadr + 3], dtype=float)
                 else:
                     env.reset(seed=0)
-                    # ★やり直しのたびに支え直す（目標角は「支え始めた時点の角度」なので、
+                    # やり直しのたびに支え直す（目標角は「支え始めた時点の角度」なので、
                     #   リセット後の姿勢で取り直す必要がある）
                     if st_hold_head.get():
                         hands.hold(target=_hold_tgt)
@@ -1485,7 +1485,7 @@ def main():
                 toy_base[0] = None
                 head_w.clear(); devs.clear(); seens.clear(); neck_hist.clear()
                 parent_log.clear(); _parent[0] = None
-                # ★おもちゃも初期状態に戻す。戻さないと「顔の前へ持っていく」で
+                # おもちゃも初期状態に戻す。戻さないと「顔の前へ持っていく」で
                 #   記録された位置（首が横を向いていれば体の横＝柵の外）が残り、
                 #   やり直しても変な所にあるままになる（ユーザーの報告 2026-07-27）。
                 follow_var.set(False)          # 環境まかせに戻す
@@ -1497,9 +1497,9 @@ def main():
                 _restart[0] = False
 
             freeze = st_freeze.get()
-            # ★物理を止めていると反射の指令が実行されない（step の中にあるため）
+            # 物理を止めていると反射の指令が実行されない（step の中にあるため）
             if freeze and st_orient.get() and tick % 60 == 0:
-                msg.config(text="⚠️物理を止めています。反射は目を動かせません"
+                msg.config(text="注意物理を止めています。反射は目を動かせません"
                                 "（『物理を止める』を外してください）")
             OR.SACCADE_LATENCY = float(lat_var.get())
             OR.SACCADE_MIN_STRENGTH = float(thr_var.get())
@@ -1511,7 +1511,7 @@ def main():
                     m.jnt_stiffness[j] = tone_k[j] if want_tone else 0.0
                 tone_on[0] = want_tone
 
-            # ★★【2026-07-28 修正】頭を抑えているあいだは、このスライダーを**適用しない**。
+            # 【2026-07-28 修正】頭を抑えているあいだは、このスライダーを**適用しない**。
             #   実験者の手も首のバネも同じ `jnt_stiffness` を使うので、毎tickここで
             #   スライダーの値（既定0.4）を書くと、`hands.hold()` が入れた強さ200が
             #   **上書きされて消えていた**（ユーザーの目視「首が結構動いてる」で発覚）。
@@ -1529,7 +1529,7 @@ def main():
                     m.dof_damping[int(m.jnt_dofadr[j])] = (float(nk_c.get()) if _on
                                                            else neck_damp0[nm])
 
-            # ★環境のスイッチ（柵・実験者の手）を実行中でも反映する
+            # 環境のスイッチ（柵・実験者の手）を実行中でも反映する
             if bool(st_fence.get()) != fence_on[0]:
                 apply_fence(st_fence.get())
             if bool(st_hold_head.get()) != bool(hands.holding):
@@ -1538,13 +1538,13 @@ def main():
                 else:
                     hands.release()
 
-            # おもちゃ。★揺らしは「固定するか」と独立に効かせる。
+            # おもちゃ。揺らしは「固定するか」と独立に効かせる。
             #   固定ON  … スライダーの位置＋揺れ
             #   固定OFF … 環境が置いた位置（視線の正面）＋揺れ
             wob = np.array([0.0, SHAKE_AMP * np.sin(2 * np.pi * SHAKE_HZ * t_sim), 0.0]) \
                 if shake_var.get() else np.zeros(3)
 
-            # ★親が顔の前へ運んでいる最中（ボタンで発動）。終わるとスライダーに引き継ぐ
+            # 親が顔の前へ運んでいる最中（ボタンで発動）。終わるとスライダーに引き継ぐ
             if _parent[0] is not None:
                 if parent_log and parent_log[-1] is None:
                     parent_log[-1] = round(t_sim, 2)   # 押された時刻を確定
@@ -1588,7 +1588,7 @@ def main():
                 m.geom_size[toy_gadr] = [s, s, s]
 
             # 姿勢
-            # ⚠️★【2026-07-28 修正】`freeze`（物理を止める）でスライダーの角度を
+            # 注意：【2026-07-28 修正】`freeze`（物理を止める）でスライダーの角度を
             #   書き戻していたため、**止めた瞬間に姿勢が作りかけの値へ飛んでいた**
             #   （ユーザーの要望「現状維持のまま物理を止めてほしい」）。
             #   スライダーで姿勢を作りたいときは「姿勢を固定」（st_hold）を使う。
@@ -1602,14 +1602,14 @@ def main():
                         d.qvel[int(m.jnt_dofadr[jid])] = 0.0
                     if jd.get("is_neck"):
                         _neck_tgt[jd["key"]] = float(jd["var"].get())
-                # ★首は実験者の手（バネ）が支えているので、**支える目標角も**
+                # 首は実験者の手（バネ）が支えているので、**支える目標角も**
                 #   一緒に動かす。これをしないと、スライダーで首を曲げた瞬間に
                 #   バネが元の角度へ引き戻し、姿勢が作れない（強さ200N·m/rad）。
                 if _neck_tgt and st_hold_head.get() and hands.holding:
                     hands.hold(target=_neck_tgt)
                     _hold_tgt = dict(_neck_tgt)
 
-            # ★物理を止めているあいだは step() が呼ばれず、おもちゃを運ぶ処理も
+            # 物理を止めているあいだは step() が呼ばれず、おもちゃを運ぶ処理も
             #   動かない。待たずに定位置へ置く（2026-07-27）。
             if freeze and getattr(u, "_toy_pending", False):
                 try:
@@ -1623,7 +1623,7 @@ def main():
                     pass
 
             if freeze:
-                # ⚠️★体の根元（位置・向き）も戻さない。止めた時点の姿勢を保つ。
+                # 注意：体の根元（位置・向き）も戻さない。止めた時点の姿勢を保つ。
                 #   `root_qpos0` はリセット直後の値なので、書き戻すと
                 #   リクライニングで座っていた体が仰向けの初期位置へ飛ぶ。
                 #   「仰向けに戻す」ボタンを使いたいときだけ明示的に戻す。
@@ -1631,29 +1631,29 @@ def main():
                 d.qacc[:] = 0.0
                 mujoco.mj_forward(m, d)
             else:
-                # ★学習した脳が優先（チェックが入っていれば自発運動より上）
+                # 学習した脳が優先（チェックが入っていれば自発運動より上）
                 if st_brain.get():
                     if tick % 10 == 0:          # 1判断＝10物理ステップ（K=10）
-                        # ⚠️★「読んだ結果が空」でも brains には印が残るので、
+                        # 注意：「読んだ結果が空」でも brains には印が残るので、
                         #   `not brains` だけだと**パスを直しても読み直さない**。
                         #   いま選んでいる側の脳ができているかで判断する。
                         _tag = "B" if brain_which.get() else "A"
                         if not (brains.get(_tag) or {}).get("taro"):
                             _ensure_brains()
                         a_env = _brain_action()
-                        # ⚠️★読めていないのに黙って動かないのを止める。
+                        # 注意：読めていないのに黙って動かないのを止める。
                         #   （2026-07-31：チェックを入れても何も起きず、
                         #     画面にも理由が出ないので原因が分からなかった）
                         if a_env is None and tick % 500 == 0:
                             tag = "B" if brain_which.get() else "A"
                             msg.config(
-                                text=f"⚠️脳{tag} が読めていないので動きません。"
+                                text=f"注意脳{tag} が読めていないので動きません。"
                                      f"パスを確かめてください")
                         if a_env is not None:
                             from run.taro_setup import rescale_action
                             act[0] = rescale_action(
                                 a_env, hybrid_env[0].action_space).astype(np.float32)
-                    # ⚠️★HybridEnv 側で進める（内臓の時間も進める）。
+                    # 注意：HybridEnv 側で進める（内臓の時間も進める）。
                     #   生の env を進めると内受容感覚が止まったままになる。
                     obs, _r, _te, _tr, _in = hybrid_env[0].step(act[0])
                     last_obs[0] = obs
@@ -1665,12 +1665,12 @@ def main():
                         _prev_act = act[0].copy()
                         act[0] = np.clip(0.5 + 0.174 * gen[0].sample(0.7), 0.0, 1.0
                                          ).astype(np.float32)
-                        # ★もがき運動の変化量も同じ物差しで測る。
+                        # もがき運動の変化量も同じ物差しで測る。
                         #   【なぜ、2026-07-31】ユーザーの目視「学習済みの方が
-                        #   ちょっと激しく動いている気がする」を★数字で確かめるため。
-                        #   ⚠️ただし脳の dAction2 は**方策の出力**（-1〜1）で測るのに対し、
-                        #     こちらは**環境へ送る値**（筋活性化0〜1）。★物差しが違うので
-                        #     大小をそのまま比べられない。★傾向を見るだけに使う。
+                        #   ちょっと激しく動いている気がする」を数字で確かめるため。
+                        #   注意：ただし脳の dAction2 は**方策の出力**（-1〜1）で測るのに対し、
+                        #     こちらは**環境へ送る値**（筋活性化0〜1）。物差しが違うので
+                        #     大小をそのまま比べられない。傾向を見るだけに使う。
                         babble_da2.append(float(((act[0] - _prev_act) ** 2).mean()))
                         if len(babble_da2) > 200:
                             babble_da2.pop(0)
@@ -1704,14 +1704,14 @@ def main():
                     devs.append(dev)
                 seens.append(1.0 if rep.get("pix_seen") else 0.0)
 
-                j = f"①角度   {rep['angle']:5.1f}°  {'視野内' if rep['in_fov'] else '★視野外'}\n"
+                j = f"①角度   {rep['angle']:5.1f}°  {'視野内' if rep['in_fov'] else '視野外'}\n"
                 j += ("②光線   遮蔽なし\n" if rep["ray_ok"]
-                      else f"②光線   ★{rep['ray_hit']}に遮られている\n")
+                      else f"②光線   {rep['ray_hit']}に遮られている\n")
                 if rep.get("pix_seen"):
                     j += (f"③画像   {rep['n_pixels']:4d}画素  "
                           f"中心からのずれ {dev:.2f}（平均 {np.mean(devs):.2f}）")
                 else:
-                    j += "③画像   ★映っていない"
+                    j += "③画像   映っていない"
                 judge_label.config(text=j, fg="#070" if rep.get("pix_seen") else "#a00")
 
                 toy = d.xpos[toy_bid]
@@ -1732,7 +1732,7 @@ def main():
                         continue
                     other = b2 if b1 == toy_bid else b1
                     pen.append((m.body(other).name, -c.dist * 1000))
-                # ★親としての介入の記録（何回・どれくらいの間隔で持っていったか）
+                # 親としての介入の記録（何回・どれくらいの間隔で持っていったか）
                 _pl = [x for x in parent_log if x is not None]
                 if _pl:
                     gaps = [_pl[i] - _pl[i - 1] for i in range(1, len(_pl))]
@@ -1748,7 +1748,7 @@ def main():
                 if pen:
                     pen.sort(key=lambda x: -x[1])
                     pen_label.config(
-                        text="★めり込み " + " ".join(f"{n}{v:.1f}mm" for n, v in pen[:3]),
+                        text="めり込み " + " ".join(f"{n}{v:.1f}mm" for n, v in pen[:3]),
                         fg="#a00")
                 else:
                     pen_label.config(text="めり込みなし", fg="#070")
@@ -1756,7 +1756,7 @@ def main():
                 hw = np.array(head_w) if head_w else np.zeros(1)
                 warn = ""
                 if not freeze and st_hold.get():
-                    warn = "\n★「この角度で固定する」がONのまま物理を回しています＝暴れます"
+                    warn = "\n「この角度で固定する」がONのまま物理を回しています＝暴れます"
                 head_label.config(
                     text=f"頭の角速度 平均 {hw.mean():.3f} 最大 {hw.max():.3f} rad/s{warn}")
 
@@ -1772,14 +1772,14 @@ def main():
                     c_crit = 2.0 * np.sqrt(k * NECK_I)
                     c_now = float(nk_c.get())
                     ratio = c_now / c_crit if c_crit > 1e-12 else float("inf")
-                    kind = ("★振動する（減衰不足）" if ratio < 0.7
+                    kind = ("振動する（減衰不足）" if ratio < 0.7
                             else "ちょうど良い" if ratio < 1.6 else "戻りが遅い（減衰過多）")
                     recent = np.array(neck_hist[-100:]) if len(neck_hist) > 20 else np.zeros(1)
                     swing = float(recent.max() - recent.min())
                     txt = (f"首の角度 {ang:7.2f}度（目標 {nk_t.get():5.1f}）  "
                            f"速さ {vel:6.2f}度/s\n"
                            f"直近2秒の振れ幅 {swing:5.2f}度  "
-                           f"{'落ち着いている' if swing < 1.0 else '★まだ動いている'}\n"
+                           f"{'落ち着いている' if swing < 1.0 else 'まだ動いている'}\n"
                            f"臨界減衰 {c_crit:.4f}／今 {c_now:.4f}（{ratio:.2f}倍）{kind}")
                     if _drop[0] is not None:
                         if _drop[0]["t0"] is None:
@@ -1790,13 +1790,13 @@ def main():
                             _drop[0]["settled"] = el
                         st = (f"{_drop[0]['settled']:.1f}秒で落ち着いた"
                               if _drop[0]["settled"] else f"{el:.1f}秒経過")
-                        txt += f"\n★持ち上げテスト：{st}  行き過ぎ {-_drop[0]['peak']:.1f}度"
+                        txt += f"\n持ち上げテスト：{st}  行き過ぎ {-_drop[0]['peak']:.1f}度"
                     neck_label.config(
                         text=txt, fg="#a00" if ratio < 0.7 and st_neck.get() else "#333")
 
                 seen_pct = float(np.mean(seens)) * 100 if seens else 0.0
                 fired = "● 撃った" if t_sim < fire_until[0] else ""
-                # ★おもちゃの状態。最初の1.5秒は「遠くで待機中」＝視界に無いのが正常
+                # おもちゃの状態。最初の1.5秒は「遠くで待機中」＝視界に無いのが正常
                 if getattr(u, "_toy_pending", False):
                     phase = ("おもちゃは遠くで待機中"
                              if not getattr(u, "_toy_arriving", False)
@@ -1813,7 +1813,7 @@ def main():
                          f"ずれ平均 {np.mean(devs) if devs else float('nan'):5.2f}"
                          f"（反射OFFで0.48）")
 
-                # ★距離と輻輳（寄り目）の必要角を出す（2026-07-28）。
+                # 距離と輻輳（寄り目）の必要角を出す（2026-07-28）。
                 #   実際の目からおもちゃまでの距離も測って、設定値と比べられるようにする。
                 try:
                     _eyes = [np.array(d.cam_xpos[int(m.camera(_n).id)], dtype=float)
@@ -1825,22 +1825,22 @@ def main():
                     vergence_label.config(
                         text=f"実際の距離 {_real*100:5.1f}cm（設定 {dist_var.get()*100:.1f}cm）\n"
                              f"両目で見るのに要る寄り目 {_verg:5.1f}度"
-                             f"（瞳孔間 {IPD*100:.1f}cm）★太郎は寄り目ができない")
+                             f"（瞳孔間 {IPD*100:.1f}cm）太郎は寄り目ができない")
                 except Exception:
                     pass
 
-                # ★環境の状態＝「今どの条件で見ているか」を常に出す（2026-07-28）。
+                # 環境の状態＝「今どの条件で見ているか」を常に出す（2026-07-28）。
                 #   Viewer と測定で条件が食い違っていた事故を防ぐため。
                 _off = hands.offsets() if hands.holding else {}
                 _offmax = max((abs(v) for v in _off.values()), default=0.0)
-                # ★実行速度（2026-07-29 追加）。ユーザーの報告「めっちゃ重い」に対し、
+                # 実行速度（2026-07-29 追加）。ユーザーの報告「めっちゃ重い」に対し、
                 #   何倍速で動いているかを常に見えるようにする。
                 #     実速度 = シミュレーション時間 ÷ 実際に経過した時間
                 #     1.0 なら等倍速。0.3 なら現実の3分の1の速さでしか進んでいない
                 _wall = max(time.time() - wall0, 1e-6)
                 _rate = t_sim / _wall
                 _tgt = float(speed_var.get())
-                _mark = "" if _rate >= _tgt * 0.9 else "  ★遅い"
+                _mark = "" if _rate >= _tgt * 0.9 else "  遅い"
                 env_label.config(
                     text=f"体年齢 {_AGE:g}ヶ月（視力も同じ）  "
                          f"柵 {'あり' if fence_on[0] else 'なし'}  "
@@ -1852,7 +1852,7 @@ def main():
                          + f"\n実行速度 {_rate:.2f}倍速（設定 {_tgt:.1f}）"
                            f"　{t_sim:.1f}秒ぶん進んだ / 実時間 {_wall:.0f}秒{_mark}")
 
-                # ★左右の目をそれぞれ描く（2026-07-28）
+                # 左右の目をそれぞれ描く（2026-07-28）
                 try:
                     from PIL import Image, ImageTk
                     for _side, _cv in eye_canvases.items():
@@ -1871,7 +1871,7 @@ def main():
                 except Exception:
                     pass
 
-                # ★コピー用のまとめ（「現在の設定をコピー」ボタンが使う）
+                # コピー用のまとめ（「現在の設定をコピー」ボタンが使う）
                 _toy = [f"{v.get():.3f}" for v in toy_vars]
                 _pl2 = [x for x in parent_log if x is not None]
                 _gaps = [_pl2[i] - _pl2[i - 1] for i in range(1, len(_pl2))]
@@ -1899,34 +1899,34 @@ def main():
                     f"自発運動:{'ON' if st_babble.get() else 'OFF'}"
                     + (f"（変化量{np.mean(babble_da2[-50:]):.3f}）"
                        if babble_da2 else "") + "\n"
-                    # ⚠️★脳の状態は**常に**出す。
+                    # 注意：脳の状態は**常に**出す。
                     #   【なぜ、2026-07-31】「動いているとき」だけ出す作りにしたら、
-                    #   ★チェックを入れ忘れて動かないときに理由が分からなかった。
-                    #   ★何もしていないなら「何もしていない」と書く。
+                    #   チェックを入れ忘れて動かないときに理由が分からなかった。
+                    #   何もしていないなら「何もしていない」と書く。
                     + "脳        "
-                    + ("OFF（★チェックを入れると学習した脳が動かします）"
+                    + ("OFF（チェックを入れると学習した脳が動かします）"
                        if not st_brain.get() else
-                       (f"★{'B' if brain_which.get() else 'A'} で動かしている"
+                       (f"{'B' if brain_which.get() else 'A'} で動かしている"
                         f"  揺らぎ{brain_std_var.get():.3f}"
                         + (f"  dAction2={np.mean(brain_da2[-50:]):.3f}"
-                           if brain_da2 else "  ⚠️まだ動いていません")
+                           if brain_da2 else "  注意まだ動いていません")
                         + (f"  目標指向{gb_stat[0]}回/探索{gb_stat[1]}回"
                            if st_gb.get() else "")))
                     + (f"\n          A={os.path.basename(brain_a_var.get())}"
                        if brain_a_var.get() else "")
                     + (f"  B={os.path.basename(brain_b_var.get())}"
                        if brain_b_var.get() else "")
-                    + ("\n          ⚠️自発運動と脳が両方ONです。★脳が優先されます"
+                    + ("\n          注意自発運動と脳が両方ONです。脳が優先されます"
                        if st_brain.get() and st_babble.get() else "") + "\n"
                     "\n【今の状態】\n"
                     f"経過 {t_sim:.1f}秒  サッケード {reflex.n_saccades}発\n"
                     f"反応の強さ {reflex.strength:.3f}（閾値 {thr_var.get():.2f}）\n"
                     f"①角度 {rep['angle']:.1f}度 "
-                    f"{'視野内' if rep['in_fov'] else '★視野外'}  "
-                    f"②光線 {'遮蔽なし' if rep['ray_ok'] else '★' + str(rep['ray_hit']) + 'に遮られている'}  "
+                    f"{'視野内' if rep['in_fov'] else '視野外'}  "
+                    f"②光線 {'遮蔽なし' if rep['ray_ok'] else '' + str(rep['ray_hit']) + 'に遮られている'}  "
                     f"③画像 "
                     + (f"{rep['n_pixels']}画素 中心からのずれ {dev:.2f}"
-                       if rep.get("pix_seen") else "★映っていない") + "\n"
+                       if rep.get("pix_seen") else "映っていない") + "\n"
                     f"見えていた割合 {seen_pct:.1f}%  "
                     f"ずれ平均 {(np.mean(devs) if devs else float('nan')):.2f}"
                     f"（反射OFFで0.48）\n"

@@ -5,26 +5,26 @@
     bias(重力)      0.00157
     passive(バネ)  -0.00002
     actuator(筋)    0.00000
-    constraint      6.31246   ← ★他の4000倍。首の筋力 0.066Nm の95倍
+    constraint      6.31246   ← 他の4000倍。首の筋力 0.066Nm の95倍
   → 重力でも筋でもバネでもなく、**拘束反力**が太郎を弾いている。
 
 【constraint が出る条件は2つ】
   ①関節角度が可動域（jnt_range）の外にある → MuJoCo が押し戻す
   ②物体どうしがめり込んでいる（接触の貫入）→ 押し出す
 
-★①が疑わしい。生理的屈曲を「伸展の限界＝jnt_range」で実装したとき
+①が疑わしい。生理的屈曲を「伸展の限界＝jnt_range」で実装したとき
 （2026-07-26、FLEXION_MODE="range"）、**初期姿勢がその範囲の外に出た**可能性がある。
 そうならリセットのたびに太郎は弾き飛ばされ、以降の全実験が汚染される。
 """
 
-# ⚠️★古い方式（2026-07-30 に整理）。新しい実験は `run/main.py` を通す。
+# 注意：古い方式（2026-07-30 に整理）。新しい実験は `run/main.py` を通す。
 #   【経緯】目標Eの実験スクリプトが118本あり、うち66本が**独立に環境を組み立てていた**。
 #     そのため「学習は関節モード（90関節を独立に駆動＝逸脱リスト 逸脱5）、
 #     測定とViewerは筋肉モード（拮抗筋2本/関節）」という**別の体で動く**事故が起きた
 #     （ユーザーの目視「視線誘導反射の実験の時とは動きが全然違う」で発覚。
 #      実測で動きが人間の新生児の約3.3倍速かった）。
 #   【設計と移行計画】`E/docs/実行基盤_設計.md`
-#   ⚠️このファイルは**記録として残す**（削除しない方針）。
+#   注意：このファイルは**記録として残す**（削除しない方針）。
 #     中の測り方は再利用できるので、プラグインへ移すときの元にする。
 import os, sys, warnings
 warnings.filterwarnings("ignore")
@@ -63,7 +63,7 @@ def check(env, label):
             over = (q - hi) if q > hi else (q - lo)
             out.append((m.joint(j).name, np.degrees(q), np.degrees(lo),
                         np.degrees(hi), np.degrees(over)))
-    print(f"\n[1] ★可動域の外にある関節: {len(out)} 個")
+    print(f"\n[1] 可動域の外にある関節: {len(out)} 個")
     if out:
         print(f"  {'関節':<34}{'現在':>9}{'下限':>9}{'上限':>9}{'はみ出し':>11}")
         for nm, q, lo, hi, ov in sorted(out, key=lambda x: -abs(x[4])):
@@ -84,7 +84,7 @@ def check(env, label):
         c = d.contact[i]
         if c.dist < -1e-5:      # 負の距離＝貫入
             deep.append((gname(c.geom1), gname(c.geom2), float(c.dist)))
-    print(f"    ★めり込んでいる接触: {len(deep)} 個")
+    print(f"    めり込んでいる接触: {len(deep)} 個")
     for g1, g2, dist in sorted(deep, key=lambda x: x[2])[:15]:
         print(f"      {g1:<32} × {g2:<32} 貫入 {-dist*1000:7.2f} mm")
 
@@ -109,7 +109,7 @@ def main():
     res = {}
     for label, flex, toy in [("生理的屈曲ON・おもちゃあり（現状）", True, True),
                              ("生理的屈曲OFF・おもちゃあり", False, True),
-                             ("生理的屈曲ON・★おもちゃなし", True, False)]:
+                             ("生理的屈曲ON・おもちゃなし", True, False)]:
         kw = body_kwargs_from_env(0.0, verbose=False)
         kw["flexion"] = flex
         env = ToySupineEnv(actuation_model=MuscleModel,

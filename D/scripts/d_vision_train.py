@@ -88,7 +88,7 @@ def main():
     torch.manual_seed(seed); np.random.seed(seed)
 
     print("=== 本番・追加学習（Cの自己モデル＋視覚を継続学習）===")
-    # ★訂正：fovy拡大とベータ高さ修正を同時に変えてしまい、どちらが「視野がぐちゃぐちゃ」
+    # 訂正：fovy拡大とベータ高さ修正を同時に変えてしまい、どちらが「視野がぐちゃぐちゃ」
     # の原因か切り分けられなくなった（1機構ずつ検証、の原則違反）。fovyは既定60に戻し、
     # 高さ修正だけを単独でテストする。
     env = HybridEnv(BetaSittingEnv(vision_params=lean_vision_params(RES, fovy=60)))
@@ -102,10 +102,10 @@ def main():
 
     brain = TaroBrainWithMotor(vocab_size=3, sensory_dim=sdim, n_actuators=n_act, proprio_dim=prop_dim)
     emb_dim = brain.sensory_proj.out_features
-    # 【★2026-07-25】D-a/D-b の層を**太郎の中（core）のものに一本化**した。
+    # 【2026-07-25】D-a/D-b の層を**太郎の中（core）のものに一本化**した。
     # 従来はここで別に作っており、core の motor_input_proj / forward_model_head は
     # 作られるだけで一度も使われていなかった＝脳が二重に存在していた（構造監査で発覚）。
-    # 構造・初期化とも core 側と完全に同型。⚠️層名が変わるので旧チェックポイントは
+    # 構造・初期化とも core 側と完全に同型。注意層名が変わるので旧チェックポイントは
     # 読めない＝学習しなおし前提（ユーザー判断 2026-07-25）。
     emb_proj = brain.motor_input_proj      # 旧名を別名として残す
     nat_head = brain.forward_model_head
@@ -131,7 +131,7 @@ def main():
     load_matching(cereb, blob["cereb"], "小脳")
     cere_opt = torch.optim.Adam(cereb.parameters(), lr=0.005)
     hidden = brain.init_motor_hidden(); prev_a = torch.zeros(n_act)
-    # 【★2026-07-25】睡眠リプレイのバッファを太郎の海馬（core: brain/hippocampus.py の
+    # 【2026-07-25】睡眠リプレイのバッファを太郎の海馬（core: brain/hippocampus.py の
     # MotorHippocampus）に一元化。**旧実装は独自のdictで、core にある FIFO容量上限(3600)も
     # clear() も無く、学習全期間ぶん無制限に増え続けていた**＝「直近の覚醒経験を再生する」
     # という睡眠リプレイの意味から外れた劣化コピーだった（構造監査で発覚）。
@@ -171,7 +171,7 @@ def main():
             learner.optimizer.zero_grad(); loss.backward()
             torch.nn.utils.clip_grad_norm_(learner.brain.parameters(), learner.grad_clip)
             learner.optimizer.step()
-            # ★今回の新規（ユーザー提案）：小脳の練習も睡眠リプレイの対象にする。
+            # 今回の新規（ユーザー提案）：小脳の練習も睡眠リプレイの対象にする。
             # 従来は小脳は"その場の1回"しか練習できず生の経験回数に律速されていた。
             # 貯めた(状態z, 実際の行動)を復習して自動化を多重に鍛える＝自己教師ありのまま多重化。
             closs = cereb.imitation_loss(z.detach(), AA[idx])
@@ -179,11 +179,11 @@ def main():
 
     print(f"\n学習開始（n_train={n_train}ティック・K={K}・視覚ON{RES}x{RES}）")
     t0 = time.time()
-    # ★ユーザー指摘(2026-07-17)：録画した映像が「視野がぐちゃぐちゃ」に見えた。訂正：
+    # ユーザー指摘(2026-07-17)：録画した映像が「視野がぐちゃぐちゃ」に見えた。訂正：
     # record()の行動は探索ノイズ(std)を足さない方策の"平均値"そのもの＝喃語(ランダム性)は
     # 無関係で、方策自体(まだ十分学習していない読込直後の脳)の出力の"大きさ"が原因の疑い。
     # 90アクチュエータの多くが極端な値だと全身が毎秒(K=100=1秒)大きく振れ暴れて見える。
-    # ⚠️経験的な定数＝感度確認が要る。人間の乳児の運動性喃語も全力で動くわけではない、
+    # 注意：経験的な定数＝感度確認が要る。人間の乳児の運動性喃語も全力で動くわけではない、
     # という考えに基づき、方策の出力に上限をかけて抑える。
     ACTION_SCALE = 0.3
 
@@ -247,7 +247,7 @@ def record(env, brain, fusion, emb_proj, nat_head, zc, step_k, state, n=100):
     beta_z = env.unwrapped.BETA_HOME[2]   # クラス側の較正済み高さ(0.45)を使う（ここでの再ハードコード禁止）
     third, eye = [], []
     obs, _ = env.reset()
-    # ★滑らかな録画にする：1ティック(K=100物理ステップ=1秒)を一気に飛ばすと「コマ送り」に
+    # 滑らかな録画にする：1ティック(K=100物理ステップ=1秒)を一気に飛ばすと「コマ送り」に
     # なるので、K内をSUB刻みで描画する。行動は1ティックの間は固定(現Taroと同じ)なので、
     # 学習ロジックは変えず「途中経過も撮る」だけ。
     SUB = 10   # 1秒あたり8フレーム（K/SUB=約12ステップごとに1描画）

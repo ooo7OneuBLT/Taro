@@ -1,5 +1,5 @@
 """
-★②本番：親=左右に動く（信号）＋ 太郎=頭を左右に振る（egomotion）。
+②本番：親=左右に動く（信号）＋ 太郎=頭を左右に振る（egomotion）。
 体の感覚（前庭・固有感覚・遠心性コピー）を足せば、自己運動下でも親の左右移動を読めるか。
 
 【土台の安定化】各クリップの頭で 太郎を初期姿勢へリセット＋養育者を定位置にワープ
@@ -81,7 +81,7 @@ def collect(self_move, n_clip):
     while len(Y) < n_clip and attempts < max_attempts:
         attempts += 1
         right = bool(rng.integers(0, 2))
-        # ★出発位置をランダムにずらす＝「動きの向き」だけがラベルになる（始点位置での位置漏れを断つ）
+        # 出発位置をランダムにずらす＝「動きの向き」だけがラベルになる（始点位置での位置漏れを断つ）
         center = float(rng.uniform(-CENTER_MARGIN, CENTER_MARGIN))
         ys = center + (np.linspace(-Y_SPAN, Y_SPAN, K) if right else np.linspace(Y_SPAN, -Y_SPAN, K))
         # 自己運動：頭yaw。向き・振り幅は左右ラベルと独立に抽選（体の感覚だけでは当てられない）
@@ -186,9 +186,9 @@ def main():
 
     print("\n=== 解釈 ===")
     if a_body > 0.62:
-        print("⚠ 体の感覚だけで当たる＝カンニング(左右が体の感覚に漏れている)。設計見直し。")
+        print("注意 体の感覚だけで当たる＝カンニング(左右が体の感覚に漏れている)。設計見直し。")
     elif a_all - a_img > 0.12 and a_all - a_sh > 0.10:
-        print("★体の感覚を足すと自己運動下でも読める＝egomotionは体の感覚で割り引ける。情報は在る。")
+        print("体の感覚を足すと自己運動下でも読める＝egomotionは体の感覚で割り引ける。情報は在る。")
     elif a_all - a_img > 0.05:
         print("△ 体の感覚で多少改善するが不十分。振り幅や入力を調整して再検証。")
     else:

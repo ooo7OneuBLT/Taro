@@ -84,7 +84,7 @@ def main():
                 state["i"] = (state["i"] + 1) % len(qpos_buf)
                 show(state["i"])
             viewer.sync()
-            time.sleep(real_dt)                   # ★実時間に合わせる（等速）
+            time.sleep(real_dt)                   # 実時間に合わせる（等速）
 
 
 if __name__ == "__main__":

@@ -10,14 +10,14 @@ D1（視覚あり）：仰向けの太郎＋養育者の手を、太郎が**目�
 ＝**触覚だけで姿勢から接触を予測するのは構造的に上限**。視覚は触覚と違い①他者が常に写る
 ②接触が要らない（離れていても見える＝先読みの余地）③画素は相手が動けば滑らかに変化する。
 
-【★この環境の肝：視覚ONでもテクスチャを落とす】
+【この環境の肝：視覚ONでもテクスチャを落とす】
 `mimo_lean.strip_textures` は従来 `vision_params is None` のときだけ適用していた。理由は
 「視覚ONで絵を消すと自分の体か相手の体かを見分けられなくなる」から。**だがこの構成では
 養育者は赤いカプセル**で、落とすテクスチャ（顔の表情7種＋服の柄＝976MB）は他者識別に
 一切無関係。＝**視覚ONのまま落とせる**。実測：視覚ON 64x64 で 2797MB → 232MB（12分の1）。
 ＝設計が視覚を保留した最大の理由（1本2.8GBに戻り並列6本に落ちる）が消える。
 
-【★養育者の色を、太郎自身と変える】
+【養育者の色を、太郎自身と変える】
 太郎の肌は肌色。養育者を肌色にすると「自分か相手か」が色で見分けにくい。赤に固定して
 おく（`CARER_RGBA`）＝視覚で他者だと分かる最小の手がかり。テクスチャは落とすが、この
 単色は builtin なので残る。
@@ -70,7 +70,7 @@ class CarerVisionEnv(CarerEnv):
     SHOW_EYES = True                    # 第三者視点で頭の向きが分かるよう装飾の目を付ける
 
     def get_vision_obs(self):
-        """★MIMoの壊れたgym描画を迂回し、眼球カメラを**生APIで直接描画**する。
+        """MIMoの壊れたgym描画を迂回し、眼球カメラを**生APIで直接描画**する。
 
         【なぜ差し替えるか・2026-07-16 確定】MIMoの `mimoVision/vision.py` は
         `env.camera_name='eye_left'` を設定して `env.render()` を呼ぶ方式だが、gymnasium
@@ -105,7 +105,7 @@ class CarerVisionEnv(CarerEnv):
                 cache[wh] = mujoco.Renderer(self.model, height=p["height"], width=p["width"])
             ren = cache[wh]
             cid = self.model.camera(cam_name).id
-            if "fovy" in p:      # ★視野角をモデルへ反映。mjCAMERA_FIXEDはmodel.cam_fovyを見るため
+            if "fovy" in p:      # 視野角をモデルへ反映。mjCAMERA_FIXEDはmodel.cam_fovyを見るため
                 self.model.cam_fovy[cid] = p["fovy"]   # vision_paramsのfovyは元々acuity計算にしか
                                                         # 使われておらず描画には未反映だった＝バグ修正
             mjcam = mujoco.MjvCamera()
@@ -155,7 +155,7 @@ class CarerVisionEnv(CarerEnv):
             a.ctrlrange = [-_HAND_RANGE, _HAND_RANGE]
             a.ctrllimited = mujoco.mjtLimited.mjLIMITED_TRUE
 
-        # ★第三者視点で「頭の向き」を分かるようにする装飾の目（黒い小球2個）。
+        # 第三者視点で「頭の向き」を分かるようにする装飾の目（黒い小球2個）。
         #   目のカメラ(local≈[0.071,±0.025,0.068])を塞がないよう少し頭側にへこませて置く。
         #   contype/conaffinity=0で非衝突＝物理・触覚に影響なし。SHOW_EYES=Falseで無効化。
         if self.SHOW_EYES:
@@ -171,7 +171,7 @@ class CarerVisionEnv(CarerEnv):
                     e.contype = 0
                     e.conaffinity = 0
 
-        # ★唯一の違い：視覚ONでもテクスチャを落とす（顔・服の絵は赤カプセルの識別に無関係）
+        # 唯一の違い：視覚ONでもテクスチャを落とす（顔・服の絵は赤カプセルの識別に無関係）
         self.n_textures_stripped = strip_textures(spec)
         self.model = spec.compile()
         self.model.vis.global_.offwidth = self.width

@@ -1,8 +1,8 @@
-"""★保存された設定（Viewerで人が調整した位置）が成立しているかを測る。
+"""保存された設定（Viewerで人が調整した位置）が成立しているかを測る。
 
 【なぜ要るか、2026-07-28】Viewerで人が目視で位置を決めたあと、
 「本当に見えているか」「手が届くか」を数値で確かめる。
-⚠️私（Claude）は探索スクリプトが計算した候補を測って「見えて届く」と報告したが、
+注意：私（Claude）は探索スクリプトが計算した候補を測って「見えて届く」と報告したが、
   遮蔽を計算に入れておらず、実際には全部体に隠れていた。
   ＝**幾何的な角度だけで『見える』と言ってはいけない**。描き分けで確かめる。
 
@@ -17,14 +17,14 @@
     E_TOY_POS=x,y,z で位置を直接指定することもできる
 """
 
-# ⚠️★古い方式（2026-07-30 に整理）。新しい実験は `run/main.py` を通す。
+# 注意：古い方式（2026-07-30 に整理）。新しい実験は `run/main.py` を通す。
 #   【経緯】目標Eの実験スクリプトが118本あり、うち66本が**独立に環境を組み立てていた**。
 #     そのため「学習は関節モード（90関節を独立に駆動＝逸脱リスト 逸脱5）、
 #     測定とViewerは筋肉モード（拮抗筋2本/関節）」という**別の体で動く**事故が起きた
 #     （ユーザーの目視「視線誘導反射の実験の時とは動きが全然違う」で発覚。
 #      実測で動きが人間の新生児の約3.3倍速かった）。
 #   【設計と移行計画】`E/docs/実行基盤_設計.md`
-#   ⚠️このファイルは**記録として残す**（削除しない方針）。
+#   注意：このファイルは**記録として残す**（削除しない方針）。
 #     中の測り方は再利用できるので、プラグインへ移すときの元にする。
 import os
 import sys
@@ -61,7 +61,7 @@ def main():
         with open(SAVE_PATH, encoding="utf-8") as fp:
             saved = json.load(fp)
     except Exception as e:
-        print(f"⚠️保存が読めない: {e}")
+        print(f"注意保存が読めない: {e}")
 
     if os.environ.get("E_TOY_POS"):
         pos = np.array([float(x) for x in os.environ["E_TOY_POS"].split(",")])
@@ -84,8 +84,8 @@ def main():
     kw = body_kwargs_from_env(AGE, verbose=False)
     kw["flexion"] = True
     buf = io.StringIO()
-    # ★条件は保存された設定に合わせる（Viewerで人が見ていた状態を再現するため）。
-    #   ⚠️これを揃えずに測ると、まったく別の姿勢の太郎を測ることになる
+    # 条件は保存された設定に合わせる（Viewerで人が見ていた状態を再現するため）。
+    #   注意：これを揃えずに測ると、まったく別の姿勢の太郎を測ることになる
     #     （2026-07-28 に実際に起きた：保存は首30度なのに60度で測っていた）。
     from infant_body import apply_neck_tone
     _neck_spring = saved.get("neck_target")
@@ -142,16 +142,16 @@ def main():
 
     # 1. 見えるか（左右それぞれ・遮蔽込み）
     print("\n" + "=" * 74)
-    print(" 1. ★実際に見えるか（体に隠れていないか。描き分けで判定）")
+    print(" 1. 実際に見えるか（体に隠れていないか。描き分けで判定）")
     print("=" * 74)
     for cam in ("eye_left", "eye_right"):
         sv = VIS.visible_by_segment(m, d, bid, cam, size=96)
         lbl = "左目" if cam == "eye_left" else "右目"
         if sv["seen"]:
-            print(f"  {lbl}  ★見える   視野内の位置 ({sv['cx']:+.2f}, {sv['cy']:+.2f})"
+            print(f"  {lbl}  見える   視野内の位置 ({sv['cx']:+.2f}, {sv['cy']:+.2f})"
                   f"   （0が中心、±1が端）")
         else:
-            print(f"  {lbl}  ★見えない（体に隠れているか視野の外）")
+            print(f"  {lbl}  見えない（体に隠れているか視野の外）")
 
     # 2. 幾何的な位置関係
     v = pos - eye
@@ -171,7 +171,7 @@ def main():
     print(f"  視線からのずれ   {ang:6.1f} 度   （視野の半角は30度）")
     print(f"  腕の長さ         {arm*100:6.1f} cm")
     print(f"  肩からの距離     {min(float(np.linalg.norm(pos - sh_r)), float(np.linalg.norm(pos - sh_l)))*100:6.1f} cm"
-          f"  ＝ 腕の {reach*100:.0f}%   {'★届く' if reach <= 1.0 else '★届かない'}")
+          f"  ＝ 腕の {reach*100:.0f}%   {'届く' if reach <= 1.0 else '届かない'}")
     print(f"  要る寄り目       {verg:6.1f} 度   （太郎は寄り目ができない）")
     print(f"  見かけの大きさ   {2*np.degrees(np.arctan2(radius, r)):6.1f} 度")
 
@@ -181,7 +181,7 @@ def main():
     print("=" * 74)
     m.vis.global_.offwidth = max(int(m.vis.global_.offwidth), 96)
     m.vis.global_.offheight = max(int(m.vis.global_.offheight), 96)
-    mujoco.mj_forward(m, d)     # ⚠️レンダリング前に状態を確定させる
+    mujoco.mj_forward(m, d)     # 注意レンダリング前に状態を確定させる
     ren = mujoco.Renderer(m, 96, 96)
     ren.enable_segmentation_rendering()
     cam = mujoco.MjvCamera()

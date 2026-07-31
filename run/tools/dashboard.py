@@ -1,4 +1,4 @@
-"""★学習の進み具合と結果を1枚の絵にする（HTML）。走行中も見られる。
+"""学習の進み具合と結果を1枚の絵にする（HTML）。走行中も見られる。
 
 【なぜ要るか、2026-07-30】学習は1本40分以上かかり、条件×シードで何本も並ぶ。
 「どの条件のどれが、どこまで進んで、いまどんな数字か」を文字のログから読み取るのは
@@ -16,9 +16,9 @@
     *.csv   チェックポイントごとの数値（step, classify, margin, corr, persist）
     *.log   画面に出た文字。ここから経過時間（real=N min）と月齢を拾う
 
-⚠️絵の中身は**そのフォルダにあるデータだけ**から描く（1ランのデータを混ぜない
+注意：絵の中身は**そのフォルダにあるデータだけ**から描く（1ランのデータを混ぜない
   ＝[[feedback-per-sim-graph]]）。条件の比較は「条件ごとに別の線」として重ねる。
-⚠️外部のCSS・フォント・スクリプトを読み込まない（オフラインで開ける・壊れない）。
+注意：外部のCSS・フォント・スクリプトを読み込まない（オフラインで開ける・壊れない）。
 """
 import argparse
 import csv
@@ -35,24 +35,24 @@ _ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-# 条件ごとの色。★字と線がかぶらないよう、明度を離した3色＋灰
+# 条件ごとの色。字と線がかぶらないよう、明度を離した3色＋灰
 COLORS = ["#2b6cb0", "#c05621", "#2f855a", "#6b46c1", "#b83280", "#4a5568"]
-# ★列の「意味づけ」表。CSVに出てくる列を**自動で見つけて**全部描くが、
+# 列の「意味づけ」表。CSVに出てくる列を**自動で見つけて**全部描くが、
 #   ここに載っている列は見出し・単位・基準線を人に読める形で出す。
-#   ⚠️載っていない列も描く（「知らない列」として末尾に回す）＝★取りこぼさない。
+#   注意：載っていない列も描く（「知らない列」として末尾に回す）＝取りこぼさない。
 #   (列名) -> (見出し, 英語, 単位, 基準線, 基準線の説明, 大きいほど良いか)
 META = {
     "margin":    ("自己モデルの質", "self-model margin", "%", 0.0, None, True),
     "persist":   ("「何もしない」予測との比べ", "vs naive forecast", "%", 100.0,
-                  "★100より下＝勝っている", False),
+                  "100より下＝勝っている", False),
     "classify":  ("自分と他人の区別", "self/other classification", "%", 50.0,
                   "50＝偶然", True),
     "corr":      ("予測と実際の相関", "prediction correlation", "", 0.0, None, True),
-    "agency":    ("行為主体感（★再現性なし）", "sense of agency", "%", 50.0, None, True),
+    "agency":    ("行為主体感（再現性なし）", "sense of agency", "%", 50.0, None, True),
     "age_months": ("体の月齢", "body age", "ヶ月", None, None, None),
     "noise":     ("探索の強さ", "exploration noise", "", None, None, None),
     "act_abs":   ("力の出し具合", "action magnitude", "", None,
-                  "★0付近＝固まった", None),
+                  "0付近＝固まった", None),
     "d_action2": ("行動の変化量", "action change", "", None, None, None),
     "effort":    ("努力（代謝コスト）", "effort cost", "", None, None, None),
     "cereb_err": ("小脳の馴染み度", "cerebellar familiarity", "", None, None, None),
@@ -63,11 +63,11 @@ META = {
     "real_min":   ("経過した実時間", "wall-clock time", "分", None, None, None),
     "life_min":   ("太郎が生きた時間", "simulated life", "分", None, None, None),
 }
-# ★上のほうに出す順番（大事な指標を先に）。ここに無い列はこの後ろに自動で並ぶ
+# 上のほうに出す順番（大事な指標を先に）。ここに無い列はこの後ろに自動で並ぶ
 ORDER = ["margin", "persist", "classify", "corr", "hand_in_view", "toy_touches",
          "toy_per_min", "age_months", "act_abs", "noise", "d_action2",
          "cereb_err", "effort", "ne_maturation", "agency"]
-# ★描かない列（時間の経過そのものは横軸なので線にしない）
+# 描かない列（時間の経過そのものは横軸なので線にしない）
 SKIP = {"step", "real_min", "life_min", "mag_ratio"}
 
 
@@ -101,7 +101,7 @@ def _read_log(path):
     m = re.search(r"train / (\d+)ステップ", txt)
     if m:
         info["steps"] = int(m.group(1))
-    # ★このログがどのCSVのものかを、ログ自身に書かれた csv のパスから取る。
+    # このログがどのCSVのものかを、ログ自身に書かれた csv のパスから取る。
     #   （ファイル名の付け方に依存しないため。2026-07-31）
     m = re.search(r"csv['\"]?\s*[:=]\s*['\"]?([^'\",\s}]+\.csv)", txt)
     if m:
@@ -109,7 +109,7 @@ def _read_log(path):
     m = re.search(r"seed=(\d+)", txt)
     if m:
         info["seed"] = int(m.group(1))
-    # ★どんな条件で回したか（run/main.py が冒頭に出す表をそのまま拾う）。
+    # どんな条件で回したか（run/main.py が冒頭に出す表をそのまま拾う）。
     #   これを絵に出さないと「どのシーンの学習か」が分からない（2026-07-31 の要望）。
     for key, pat in (("scene",   r"^\s*シーン\s+(.+)$"),
                      ("taro",    r"^\s*太郎\s+(.+)$"),
@@ -138,14 +138,14 @@ def collect(d):
     for cp in sorted(glob.glob(os.path.join(d, "*.csv"))):
         base = os.path.basename(cp)[:-4]
         rows = _read_csv(cp)
-        # ★CSVとログの紐づけ。3段構えで探す。
+        # CSVとログの紐づけ。3段構えで探す。
         #   【なぜ3段か、2026-07-31】以前は「ログ名とCSV名の前方一致」だけだった。
         #   ログを `seed0.log` のような短い名前にすると一致せず、総ステップ数が読めない。
-        #   すると `steps = 最後のstep` になり、★走行中なのに「完了」と誤判定していた
+        #   すると `steps = 最後のstep` になり、走行中なのに「完了」と誤判定していた
         #   （ダッシュボードの進捗バーが常に100%になる）。
         info = None
         logs = sorted(glob.glob(os.path.join(d, "*.log")))
-        # ① ログ自身が書いている csv のパスで照合（★名前の付け方に依存しない）
+        # ① ログ自身が書いている csv のパスで照合（名前の付け方に依存しない）
         for p in logs:
             i = _read_log(p)
             if i.get("csv") == os.path.basename(cp):
@@ -170,7 +170,7 @@ def collect(d):
         if info is None:
             info = {"real_min": None, "age": None, "regrow": 0,
                     "steps": None, "name": None}
-        # ★条件は「CSVの隣に置かれたメタ情報」を最優先で使う。
+        # 条件は「CSVの隣に置かれたメタ情報」を最優先で使う。
         #   ログの保存（`> seed0.log`）に頼ると、リダイレクトしなかった実験の
         #   条件が絵に出ない。メタは dashboard プラグインが必ず書く。
         meta_path = cp[:-4] + ".meta.json"
@@ -240,7 +240,7 @@ def line_chart(series, col, base=None, base_note=None, width=760, height=260):
         return pad_t + ih - (y - y0) / (y1 - y0) * ih
 
     out = [f'<svg viewBox="0 0 {width} {height}" class="chart" role="img">']
-    # 横の目安線と目盛り（★字と線が重ならないよう左に置く）
+    # 横の目安線と目盛り（字と線が重ならないよう左に置く）
     for i in range(5):
         y = y0 + (y1 - y0) * i / 4
         yy = sy(y)
@@ -286,11 +286,11 @@ def _fmt_eta(cur, steps, real_min):
 
 
 def _detail_html(rid, cond, seed, r, col):
-    """★1本の学習の詳細（クリックで開く画面）。
+    """1本の学習の詳細（クリックで開く画面）。
 
     【なぜ要るか、2026-07-31】一覧は「何本がどこまで進んだか」を見る場所で、
-    ★どんな条件で回しているか（シーン・体の設定・道具）が分からなかった。
-    一覧に全部書くと読めないので、★クリックで開く場所に分ける。
+    どんな条件で回しているか（シーン・体の設定・道具）が分からなかった。
+    一覧に全部書くと読めないので、クリックで開く場所に分ける。
     """
     info = r["info"]
     rows = r["rows"]
@@ -298,12 +298,12 @@ def _detail_html(rid, cond, seed, r, col):
     meta = info.get("meta") or {}
     world = meta.get("world") or {}
     body = meta.get("body") or {}
-    # ★環境の中身（柵・おもちゃ・傾き）。これが無いと「どのシーンか」が名前だけになる
+    # 環境の中身（柵・おもちゃ・傾き）。これが無いと「どのシーンか」が名前だけになる
     env_bits = []
     if world:
-        env_bits.append("柵 " + ("あり" if world.get("fence") else "★なし"))
+        env_bits.append("柵 " + ("あり" if world.get("fence") else "なし"))
         toy = world.get("toy") or {}
-        env_bits.append("おもちゃ " + ("あり" if toy.get("enabled") else "★なし"))
+        env_bits.append("おもちゃ " + ("あり" if toy.get("enabled") else "なし"))
         env_bits.append(f"傾き {world.get('recline_deg', 0)}度")
         if world.get("plain"):
             env_bits.append("視界を貧しく")
@@ -345,7 +345,7 @@ def _detail_html(rid, cond, seed, r, col):
         f"<div><em>{html.escape(META.get(k, (k,))[0])}</em><b>{v:,.3f}</b></div>"
         for k, v in last.items() if k not in ("step",) and isinstance(v, float))
 
-    # ★このランだけのグラフ（一覧は全ランを重ねるので、1本だけの推移が見えない）
+    # このランだけのグラフ（一覧は全ランを重ねるので、1本だけの推移が見えない）
     charts = []
     found = [k for x in rows for k in x if k not in SKIP]
     seen = []
@@ -427,7 +427,7 @@ def build_html(runs, title):
       </div>""")
             details.append(_detail_html(rid, c, s, r, col))
 
-    # ---- 下：グラフ（★CSVにある列を自動で見つけて全部描く）------------------
+    # ---- 下：グラフ（CSVにある列を自動で見つけて全部描く）------------------
     found = []
     for r in runs:
         for x in r["rows"]:
@@ -447,7 +447,7 @@ def build_html(runs, title):
                     series.append((f"{c} seed{s}", color_of[c], ps))
         hint = ("大きいほど良い / higher is better" if big_good is True
                 else "小さいほど良い / lower is better" if big_good is False else "")
-        unk = "" if col_name in META else ' <span class="unk">★表に無い列</span>'
+        unk = "" if col_name in META else ' <span class="unk">表に無い列</span>'
         charts.append(f"""
       <section class="panel">
         <h3>{html.escape(head)}{f'（{unit}）' if unit else ''}
@@ -512,7 +512,7 @@ def build_html(runs, title):
    overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }}
  .scene b {{ color:var(--ink); font-weight:600; }}
  .more {{ margin-top:8px; font-size:.74rem; color:#2b6cb0; text-align:right; }}
- /* ★詳細画面（クリックで開く）。既定は隠しておく */
+ /* 詳細画面（クリックで開く）。既定は隠しておく */
  .detail {{ display:none; position:fixed; inset:0; z-index:50; overflow-y:auto;
    background:var(--bg); padding:16px 16px 40px; }}
  .detail.on {{ display:block; }}
@@ -559,16 +559,16 @@ def build_html(runs, title):
 {''.join(charts)}
 
 <footer>
-  自己モデルの質（margin）＝自分の行動と他人の行動で予測させたときの★予測誤差の差。
+  自己モデルの質（margin）＝自分の行動と他人の行動で予測させたときの予測誤差の差。
   大きいほど「自分の体を分かっている」。<br>
-  「何もしない」予測との比べ（persist）＝★100より下なら「何もしない」と予測するより上手。
+  「何もしない」予測との比べ（persist）＝100より下なら「何もしない」と予測するより上手。
   100を超えていたらモデルが壊れている疑い。<br>
-  ⚠️絵はこのフォルダのデータだけから描いています（別のランを混ぜていません）。
+  注意：絵はこのフォルダのデータだけから描いています（別のランを混ぜていません）。
 </footer>
 {''.join(details)}
 <script>
-// ★カードをクリックすると、その学習だけの詳細を開く。
-//   ⚠️文字列の中に本物の改行を入れないこと（2026-07-30 に配線図の JS が
+// カードをクリックすると、その学習だけの詳細を開く。
+//   注意文字列の中に本物の改行を入れないこと（2026-07-30 に配線図の JS が
 //     まるごと動かなくなった原因。check_js.py で構文を確かめる）。
 function showDetail(id) {{
   hideDetail();
@@ -587,7 +587,7 @@ function hideDetail() {{
 document.addEventListener('keydown', function (e) {{
   if (e.key === 'Escape') {{ hideDetail(); }}
 }});
-// ⚠️30秒ごとの自動リロードは、詳細を開いている間は止める
+// 注意30秒ごとの自動リロードは、詳細を開いている間は止める
 //   （読んでいる最中に一覧へ戻されるのを防ぐ）
 (function () {{
   var meta = document.querySelector('meta[http-equiv="refresh"]');
@@ -606,7 +606,7 @@ document.addEventListener('keydown', function (e) {{
 
 
 def make(d, title=None):
-    """★フォルダを見て HTML を1枚作る。プラグインからも呼ばれる（自動化の入口）。
+    """フォルダを見て HTML を1枚作る。プラグインからも呼ばれる（自動化の入口）。
 
     Returns: 作った HTML のパス
     """
@@ -615,16 +615,16 @@ def make(d, title=None):
     title = title or f"学習の様子 ── {os.path.basename(d)}"
     out = os.path.join(d, "ダッシュボード.html")
     runs = collect(d)
-    # ⚠️★一時ファイルの名前にプロセス番号を入れる。
+    # 注意：一時ファイルの名前にプロセス番号を入れる。
     #   【なぜ、2026-07-31】同じフォルダへ複数のプロセスが同時に絵を作る
-    #   （2シードを並列で回すと★学習プロセス2つがそれぞれ書き、さらに --watch を
+    #   （2シードを並列で回すと学習プロセス2つがそれぞれ書き、さらに --watch を
     #    立てると3つになる）。固定名 `.tmp` だと**書き込みが混ざる**。
     #   os.replace 自体はアトミックなので、tmp さえ分ければ安全。
     tmp = f"{out}.{os.getpid()}.tmp"
     try:
         with open(tmp, "w", encoding="utf-8") as fp:
             fp.write(build_html(runs, title))
-        os.replace(tmp, out)     # ★書き換え中の半端なHTMLを開かせない
+        os.replace(tmp, out)     # 書き換え中の半端なHTMLを開かせない
     finally:
         if os.path.exists(tmp):
             os.remove(tmp)
@@ -641,7 +641,7 @@ def main():
 
     d = a.dir if os.path.isabs(a.dir) else os.path.join(_ROOT, a.dir)
     if not os.path.isdir(d):
-        print(f"⚠️フォルダがない: {d}")
+        print(f"注意フォルダがない: {d}")
         return 1
     title = a.title or f"学習の様子 ── {os.path.basename(d)}"
     out = os.path.join(d, "ダッシュボード.html")
@@ -660,19 +660,19 @@ def main():
         import webbrowser
         webbrowser.open("file:///" + out.replace(os.sep, "/"))
     if a.watch:
-        print("★30秒ごとに作り直します（Ctrl+C で終わり）", flush=True)
+        print("30秒ごとに作り直します（Ctrl+C で終わり）", flush=True)
         try:
             while True:
                 time.sleep(30)
                 runs = once()
-                # ⚠️★「全部おわった」だけで止めてはいけない。条件ごとに順番に流す
+                # 注意：「全部おわった」だけで止めてはいけない。条件ごとに順番に流す
                 #   使い方（2並列×3回など）では、次のランが始まる前に止まってしまう。
                 #   2026-07-30 に実際に起きた（条件Aが終わった瞬間に終了し、
                 #   条件B/Cの絵が更新されなくなった）。
                 #   ⇒ **どのCSVも一定時間書かれていない**ことまで確かめてから止める。
                 if runs and all(r["cur"] >= r["steps"] for r in runs) \
                         and (time.time() - max(r["mtime"] for r in runs)) > 600:
-                    print("★全部おわって10分動きがないので終了します", flush=True)
+                    print("全部おわって10分動きがないので終了します", flush=True)
                     break
         except KeyboardInterrupt:
             print("\n止めました", flush=True)

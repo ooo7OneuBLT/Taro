@@ -5,7 +5,7 @@
 そのため：
   ・設定を変えるには**環境変数を経由するしかなかった**（実験ファイルから渡せない）
   ・どの設定がどこで効くのか、読まないと分からなかった
-  ・★既定値が食い違っても気づけなかった（学習ループだけ関節モードだった事故）
+  ・既定値が食い違っても気づけなかった（学習ループだけ関節モードだった事故）
 
 → 設定を1つのオブジェクトにして、**実験ファイルから作る**のを正式な経路にする。
   環境変数から作る経路（`from_env`）は「古い方式と同じ数値が出るか確かめる」ためだけに残す。
@@ -15,20 +15,20 @@
     run    → 動かし方（steps / seed / K / checkpoint）
     scene  → 環境（ここには入れない。scene.py が担う）
 
-⚠️★ここに「測り方」は入れない。測るのはプラグインの仕事。
-⚠️★根拠ラベルは各項目のコメントに残す。値の由来（Tier1=一次文献／Tier3=恣意的）が
+注意：ここに「測り方」は入れない。測るのはプラグインの仕事。
+注意：根拠ラベルは各項目のコメントに残す。値の由来（Tier1=一次文献／Tier3=恣意的）が
   分からなくなると、あとで「この数字はどこから来たのか」を追えなくなる。
 """
 import os
 
 
-# ★既定値の表。キー＝実験ファイルの `taro` / `run` で書く名前。
+# 既定値の表。キー＝実験ファイルの `taro` / `run` で書く名前。
 #   値＝(既定値, 説明, 環境変数名)。環境変数名は古い方式との比較用。
-#   ⚠️既定値を変えるときは、必ず理由を研究日誌に書く（過去に既定値の食い違いで事故った）。
+#   注意：既定値を変えるときは、必ず理由を研究日誌に書く（過去に既定値の食い違いで事故った）。
 TARO_DEFAULTS = {
     # ---- 体 ----------------------------------------------------------------
     # 駆動モード。muscle＝拮抗筋2本/関節・引くだけ・行動180次元[0,1]。
-    # ★joint（90関節を独立に駆動）は逸脱リスト「逸脱5」の逸脱
+    # joint（90関節を独立に駆動）は逸脱リスト「逸脱5」の逸脱
     #   （Hadders-Algra et al. 1992［Tier1］＝新生児は拮抗筋を同時に力ませる）。
     "actuation":     ("muscle", "駆動モード muscle/joint", "E_MUSCLE"),
     "age_months":    (None, "体の月齢。None＝シーンの値を使う", "E_AGE"),
@@ -37,13 +37,13 @@ TARO_DEFAULTS = {
     "age_ramp":      (0, "何回かけて月齢を変えるか。0＝一瞬で", "E_AGE_RAMP"),
     "age_every":     (500, "何回ごとに月齢を見直すか", "E_AGE_EVERY"),
     # ---- 感覚 --------------------------------------------------------------
-    # ⚠️触覚ONでは体を育てられない（センサ点が月齢で変わり観測次元がずれる。項75）
+    # 注意：触覚ONでは体を育てられない（センサ点が月齢で変わり観測次元がずれる。項75）
     "touch":         (False, "触覚を足す", "E_TOUCH"),
     "touch_mode":    ("target", "触覚を予測対象にするか input/target", "E_TOUCH_MODE"),
     "somatosensory": (False, "触覚を視床VPL+S1相当の経路にする", "E_SOMATOSENSORY"),
     "vision":        (True, "視覚を入力に入れる", "E_E1_VISION"),
-    # ★反射。シーンを組むときに渡す（run/plugins/common/scene.py が読む）。
-    #   ⚠️ここに無いと measure では使えて train/view では弾かれる、という
+    # 反射。シーンを組むときに渡す（run/plugins/common/scene.py が読む）。
+    #   注意：ここに無いと measure では使えて train/view では弾かれる、という
     #     非対称が起きる（2026-07-30 の点検で発覚）。
     "vor":           (True, "前庭動眼反射（頭が動いても視線を保つ）", None),
     "orienting_reflex": (False, "視線誘導反射（動くものへ目を向ける）", None),
@@ -52,7 +52,7 @@ TARO_DEFAULTS = {
     "lam_v":         (1.0, "視覚ブロックの重み[Tier3]", "E_LAM_V"),
     # ---- 本能（脳の中の機構）------------------------------------------------
     "lr":            (0.005, "学習率", "E_LR"),
-    # progress＝学習進度（Oudeyer の好奇心）。predict は★大行動バイアスの既知欠陥あり
+    # progress＝学習進度（Oudeyer の好奇心）。predict は大行動バイアスの既知欠陥あり
     "reward":        ("progress", "内発的動機 progress/predict", "E_REWARD"),
     "ne_relative":   (True, "ノルアドレナリンを相対基準で出す", "E_NE_RELATIVE"),
     "replay":        (True, "睡眠中の経験リプレイ（記憶定着）", "E_REPLAY"),
@@ -72,10 +72,10 @@ TARO_DEFAULTS = {
     "antagonist":    (False, "拮抗筋モード（要 actuation=muscle）", "E_ANTAGONIST"),
     "coactivation":  (0.3, "共収縮の度合い[Tier3]", "E_COACTIVATION"),
     # ---- 目標指向の探索（Goal Babbling）------------------------------------
-    # ⚠️★2026-07-30 の実測で**有害**と判明（接触−32%・margin +30.7%→+17.2%・
+    # 注意：2026-07-30 の実測で**有害**と判明（接触−32%・margin +30.7%→+17.2%・
     #   persist 1000%）。原典（Rolf, Steil & Gienger 2010）とは目標空間が違う
     #   （原典＝手先位置の低次元／太郎＝固有感覚621次元まるごと）。作り直し予定。
-    "goal_babbling": (False, "★目標指向の探索（現状は有害と判明）", "E_GOALBABBLE"),
+    "goal_babbling": (False, "目標指向の探索（現状は有害と判明）", "E_GOALBABBLE"),
     "goal_switch":   ("pe", "探索/目標の切替 fixed/ne/pe", "E_GB_SWITCH"),
     "closed_loop_reach": (False, "目標を保持してにじり寄る", "E_CLTRAIN"),
     # ---- モデルの読み書き ---------------------------------------------------
@@ -87,26 +87,26 @@ RUN_DEFAULTS = {
     "steps":      (600, "学習回数（判断の回数）", None),
     "seed":       (0, "乱数の種", None),
     # K＝1判断あたりの物理ステップ数。K=10＝10Hz（皮質μ律動）。
-    # ⚠️K=100（1Hz）は人間の最遅神経発火7Hzより遅い＝生物学的に成立しない
+    # 注意：K=100（1Hz）は人間の最遅神経発火7Hzより遅い＝生物学的に成立しない
     "K":          (10, "1判断あたりの物理ステップ数", "E_K"),
     "checkpoint": (600, "何回ごとに測るか", "E_CKPT"),
     "n_eval":     (80, "自己モデルの評価に使う試行数", None),
     "type":       ("train", "動かし方 train/view/measure/edit", None),
-    "log":        (None, "画面に出た文字をそのまま残す先（★古い経路のみ）", None),
+    "log":        (None, "画面に出た文字をそのまま残す先（古い経路のみ）", None),
     "csv":        (None, "チェックポイントの数値を残す先（.csv）", None),
     # ---- 目視（run.type=view）--------------------------------------------
-    # ★既定で探索ON：決定的な行動だと**ゆらぎが一切出ず自発運動が見えない**
+    # 既定で探索ON：決定的な行動だと**ゆらぎが一切出ず自発運動が見えない**
     "view_explore": (True, "自発運動（探索のゆらぎ）を出す", "E_VIEW_EXPLORE"),
     # 学習中の std は 0.05 + ne*0.45。学習初期は ne≒0.275 なので std≒0.174
     "view_std":     (0.174, "探索の揺らぎの大きさ", "E_VIEW_STD"),
-    # ★2つ目の脳。指定すると Viewer 実行中に ; ' / のキーで★往復して見比べられる。
-    #   ⚠️別プロセスで2本立ち上げて見比べるのは当てにならない（乱数も姿勢も違う）。
-    #   ★同じ体・同じ姿勢のまま脳だけ入れ替えるのが正しい比べ方。
+    # 2つ目の脳。指定すると Viewer 実行中に ; ' / のキーで往復して見比べられる。
+    #   注意：別プロセスで2本立ち上げて見比べるのは当てにならない（乱数も姿勢も違う）。
+    #   同じ体・同じ姿勢のまま脳だけ入れ替えるのが正しい比べ方。
     #   （2026-07-30、C_seed0 が固まっているかを C_seed1 と見比べるために追加）
-    "view_model_b": (None, "★見比べる2つ目のモデルのパス", "E_VIEW_MODEL_B"),
+    "view_model_b": (None, "見比べる2つ目のモデルのパス", "E_VIEW_MODEL_B"),
     "view_goal_babbling": (False, "目標指向の動きを見る", "E_VIEW_GOALBABBLE"),
-    # ⚠️再生では予測誤差を計算しないので学習ループと同じ切替ができない＝割合を直接指定
-    "view_gb_rate": (0.5, "目標指向にする割合（★学習ループとは違う近似）", "E_VIEW_GB_RATE"),
+    # 注意：再生では予測誤差を計算しないので学習ループと同じ切替ができない＝割合を直接指定
+    "view_gb_rate": (0.5, "目標指向にする割合（学習ループとは違う近似）", "E_VIEW_GB_RATE"),
 }
 
 # 環境変数から読むときの型変換
@@ -120,16 +120,16 @@ _INTS = {"age_start", "age_ramp", "age_every", "steps", "seed", "K", "checkpoint
 class Config:
     """実験の設定。属性で読む（`cfg.lr` `cfg.reward`）。
 
-    ⚠️★作ったあとは**変えない**（読むだけ）。学習の途中で設定が変わると、
+    注意：作ったあとは**変えない**（読むだけ）。学習の途中で設定が変わると、
       ログのどこから条件が違うのかが追えなくなる。
     """
 
     def __init__(self, taro=None, run=None, *, scene=None, name=None):
-        # ★実験の名前。設定ではないが、絵の見出しや記録に使うので持ち回る
+        # 実験の名前。設定ではないが、絵の見出しや記録に使うので持ち回る
         #   （2026-07-31：ダッシュボードの見出しがフォルダ名になっていたので追加）
         self.name = name
         self._taro, self._run = dict(taro or {}), dict(run or {})
-        # ★知らないキーはここで止める（書き間違いを黙って無視しない）
+        # 知らないキーはここで止める（書き間違いを黙って無視しない）
         for name, d, given in (("taro", TARO_DEFAULTS, self._taro),
                                ("run", RUN_DEFAULTS, self._run)):
             unknown = set(given) - set(d)
@@ -147,7 +147,7 @@ class Config:
     # ------------------------------------------------------------------ 作る
     @classmethod
     def from_spec(cls, spec, *, steps_override=None):
-        """実験ファイル（辞書）から作る。★これが正式な経路。"""
+        """実験ファイル（辞書）から作る。これが正式な経路。"""
         run = dict(spec.get("run", {}))
         if steps_override is not None:
             run["steps"] = int(steps_override)
@@ -156,7 +156,7 @@ class Config:
 
     @classmethod
     def from_env(cls):
-        """環境変数から作る。⚠️★古い方式と同じ数値が出るか確かめるためだけに使う。
+        """環境変数から作る。注意古い方式と同じ数値が出るか確かめるためだけに使う。
 
         新しい実験でこれを使わない（実験ファイルが唯一の指定手段）。
         """
@@ -175,7 +175,7 @@ class Config:
                 taro[key] = int(v)
             else:
                 taro[key] = v if v != "" else None
-        # ⚠️★既定値の型で分ける。全部 int() にすると E_VIEW_STD=0.174 で落ちる
+        # 注意：既定値の型で分ける。全部 int() にすると E_VIEW_STD=0.174 で落ちる
         #   （2026-07-30 の点検で発覚）。
         for key, (dflt, _doc, envname) in RUN_DEFAULTS.items():
             if not envname or envname not in os.environ:
@@ -194,39 +194,39 @@ class Config:
     # ------------------------------------------------------------ 確かめる
     def _check(self):
         """組み合わせとして成り立たない設定をここで止める。"""
-        # ⚠️語彙は run/plugins/common/scene.py と★同じにする（片方だけ通ると
+        # 注意：語彙は run/plugins/common/scene.py と同じにする（片方だけ通ると
         #   measure では動いて train では弾かれる、という非対称になる）
         if str(self.actuation).lower() not in ("muscle", "muscles", "joint", "spring",
                                                "springdamper", "torque"):
             raise ValueError(f"actuation が不明: {self.actuation}（muscle / joint）")
         if self.antagonist and not self.is_muscle:
             raise ValueError("antagonist（拮抗筋モード）は actuation=muscle が要る")
-        # ★体を育てる設定なのに育たない組み合わせを止める。
+        # 体を育てる設定なのに育たない組み合わせを止める。
         #   【なぜ、2026-07-30】`age_every<=0` だと月齢を見直す処理が**一度も走らない**のに、
         #     起動時には「月齢 0.0 → 4.0」と表示される＝典型的な「黙って壊れる」。
         if self.age_to is not None and self.age_every <= 0:
             raise ValueError(
-                f"★age_to={self.age_to} を指定しているのに age_every={self.age_every} です。\n"
+                f"age_to={self.age_to} を指定しているのに age_every={self.age_every} です。\n"
                 "  age_every は「何回ごとに月齢を見直すか」なので、0以下だと\n"
                 "  **体が一度も育たないまま**学習が終わります（既定は500）。")
         if self.age_to is not None and self.age_start >= self.steps:
             raise ValueError(
-                f"★age_start={self.age_start} が steps={self.steps} 以上です。\n"
+                f"age_start={self.age_start} が steps={self.steps} 以上です。\n"
                 "  月齢を変え始める前に学習が終わるので、**体が育ちません**。")
-        # ⚠️触覚ONで体を育てると観測次元がずれて黙って壊れる（落とし穴 項75）
+        # 注意：触覚ONで体を育てると観測次元がずれて黙って壊れる（落とし穴 項75）
         if self.touch and self.age_to is not None:
             raise ValueError(
-                "★触覚ONでは体を育てられない（センサ点が月齢で変わり観測次元がずれる）。\n"
+                "触覚ONでは体を育てられない（センサ点が月齢で変わり観測次元がずれる）。\n"
                 "  0ヶ月1734点 → 4ヶ月4274点。落とし穴チェックリスト 項75")
         if self.goal_babbling:
-            print("⚠️[config] ★goal_babbling を有効にした。2026-07-30 の実測で"
+            print("注意[config] goal_babbling を有効にした。2026-07-30 の実測で"
                   "**有害**（おもちゃへの接触−32%、margin +30.7%→+17.2%、persist 1000%）。"
                   "原典と目標空間が違う（原典＝手先位置の低次元）", flush=True)
         if self.reward == "predict":
-            print("⚠️[config] reward=predict は【既知の欠陥】（大行動バイアス＝"
+            print("注意[config] reward=predict は【既知の欠陥】（大行動バイアス＝"
                   "大きく動くほど得なので暴れる。実測でうつ伏せ57.5%・jerk2501）", flush=True)
         if not self.is_muscle:
-            print("⚠️[config] ★関節モード（90関節を独立に駆動）＝逸脱リスト 逸脱5 の逸脱を"
+            print("注意[config] 関節モード（90関節を独立に駆動）＝逸脱リスト 逸脱5 の逸脱を"
                   "選んでいます。人間の新生児は拮抗筋を同時に力ませる[Tier1]", flush=True)
         if self.K >= 100:
             print(f"[!] K={self.K}（{100/self.K:.0f}Hz）＝人間の最遅神経発火7Hzより遅い。"
@@ -258,7 +258,7 @@ class Config:
     def age_at(self, step):
         """学習が step 回進んだ時点の月齢。age_to が無ければ常に同じ。
 
-        ⚠️[Tier3] 月齢を学習回数の**線形**で進めることに直接の根拠は無い。
+        注意：[Tier3] 月齢を学習回数の**線形**で進めることに直接の根拠は無い。
           taro_core 側の体の補正（taper_weight / target_ratio_for_age）が線形なのに
           合わせてある。主張できるのは「崖が無い」ことだけ。
         """
@@ -272,7 +272,7 @@ class Config:
         return a0 + (a1 - a0) * max(0.0, min(1.0, f))
 
     def summary(self):
-        """★既定から変えた項目だけを並べる（ログの1行目に出す）。"""
+        """既定から変えた項目だけを並べる（ログの1行目に出す）。"""
         out = []
         for key, (dflt, _doc, _e) in TARO_DEFAULTS.items():
             v = getattr(self, key)

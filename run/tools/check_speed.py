@@ -1,15 +1,15 @@
 # -*- coding: utf-8 -*-
-"""★「学習済みの方が倍速感がある」を実測で確かめる。
+"""「学習済みの方が倍速感がある」を実測で確かめる。
 
 ユーザーの目視（2026-07-31）：
 > 学習モデルの方がなんか倍速感がある。デフォルトのもがき運動に比べて
 
-⚠️過去に同じ型の問題があった（学習は関節モード・Viewerは筋肉モードで
-  動きが人間の新生児の3.3倍速だった）。★推測でなく数字で確かめる。
+注意：過去に同じ型の問題があった（学習は関節モード・Viewerは筋肉モードで
+  動きが人間の新生児の3.3倍速だった）。推測でなく数字で確かめる。
 
 測るもの（同じ環境・同じ体・同じステップ数で）:
-  ・環境へ送る値の変化量   ★同じ物差しで比べられる唯一の量
-  ・手と頭の速度[m/s]      ★「速い」の直接の指標
+  ・環境へ送る値の変化量   同じ物差しで比べられる唯一の量
+  ・手と頭の速度[m/s]      「速い」の直接の指標
   ・体の重心の移動距離     柵を外したので「遠くへ行くか」も同時に見る
 """
 import os, sys
@@ -63,10 +63,10 @@ def measure(name, env, get_action):
             pos0 = d.xpos[hip].copy()
     moved = float(np.linalg.norm(d.xpos[hip] - pos0))
     print(f"--- {name}")
-    print(f"  ★環境へ送る値の変化量  {np.mean(dact[1:]):.5f}")
-    print(f"  ★右手の速度[m/s]      平均{np.mean(v_hand):.4f}  最大{np.max(v_hand):.4f}")
-    print(f"  ★頭の速度[m/s]        平均{np.mean(v_head):.4f}  最大{np.max(v_head):.4f}")
-    print(f"  ★腰の移動距離         {moved*100:.2f} cm（{STEPS}ステップ＝"
+    print(f"  環境へ送る値の変化量  {np.mean(dact[1:]):.5f}")
+    print(f"  右手の速度[m/s]      平均{np.mean(v_hand):.4f}  最大{np.max(v_hand):.4f}")
+    print(f"  頭の速度[m/s]        平均{np.mean(v_head):.4f}  最大{np.max(v_head):.4f}")
+    print(f"  腰の移動距離         {moved*100:.2f} cm（{STEPS}ステップ＝"
           f"{STEPS*0.002*5:.0f}秒相当）")
     return {"dact": np.mean(dact[1:]), "vh": np.mean(v_hand), "moved": moved}
 
@@ -109,12 +109,12 @@ env.close()
 
 print()
 print("=" * 70)
-print(f"★★比べ  変化量 {r2['dact']/max(r1['dact'],1e-9):.2f}倍   "
+print(f"比べ  変化量 {r2['dact']/max(r1['dact'],1e-9):.2f}倍   "
       f"手の速度 {r2['vh']/max(r1['vh'],1e-9):.2f}倍   "
       f"移動 {r2['moved']/max(r1['moved'],1e-9):.2f}倍")
 print("=" * 70)
 
-# ---- ③ ★白紙の脳（学習前）＝「学習で速くなったのか」の切り分け -------------
+# ---- ③ 白紙の脳（学習前）＝「学習で速くなったのか」の切り分け -------------
 env, sc = make_env(hybrid=True)
 cfg0 = Config({"actuation": "muscle", "age_months": 4.0},
               {"seed": 0, "K": 10}, scene=sc["name"], name="speed-test-blank")
@@ -136,19 +136,19 @@ def blank_action(obs):
     return rescale_action(t0.brain.to_env_action(a), env.action_space).astype(np.float32)
 
 
-r3 = measure("★白紙の脳（学習前・同じ揺らぎ0.174）", env, blank_action)
+r3 = measure("白紙の脳（学習前・同じ揺らぎ0.174）", env, blank_action)
 env.close()
 
 print()
 print("=" * 70)
-print("★★切り分け（もがき運動を1とした比）")
+print("切り分け（もがき運動を1とした比）")
 print(f"  もがき運動   変化量 1.00   手の速度 1.00")
-print(f"  ★白紙の脳   変化量 {r3['dact']/r1['dact']:.2f}   "
+print(f"  白紙の脳   変化量 {r3['dact']/r1['dact']:.2f}   "
       f"手の速度 {r3['vh']/r1['vh']:.2f}")
-print(f"  ★学習した脳 変化量 {r2['dact']/r1['dact']:.2f}   "
+print(f"  学習した脳 変化量 {r2['dact']/r1['dact']:.2f}   "
       f"手の速度 {r2['vh']/r1['vh']:.2f}")
 print()
 print(f"  ⇒ 学習した脳 ÷ 白紙の脳 = 変化量 {r2['dact']/r3['dact']:.2f}倍  "
       f"手の速度 {r2['vh']/r3['vh']:.2f}倍")
-print("     ★ここが1に近ければ「速いのは学習のせいではなく脳の作りのせい」")
+print("     ここが1に近ければ「速いのは学習のせいではなく脳の作りのせい」")
 print("=" * 70)

@@ -6,7 +6,7 @@
   ・`E_ORIENT` が e_toy_env にしかなく、学習ループには繋がっていない
   ・MuscleModel が actuator_gear を毎ステップ上書きし、筋力補正が効いていなかった
   ・生理的屈曲が既定OFFで、渡し忘れて効いていなかった（今日）
-★共通点：**ログには出るのに実効がない**。だから「ログを見た」では検証にならない。
+共通点：**ログには出るのに実効がない**。だから「ログを見た」では検証にならない。
 
 【この検査の考え方】反射の入口から出口まで、各段で「値が変わること」を確認する。
   入口： 視覚パイプラインが画像を返すか
@@ -17,14 +17,14 @@
     .venv/Scripts/python.exe E/scripts/e_orient_wiring_check.py
 """
 
-# ⚠️★古い方式（2026-07-30 に整理）。新しい実験は `run/main.py` を通す。
+# 注意：古い方式（2026-07-30 に整理）。新しい実験は `run/main.py` を通す。
 #   【経緯】目標Eの実験スクリプトが118本あり、うち66本が**独立に環境を組み立てていた**。
 #     そのため「学習は関節モード（90関節を独立に駆動＝逸脱リスト 逸脱5）、
 #     測定とViewerは筋肉モード（拮抗筋2本/関節）」という**別の体で動く**事故が起きた
 #     （ユーザーの目視「視線誘導反射の実験の時とは動きが全然違う」で発覚。
 #      実測で動きが人間の新生児の約3.3倍速かった）。
 #   【設計と移行計画】`E/docs/実行基盤_設計.md`
-#   ⚠️このファイルは**記録として残す**（削除しない方針）。
+#   注意：このファイルは**記録として残す**（削除しない方針）。
 #     中の測り方は再利用できるので、プラグインへ移すときの元にする。
 import os, sys, warnings
 warnings.filterwarnings("ignore")
@@ -135,7 +135,7 @@ def main():
           f"最大の変化量 {diff_max:.4f}" +
           (f"  サッケード発火 {n_sacc} 回" if n_sacc is not None else "  （v1は間欠出力なし）"))
 
-    # ⚠️MIMoの環境は1つで約1.7GB使う。比較の前に必ず閉じる
+    # 注意：MIMoの環境は1つで約1.7GB使う。比較の前に必ず閉じる
     #   （3つ同時に作って "Could not allocate memory" になった。2026-07-26）
     env.close()
     del env, m, d, reflex
@@ -175,7 +175,7 @@ def main():
     ng = [n for n, ok in _RESULTS if not ok]
     print(f"\n  結果: {len(_RESULTS) - len(ng)}/{len(_RESULTS)} 通過")
     if ng:
-        print("  ★NG:", " / ".join(ng))
+        print("  NG:", " / ".join(ng))
         print("  → 反射のロジックではなく【配線】を疑う。"
               "vision_params・orient フラグ・update の呼び出し位置を確認する")
     return 1 if ng else 0

@@ -55,12 +55,12 @@ _BODY_GROUPS = [
     ("right_palm", ["right_hand"]),
     ("left_palm", ["left_hand"]),
     # 右指5本(親指含む)を各指1グループに集約
-    # ⚠️★【2026-07-31 修正】薬指(rf)と小指(lf)の指節が**入れ違っていた**。
+    # 注意：【2026-07-31 修正】薬指(rf)と小指(lf)の指節が**入れ違っていた**。
     #   誤：right_rf = [lfmetacarpal, lfknuckle, lfmiddle, rfdistal]  ← 小指3節＋薬指の先
     #       right_lf = [rfknuckle, rfmiddle, lfdistal]              ← 薬指2節＋小指の先
     #   ⇒ 各グループが「1本の指」になっておらず、2本の指の断片が混ざっていた。
-    #     実測でも left_rf 376点 / left_ff 53点 と★7倍の偏りが出ていた。
-    #   ★MIMo の実際の親子関係（mujoco の body_parentid で確認）：
+    #     実測でも left_rf 376点 / left_ff 53点 と7倍の偏りが出ていた。
+    #   MIMo の実際の親子関係（mujoco の body_parentid で確認）：
     #     hand → rfknuckle → rfmiddle → rfdistal                    （薬指＝3節）
     #     hand → lfmetacarpal → lfknuckle → lfmiddle → lfdistal      （小指＝4節）
     ("right_thumb", ["right_thbase", "right_thhub", "right_thdistal"]),
@@ -99,10 +99,10 @@ def build_sensor_layout(model, touch):
         total_dim: flat配列の全長(= sum(n_points) * 3)、検証用
     """
     # sorted(geom_id) 順に flat配列が並ぶ(mimoTouch.flatten_sensor_dictと同じ規則)
-    # ⚠️★★【2026-07-31 修正】`touch.sensor_positions` のキーは
+    # 注意：【2026-07-31 修正】`touch.sensor_positions` のキーは
     #   **触覚クラスによって意味が違う**。
-    #     DiscreteTouch  … キーは ★geom_id
-    #     TrimeshTouch   … キーは ★body_id   ← ★MIMo v2 の既定はこちら
+    #     DiscreteTouch  … キーは geom_id
+    #     TrimeshTouch   … キーは body_id   ← MIMo v2 の既定はこちら
     #   従来はキーを geom_id と決め打ちして `model.geom_bodyid[key]` で body を引いていた。
     #   ⇒ TrimeshTouch では**まったく別の部位に点数が割り当てられる**。
     #     実測では「左右で点数が桁違い（rfdistal 右96 vs 左412）」「脚にセンサーが無い」
@@ -117,13 +117,13 @@ def build_sensor_layout(model, touch):
         geom_offset[k] = (offset, offset + n_pts * 3, n_pts)
         offset += n_pts * 3
     total_dim = offset
-    # ★キーが body_id を指しているか（TrimeshTouch）を判定する。
+    # キーが body_id を指しているか（TrimeshTouch）を判定する。
     #   body_id なら `model.body(k)` が引けて、かつ geom_bodyid 経由と食い違う。
     keys_are_body = type(touch).__name__ == "TrimeshTouch"
     geom_ids_sorted = keys_sorted
 
     # body_name → キー のマップ
-    #   ★TrimeshTouch はキーが body_id なので**そのまま**引く。
+    #   TrimeshTouch はキーが body_id なので**そのまま**引く。
     #     DiscreteTouch はキーが geom_id なので geom_bodyid 経由で引く。
     name_to_geoms = {}
     for gid in geom_ids_sorted:

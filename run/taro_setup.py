@@ -1,11 +1,11 @@
-"""★太郎一式（脳・学習器・神経調節・小脳）を組み立てる。
+"""太郎一式（脳・学習器・神経調節・小脳）を組み立てる。
 
 【なぜ切り出したか、2026-07-30】これは `E/scripts/e_growth_train.py` の
 562〜700行を**そのまま写した**もの。元は930行の関数の中に埋まっていて、
 53個のモジュール変数（`_LR` `_MUSCLE` …）を直接読んでいたため
 実験ファイルから設定を渡せなかった。→ `run/config.py` の Config を受け取る形にする。
 
-⚠️★写すときに守ったこと：**乱数を消費する順序を変えない**。
+注意：写すときに守ったこと：**乱数を消費する順序を変えない**。
   順序が変わると同じシードでも違う初期値になり、過去の実験と比較できなくなる
   （落とし穴チェックリスト 項3「reset を1回足すだけで乱数列がずれる」）。
   順序は：env作成 → fusion → target_fusion → env.reset(seed) → 予測対象の次元を測る
@@ -45,14 +45,14 @@ from test_phase8_motor_learning import CombinedParams, rescale_action, to_tensor
 mse = torch.nn.functional.mse_loss
 
 # シナジーの関節index（MIMo身体の配列。d_c5_motor_quality.py と同一）
-# ⚠️★【逸脱・Tier3・2026-07-30】「まとめてしか動かせない」を**配線で作っている**。
+# 注意：【逸脱・Tier3・2026-07-30】「まとめてしか動かせない」を**配線で作っている**。
 #   人間（および國吉研の胎児モデル）は、振動子を互いに繋がず、
-#   ★身体・床・羊水を介した物理的な力の伝達で位相が揃う（引き込み現象）。
+#   身体・床・羊水を介した物理的な力の伝達で位相が揃う（引き込み現象）。
 #   ＝「まとめて動く」は**結果**であって入力ではない。
 #   国吉 & Sangawa 2006（Biological Cybernetics 95(6)）は
 #   「複数筋を協調させる回路を一切事前に組み込まずに」全身協調運動を創発させている。
 #   ⇒ 人間模倣からの逸脱リスト「2026-07-30 シナジーを配線で作っている」を参照。
-#     ⚠️太郎の環境には羊水も子宮壁もないので、外すと単に消える可能性がある（要検証）。
+#     注意：太郎の環境には羊水も子宮壁もないので、外すと単に消える可能性がある（要検証）。
 LEG_R = [72, 73, 75, 76]
 LEG_L = [81, 82, 84, 85]
 ARM_R = [14, 15, 17, 19]
@@ -60,9 +60,9 @@ ARM_L = [43, 44, 46, 48]
 
 
 class Taro:
-    """★太郎そのもの。脳・学習器・神経調節・小脳・海馬を持つ。
+    """太郎そのもの。脳・学習器・神経調節・小脳・海馬を持つ。
 
-    ⚠️ここは「太郎の中身」だけ。環境（env）は組み立てに必要なので受け取るが、
+    注意：ここは「太郎の中身」だけ。環境（env）は組み立てに必要なので受け取るが、
       **保持しない**（体を作り直しても Taro は作り直さないため）。
       env が要る操作（step / reset）は呼び出し側（run/trainer.py）が持つ。
 
@@ -79,14 +79,14 @@ class Taro:
         self.seed = int(seed)
         self.blocks = None            # ln_prop が最初の呼び出しで作る
 
-        # ---- 触覚の次元（reset せずに読める。★reset を足すと乱数列がずれる）----
+        # ---- 触覚の次元（reset せずに読める。reset を足すと乱数列がずれる）----
         # 注意：get_sensor_count() は「センサ点の数」で、観測は1点あたり力の3成分。
         touch_dim = int(env.observation_space["touch"].shape[0]) if cfg.touch else 0
         # 固有感覚の次元は駆動モードで変わる（関節モード=621 / 筋肉モード=801）
         prop_dim_space = int(env.observation_space["observation"].shape[0])
 
         # ---- 視覚の解像度（fusion に渡す）------------------------------------
-        # ⚠️シーンを使う場合、環境は**常に**視覚を持つ（e_scene が vision_params を渡す）。
+        # 注意：シーンを使う場合、環境は**常に**視覚を持つ（e_scene が vision_params を渡す）。
         #   vision=False は「脳が視覚を無視する」アブレーションになる（環境は変わらない）。
         vres = 0
         if cfg.vision:
@@ -105,7 +105,7 @@ class Taro:
                       f" 触覚総次元={touch_dim}", flush=True)
 
         # ---- ① 融合層（感覚をまとめる）--------------------------------------
-        # ★target_fusion は**凍結した別インスタンス**（RND式）。予測側と正解側が
+        # target_fusion は**凍結した別インスタンス**（RND式）。予測側と正解側が
         #   同じ学習中の層だと「出力を平坦にすれば当たる」抜け道で崩壊する（目標Cで実際に踏んだ）。
         self.fusion = MinimalFusion(touch_dim, vision_res=vres,
                                     proprio_dim=prop_dim_space,
@@ -122,7 +122,7 @@ class Taro:
         # 2*n_joint に写像して渡す。既定は n_act == n_env_act。
         self.n_act = n_env_act // 2 if (cfg.is_muscle and cfg.antagonist) else n_env_act
 
-        # ---- ③ 最初の reset（★必ず seed を渡す）------------------------------
+        # ---- ③ 最初の reset（必ず seed を渡す）------------------------------
         # 環境の乱数（env.unwrapped.np_random）は gym が別に管理しており、
         # torch.manual_seed も np.random.seed も効かない。シードなし reset だと
         # 毎回ちがう姿勢から始まり再現できない（2026-07-15 のバグ）。
@@ -135,7 +135,7 @@ class Taro:
         if cfg.target_has_vision and verbose:
             bd = "／".join(f"{nm}:{e - s}" for (s, e, nm) in (self.blocks or []))
             print(f"[予測対象] {cfg.target_kind} → 全{self.out_dim}次元  内訳 {bd}")
-            print(f"     ★誤差はブロックごとに平均してから足す（次元数の影響を除く。"
+            print(f"     誤差はブロックごとに平均してから足す（次元数の影響を除く。"
                   f"λ_v={cfg.lam_v}）")
 
         # ---- ⑤ 脳 -----------------------------------------------------------
@@ -144,7 +144,7 @@ class Taro:
         # 【運動性喃語（脊髄CPG）】noise=colored のとき太郎の中で色付き探索を有効化する。
         # 既定 white では呼ばれない＝spinal_cpg=None＝白色ガウス＝従来と数値完全一致。
         if str(cfg.noise) == "colored":
-            # ⚠️シナジーの index は90-actuator前提。筋肉モードでは pair_offset を入れて
+            # 注意：シナジーの index は90-actuator前提。筋肉モードでは pair_offset を入れて
             #   対になる筋（伸ばす側）に符号反転で同じシナジーを混ぜる（spinal_cord/cpg.py）。
             pair_offset = (self.n_act // 2) if (cfg.is_muscle and not cfg.antagonist) else 0
             self.brain.enable_spinal_babble(
@@ -183,7 +183,7 @@ class Taro:
 
         # ---- ⑧ 努力コストの重み ---------------------------------------------
         # 筋力（最大トルク）が大きい筋ほど動かすとコストが高い（代謝の標準：活性化²×筋サイズ）。
-        # ⚠️★体を作り直しても**更新していない**（元の実装もそうだった）。
+        # 注意：体を作り直しても**更新していない**（元の実装もそうだった）。
         #   体を育てる実験で努力コストを使うときは、ここが古い体の値であることに注意。
         gear = np.abs(env.unwrapped.model.actuator_gear[:self.n_act, 0]).astype(np.float32)
         self.eff_w = torch.tensor(gear / (gear.sum() + 1e-8))
@@ -204,17 +204,17 @@ class Taro:
         self.fusion.insula.load_state_dict(blob["fusion_insula"])
         self.fusion.proprio.load_state_dict(blob["fusion_proprio"])
         self.fusion.vestibular.load_state_dict(blob["fusion_vestibular"])
-        # ★触覚のエンコーダ。save は保存していたのに**読み戻していなかった**
+        # 触覚のエンコーダ。save は保存していたのに**読み戻していなかった**
         #   （2026-07-30 の点検で発覚）。黙って白紙に戻るので、
         #   「続きから学習できている」ように見えて触覚だけ学習しなおしになる。
         if "fusion_touch" in blob:
             if self.fusion.touch is not None:
                 _match(self.fusion.touch, blob["fusion_touch"], "触覚")
             else:
-                print("⚠️[load] 保存されたモデルは★触覚あり、いまの設定は触覚なしです。"
+                print("注意[load] 保存されたモデルは触覚あり、いまの設定は触覚なしです。"
                       "触覚のエンコーダは読み込みません（taro.touch を確認）", flush=True)
         elif self.fusion.touch is not None:
-            print("⚠️[load] いまの設定は★触覚ありですが、保存されたモデルに触覚が"
+            print("注意[load] いまの設定は触覚ありですが、保存されたモデルに触覚が"
                   "ありません。触覚のエンコーダは白紙から学習します", flush=True)
         if "emb_proj" in blob:
             print("  [注意] 旧形式のチェックポイント（emb_proj/nat_head が別層）です。"
@@ -225,9 +225,9 @@ class Taro:
 
     # -------------------------------------------------------- 予測の対象
     def encode_target(self, obs):
-        """★予測する対象を作る（元 `ln_prop`）。既定は固有感覚のみ。
+        """予測する対象を作る（元 `ln_prop`）。既定は固有感覚のみ。
 
-        ★2つの設計判断（詳細は E/scripts/e_target.py）：
+        2つの設計判断（詳細は E/scripts/e_target.py）：
           (1) **凍結した別インスタンス**のエンコーダを使う（RND式）。学習中のエンコーダを
               正解側に使うと「出力を平坦にすれば当たる」抜け道で崩壊する。
           (2) **固有感覚と視覚を別々に layer_norm** してから連結する。全体を一度に
@@ -249,7 +249,7 @@ class Taro:
                 parts.append(ln(e, e.shape)); names.append("touch_embed")
         if cfg.target_has_vision:
             with torch.no_grad():             # 正解側は勾配を流さない（RND式）
-                # ★内受容は入れない（2026-07-20 の文献調査による判断）：人間は内受容の
+                # 内受容は入れない（2026-07-20 の文献調査による判断）：人間は内受容の
                 #   予測誤差を自律反射（心拍・血管）で解消するが、太郎にはその出力が無い
                 #   ＝**誤差を減らす手段が構造的に存在しない**ので progress報酬が生まれない。
                 if cfg.target_has_all:
@@ -270,7 +270,7 @@ class Taro:
         return torch.cat(parts, dim=-1).detach() if len(parts) > 1 else parts[0]
 
     def block_pe(self, pred, target):
-        """★予測誤差＝**ブロックごとに平均してから足す**（次元数の影響を除く）。
+        """予測誤差＝**ブロックごとに平均してから足す**（次元数の影響を除く）。
 
         【なぜ】従来は連結したベクトル全体を1回で平均していたので、寄与が次元数比で
         決まっていた（固有感覚621 + 視覚64 → 視覚の寄与は 9.3%）。これは「視覚が
@@ -278,7 +278,7 @@ class Taro:
         同じ罠を目標D0とE1で計3回踏んだ。
         根拠＝Ohata & Tani 2020（`1/(2Rp)`）、Idei et al. 2025（1,150倍差を正規化のみで処理）、
         Ichiwara & Ogata 2022（`1/(H·W·C)`）。［参考文献リスト §目標E-17］
-        ⚠️(1+λ_v) で割るのは全体のスケールを保つため（割らないと「視覚を足した効果」と
+        注意：(1+λ_v) で割るのは全体のスケールを保つため（割らないと「視覚を足した効果」と
           「学習率が実質変わった効果」が混ざる＝交絡）。
         """
         if not self.blocks or len(self.blocks) <= 1:
@@ -307,9 +307,9 @@ class Taro:
             cerebellum=(self.cereb if self.cfg.cerebellum else None))
 
     def infer_goal_action(self, z, clp, init_mean, g, n_steps=15, lr_inf=0.1):
-        """★目標指向：凍結した順モデルを反転し、望む感覚 g に届く行動を推論する。
+        """目標指向：凍結した順モデルを反転し、望む感覚 g に届く行動を推論する。
 
-        ⚠️2026-07-30 の実測でこの機構は**有害**と判明（config.py の注記参照）。
+        注意：2026-07-30 の実測でこの機構は**有害**と判明（config.py の注記参照）。
           原典（Rolf, Steil & Gienger 2010）は目標を**手先位置の低次元**に取るが、
           ここは固有感覚621次元まるごとを目標にしている＝別物。
         """
@@ -328,9 +328,9 @@ class Taro:
                 "prev_a": torch.zeros(self.n_act)}
 
     def save(self, path, *, extra=None):
-        """確立した自己モデルを保存する。★条件も一緒に入れる。
+        """確立した自己モデルを保存する。条件も一緒に入れる。
 
-        ⚠️条件を入れないと、あとから「どの設定で保存されたか」が分からない
+        注意：条件を入れないと、あとから「どの設定で保存されたか」が分からない
           （2026-07-25 に感度分析のモデルが同一だと分かっても原因を追えなかった）。
         """
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)

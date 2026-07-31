@@ -62,10 +62,10 @@ def build(seed):
     sdim = fusion.encode(obs).shape[0]; prop_dim = to_tensor(obs["observation"]).shape[0]
     brain = TaroBrainWithMotor(vocab_size=3, sensory_dim=sdim, n_actuators=n_act, proprio_dim=prop_dim)
     emb_dim = brain.sensory_proj.out_features
-    # 【★2026-07-25】D-a/D-b の層を**太郎の中（core）のものに一本化**した。
+    # 【2026-07-25】D-a/D-b の層を**太郎の中（core）のものに一本化**した。
     # 従来はここで別に作っており、core の motor_input_proj / forward_model_head は
     # 作られるだけで一度も使われていなかった＝脳が二重に存在していた（構造監査で発覚）。
-    # 構造・初期化とも core 側と完全に同型。⚠️層名が変わるので旧チェックポイントは
+    # 構造・初期化とも core 側と完全に同型。注意層名が変わるので旧チェックポイントは
     # 読めない＝学習しなおし前提（ユーザー判断 2026-07-25）。
     emb_proj = brain.motor_input_proj      # 旧名を別名として残す
     nat_head = brain.forward_model_head

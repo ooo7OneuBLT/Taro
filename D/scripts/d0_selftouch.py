@@ -145,10 +145,10 @@ def run(seed=0, n_train=3600, ckpt=600, n_eval=60):
     sdim = fusion.encode(obs).shape[0]
     out_dim = prop_dim + tch_dim
     brain = TaroBrainWithMotor(vocab_size=3, sensory_dim=sdim, n_actuators=n_act, proprio_dim=out_dim)
-    # 【★2026-07-25】D-a/D-b の層を**太郎の中（core）のものに一本化**した。
+    # 【2026-07-25】D-a/D-b の層を**太郎の中（core）のものに一本化**した。
     # 従来はここで別に作っており、core の motor_input_proj / forward_model_head は
     # 作られるだけで一度も使われていなかった＝脳が二重に存在していた（構造監査で発覚）。
-    # 構造・初期化とも core 側と完全に同型。⚠️層名が変わるので旧チェックポイントは
+    # 構造・初期化とも core 側と完全に同型。注意層名が変わるので旧チェックポイントは
     # 読めない＝学習しなおし前提（ユーザー判断 2026-07-25）。
     emb_proj = brain.motor_input_proj      # 旧名を別名として残す
     nat_head = brain.forward_model_head
@@ -250,7 +250,7 @@ def run(seed=0, n_train=3600, ckpt=600, n_eval=60):
         # 動きを消すと誤差は下がりきって進度0＝退屈になるので、暗い部屋に留まれない。
         return progress
 
-    # 【★2026-07-25】睡眠リプレイのバッファを太郎の海馬（core: brain/hippocampus.py の
+    # 【2026-07-25】睡眠リプレイのバッファを太郎の海馬（core: brain/hippocampus.py の
     # MotorHippocampus）に一元化。**旧実装は独自のdictで、core にある FIFO容量上限(3600)も
     # clear() も無く、学習全期間ぶん無制限に増え続けていた**＝「直近の覚醒経験を再生する」
     # という睡眠リプレイの意味から外れた劣化コピーだった（構造監査で発覚）。

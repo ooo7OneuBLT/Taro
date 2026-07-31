@@ -76,14 +76,14 @@ def analyze(logs, window=10):
     print("--- 食事文脈の最新10件 ---")
     for r in feed[-10:]:
         day = r["sim_seconds"] // 86400 + 1
-        mark = "★" if exact_mamama(r["taro"]) else "  "
+        mark = "" if exact_mamama(r["taro"]) else "  "
         print(f"  {mark} Day{day} turn={r['turn']:3d} | 親「{r['parent']}」→ 太郎「{r['taro']}」| r_imit={r['r_imit']:.2f} hunger={r['hunger']:.2f}")
 
     print()
     print("--- その他文脈の最新10件 ---")
     for r in comfort[-10:]:
         day = r["sim_seconds"] // 86400 + 1
-        mark = "★" if exact_mamama(r["taro"]) else "  "
+        mark = "" if exact_mamama(r["taro"]) else "  "
         print(f"  {mark} Day{day} turn={r['turn']:3d} | 親「{r['parent']}」→ 太郎「{r['taro']}」| r_imit={r['r_imit']:.2f}")
 
     # --- 日別の模倣報酬推移 ---

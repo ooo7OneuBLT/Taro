@@ -16,14 +16,14 @@
     E_RECLINE=60 .venv/Scripts/python.exe E/scripts/e_recline_gaze_check.py
 """
 
-# ⚠️★古い方式（2026-07-30 に整理）。新しい実験は `run/main.py` を通す。
+# 注意：古い方式（2026-07-30 に整理）。新しい実験は `run/main.py` を通す。
 #   【経緯】目標Eの実験スクリプトが118本あり、うち66本が**独立に環境を組み立てていた**。
 #     そのため「学習は関節モード（90関節を独立に駆動＝逸脱リスト 逸脱5）、
 #     測定とViewerは筋肉モード（拮抗筋2本/関節）」という**別の体で動く**事故が起きた
 #     （ユーザーの目視「視線誘導反射の実験の時とは動きが全然違う」で発覚。
 #      実測で動きが人間の新生児の約3.3倍速かった）。
 #   【設計と移行計画】`E/docs/実行基盤_設計.md`
-#   ⚠️このファイルは**記録として残す**（削除しない方針）。
+#   注意：このファイルは**記録として残す**（削除しない方針）。
 #     中の測り方は再利用できるので、プラグインへ移すときの元にする。
 import os
 import sys
@@ -65,7 +65,7 @@ def probe(neck_target):
                            recline_deg=REC, **kw)
         env.reset(seed=0)
         # 首のバネの目標角を上書きする。
-        # ⚠️環境のコンストラクタは neck_tone_target を受け取らないので、
+        # 注意：環境のコンストラクタは neck_tone_target を受け取らないので、
         #   構築後に core の関数を直接呼ぶ。qpos_spring は model の値なので
         #   reset しても消えない。
         from infant_body import apply_neck_tone
@@ -135,12 +135,12 @@ def main():
     print("\n" + "=" * 78)
     if ok:
         best = min(ok, key=lambda o: abs(o["cx"]) + abs(o["cy"]))
-        print(f" ★おもちゃが見えるのは "
+        print(f" おもちゃが見えるのは "
               f"{'、'.join(f'{o["target"]:+.0f}度' for o in ok)}")
         print(f"   最も中心で捉えるのは {best['target']:+.0f}度"
               f"（視野内 {best['cx']:+.2f},{best['cy']:+.2f}）")
     else:
-        print(" ⚠️どの角度でもおもちゃが見えない。おもちゃの位置も変える必要がある")
+        print(" 注意どの角度でもおもちゃが見えない。おもちゃの位置も変える必要がある")
         print(f"   視線は {min(o['gaze'] for o in outs):+.0f}〜"
               f"{max(o['gaze'] for o in outs):+.0f}度 の範囲で振れる")
         print(f"   おもちゃとのずれは最小 {min(o['off'] for o in outs):.1f}度"

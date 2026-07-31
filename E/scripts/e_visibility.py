@@ -1,6 +1,6 @@
 """「太郎に見えているか」を判定する共通の道具。
 
-★【なぜ作ったか】2026-07-26、視界の判定を
+【なぜ作ったか】2026-07-26、視界の判定を
     視線ベクトルと対象方向のなす角 < 視野の半角(30度)
 だけで行っていた。おもちゃがベビーサークルの柵の**向こう側**（X=0.353・柵は0.310）に
 あっても、なす角は 4.5度なので「視界内 100%」と報告し続けた。
@@ -14,9 +14,9 @@
 
   ②光線を飛ばす     `visible_by_ray()`
       目から対象へ光線を飛ばし、最初に当たる物体が対象かを見る。
-      幾何学的に確実。⚠️ただし「太郎の脳に届く情報」ではない（視力・解像度を経ていない）。
+      幾何学的に確実。注意ただし「太郎の脳に届く情報」ではない（視力・解像度を経ていない）。
 
-  ③画像に映っているか `visible_in_image()`   ★これが本命
+  ③画像に映っているか `visible_in_image()`   これが本命
       太郎の眼球カメラが実際に描いた画像に、対象の色が何画素あるかを数える。
       視力のぼかし（acuity）・解像度・視野を全部通った後なので、
       **太郎が実際に受け取っている情報そのもの**。
@@ -34,14 +34,14 @@ HALF_FOV = 30.0
 TOY_RGB_OFF = np.array([0.9, 0.2, 0.15])     # 通常＝赤
 TOY_RGB_ON = np.array([1.0, 1.0, 0.45])      # 接触中＝明るい黄
 
-# 色で拾うときの許容幅。⚠️視力のぼかし（acuity）で色が薄まるので緩めに取る。
+# 色で拾うときの許容幅。注意視力のぼかし（acuity）で色が薄まるので緩めに取る。
 # 「赤が飛び抜けて強い画素」を拾う条件にして、しきい値の恣意性を減らす。
 RED_DOMINANCE = 1.35     # R が G・B の何倍以上なら「赤い」とみなすか
 RED_MIN = 0.30           # R の下限（暗すぎる画素は拾わない）
 
 
 def gaze_angle(model, data, toy_bid, camera="eye_left"):
-    """視線と対象のなす角[度]。⚠️遮蔽を見ないので単独で使わないこと。"""
+    """視線と対象のなす角[度]。注意遮蔽を見ないので単独で使わないこと。"""
     cid = int(model.camera(camera).id)
     cpos = data.cam_xpos[cid]
     fwd = -np.array(data.cam_xmat[cid], dtype=float).reshape(3, 3)[:, 2]
@@ -87,7 +87,7 @@ def visible_by_ray(model, data, toy_bid, camera="eye_left", exclude_head=True):
 def red_mask(image):
     """画像から「赤が飛び抜けて強い画素」を拾う。おもちゃ（赤）の検出用。
 
-    ⚠️太郎の視覚は視力のぼかしを通っているので、色は薄まる。
+    注意：太郎の視覚は視力のぼかしを通っているので、色は薄まる。
       絶対値でなく**チャンネル間の比**で見ることで、ぼけに強くする。
     """
     a = np.asarray(image, dtype=float)
@@ -100,7 +100,7 @@ def red_mask(image):
 
 
 def visible_in_image(image, min_pixels=1):
-    """★太郎の目に実際に映っているか。赤い画素の数と、その重心を返す。
+    """太郎の目に実際に映っているか。赤い画素の数と、その重心を返す。
 
     Returns:
         dict: seen(bool) / n_pixels(int) / frac(画面に占める割合) /
@@ -118,7 +118,7 @@ def visible_in_image(image, min_pixels=1):
     return out
 
 
-# ---- ★描き分けによる正確な判定（2026-07-27 追加）------------------------
+# ---- 描き分けによる正確な判定（2026-07-27 追加）------------------------
 # 色による判定（red_mask）は**本当の画素の46%しか拾えていなかった**
 #   本当のおもちゃ 2352画素 → 色で拾えたのは 1086画素、取りこぼし 1266画素
 #   ユーザーの目視「赤い部分があるのに緑に光ってないときがある」で発覚
@@ -126,7 +126,7 @@ def visible_in_image(image, min_pixels=1):
 # 言えなくなる）ため、重心が中心寄りにずれていた。
 #
 # MuJoCo の segmentation rendering は「どの画素がどの geom か」を正確に返す。
-# ★ただし**太郎が受け取る情報ではない**（視力のぼかしを通っていない）。
+# ただし**太郎が受け取る情報ではない**（視力のぼかしを通っていない）。
 #   使い分け：
 #     「おもちゃが本当はどこにあるか」  → segment_mask（正確）
 #     「太郎に見分けられるか」          → red_mask（ぼかし後の画像）
@@ -134,7 +134,7 @@ _SEG_CACHE = {}
 
 
 def segment_mask(model, data, body_id, camera="eye_left", size=128):
-    """★MuJoCo に描き分けさせて、対象の画素を正確に取り出す。
+    """MuJoCo に描き分けさせて、対象の画素を正確に取り出す。
 
     Returns:
         np.ndarray: True/False の2次元マップ（対象の画素が True）
@@ -188,7 +188,7 @@ def report(model, data, toy_bid, image=None, camera="eye_left"):
     out = dict(angle=ang, in_fov=bool(ang < HALF_FOV), ray_ok=ray_ok, ray_hit=hit,
                pix_seen=None, n_pixels=0, frac=0.0, cx=float("nan"), cy=float("nan"),
                seg_seen=None, seg_pixels=0, seg_cx=float("nan"), seg_cy=float("nan"))
-    # ★描き分けによる正確な位置（色の判定は本当の46%しか拾えない）
+    # 描き分けによる正確な位置（色の判定は本当の46%しか拾えない）
     try:
         sz = 128
         if image is not None:
@@ -209,11 +209,11 @@ def describe(r):
     """report() の結果を1行の日本語にする。"""
     s = f"なす角{r['angle']:5.1f}° "
     s += "視野内 " if r["in_fov"] else "視野外 "
-    s += "遮蔽なし " if r["ray_ok"] else f"★{r['ray_hit']}に遮られている "
+    s += "遮蔽なし " if r["ray_ok"] else f"{r['ray_hit']}に遮られている "
     if r.get("seg_seen") is not None:
         s += (f"実際に{r['seg_pixels']:4d}画素(ずれ{np.hypot(r['seg_cx'], r['seg_cy']):.2f}) "
-              if r["seg_seen"] else "★視野に入っていない ")
+              if r["seg_seen"] else "視野に入っていない ")
     if r["pix_seen"] is not None:
         s += (f"／色で拾えたのは{r['n_pixels']:4d}画素" if r["pix_seen"]
-              else "／★色では拾えない")
+              else "／色では拾えない")
     return s

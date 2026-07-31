@@ -1,4 +1,4 @@
-"""★学習ループ本体。太郎を動かし、学習させ、プラグインに測らせる。
+"""学習ループ本体。太郎を動かし、学習させ、プラグインに測らせる。
 
 【なぜ切り出したか、2026-07-30】これは `E/scripts/e_growth_train.py` の
 1175〜1304行（学習ループ）＋1069〜1098行（checkpoint）＋1128〜1148行（睡眠リプレイ）
@@ -10,13 +10,13 @@
 
 【役割の分担】
     run/config.py       設定（実験ファイルから）
-    run/taro_setup.py   ★太郎の中身（脳・学習器・神経調節・小脳）
-    run/trainer.py      ★ここ。太郎と環境を噛み合わせて回す
+    run/taro_setup.py   太郎の中身（脳・学習器・神経調節・小脳）
+    run/trainer.py      ここ。太郎と環境を噛み合わせて回す
     run/plugins/        外から測る道具（太郎を変えない）
 
-⚠️★同じ設定で同じ結果が出るかを必ず確かめる（`run/tools/check_divergence.py`）。
+注意：同じ設定で同じ結果が出るかを必ず確かめる（`run/tools/check_divergence.py`）。
   乱数を消費する順序が1つ違うだけで同じシードでも別の学習になる（落とし穴 項3）。
-  ⚠️★測定は体を進めるので、測定の前後で状態を控えて戻している（項79・項80）。
+  注意：測定は体を進めるので、測定の前後で状態を控えて戻している（項79・項80）。
     その仕組みは `_snapshot` / `_restore`。ここを崩すと再現性が失われる。
 """
 import os
@@ -45,9 +45,9 @@ def _mj_arrays(d):
     戻す必要がある（落とし穴 項79・項80）。ところが `qpos` と `qvel` だけ戻しても
     足りず、実測では「環境を進めた結果（obs_out）」だけが食い違い続けた。
     加速度・ソルバの前回解・センサの値も次の計算に影響するため。
-    ⚠️手で並べると必ず取りこぼす。`mujoco.mj_copyData` は Python に露出していない
+    注意：手で並べると必ず取りこぼす。`mujoco.mj_copyData` は Python に露出していない
       （mujoco 3.3.0 で確認）ので、属性を走査して配列を集める。
-    ⚠️読み取り専用の配列（サイズ情報など）は書き戻せないので飛ばす。
+    注意：読み取り専用の配列（サイズ情報など）は書き戻せないので飛ばす。
     """
     out = {}
     for nm in dir(d):
@@ -63,13 +63,13 @@ def _mj_arrays(d):
 
 
 def _release_renderers(env):
-    """★眼球の描画用メモリ（OpenGL）を明示的に返す。体を作り直す前に呼ぶ。
+    """眼球の描画用メモリ（OpenGL）を明示的に返す。体を作り直す前に呼ぶ。
 
     【なぜ要るか、2026-07-30】体を育てる実験（500回ごとに体を作り直す）で、
     GPU のメモリが尽きて学習が落ちた（OpenGL error 0x505 → exit 139）。
     `e_toy_env` は眼球カメラの `mujoco.Renderer` を辞書に持ち、
     **モデルが変わったときにしか閉じない**。作り直しのたびに古いものが残る。
-    ⚠️`env.close()` はこの辞書を触らないので、ここで自分で閉じる。
+    注意：`env.close()` はこの辞書を触らないので、ここで自分で閉じる。
     """
     u = getattr(env, "unwrapped", env)
     cache = getattr(u, "_eye_renderers", None)
@@ -81,8 +81,8 @@ def _release_renderers(env):
             r.close()
             n += 1
         except Exception as e:      # noqa: BLE001
-            # ⚠️握りつぶすが黙らない（閉じ損ねはメモリが残るだけ）
-            print(f"⚠️[renderer] 閉じるのに失敗: {type(e).__name__}: {e}", flush=True)
+            # 注意：握りつぶすが黙らない（閉じ損ねはメモリが残るだけ）
+            print(f"注意[renderer] 閉じるのに失敗: {type(e).__name__}: {e}", flush=True)
     cache.clear()
     u._eye_renderers = {}
     u._eye_renderers_model = None
@@ -96,7 +96,7 @@ def _release_renderers(env):
 class Trainer:
     """太郎に「生きて学ぶ」をさせる。
 
-    ⚠️★このクラスは**測らない**。測るのはプラグイン。
+    注意：このクラスは**測らない**。測るのはプラグイン。
       ここが測り始めると、また「学習ループの中に測定が埋まる」状態に戻る。
     """
 
@@ -107,29 +107,29 @@ class Trainer:
         self._log_row = log_row or (lambda row: None)
         self.env = None
         self.taro = None
-        # ★測定の前に体を控えるための入れ物（重いので1つ作って使い回す）
+        # 測定の前に体を控えるための入れ物（重いので1つ作って使い回す）
         self._snap_data = None
         self._snap_model = None
 
     # ------------------------------------------------------------ 組み立て
     def build(self):
-        """環境と太郎を作る。★乱数の順序を元の実装に合わせる。"""
+        """環境と太郎を作る。乱数の順序を元の実装に合わせる。"""
         cfg = self.cfg
-        # ★★太郎の乱数は**4系統**ある。1つでも撒き忘れると同じシードで再現できない。
+        # 太郎の乱数は**4系統**ある。1つでも撒き忘れると同じシードで再現できない。
         #   【2026-07-30 に判明】4つ目（Python標準の random）を誰も撒いていなかった。
         #     `taro_core/src/body/internal_state.py` が「泣き始めるか」「寝入るか」
         #     「うとうとするか」を `random.random()` で決めている（同 168/121/146行）。
         #     泣く・眠るは**内受容感覚として脳の入力に入る**ので、1回でもタイミングが
         #     ずれると以後の学習が丸ごと分岐する。
-        #   ⚠️元の経路（E/scripts/e_growth_train.py）にも同じ撒き忘れがある
+        #   注意：元の経路（E/scripts/e_growth_train.py）にも同じ撒き忘れがある
         #     ＝過去の実験は同一シードでも再現していなかった（落とし穴 項79）。
         torch.manual_seed(cfg.seed)     # ①脳の初期値・探索のゆらぎ・睡眠リプレイの抜き取り
         np.random.seed(cfg.seed)        # ②numpy を使う処理（agency の並べ替えなど）
-        random.seed(cfg.seed)           # ③★内臓（泣く・寝る・うとうと）
+        random.seed(cfg.seed)           # ③内臓（泣く・寝る・うとうと）
         # ④環境の初期姿勢（gym の np_random）は env.reset(seed=) で撒く（taro_setup.py）
 
         from run.plugins.common import scene as scene_mod
-        # ★月齢は「学習ループ側の月齢」で上書きする（体を育てると学習中に変わるので、
+        # 月齢は「学習ループ側の月齢」で上書きする（体を育てると学習中に変わるので、
         #   シーンの固定値では合わない）。＝シーンは月齢以外の環境を担う。
         self._cur_age = cfg.age_at(0)
         taro_spec = dict(cfg._taro)
@@ -145,7 +145,7 @@ class Trainer:
         self.taro = Taro(cfg, self.env, seed=cfg.seed, verbose=self.verbose)
         self.state = self.taro.init_state(self.taro.first_obs)
         # 目標指向の探索が使う（過去に経験した感覚）
-        # ⚠️★【逸脱/工学近似・2026-07-30 判明】これは Self-Prior ではない。
+        # 注意：【逸脱/工学近似・2026-07-30 判明】これは Self-Prior ではない。
         #   先行研究（Kim, Kanazawa, Yoshida, Kuniyoshi 2025, arXiv:2504.11075）の
         #   self-prior は「経験した観測の**頻度分布**」を明示的に学習する
         #   （離散版＝カウント→Categorical／連続版＝正規化フロー NSF を最尤推定）。
@@ -163,11 +163,11 @@ class Trainer:
     def step_k(self, a):
         """1回の判断で K 物理ステップ進める（＝同じ命令を K tick 保持する）。
 
-        ⚠️★【逸脱・2026-07-30】**感覚運動遅延（神経伝導の遅れ）が無い**。
+        注意：【逸脱・2026-07-30】**感覚運動遅延（神経伝導の遅れ）が無い**。
           人間は運動指令が筋に届くまで、感覚が脳に届くまでに 0.1〜0.2秒かかる。
           太郎は命令がその tick で力になり、感覚もその tick で返る。
           ⇒ K=10（0.1秒）は「人間のフィードバック遅延に合わせた**間隔**」であって、
-            ★遅れそのものは入っていない。
+            遅れそのものは入っていない。
           MIMo grows!（López et al. 2025）は FIFO バッファとして実装している。
           → 人間模倣からの逸脱リスト「2026-07-30 感覚運動遅延が無い」
         """
@@ -186,7 +186,7 @@ class Trainer:
 
     # -------------------------------------------------- 測定器へ渡す入れ物
     def _build_probe_ctx(self):
-        """`E/scripts/e_probes.py` に渡す入れ物。★判定の実体は e_probes 側にある。"""
+        """`E/scripts/e_probes.py` に渡す入れ物。判定の実体は e_probes 側にある。"""
         import e_probes
         t = self.taro
         self.probe_ctx = e_probes.ProbeContext(
@@ -197,29 +197,29 @@ class Trainer:
             infer_goal_action=t.infer_goal_action,
             state=self.state, n_act=t.n_act, n_eval=self.cfg.n_eval,
             K=self.cfg.K, DT=DT, seed=self.cfg.seed,
-            # ⚠️★リポジトリのルート基準にする。cwd 相対だと、どこから実行したかで
+            # 注意：リポジトリのルート基準にする。cwd 相対だと、どこから実行したかで
             #   逆モデルの診断ログ（inv_probe_*.txt 等）の出力先が変わる。
             log_dir=os.path.join(_ROOT, os.path.dirname(self.cfg.log or "")
                                  or os.path.join("E", "logs", "run")))
 
     def _build_ctx(self):
-        """プラグインに渡す入れ物。★プラグインは読むだけ。"""
+        """プラグインに渡す入れ物。プラグインは読むだけ。"""
         u = self.env.unwrapped
         dt = float(u.model.opt.timestep) * int(u.frame_skip) * self.cfg.K
-        # ⚠️★name を入れ忘れると、ダッシュボードの見出しが★フォルダ名になる
+        # 注意：name を入れ忘れると、ダッシュボードの見出しがフォルダ名になる
         #   （2026-07-31 に実際にそうなっていた）。プラグインは spec しか見られない。
         self.ctx = Ctx(env=self.env, spec={"name": self.cfg.name,
                                            "scene": self.cfg.scene, "taro": self.cfg._taro,
                                            "run": self.cfg._run},
                        scene=self.scene, n_steps=self.cfg.steps, dt=dt,
                        brain=self.taro.brain, log=self._log_row)
-        # ★自己モデルのプラグインが測るのに使う（e_probes への入れ物）
+        # 自己モデルのプラグインが測るのに使う（e_probes への入れ物）
         self.ctx.probe_ctx = self.probe_ctx
         self.ctx.taro = self.taro
 
     # ---------------------------------------------------------- 体を育てる
     def _regrow(self, new_age):
-        """★保存を挟まずに env だけ作り直す（脳・経験・オプティマイザは残る）。
+        """保存を挟まずに env だけ作り直す（脳・経験・オプティマイザは残る）。
 
         【なぜ、2026-07-29】以前は「0ヶ月で学ぶ → 保存 → 別プロセスで4ヶ月として
         読み込み」で体を切り替えていた。ところが保存されるのは**脳の重みだけ**で、
@@ -229,14 +229,14 @@ class Trainer:
         cfg = self.cfg
         old = (int(self.env.observation_space["observation"].shape[0]),
                int(self.env.action_space.shape[0]))
-        # ★★視覚のレンダラ（OpenGLの描画用メモリ）を**明示的に閉じる**。
+        # 視覚のレンダラ（OpenGLの描画用メモリ）を**明示的に閉じる**。
         #   【なぜ、2026-07-30】体を育てる実験で学習が落ちた：
         #     WARNING: OpenGL error 0x505 in or before mjr_makeContext
         #     ⇒ 0x505 は GPU のメモリ不足。体を作り直すたびに眼球用の
         #       `mujoco.Renderer` が新しく作られ、**古いものが解放されずに積み上がる**。
         #     条件Cは500回ごとに作り直すので36回ぶん溜まり、実測で
         #     3000回目（6回目の作り直し）で落ちた（exit=139＝メモリアクセス違反）。
-        #   ⚠️`env.close()` では解放されない（レンダラは環境が持つ Python の辞書）。
+        #   注意：`env.close()` では解放されない（レンダラは環境が持つ Python の辞書）。
         _release_renderers(self.env)
         self.env.close()
         from run.plugins.common import scene as scene_mod
@@ -246,10 +246,10 @@ class Trainer:
             cfg.scene, taro=spec, seed=cfg.seed, verbose=False, hybrid=True)
         new = (int(self.env.observation_space["observation"].shape[0]),
                int(self.env.action_space.shape[0]))
-        # ⚠️触覚ONではセンサ点が月齢で変わる（0ヶ月1734→4ヶ月4274）ので次元が合わなくなる。
+        # 注意：触覚ONではセンサ点が月齢で変わる（0ヶ月1734→4ヶ月4274）ので次元が合わなくなる。
         #   黙って壊れると「体を育てたのに学習が進まない」と読み違えるのでここで止める。
         if old != new:
-            # ⚠️★ここで止めるとき、新しく作った env を閉じてから投げる
+            # 注意：ここで止めるとき、新しく作った env を閉じてから投げる
             #   （閉じないと描画コンテキストが残る）
             close_env(self.env)
             raise AssertionError(
@@ -259,8 +259,8 @@ class Trainer:
         self.ctx.env = self.env
         u = self.env.unwrapped
         self.ctx.model, self.ctx.data = u.model, u.data
-        # ★プラグインに知らせる（geom の id を引き直させる）。
-        #   ⚠️元の実装はここが無く、さらに `env.unwrapped` を作り直し前のまま
+        # プラグインに知らせる（geom の id を引き直させる）。
+        #   注意：元の実装はここが無く、さらに `env.unwrapped` を作り直し前のまま
         #     参照していた＝体を育てる実験では接触を古い体で見ていた。
         for p in self.plugins:
             p.on_body_change(self.ctx)
@@ -285,30 +285,30 @@ class Trainer:
             out, _ = t.brain.motor_gru(emb, hb)
             z, kl, rc = t.brain.pc_latent.infer(hb[-1], out[:, 0], CF[idx])
             pred = CLP[idx] + t.nat_head(torch.cat([z, AA[idx]], dim=-1))
-            loss = t.block_pe(pred, NLP[idx]) + kl + rc       # ★学習ループと同じ基準
+            loss = t.block_pe(pred, NLP[idx]) + kl + rc       # 学習ループと同じ基準
             t.learner.optimizer.zero_grad(); loss.backward()
             torch.nn.utils.clip_grad_norm_(t.learner.brain.parameters(),
                                            t.learner.grad_clip)
             t.learner.optimizer.step()
 
-    # ------------------------------------------- ★測定を「無かったこと」にする
+    # ------------------------------------------- 測定を「無かったこと」にする
     #
     # 【なぜ要るか、2026-07-30】自己モデルの測定（`e_probes.evaluate`）は
     #   **見るだけではなく実際に動かす**（n_eval=80 判断＝8秒ぶん）。
     #   そのため測定を1回するたびに：
     #     ・太郎の体が 8秒（agency も測るなら 14秒）ぶん進む
     #     ・学習が「測定後の体」から再開する
-    #     ・★チェックポイント間隔を変えると学習そのものが変わる（項80）
-    #     ・★同じシードでも結果がばらつく入り口になる（項79）
+    #     ・チェックポイント間隔を変えると学習そのものが変わる（項80）
+    #     ・同じシードでも結果がばらつく入り口になる（項79）
     #   実測：測定を外すと4回すべて完全一致。入れると step 1 で既に食い違う。
     #        食い違うのは体の状態（関節・前庭・触覚・視覚）で、**脳の重みは一致**。
     #
     # ⇒ 測定の前にすべてを控え、測定が終わったら**元に戻す**。
     #    学習から見て測定は「無かったこと」になる。
     #
-    # ⚠️★これで過去の実験とは学習の軌道が変わる（＝数値が比較できなくなる）。
+    # 注意：これで過去の実験とは学習の軌道が変わる（＝数値が比較できなくなる）。
     #   それでも直すのは、過去の数値がそもそも再現しないため（項79）。
-    # ⚠️測定**値**のばらつきは残りうる（測定の中の非決定性は消えない）。
+    # 注意：測定**値**のばらつきは残りうる（測定の中の非決定性は消えない）。
     #   ただしそれは「測るときの誤差」で、学習が分岐して増幅するのとは別物。
 
     def _snapshot(self):
@@ -317,11 +317,11 @@ class Trainer:
         import random
         u = self.env.unwrapped
         d = u.data
-        # --- 体（MuJoCo）を★丸ごと控える ----------------------------------
+        # --- 体（MuJoCo）を丸ごと控える ----------------------------------
         #   qpos/qvel だけでは足りない。加速度（qacc）・ソルバの前回解
         #   （qacc_warmstart）・センサの値も次の計算に影響する。
-        #   ⚠️手で並べると必ず取りこぼす（実測で obs_out だけ食い違い続けた）。
-        #   ⚠️`mujoco.mj_copyData` は Python に露出していない（mujoco 3.3.0 で確認）。
+        #   注意：手で並べると必ず取りこぼす（実測で obs_out だけ食い違い続けた）。
+        #   注意：`mujoco.mj_copyData` は Python に露出していない（mujoco 3.3.0 で確認）。
         #     なので**書き換えられる配列を機械的に全部**控える。
         snap = {
             "mjarr": _mj_arrays(d),
@@ -330,7 +330,7 @@ class Trainer:
             "state": {"obs": self.state["obs"],
                       "hidden": self.state["hidden"].clone(),
                       "prev_a": self.state["prev_a"].clone()},
-            # --- 乱数（3系統＋Python標準）★測定が引いた分を巻き戻す ----------
+            # --- 乱数（3系統＋Python標準）測定が引いた分を巻き戻す ----------
             "torch_rng": torch.get_rng_state(),
             "np_rng": np.random.get_state(),
             "py_rng": random.getstate(),
@@ -346,14 +346,14 @@ class Trainer:
             if hasattr(self.env, nm):
                 organs[nm] = copy.deepcopy(getattr(self.env, nm))
         snap["organs"] = organs
-        # --- ★筋の状態（MuJoCo の外・Python 側にある）------------------------
+        # --- 筋の状態（MuJoCo の外・Python 側にある）------------------------
         #   MuscleModel は活性化ダイナミクス（力がじわっと立ち上がる一次遅れ）を
         #   `self.activity` という**Python の配列**で持っている。d.act ではない。
-        #   ⚠️ここを戻さないと「測定中に力んだ状態」から学習が再開する。
+        #   注意：ここを戻さないと「測定中に力んだ状態」から学習が再開する。
         #     2026-07-30 の実測では、これが obs_out（環境を進めた結果）が
-        #     食い違う原因だった。★元の学習ループにも同じ穴がある。
+        #     食い違う原因だった。元の学習ループにも同じ穴がある。
         snap["actu"] = self._numeric_attrs(getattr(u, "actuation_model", None))
-        # --- ★環境が持つ数値の状態（おもちゃのタイマー・視覚のキャッシュなど）---
+        # --- 環境が持つ数値の状態（おもちゃのタイマー・視覚のキャッシュなど）---
         #   列挙漏れを防ぐため**数値と配列は機械的に全部**控える。
         #   （`_t_since_reset` `_toy_pending` `_glow_until` `_vision_cache` など、
         #     手で並べると必ず取りこぼす）
@@ -365,10 +365,10 @@ class Trainer:
             if v is not None:
                 refl[nm] = copy.deepcopy(v)
         snap["reflex"] = refl
-        # --- ★視覚のキャッシュ（辞書なので上の数値の走査では拾えない）-----------
+        # --- 視覚のキャッシュ（辞書なので上の数値の走査では拾えない）-----------
         #   `e_toy_env` は「前回の描画から VISION_MIN_DT 経っていなければ使い回す」
         #   ため、描いた画像（辞書）と時刻を持っている。
-        #   ⚠️戻さないと**測定中に描いた画像**が学習に混ざりうる。
+        #   注意：戻さないと**測定中に描いた画像**が学習に混ざりうる。
         snap["vis"] = {nm: copy.deepcopy(getattr(u, nm, None))
                        for nm in ("_vision_cache", "_vision_t")
                        if hasattr(u, nm)}
@@ -378,10 +378,10 @@ class Trainer:
 
     @staticmethod
     def _numeric_attrs(obj):
-        """obj が持つ「数値・配列」の属性を控える。★オブジェクトは触らない。
+        """obj が持つ「数値・配列」の属性を控える。オブジェクトは触らない。
 
-        ⚠️`model` `data` は MuJoCo の本体なので除く（ここで触ると壊れる）。
-        ⚠️配列は必ず copy する（`data` のビューだと戻す意味がなくなる）。
+        注意：`model` `data` は MuJoCo の本体なので除く（ここで触ると壊れる）。
+        注意：配列は必ず copy する（`data` のビューだと戻す意味がなくなる）。
         """
         if obj is None:
             return {}
@@ -398,14 +398,14 @@ class Trainer:
         return out
 
     def _restore(self, snap):
-        """控えた状態に戻す。★測定が体を進めた分を巻き戻す。"""
+        """控えた状態に戻す。測定が体を進めた分を巻き戻す。"""
         import mujoco
         import random
         u = self.env.unwrapped
         d = u.data
-        # ★体を戻す。順序が大事：
+        # 体を戻す。順序が大事：
         #   ①全部の配列を戻す ②派生量を作り直す（mj_forward）
-        #   ③★ソルバの前回解（qacc_warmstart）と加速度を**もう一度**戻す
+        #   ③ソルバの前回解（qacc_warmstart）と加速度を**もう一度**戻す
         #     — mj_forward がこれらを上書きするので、後から入れ直さないと
         #       物理が「測定の続き」から解かれて静かに軌道が変わる。
         arr = snap["mjarr"]
@@ -430,14 +430,14 @@ class Trainer:
             u.np_random.bit_generator.state = snap["env_rng"]
         for nm, v in snap["organs"].items():
             setattr(self.env, nm, v)
-        # ★筋の状態（活性化ダイナミクス）を戻す。ここが抜けると力んだまま再開する
+        # 筋の状態（活性化ダイナミクス）を戻す。ここが抜けると力んだまま再開する
         am = getattr(u, "actuation_model", None)
         if am is not None:
             for nm, v in snap.get("actu", {}).items():
                 cur = getattr(am, nm, None)
                 if isinstance(cur, np.ndarray) and isinstance(v, np.ndarray) \
                         and cur.shape == v.shape:
-                    cur[:] = v          # ★中身を書き戻す（参照を差し替えない）
+                    cur[:] = v          # 中身を書き戻す（参照を差し替えない）
                 else:
                     setattr(am, nm, v)
         for nm, v in snap.get("envnum", {}).items():
@@ -450,24 +450,24 @@ class Trainer:
         for nm, v in snap.get("reflex", {}).items():
             setattr(u, nm, v)
         for nm, v in snap.get("vis", {}).items():
-            setattr(u, nm, v)          # ★視覚のキャッシュと描画時刻
+            setattr(u, nm, v)          # 視覚のキャッシュと描画時刻
         if "vis_out" in snap and getattr(u, "vision", None) is not None:
             u.vision.sensor_outputs = snap["vis_out"]
 
     # ------------------------------------------------------------ 記録
     def _record(self, step):
-        """★全プラグインの値＋太郎の状態を**1行**にして残す。
+        """全プラグインの値＋太郎の状態を**1行**にして残す。
 
         【なぜ1行にまとめるか、2026-07-30】以前は各プラグインが自分で `ctx.log(行)` を
         呼んでいたので、道具を2つ以上使うと**CSVの行が道具ごとに分裂**していた。
         1行に揃えると、グラフを描く側は**列を決め打ちしなくてよい**
         （`run/tools/dashboard.py` が列を自動で見つけて全部描く）。
 
-        ⚠️ここに入れるのは「記録」だけ。学習の数値は変えない。
+        注意：ここに入れるのは「記録」だけ。学習の数値は変えない。
         """
         t = self.taro
         row = {"step": step,
-               # 太郎が生きた時間（判断×K×DT）。★実時間ではない
+               # 太郎が生きた時間（判断×K×DT）。実時間ではない
                "life_min": round(step * self.cfg.K * DT / 60.0, 3),
                "age_months": round(float(self._cur_age), 4),
                "real_min": round((time.time() - self._t0) / 60.0, 2),
@@ -490,9 +490,9 @@ class Trainer:
 
     # ------------------------------------------------------- チェックポイント
     def _checkpoint(self, step):
-        """★測るのはプラグイン。ここは呼ぶだけ。
+        """測るのはプラグイン。ここは呼ぶだけ。
 
-        ⚠️測定は体を進めるので、前後で状態を控えて戻す（上の注記を参照）。
+        注意：測定は体を進めるので、前後で状態を控えて戻す（上の注記を参照）。
           `finally` で戻すのは、測定が例外で落ちても学習を汚さないため。
         """
         self.ctx.step = step
@@ -517,7 +517,7 @@ class Trainer:
             extra += f" |act|={np.mean(self._act_accum[-200:]):.3f}"
             if self.cfg.effort_cost and self._eff_accum:
                 extra += f" effort={np.mean(self._eff_accum[-200:]):.3f}(lam={self.cfg.effort_cost})"
-        # ⚠️タグはASCIIのみ（Windowsのcp932で出せない文字を混ぜると print が例外を投げ
+        # 注意：タグはASCIIのみ（Windowsのcp932で出せない文字を混ぜると print が例外を投げ
         #   学習が途中で落ちる。上付き2・絵文字で実際に2回踏んだ＝落とし穴 項35）
         if self._caps_accum:
             extra += f" da2={np.mean(self._caps_accum[-200:]):.4f}(lam={self.cfg.caps})"
@@ -528,7 +528,7 @@ class Trainer:
 
     # ------------------------------------------------------------ 本体
     def run(self):
-        """★学習ループ。e_growth_train.py 1175〜1304行の写し。"""
+        """学習ループ。e_growth_train.py 1175〜1304行の写し。"""
         cfg, t = self.cfg, self.taro
         env = self.env
         state = self.state
@@ -554,9 +554,9 @@ class Trainer:
                     print(f"[body-growth] {i}回目：月齢 {self._cur_age:.3f} → {na:.3f} ヶ月",
                           flush=True)
                     self._cur_age = na
-                    env = self.env            # ★作り直したので持ち替える
+                    env = self.env            # 作り直したので持ち替える
             # ---- 感覚を受け取り、内部表現を作る -------------------------------
-            obs_in = state["obs"]       # ★環境を進める**前**の観測（原因追跡用に控える）
+            obs_in = state["obs"]       # 環境を進める**前**の観測（原因追跡用に控える）
             sv = t.fusion.encode(state["obs"])
             cf = t.target_fusion.encode(state["obs"]).detach()
             clp = t.encode_target(state["obs"])
@@ -572,7 +572,7 @@ class Trainer:
                 elif cfg.goal_switch == "ne":
                     goal_step = torch.rand(1).item() < (1.0 - t.ne.get_ne_level())
                 else:      # "pe"：驚きを主役＋NEを下駄
-                    # 【逸脱/工学近似 ⚠️】向き（驚き大→探索）はEFE/LC-NE/予測符号化に基づく
+                    # 【逸脱/工学近似 注意】向き（驚き大→探索）はEFE/LC-NE/予測符号化に基づく
                     # 人間模倣だが、"足し算・等重み・この正規化"という式には根拠なし＝恣意的。
                     rel = min(pe_fast / (pe_slow + 1e-6), 2.0) / 2.0
                     explore_drive = min(t.ne.get_ne_level() + rel, 1.0)
@@ -593,9 +593,9 @@ class Trainer:
             a, lp = t.brain.explore(mean, std)
             self.goal_buf.append(clp.detach())
             if len(self.goal_buf) > 2000:
-                # ⚠️★【逸脱・2026-07-30】先行研究は経験のカウントを**一度も捨てない**
+                # 注意：【逸脱・2026-07-30】先行研究は経験のカウントを**一度も捨てない**
                 #   （離散版は 30,000ステップ通して累積し、それで「馴化」が起きる）。
-                #   太郎は古い方から捨てるので、★昔の経験の頻度情報が消える。
+                #   太郎は古い方から捨てるので、昔の経験の頻度情報が消える。
                 self.goal_buf.pop(0)
             pred = clp + t.nat_head(torch.cat([z, a.detach()], dim=-1))
             # 拮抗筋モード：a(n_joint) → to_env_action で筋活性化へ写像。OFFなら a_env==a
@@ -612,14 +612,14 @@ class Trainer:
                 t.hippo.record(sv.detach(), state["prev_a"].detach(), a.detach(),
                                cf.detach(), clp.detach(), nlp.detach(),
                                state["hidden"].detach())
-            # ---- ★測る（プラグイン）------------------------------------------
-            # ⚠️判断ごとに1回（K tick ぶんに1回）呼ぶ。元の実装と同じ頻度。
+            # ---- 測る（プラグイン）------------------------------------------
+            # 注意：判断ごとに1回（K tick ぶんに1回）呼ぶ。元の実装と同じ頻度。
             #   接触のような一瞬の事象は tick 単位で見た方が正確だが、
             #   まず元と同じ数値が出ることを確かめるため頻度も合わせる。
             self.ctx.step = i + 1
-            # ★このステップの内部の値を「置いておく」だけ（プラグインは読むだけ）。
+            # このステップの内部の値を「置いておく」だけ（プラグインは読むだけ）。
             #   同じシードで結果がばらつく原因を追うのに使う（落とし穴 項79）。
-            #   ⚠️参照を入れるだけなので計算はしない＝学習の数値は変わらない。
+            #   注意：参照を入れるだけなので計算はしない＝学習の数値は変わらない。
             self.ctx.last = {"obs_in": obs_in, "obs_out": state["obs"], "sv": sv,
                              "cf": cf, "clp": clp, "z": z, "mean": mean, "std": std,
                              "a": a, "pred": pred, "nlp": nlp}
@@ -635,12 +635,12 @@ class Trainer:
             rew = rew_task
             if cfg.effort_cost:
                 # 【taro-C5】努力コスト：活性化²の筋力重み付き平均を報酬から引く
-                # （Selinger 2015 等の代謝最小化。⚠️二乗・λ・重みは近似＝感度確認対象）
+                # （Selinger 2015 等の代謝最小化。注意二乗・λ・重みは近似＝感度確認対象）
                 effort = float((a.detach() ** 2 * t.eff_w).sum())
                 rew = rew_task - cfg.effort_cost * effort
                 self._eff_accum.append(effort)
             # 【CAPS, Mysore et al. 2021】行動の急変にペナルティ。
-            # ★λ=0 でも**必ず記録する**：OFF側の値が無いと「λが弱くて効かなかった」のか
+            # λ=0 でも**必ず記録する**：OFF側の値が無いと「λが弱くて効かなかった」のか
             #   「元からこの値なのか」を切り分けられない（2026-07-25 に実際に困った）。
             smooth = smoothness_cost(a.detach(), state["prev_a"].detach())
             self._caps_accum.append(smooth)
@@ -684,27 +684,27 @@ class Trainer:
             self.taro.save(os.path.join(_ROOT, cfg.save) if not os.path.isabs(cfg.save)
                            else cfg.save,
                            extra={"age_final": self._cur_age})
-        # ⚠️env を閉じるのは呼び出し側（train / view）の finally に任せる。
+        # 注意：env を閉じるのは呼び出し側（train / view）の finally に任せる。
         #   ここで閉じると、途中で例外が出たときに閉じられないまま残る。
         return out
 
 
 def close_env(env):
-    """環境を閉じる。★閉じる処理そのものの失敗で本来の例外を隠さない。"""
+    """環境を閉じる。閉じる処理そのものの失敗で本来の例外を隠さない。"""
     if env is None:
         return
     try:
-        _release_renderers(env)     # ★描画用メモリを先に返す
+        _release_renderers(env)     # 描画用メモリを先に返す
         env.close()
     except Exception as e:      # noqa: BLE001
-        # ⚠️握りつぶすが黙らない。閉じ損ねはメモリが残るだけで結果は汚さない。
-        print(f"⚠️[close] 環境を閉じるときに失敗: {type(e).__name__}: {e}", flush=True)
+        # 注意：握りつぶすが黙らない。閉じ損ねはメモリが残るだけで結果は汚さない。
+        print(f"注意[close] 環境を閉じるときに失敗: {type(e).__name__}: {e}", flush=True)
 
 
 def train(cfg, *, plugins=(), verbose=True, log_row=None):
-    """設定から学習を1本回す。★これが新しい経路の本体。
+    """設定から学習を1本回す。これが新しい経路の本体。
 
-    ⚠️途中で例外が出ても環境を必ず閉じる（`finally`）。閉じ損ねると
+    注意：途中で例外が出ても環境を必ず閉じる（`finally`）。閉じ損ねると
       MuJoCo の描画コンテキストが残り、次の実行が不安定になる。
     """
     tr = Trainer(cfg, plugins=plugins, verbose=verbose, log_row=log_row)

@@ -1,25 +1,25 @@
-"""自己モデルの質を測る。★太郎の脳が要るので、run.type=train のときだけ使える。
+"""自己モデルの質を測る。太郎の脳が要るので、run.type=train のときだけ使える。
 
 測るものの意味（4つ）:
-    classify  自分の行動と他人の行動を★言い当てられるか（50%=偶然）
-    margin    正解と不正解の予測誤差の★差。大きいほど「自分の体を分かっている」
+    classify  自分の行動と他人の行動を言い当てられるか（50%=偶然）
+    margin    正解と不正解の予測誤差の差。大きいほど「自分の体を分かっている」
     corr      「こう動くはず」の予測と実際の変化の相関
-    persist   ★「何もしない」と予測した場合と比べた誤差の比
-              100未満＝勝ち／100超＝★何もしない予測より下手
-              ⚠️統計の分野では naive forecast に負けることを
+    persist   「何もしない」と予測した場合と比べた誤差の比
+              100未満＝勝ち／100超＝何もしない予測より下手
+              注意：統計の分野では naive forecast に負けることを
                 "illusion of skill"（見かけの上手さ）と呼ぶ。MASE と同じ発想
 
 判定の実体は `E/scripts/e_probes.py` の evaluate / agency_probe。
-ここは**包むだけ**。⚠️判定を2箇所に書かない。
+ここは**包むだけ**。注意判定を2箇所に書かない。
 
-⚠️★agency（行為主体感）は**再現性が無い**（2026-07-30 実測）。
+注意：agency（行為主体感）は**再現性が無い**（2026-07-30 実測）。
   同じコード・同じシードで 48.0% → 46.0% と変わる。
   主指標（classify/margin/corr/persist）は完全一致するので、
   **agency を根拠にした主張はできない**。既定では測らない。
 
 実験ファイルでの書き方:
     "plugins": {"self_model": true}
-    "plugins": {"self_model": {"agency": true}}   ← ★再現性が無いことを承知の上で
+    "plugins": {"self_model": {"agency": true}}   ← 再現性が無いことを承知の上で
 """
 import os
 import sys
@@ -39,11 +39,11 @@ class SelfModel(Plugin):
     def setup(self, ctx):
         if ctx.brain is None:
             raise ValueError(
-                "self_model は★太郎の脳が要る（run.type=train で使う）。\n"
+                "self_model は太郎の脳が要る（run.type=train で使う）。\n"
                 "  measure（脳を通さず環境だけ進める）では測れない")
         self.want_agency = bool(self.config.get("agency", False))
         if self.want_agency:
-            print("⚠️[self_model] agency を測るよう指定された。★再現性が無い指標なので"
+            print("注意[self_model] agency を測るよう指定された。再現性が無い指標なので"
                   "（同条件で48.0%→46.0%）、これを根拠に主張しないこと", flush=True)
         self.rows = []
         self._last = None
@@ -53,7 +53,7 @@ class SelfModel(Plugin):
         probe_ctx = getattr(ctx, "probe_ctx", None)
         if probe_ctx is None:
             # run/trainer.py が渡す。measure（脳を通さない）では測れない
-            raise RuntimeError("self_model は★太郎の脳を通す実行（run.type=train）が要る")
+            raise RuntimeError("self_model は太郎の脳を通す実行（run.type=train）が要る")
         cl, mg, co, pr = e_probes.evaluate(probe_ctx)
         row = {"step": ctx.step, "classify": cl, "margin": mg,
                "corr": co, "persist": pr}
@@ -63,14 +63,14 @@ class SelfModel(Plugin):
             row["mag_ratio"] = magr
         self.rows.append(row)
         self._last = row
-        # ⚠️★ここで ctx.log を呼ばない。学習ループが全プラグインの metrics を
+        # 注意：ここで ctx.log を呼ばない。学習ループが全プラグインの metrics を
         #   集めて**1行**にする（道具ごとに行が分裂するのを避ける）。
 
     def metrics(self, ctx):
         r = self._last
         if not r:
             return None
-        # ★step は学習ループが入れるので、ここでは指標だけ返す
+        # step は学習ループが入れるので、ここでは指標だけ返す
         return {k: v for k, v in r.items() if k != "step"}
 
     def line(self, ctx):
@@ -80,7 +80,7 @@ class SelfModel(Plugin):
         s = (f"classify={r['classify']:.1f}% margin={r['margin']:+.1f}% "
              f"corr={r['corr']:.3f} persist={r['persist']:.1f}%")
         if "agency" in r:
-            s += f" agency={r['agency']:.1f}%(★再現性なし)"
+            s += f" agency={r['agency']:.1f}%(再現性なし)"
         return s
 
     def report(self, ctx):
@@ -95,10 +95,10 @@ class SelfModel(Plugin):
         if self.want_agency:
             out["終盤の平均"]["agency"] = round(
                 st.mean(r["agency"] for r in tail), 2)
-            out["⚠️注意"] = "agency は再現性が無い（同条件で48.0→46.0）"
-        # ★persist が100を超えていたら黙って通さない
+            out["注意注意"] = "agency は再現性が無い（同条件で48.0→46.0）"
+        # persist が100を超えていたら黙って通さない
         if out["終盤の平均"]["persist"] > 100.0:
-            out["★警告"] = ("persist が100超＝「何もしない」と予測した場合より下手。"
+            out["警告"] = ("persist が100超＝「何もしない」と予測した場合より下手。"
                           "モデルが壊れている疑い（2026-07-30 に Goal Babbling で"
                           "1000%になった）")
         return out

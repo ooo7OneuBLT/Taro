@@ -47,7 +47,7 @@ for rate in RATES:
     feeds_per_day = r["feed_count"] / DAYS
     cries_per_day = r["cry_count"] / DAYS
     req_per_day = r["request_count"] / DAYS
-    mark = "  ★人間域" if 6 <= feeds_per_day <= 10 else ""
+    mark = "  人間域" if 6 <= feeds_per_day <= 10 else ""
     print(f"{rate:>18.7f} | {feeds_per_day:>7.1f} | {cries_per_day:>7.1f} | "
           f"{req_per_day:>9.1f}{mark}")
 

@@ -1,4 +1,4 @@
-"""★視線誘導反射が「おもちゃを視野の中心へ寄せられるか」を測る（本番の判定）。
+"""視線誘導反射が「おもちゃを視野の中心へ寄せられるか」を測る（本番の判定）。
 
 【なぜこれが本当の判定か】それまでは「1発で真の位置と一致するか」を見ていたが、
 人間の新生児はそうならない。**第一サッケードは著しく低振幅で目標に届かず、
@@ -18,14 +18,14 @@
   階段状に減る                   → 新生児らしい（1発では届かない）
 """
 
-# ⚠️★古い方式（2026-07-30 に整理）。新しい実験は `run/main.py` を通す。
+# 注意：古い方式（2026-07-30 に整理）。新しい実験は `run/main.py` を通す。
 #   【経緯】目標Eの実験スクリプトが118本あり、うち66本が**独立に環境を組み立てていた**。
 #     そのため「学習は関節モード（90関節を独立に駆動＝逸脱リスト 逸脱5）、
 #     測定とViewerは筋肉モード（拮抗筋2本/関節）」という**別の体で動く**事故が起きた
 #     （ユーザーの目視「視線誘導反射の実験の時とは動きが全然違う」で発覚。
 #      実測で動きが人間の新生児の約3.3倍速かった）。
 #   【設計と移行計画】`E/docs/実行基盤_設計.md`
-#   ⚠️このファイルは**記録として残す**（削除しない方針）。
+#   注意：このファイルは**記録として残す**（削除しない方針）。
 #     中の測り方は再利用できるので、プラグインへ移すときの元にする。
 import os, sys, warnings
 warnings.filterwarnings("ignore")
@@ -53,7 +53,7 @@ plt.rcParams["axes.unicode_minus"] = False
 import e_visibility as VIS
 
 # おもちゃの初期位置[m]。E_ORIENT_OFFSETS で振れる。
-# ⚠️★新生児が定位できる範囲は方向で違う：水平・斜めは30度まで、
+# 注意：新生児が定位できる範囲は方向で違う：水平・斜めは30度まで、
 #   **垂直は10度まで**（Aslin & Salapatek 1975）。距離10.9cmなら
 #   0.02m ≒ 10度、0.04m ≒ 20度。垂直を ±0.04 で測るのは能力の範囲外。
 START_OFFSETS = [float(x) for x in
@@ -61,12 +61,12 @@ START_OFFSETS = [float(x) for x in
 BLINK_HZ = 2.5     # おもちゃを点滅させる周期[Hz]
 SECONDS = float(os.environ.get("E_SECONDS", "6.0"))
 OUT_DIR = os.path.join(_ROOT, "E", "logs", "orient_converge")
-# ★どの軸で測るか。E_ORIENT_AXIS=v で上下方向。
+# どの軸で測るか。E_ORIENT_AXIS=v で上下方向。
 #   水平の符号は実測で直したが、垂直は「水平と同じ向き」と仮定しただけだった。
 AXIS = os.environ.get("E_ORIENT_AXIS", "h")
 IS_V = (AXIS == "v")
 
-# ★【2026-07-28】体年齢を 0ヶ月 → 4ヶ月に変更した。
+# 【2026-07-28】体年齢を 0ヶ月 → 4ヶ月に変更した。
 #
 # 【なぜ4ヶ月か】この反射を実装した目的は**リーチング**（運動発達ロードマップ段階3、
 # 人間年齢3〜5ヶ月・体年齢4m）の前提を満たすこと。`E/docs/全体設計_目標E.md` §2.5 が
@@ -74,21 +74,21 @@ IS_V = (AXIS == "v")
 # 視線誘導反射をそのボトルネックA としている。＝反射を検証する月齢は、それを使う月齢に
 # 揃えるべき（ユーザーの判断、2026-07-28）。
 #
-# ⚠️【引き受ける逸脱】4ヶ月の人間は**皮質（前頭眼野など）が定位に関与し始める**
+# 注意：【引き受ける逸脱】4ヶ月の人間は**皮質（前頭眼野など）が定位に関与し始める**
 # （Johnson 1990）が、太郎は上丘だけで「対象を選んで見続ける」注意機構を持たない。
 # 設計図はこれを既知の穴とし「本能で足すか創発に委ねるかは要判断」と保留にしている。
 # 4ヶ月で回すことで、設計の予測（注意が無いとリーチが空振りする）を実際に確かめられる。
 #
-# ⚠️人間の視覚定位実験（Hunter & Richards 2003）の最年長群は**14週齢＝3.2ヶ月**なので、
+# 注意：人間の視覚定位実験（Hunter & Richards 2003）の最年長群は**14週齢＝3.2ヶ月**なので、
 # 4ヶ月はその近傍。比較は可能だが厳密に同月齢ではない。
 AGE = float(os.environ.get("E_AGE", "4.0"))
 
-# ★★【2026-07-29】既定のシーン。E_SCENE=名前 で切り替えられる。
+# 【2026-07-29】既定のシーン。E_SCENE=名前 で切り替えられる。
 #   環境の条件（月齢・柵・リクライニング・頭の支え・おもちゃ）はシーンが持つので、
 #   ここから下の AGE / HEAD_HOLD は**シーンの値で上書きされる**（表示用に残している）。
 DEFAULT_SCENE = os.environ.get("E_SCENE", "視線誘導反射_仰向け_頭を支える")
 
-# ★実験中は**実験者が頭を抑える**（既定ON）。
+# 実験中は**実験者が頭を抑える**（既定ON）。
 # 人間の乳児実験でも実験者が支えている（Hunter & Richards 2003：5週齢は頭の両側に枕、
 # 8〜14週齢は親が手で頭を抑える）。太郎の首が倒れて対象を捉え続けられないのは、
 # 「首がすわっていない」からではなく「支えていない」からだった。
@@ -96,15 +96,15 @@ DEFAULT_SCENE = os.environ.get("E_SCENE", "視線誘導反射_仰向け_頭を�
 # 詳細と実装は `E/scripts/e_head_hold.py`。
 HEAD_HOLD = os.environ.get("E_HEAD_HOLD", "1") == "1"
 
-# ★【2026-07-28】シードを振れるようにした。
+# 【2026-07-28】シードを振れるようにした。
 #
 # 【なぜ要るか】2026-07-27 に「高速化で悪化した（0.154→0.490）」と判断したが、
 # 実際は神経ノイズのシードが毎回変わっていただけで、同じ条件3回で
 # 0.319 / 0.215 / 0.189 とばらついていた（＝ばらつきの幅0.13）。
-# ★今日の改善幅（0.175→0.076＝0.10）は**このばらつきより小さい可能性がある**。
+# 今日の改善幅（0.175→0.076＝0.10）は**このばらつきより小さい可能性がある**。
 # 1シードの結果だけでは本物かどうか言えないので、複数シードで確かめる。
 #
-# ⚠️2つのシードを揃える必要がある：
+# 注意：2つのシードを揃える必要がある：
 #     env.reset(seed=)      … 物理の初期ゆらぎ
 #     E_ORIENT_SEED         … 反射の神経ノイズ（e_orienting_v2.py）
 SEED = int(os.environ.get("E_SEED", "0"))
@@ -115,7 +115,7 @@ def run(orient_on, off, env, u, m, d, dt, toy_gadr, right, toy_bid, n_steps,
         hands=None, scene=None):
     """1条件を走らせ、時系列（時刻・ずれ・眼球角度・サッケード数）を返す。"""
     import e_scene
-    # ★★【2026-07-29】`env.reset()` ではなくシーンへ戻す。
+    # 【2026-07-29】`env.reset()` ではなくシーンへ戻す。
     #   reset だけだと**シーンの姿勢が失われ**、2条件目からは既定の姿勢で
     #   走ってしまう（Viewer と測定の食い違いと同じ型）。
     e_scene.reset_to_scene(env, scene, hands=(hands if HEAD_HOLD else None),
@@ -126,11 +126,11 @@ def run(orient_on, off, env, u, m, d, dt, toy_gadr, right, toy_bid, n_steps,
     a = np.zeros(env.action_space.shape[0], dtype=np.float32)
     ts, errs, eyes, sacc = [], [], [], []
     cmds, tgts, hdirs = [], [], []
-    snap = {}   # ★途中の一枚（生の画像・動きマップ）を診断用に取っておく
+    snap = {}   # 途中の一枚（生の画像・動きマップ）を診断用に取っておく
 
-    # ★おもちゃを**シーンの位置から** off だけ横（または上下）へずらす。
+    # おもちゃを**シーンの位置から** off だけ横（または上下）へずらす。
     #   ＝「視野の端に置いて、反射が中心へ寄せられるか」を測るための条件。
-    #   ⚠️移行前は「親が運んでくる途中で行き先をずらす」実装だったが、
+    #   注意：移行前は「親が運んでくる途中で行き先をずらす」実装だったが、
     #     シーンでは位置が最初から決まっているので運搬を待つ必要がない。
     #     `place_toy` は固定位置（`_rest_pos`）ごと動かすので、次の step で
     #     元の場所へ引き戻されることもない。
@@ -138,7 +138,7 @@ def run(orient_on, off, env, u, m, d, dt, toy_gadr, right, toy_bid, n_steps,
     for _ in range(int(0.2 / dt)):
         env.step(a)                       # 落ち着かせる
 
-    # ★動きを作る手段は「点滅」。おもちゃを物理的に動かすと顔と当たって壊れる。
+    # 動きを作る手段は「点滅」。おもちゃを物理的に動かすと顔と当たって壊れる。
     #   文献の定位実験も点滅光を使い（Lewis & Maurer 系）、上丘のニューロンは
     #   静止した点滅ドットにも動く刺激とほぼ同等に応答する（J Neurophysiol 2004）。
     base_rgba = m.geom_rgba[toy_gadr].copy()
@@ -162,7 +162,7 @@ def run(orient_on, off, env, u, m, d, dt, toy_gadr, right, toy_bid, n_steps,
             snap["dir"] = (reflex.v_dir if IS_V else reflex.h_dir) if reflex else 0.0
         sv = VIS.visible_by_segment(m, d, toy_bid, "eye_left", size=64)
         ts.append(i * dt)
-        # ★画像の y は下向きなので、上下方向は符号を反転して「上が正」に揃える
+        # 画像の y は下向きなので、上下方向は符号を反転して「上が正」に揃える
         if sv["seen"]:
             errs.append(-sv["cy"] if IS_V else sv["cx"])
         else:
@@ -195,11 +195,11 @@ def main():
     from e_head_hold import CaregiverHands
 
     results = {}
-    # ★★【2026-07-29】シーン方式へ移行した。
+    # 【2026-07-29】シーン方式へ移行した。
     #   環境の条件（月齢・柵・リクライニング・頭の支え・おもちゃ）は
     #   **シーンファイルが全部持つ**ので、ここでは組み立てない。
     #   ⇒ Viewer で見た状態と、この測定が走る状態が構造的に同じになる。
-    #   ⚠️移行前は `fence` を指定しておらず既定（柵あり）で走っていたが、
+    #   注意：移行前は `fence` を指定しておらず既定（柵あり）で走っていたが、
     #     Viewer 側は柵なしで見ていた＝**実際に食い違っていた**。
     import e_scene
     global AGE, HEAD_HOLD
@@ -227,7 +227,7 @@ def main():
         R = np.array(d.cam_xmat[cam_id], dtype=float).reshape(3, 3)
         right, up, fwd = R[:, 0], R[:, 1], -R[:, 2]
         shift = up if IS_V else right
-        # ⚠️★おもちゃの置き場所は「親が運び始める瞬間」に環境が決めるので、
+        # 注意：おもちゃの置き場所は「親が運び始める瞬間」に環境が決めるので、
         #   reset 直後はまだ決まっていない（`_rest_pos` が退避位置か未設定）。
         #   ここで距離を測ると nan や無意味な値になる（表示が「nan cm」になっていた）。
         #   → 決まっていなければ環境に決めさせてから測る。
@@ -259,11 +259,11 @@ def main():
         env.close()
 
     # ---- 表 ----------------------------------------------------------------
-    print("  ★ずれは符号つき（正＝おもちゃが視野の右）。眼球の動きも符号つき。")
+    print("  ずれは符号つき（正＝おもちゃが視野の右）。眼球の動きも符号つき。")
     print("    正しければ、おもちゃが右にあるとき眼球も右へ動いてずれが減る\n")
     print(f"{'初期位置':>10}{'反射':>6}{'最初のずれ':>11}{'最後のずれ':>11}"
           f"{'後半の|ずれ|平均':>16}{'|ずれ|最小':>11}{'サッケード':>11}")
-    _rows = []      # ★JSONに残す行（複数シードの集計用）
+    _rows = []      # JSONに残す行（複数シードの集計用）
     for off in START_OFFSETS:
         for on in (True, False):
             ts, errs, eyes, sacc, cmds, tgts, hdirs, snap = results[(on, off)]
@@ -271,7 +271,7 @@ def main():
             e0 = float(np.nanmean(errs[:5])) if len(errs) >= 5 else float("nan")
             e1 = float(np.nanmean(errs[-5:])) if len(errs) >= 5 else float("nan")
             emin = float(np.abs(good).min()) if len(good) else float("nan")
-            # ★振動しているので「最後の値」は運で決まる。後半の平均で評価する。
+            # 振動しているので「最後の値」は運で決まる。後半の平均で評価する。
             half = errs[len(errs) // 2:]
             ehalf = float(np.nanmean(np.abs(half))) if len(half) else float("nan")
             de = float(eyes[-1] - eyes[0]) if len(eyes) else 0.0
@@ -283,7 +283,7 @@ def main():
                               first=e0, last=e1, half_mean=ehalf, min_abs=emin,
                               saccades=int(sacc[-1]), seconds=SECONDS))
 
-    # ★【2026-07-28】結果をJSONで残す。複数シードを回して**まとめて集計する**ため。
+    # 【2026-07-28】結果をJSONで残す。複数シードを回して**まとめて集計する**ため。
     #   1シードの結果だけでは、改善がばらつきに埋もれているか判断できない。
     import json as _json
     _jp = os.path.join(OUT_DIR, f"result_{AXIS}_seed{SEED}.json")
@@ -292,7 +292,7 @@ def main():
     print(f"\n  → 結果を保存: {os.path.relpath(_jp, _ROOT)}")
 
     # ---- グラフ ------------------------------------------------------------
-    # ⚠️squeeze=False：条件が1つのとき axes が1次元になって axes[0, j] が失敗する
+    # 注意：squeeze=False：条件が1つのとき axes が1次元になって axes[0, j] が失敗する
     #   （下の診断図では reshape で対処していたが、こちらは漏れていた）
     fig, axes = plt.subplots(2, len(START_OFFSETS), squeeze=False,
                              figsize=(4.0 * len(START_OFFSETS), 6.4), sharex=True)
@@ -328,7 +328,7 @@ def main():
     plt.close(fig)
     print(f"\n  グラフを保存: {png}")
 
-    # ---- ★診断図：反射が働いている最中の「目に映る像」と「動き検出の出力」----
+    # ---- 診断図：反射が働いている最中の「目に映る像」と「動き検出の出力」----
     fig2, ax2s = plt.subplots(2, len(START_OFFSETS),
                               figsize=(3.4 * len(START_OFFSETS), 7.0))
     if len(START_OFFSETS) == 1:

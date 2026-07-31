@@ -1,4 +1,4 @@
-"""★学習の様子の絵（HTML）を、記録の区切りごとに自動で作り直す。
+"""学習の様子の絵（HTML）を、記録の区切りごとに自動で作り直す。
 
 【なぜプラグインにしたか、2026-07-30】ユーザーの要望：
 
@@ -7,7 +7,7 @@
 図を作るのは「外から見る道具」なので、測る道具と同じ枠（プラグイン）に収める。
 学習ループは図のことを知らないままでよい（責務を混ぜない）。
 
-⚠️★ctx を**読むだけ**。太郎も環境も変えない。
+注意：ctx を**読むだけ**。太郎も環境も変えない。
   実際に読むのは CSV（同じフォルダに書かれたもの）で、絵を作るのは
   `run/tools/dashboard.py`。ここは**呼ぶだけ**。
 
@@ -16,19 +16,19 @@
     "plugins": {"dashboard": false}
 と明示する。
 
-【★ブラウザが自動で開く、2026-07-31】学習を始めると絵を1枚作ってブラウザで開く。
+【ブラウザが自動で開く、2026-07-31】学習を始めると絵を1枚作ってブラウザで開く。
 絵は500回ごとに作り直され、HTML 側に `<meta http-equiv="refresh" content="30">`
 が入っているので**開きっぱなしで進み具合が見える**。
 ⇒ 別プロセスで `run.tools.dashboard --watch` を立てる必要はない。
 
-⚠️★同じフォルダへ**複数のシードを並列で流す**とき、全部がブラウザを開くと
+注意：同じフォルダへ**複数のシードを並列で流す**とき、全部がブラウザを開くと
   タブが増えて邪魔になる。そこで「直近10分に誰かが開いていたら開かない」印
-  （`.dashboard_opened`）をフォルダに置いて、★1回だけ開くようにしている。
+  （`.dashboard_opened`）をフォルダに置いて、1回だけ開くようにしている。
 
 実験ファイルでの書き方（明示する場合）:
     "plugins": {"dashboard": true}
     "plugins": {"dashboard": {"dir": "E/logs/別のフォルダ", "title": "見出し"}}
-    "plugins": {"dashboard": {"open": false}}     ← ★ブラウザを開かせない
+    "plugins": {"dashboard": {"open": false}}     ← ブラウザを開かせない
 """
 import os
 import time
@@ -49,26 +49,26 @@ class Dashboard(Plugin):
             csv_path = (ctx.spec.get("run") or {}).get("csv")
             d = os.path.dirname(csv_path) if csv_path else None
         self.dir = d
-        # 見出しは実験ファイルの name を既定にする（★どの実験の絵か分かるように）
+        # 見出しは実験ファイルの name を既定にする（どの実験の絵か分かるように）
         self.title = self.config.get("title") or ctx.spec.get("name")
         self.made = None
         self.open_browser = bool(self.config.get("open", True))
         if not self.dir:
-            print("⚠️[dashboard] 出力先が決まらないので絵を作りません"
+            print("注意[dashboard] 出力先が決まらないので絵を作りません"
                   "（run.csv か plugins.dashboard.dir を指定してください）", flush=True)
             return
         self._write_meta(ctx)
-        # ★学習の開始時に1枚作ってブラウザで開く（あとは30秒ごとに自動で読み直される）
+        # 学習の開始時に1枚作ってブラウザで開く（あとは30秒ごとに自動で読み直される）
         self._make()
         self._open_once()
 
     def _write_meta(self, ctx):
-        """★「どんな条件で回したか」を CSV の隣に書く。
+        """「どんな条件で回したか」を CSV の隣に書く。
 
         【なぜ要るか、2026-07-31】絵に条件（シーン名・体の設定）を出したかったが、
         読める場所が**画面に出た文字を保存したログ**しかなかった。
         ⇒ `> seed0.log` のようにリダイレクトした人だけが条件を見られる、という
-        ★不安定な作りだった。実験ファイルの中身をそのまま横に置いて解決する。
+        不安定な作りだった。実験ファイルの中身をそのまま横に置いて解決する。
         """
         csv_path = (ctx.spec.get("run") or {}).get("csv")
         if not csv_path:
@@ -87,14 +87,14 @@ class Dashboard(Plugin):
                            "body": (ctx.scene or {}).get("body")},
                           fp, ensure_ascii=False, indent=2)
         except Exception as e:      # noqa: BLE001
-            print(f"⚠️[dashboard] 条件を書けませんでした: {type(e).__name__}: {e}",
+            print(f"注意[dashboard] 条件を書けませんでした: {type(e).__name__}: {e}",
                   flush=True)
 
     def _open_once(self):
-        """★ブラウザで開く。ただし同じフォルダで直近10分に誰かが開いていたら開かない。
+        """ブラウザで開く。ただし同じフォルダで直近10分に誰かが開いていたら開かない。
 
         【なぜ印を置くか】2シードを並列で流すと**2つのプロセスがそれぞれ開く**。
-        3本流せば3つ開く。★見たいのは1枚なので、先に開いた者だけが開く。
+        3本流せば3つ開く。見たいのは1枚なので、先に開いた者だけが開く。
         """
         if not (self.open_browser and self.made):
             return
@@ -107,11 +107,11 @@ class Dashboard(Plugin):
             import webbrowser
             url = "file:///" + os.path.abspath(self.made).replace("\\", "/")
             webbrowser.open(url)
-            print(f"[dashboard] ★ブラウザで開きました（30秒ごとに自動で最新になります）\n"
+            print(f"[dashboard] ブラウザで開きました（30秒ごとに自動で最新になります）\n"
                   f"            {self.made}", flush=True)
         except Exception as e:              # noqa: BLE001
-            # ⚠️★開けなくても学習は続ける（画面が無い環境・既定ブラウザが無い等）
-            print(f"⚠️[dashboard] ブラウザを開けませんでした: {type(e).__name__}: {e}\n"
+            # 注意：開けなくても学習は続ける（画面が無い環境・既定ブラウザが無い等）
+            print(f"注意[dashboard] ブラウザを開けませんでした: {type(e).__name__}: {e}\n"
                   f"            手で開いてください: {self.made}", flush=True)
 
     def _make(self):
@@ -121,13 +121,13 @@ class Dashboard(Plugin):
         try:
             self.made = dash.make(self.dir, self.title)
         except Exception as e:      # noqa: BLE001
-            # ⚠️握りつぶすが黙らない。★絵作りの失敗で**学習を落とさない**のが大事。
+            # 注意：握りつぶすが黙らない。絵作りの失敗で**学習を落とさない**のが大事。
             #   （2時間の学習が図の不具合で消えるのは本末転倒）
-            print(f"⚠️[dashboard] 絵を作れませんでした: {type(e).__name__}: {e}",
+            print(f"注意[dashboard] 絵を作れませんでした: {type(e).__name__}: {e}",
                   flush=True)
 
     def on_checkpoint(self, ctx):
-        # ⚠️★CSV はこのあと書かれるので、ここで作る絵は**1つ前**の区切りまでを映す。
+        # 注意：CSV はこのあと書かれるので、ここで作る絵は**1つ前**の区切りまでを映す。
         #   （記録の順番＝測る→CSVに書く→次の学習。1区切り遅れるだけなので許容）
         self._make()
 
