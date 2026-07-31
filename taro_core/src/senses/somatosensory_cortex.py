@@ -54,18 +54,26 @@ _BODY_GROUPS = [
     # 手のひら(手全体を1つのグループにまとめて指の各節と対等に扱う)
     ("right_palm", ["right_hand"]),
     ("left_palm", ["left_hand"]),
-    # 右指5本(親指含む)を各指1グループに集約(3節を1つに)
+    # 右指5本(親指含む)を各指1グループに集約
+    # ⚠️★【2026-07-31 修正】薬指(rf)と小指(lf)の指節が**入れ違っていた**。
+    #   誤：right_rf = [lfmetacarpal, lfknuckle, lfmiddle, rfdistal]  ← 小指3節＋薬指の先
+    #       right_lf = [rfknuckle, rfmiddle, lfdistal]              ← 薬指2節＋小指の先
+    #   ⇒ 各グループが「1本の指」になっておらず、2本の指の断片が混ざっていた。
+    #     実測でも left_rf 376点 / left_ff 53点 と★7倍の偏りが出ていた。
+    #   ★MIMo の実際の親子関係（mujoco の body_parentid で確認）：
+    #     hand → rfknuckle → rfmiddle → rfdistal                    （薬指＝3節）
+    #     hand → lfmetacarpal → lfknuckle → lfmiddle → lfdistal      （小指＝4節）
     ("right_thumb", ["right_thbase", "right_thhub", "right_thdistal"]),
     ("right_ff", ["right_ffknuckle", "right_ffmiddle", "right_ffdistal"]),
     ("right_mf", ["right_mfknuckle", "right_mfmiddle", "right_mfdistal"]),
-    ("right_rf", ["right_lfmetacarpal", "right_lfknuckle", "right_lfmiddle", "right_rfdistal"]),
-    ("right_lf", ["right_rfknuckle", "right_rfmiddle", "right_lfdistal"]),
+    ("right_rf", ["right_rfknuckle", "right_rfmiddle", "right_rfdistal"]),
+    ("right_lf", ["right_lfmetacarpal", "right_lfknuckle", "right_lfmiddle", "right_lfdistal"]),
     # 左指5本
     ("left_thumb", ["left_thbase", "left_thhub", "left_thdistal"]),
     ("left_ff", ["left_ffknuckle", "left_ffmiddle", "left_ffdistal"]),
     ("left_mf", ["left_mfknuckle", "left_mfmiddle", "left_mfdistal"]),
-    ("left_rf", ["left_lfmetacarpal", "left_lfknuckle", "left_lfmiddle", "left_rfdistal"]),
-    ("left_lf", ["left_rfknuckle", "left_rfmiddle", "left_lfdistal"]),
+    ("left_rf", ["left_rfknuckle", "left_rfmiddle", "left_rfdistal"]),
+    ("left_lf", ["left_lfmetacarpal", "left_lfknuckle", "left_lfmiddle", "left_lfdistal"]),
     # 脚
     ("right_upper_leg", ["right_upper_leg"]),
     ("left_upper_leg", ["left_upper_leg"]),
@@ -91,20 +99,35 @@ def build_sensor_layout(model, touch):
         total_dim: flat配列の全長(= sum(n_points) * 3)、検証用
     """
     # sorted(geom_id) 順に flat配列が並ぶ(mimoTouch.flatten_sensor_dictと同じ規則)
-    geom_ids_sorted = sorted(touch.sensor_positions.keys())
-    # flat配列上の各geomの開始位置と点数を計算
+    # ⚠️★★【2026-07-31 修正】`touch.sensor_positions` のキーは
+    #   **触覚クラスによって意味が違う**。
+    #     DiscreteTouch  … キーは ★geom_id
+    #     TrimeshTouch   … キーは ★body_id   ← ★MIMo v2 の既定はこちら
+    #   従来はキーを geom_id と決め打ちして `model.geom_bodyid[key]` で body を引いていた。
+    #   ⇒ TrimeshTouch では**まったく別の部位に点数が割り当てられる**。
+    #     実測では「左右で点数が桁違い（rfdistal 右96 vs 左412）」「脚にセンサーが無い」
+    #     という**存在しない現象**が観測されていた（実際は左右対称・脚にも346点ある）。
+    #   ⇒ キーが body_id かどうかを実際に確かめてから引く。
+    keys_sorted = sorted(touch.sensor_positions.keys())
+    # flat配列上の各キーの開始位置と点数を計算
     geom_offset = {}
     offset = 0
-    for gid in geom_ids_sorted:
-        n_pts = touch.sensor_positions[gid].shape[0]
-        geom_offset[gid] = (offset, offset + n_pts * 3, n_pts)
+    for k in keys_sorted:
+        n_pts = touch.sensor_positions[k].shape[0]
+        geom_offset[k] = (offset, offset + n_pts * 3, n_pts)
         offset += n_pts * 3
     total_dim = offset
+    # ★キーが body_id を指しているか（TrimeshTouch）を判定する。
+    #   body_id なら `model.body(k)` が引けて、かつ geom_bodyid 経由と食い違う。
+    keys_are_body = type(touch).__name__ == "TrimeshTouch"
+    geom_ids_sorted = keys_sorted
 
-    # body_name → geom_id のマップ(MIMoは各geomがbodyに属する)
+    # body_name → キー のマップ
+    #   ★TrimeshTouch はキーが body_id なので**そのまま**引く。
+    #     DiscreteTouch はキーが geom_id なので geom_bodyid 経由で引く。
     name_to_geoms = {}
     for gid in geom_ids_sorted:
-        body_id = model.geom_bodyid[gid]
+        body_id = int(gid) if keys_are_body else int(model.geom_bodyid[gid])
         name = model.body(body_id).name
         name_to_geoms.setdefault(name, []).append(gid)
 
