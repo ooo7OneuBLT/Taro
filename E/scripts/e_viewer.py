@@ -1002,7 +1002,12 @@ def main():
     #   これまで「学習した太郎を見る」のは run/viewer.py にしかなく、
     #   ★編集パネルを使いながら学習後の動きを見ることができなかった。
     #   設計は E/docs/実行基盤_設計.md §7.5（第4段階）。
-    sec_brain = Section(colR, "脳（学習したモデル）", op.get("brain", False))
+    # ⚠️★モデルを指定して起動したときは**開いた状態**にする。
+    #   【なぜ、2026-07-31】既定で畳んでいたら、ユーザーが区画の存在に気づけず
+    #   「チェックを入れていないので太郎が動かない」状態になった。
+    #   ★見えないものは使えない。指定があるときは最初から見せる。
+    sec_brain = Section(colR, "脳（学習したモデル）",
+                        op.get("brain", bool(os.environ.get("E_VIEW_MODEL"))))
     brain_a_var = tk.StringVar(value=os.environ.get("E_VIEW_MODEL", ""))
     brain_b_var = tk.StringVar(value=os.environ.get("E_VIEW_MODEL_B", ""))
     st_brain = tk.BooleanVar(value=False)
@@ -1033,8 +1038,13 @@ def main():
            note="学習中の実効値≒0.174。0にすると迷いのない動きになる")
     _bf2 = tk.Frame(sec_brain.body); _bf2.pack(anchor="w", padx=14, pady=2)
     tk.Checkbutton(_bf2, text="★この脳で動かす", variable=st_brain).pack(side="left")
-    tk.Radiobutton(_bf2, text="A", variable=brain_which, value=0).pack(side="left")
-    tk.Radiobutton(_bf2, text="B", variable=brain_which, value=1).pack(side="left")
+    # ★押したら必ず何か起きる。command を付けないと「切り替わったのか分からない」
+    #   （2026-07-31：ユーザーの「Bのラジオを押しても表示が変わらない」）
+    _switch_hook = [lambda: None]      # 中身は下（脳の準備のあと）で差し替える
+    tk.Radiobutton(_bf2, text="A", variable=brain_which, value=0,
+                   command=lambda: _switch_hook[0]()).pack(side="left")
+    tk.Radiobutton(_bf2, text="B", variable=brain_which, value=1,
+                   command=lambda: _switch_hook[0]()).pack(side="left")
     # ★目標指向の探索（Goal Babbling）。run/viewer.py から移した（2026-07-31）
     #   ⚠️2026-07-30 の実測で**有害**と判明（おもちゃ接触−32%・persist 1000%）。
     #     さらに 2026-07-31 に「太郎の実装は Self-Prior ではなかった」と分かった
@@ -1227,6 +1237,8 @@ def main():
     brain_da2 = []       # 行動の変化量（学習ログの da2 と同じ量）
     gbuf = []            # 目標指向の探索が使う「過去に経験した感覚」
     gb_stat = [0, 0]     # [目標指向にした回数, 探索のままにした回数]
+    last_obs = [None]    # ★いちばん新しい観測（脳を切り替えたときに渡し直す）
+    babble_da2 = []      # もがき運動の変化量（学習済みと見比べるため）
 
     def _load_brain(tag, path):
         """モデルを読んで太郎一式を作る。失敗しても Viewer は落とさない。"""
@@ -1269,12 +1281,43 @@ def main():
                 brains[tag] = ({"path": path, **got} if got else {"path": path})
             if not path:
                 brains.pop(tag, None)
+        _update_brain_label()
+        return [k for k in ("A", "B") if brains.get(k, {}).get("taro")]
+
+    def _update_brain_label():
+        """★いまどちらの脳を使っているかを、押した瞬間に画面へ出す。"""
         ok = [k for k in ("A", "B") if brains.get(k, {}).get("taro")]
-        if ok:
+        now = "B" if brain_which.get() else "A"
+        if not ok:
+            brain_label.config(text="（まだ読み込んでいません）", fg="#666")
+        elif now in ok:
             brain_label.config(
-                text=f"読み込み済み: {', '.join(ok)}（いま {'B' if brain_which.get() else 'A'}）",
+                text=f"★いま {now} で動かしています（読み込み済み: {', '.join(ok)}）",
                 fg="#0a7")
-        return ok
+        else:
+            brain_label.config(
+                text=f"⚠️{now} は読み込めていません（読み込み済み: {', '.join(ok)}）",
+                fg="#a33")
+
+    def _on_brain_switch():
+        """★A ⇔ B を切り替えたとき。
+
+        ⚠️切り替えた側の脳に「いまの観測」を渡し直す。
+          【なぜ、2026-07-31】観測は**選んでいる方だけ**更新していたので、
+          切り替えると相手は「前に選ばれていたときの観測」から再開してしまう。
+          ★体は動いているのに脳だけ過去を見ている状態になる。
+        """
+        brain_da2.clear()          # 前の脳の値が混ざらないように捨てる
+        gb_stat[0] = gb_stat[1] = 0
+        tag = "B" if brain_which.get() else "A"
+        if not (brains.get(tag) or {}).get("taro"):
+            _ensure_brains()       # まだ読んでいなければここで読む
+        b = brains.get(tag) or {}
+        if b.get("state") is not None and last_obs[0] is not None:
+            b["state"]["obs"] = last_obs[0]
+        _update_brain_label()
+
+    _switch_hook[0] = _on_brain_switch
 
     def _brain_action():
         """★いま選んでいる脳に、次の行動を決めてもらう。"""
@@ -1591,9 +1634,21 @@ def main():
                 # ★学習した脳が優先（チェックが入っていれば自発運動より上）
                 if st_brain.get():
                     if tick % 10 == 0:          # 1判断＝10物理ステップ（K=10）
-                        if not brains:
+                        # ⚠️★「読んだ結果が空」でも brains には印が残るので、
+                        #   `not brains` だけだと**パスを直しても読み直さない**。
+                        #   いま選んでいる側の脳ができているかで判断する。
+                        _tag = "B" if brain_which.get() else "A"
+                        if not (brains.get(_tag) or {}).get("taro"):
                             _ensure_brains()
                         a_env = _brain_action()
+                        # ⚠️★読めていないのに黙って動かないのを止める。
+                        #   （2026-07-31：チェックを入れても何も起きず、
+                        #     画面にも理由が出ないので原因が分からなかった）
+                        if a_env is None and tick % 500 == 0:
+                            tag = "B" if brain_which.get() else "A"
+                            msg.config(
+                                text=f"⚠️脳{tag} が読めていないので動きません。"
+                                     f"パスを確かめてください")
                         if a_env is not None:
                             from run.taro_setup import rescale_action
                             act[0] = rescale_action(
@@ -1601,13 +1656,24 @@ def main():
                     # ⚠️★HybridEnv 側で進める（内臓の時間も進める）。
                     #   生の env を進めると内受容感覚が止まったままになる。
                     obs, _r, _te, _tr, _in = hybrid_env[0].step(act[0])
+                    last_obs[0] = obs
                     tag = "B" if brain_which.get() else "A"
                     if brains.get(tag, {}).get("state") is not None:
                         brains[tag]["state"]["obs"] = obs
                 elif st_babble.get():
                     if tick % 10 == 0:
+                        _prev_act = act[0].copy()
                         act[0] = np.clip(0.5 + 0.174 * gen[0].sample(0.7), 0.0, 1.0
                                          ).astype(np.float32)
+                        # ★もがき運動の変化量も同じ物差しで測る。
+                        #   【なぜ、2026-07-31】ユーザーの目視「学習済みの方が
+                        #   ちょっと激しく動いている気がする」を★数字で確かめるため。
+                        #   ⚠️ただし脳の dAction2 は**方策の出力**（-1〜1）で測るのに対し、
+                        #     こちらは**環境へ送る値**（筋活性化0〜1）。★物差しが違うので
+                        #     大小をそのまま比べられない。★傾向を見るだけに使う。
+                        babble_da2.append(float(((act[0] - _prev_act) ** 2).mean()))
+                        if len(babble_da2) > 200:
+                            babble_da2.pop(0)
                     env.step(act[0])
                 else:
                     env.step(zero)
@@ -1831,11 +1897,27 @@ def main():
                     f"{'3軸' if nk_all.get() else '前後だけ'}\n"
                     f"再生      速度{speed_var.get():.1f}倍  "
                     f"自発運動:{'ON' if st_babble.get() else 'OFF'}"
-                    + (f"  ★脳:{'B' if brain_which.get() else 'A'}"
-                       f" dAction2={np.mean(brain_da2[-50:]):.3f}"
-                       + (f" 目標指向{gb_stat[0]}回/探索{gb_stat[1]}回"
-                          if st_gb.get() else "")
-                       if st_brain.get() and brain_da2 else "") + "\n"
+                    + (f"（変化量{np.mean(babble_da2[-50:]):.3f}）"
+                       if babble_da2 else "") + "\n"
+                    # ⚠️★脳の状態は**常に**出す。
+                    #   【なぜ、2026-07-31】「動いているとき」だけ出す作りにしたら、
+                    #   ★チェックを入れ忘れて動かないときに理由が分からなかった。
+                    #   ★何もしていないなら「何もしていない」と書く。
+                    + "脳        "
+                    + ("OFF（★チェックを入れると学習した脳が動かします）"
+                       if not st_brain.get() else
+                       (f"★{'B' if brain_which.get() else 'A'} で動かしている"
+                        f"  揺らぎ{brain_std_var.get():.3f}"
+                        + (f"  dAction2={np.mean(brain_da2[-50:]):.3f}"
+                           if brain_da2 else "  ⚠️まだ動いていません")
+                        + (f"  目標指向{gb_stat[0]}回/探索{gb_stat[1]}回"
+                           if st_gb.get() else "")))
+                    + (f"\n          A={os.path.basename(brain_a_var.get())}"
+                       if brain_a_var.get() else "")
+                    + (f"  B={os.path.basename(brain_b_var.get())}"
+                       if brain_b_var.get() else "")
+                    + ("\n          ⚠️自発運動と脳が両方ONです。★脳が優先されます"
+                       if st_brain.get() and st_babble.get() else "") + "\n"
                     "\n【今の状態】\n"
                     f"経過 {t_sim:.1f}秒  サッケード {reflex.n_saccades}発\n"
                     f"反応の強さ {reflex.strength:.3f}（閾値 {thr_var.get():.2f}）\n"
