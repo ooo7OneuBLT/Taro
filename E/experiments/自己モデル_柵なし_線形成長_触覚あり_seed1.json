@@ -1,0 +1,27 @@
+{
+  "name": "自己モデル：柵なし・線形成長・触覚あり（0→4ヶ月・seed1）",
+  "note": "2026-07-31。触覚ONで体を育てられるようになったので回す（SomatosensoryCortex を部位ごとの点数非依存な要約に作り変えた。検証は run/tools/check_touch_growth.py の6項目）。比較対象は同じ設定の触覚なし（E/logs/selfmodel_v3/柵なし_線形_seed*.csv）。違いは touch と somatosensory の2つだけなので、触覚あり/なしの差がそのまま取れる。終わったらViewerで目視すること（柵なしなので遠くへ行く可能性がある）。",
+  "scene": "新生児_仰向け_柵なし",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 0.0,
+    "age_to": 4.0,
+    "age_start": 0,
+    "age_ramp": 18000,
+    "age_every": 500,
+    "touch": true,
+    "somatosensory": true,
+    "save": "E/logs/selfmodel_v3_touch/model_柵なし_線形_触覚_seed1.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 18000,
+    "seed": 1,
+    "checkpoint": 500,
+    "csv": "E/logs/selfmodel_v3_touch/柵なし_線形_触覚_seed1.csv"
+  },
+  "plugins": {
+    "self_model": true,
+    "hand_in_view": true
+  }
+}

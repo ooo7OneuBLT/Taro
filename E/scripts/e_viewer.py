@@ -1240,6 +1240,51 @@ def main():
     last_obs = [None]    # いちばん新しい観測（脳を切り替えたときに渡し直す）
     babble_da2 = []      # もがき運動の変化量（学習済みと見比べるため）
 
+    def _ensure_hybrid():
+        """内臓つきの環境（HybridEnv）を必ず用意する。
+
+        【なぜ、2026-07-31】以前はこれを `_load_brain` の中でだけ作っていた。
+        ところが `_load_brain` は「10物理ステップに1回」の判断のタイミングでしか
+        呼ばれないのに、`hybrid_env[0].step()` は**毎フレーム**呼ばれる。
+        チェックを入れた瞬間が10の倍数でないと
+        `AttributeError: 'NoneType' object has no attribute 'step'` で Viewer が落ちた。
+        ⇒ 使う側から必ず通るようにした。
+        """
+        if hybrid_env[0] is None:
+            from hybrid_env import HybridEnv
+            hybrid_env[0] = HybridEnv(env)
+            hybrid_env[0].reset(seed=0)
+        return hybrid_env[0]
+
+    def _touch_setting_of(path):
+        """保存されたモデルを覗いて、触覚の設定（touch / somatosensory）を言い当てる。
+
+        【なぜ、2026-07-31】Viewer は触覚の設定を持っていなかったので、
+        触覚ありのモデルを開くと**触覚の層だけ白紙**の脳になっていた。
+        しかも例外は出ない（Taro._load は形の合う層だけ読む）ので気づけない。
+        ⇒ 実験ファイルの書き方に頼らず、モデル自身に聞く。
+
+        見分け方：
+          fusion_touch が無い            → 触覚なし
+          fusion_touch に part_weight    → SomatosensoryCortex（部位ごとの要約）
+          それ以外                       → TouchEncoder（1枚の巨大変換層）
+        """
+        try:
+            import torch as _t
+            blob = _t.load(path, map_location="cpu", weights_only=False)
+        except Exception as e:      # noqa: BLE001
+            print(f"注意[脳] 触覚の設定を読み取れません: {e}。触覚なしとして開きます",
+                  flush=True)
+            return {}
+        ft = blob.get("fusion_touch")
+        if ft is None:
+            print("  [脳] このモデルは触覚なしで学習されています", flush=True)
+            return {"touch": False, "somatosensory": False}
+        soma = any(k.startswith("part_weight") for k in ft)
+        print(f"  [脳] このモデルは触覚ありで学習されています"
+              f"（{'部位ごとの要約' if soma else '1枚の変換層'}）", flush=True)
+        return {"touch": True, "somatosensory": soma}
+
     def _load_brain(tag, path):
         """モデルを読んで太郎一式を作る。失敗しても Viewer は落とさない。"""
         if not path:
@@ -1253,17 +1298,18 @@ def main():
                 sys.path.insert(0, _ROOT)
             from run.config import Config
             from run.taro_setup import Taro
-            if hybrid_env[0] is None:
-                from hybrid_env import HybridEnv
-                hybrid_env[0] = HybridEnv(env)
-                hybrid_env[0].reset(seed=0)
+            _ensure_hybrid()
             # 注意：学習時と同じ設定で作らないと、層の形が合わず**黙って白紙**になる
             #   （Taro._load は形の合う層だけ読む strict=False）。
             #   駆動モードはシーンが決めた実物（筋肉/関節）に合わせる。
-            cfg = Config({"actuation": "muscle" if n_act > 90 else "joint",
-                          "age_months": _AGE, "model": p},
-                         {"seed": 0, "K": 10}, scene=(_scene or {}).get("name"),
-                         name="viewer")
+            # 【2026-07-31】触覚の設定は**保存されたモデルから読み取る**。
+            #   実験ファイルに書き忘れると、触覚ありのモデルを触覚なしで開いて
+            #   「触覚の層だけ白紙の別の脳」を見ることになる（黙って通る）。
+            taro_spec = {"actuation": "muscle" if n_act > 90 else "joint",
+                         "age_months": _AGE, "model": p}
+            taro_spec.update(_touch_setting_of(p))
+            cfg = Config(taro_spec, {"seed": 0, "K": 10},
+                         scene=(_scene or {}).get("name"), name="viewer")
             t = Taro(cfg, hybrid_env[0], seed=0, verbose=True)
             st = t.init_state(t.first_obs)
             return {"taro": t, "state": st}
@@ -1652,10 +1698,10 @@ def main():
                         if a_env is not None:
                             from run.taro_setup import rescale_action
                             act[0] = rescale_action(
-                                a_env, hybrid_env[0].action_space).astype(np.float32)
+                                a_env, _ensure_hybrid().action_space).astype(np.float32)
                     # 注意：HybridEnv 側で進める（内臓の時間も進める）。
                     #   生の env を進めると内受容感覚が止まったままになる。
-                    obs, _r, _te, _tr, _in = hybrid_env[0].step(act[0])
+                    obs, _r, _te, _tr, _in = _ensure_hybrid().step(act[0])
                     last_obs[0] = obs
                     tag = "B" if brain_which.get() else "A"
                     if brains.get(tag, {}).get("state") is not None:
