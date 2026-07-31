@@ -13,11 +13,21 @@
   ③ 指標が何と連動しているか（d_action2 が小さい＝固まっている）
   ④ 終盤の平均±標準偏差（★報告する数値のばらつき）
 
-使い方:  python run/tools/check_jitter.py
+使い方:
+    python run/tools/check_jitter.py                       # 既定 E/logs/selfmodel_v2
+    python run/tools/check_jitter.py E/logs/selfmodel_v3   # フォルダを指定
+    python run/tools/check_jitter.py E/logs/selfmodel_v2 E/logs/selfmodel_v3  # 並べて比べる
 """
 import csv, glob, os, math, sys
 
-FILES = sorted(glob.glob(r"C:\claude\AI\Taro\E\logs\selfmodel_v2\*.csv"))
+sys.stdout.reconfigure(encoding="utf-8")
+_R = r"C:\claude\AI\Taro"
+_dirs = sys.argv[1:] or [os.path.join(_R, "E", "logs", "selfmodel_v2")]
+FILES = []
+for _d in _dirs:
+    _d = _d if os.path.isabs(_d) else os.path.join(_R, _d)
+    FILES += sorted(p for p in glob.glob(os.path.join(_d, "*.csv"))
+                    if not p.endswith(".meta.json"))
 KEYS = ["classify", "margin", "corr", "persist"]
 CTX = ["age_months", "noise", "act_abs", "d_action2", "cereb_err", "life_min"]
 

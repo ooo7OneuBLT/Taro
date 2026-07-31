@@ -24,6 +24,17 @@ class ToyTouch(Plugin):
 
     def setup(self, ctx):
         from e_toy_touch import ToyTouchProbe
+        # ⚠️シーンで「おもちゃなし」を指定していたら、ここで止める。
+        #   【なぜ、2026-07-31】`toy.enabled=false` にしても MuJoCo のモデルからは
+        #   `test_object1` という body が**消えない**（遠くへ退避されるだけ）。
+        #   そのため ToyTouchProbe の ok 判定（body があるか）が True になり、
+        #   ★4m 先の物体との距離を「おもちゃへの最接近 404cm」として記録し続けていた。
+        #   ⇒ シーンの指定を見て判断する。
+        toy = ((getattr(ctx, "scene", None) or {}).get("world", {}) or {}).get("toy", {})
+        if isinstance(toy, dict) and toy.get("enabled") is False:
+            print("[toy_touch] シーンが★おもちゃなし＝接触は測らない", flush=True)
+            self.probe = None
+            return
         self.probe = ToyTouchProbe(ctx.model, ctx.data)
         if not self.probe.ok:
             print("[toy_touch] おもちゃが無い環境＝接触は測らない", flush=True)

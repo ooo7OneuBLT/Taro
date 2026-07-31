@@ -33,6 +33,8 @@ function el(id){
     addEventListener(t){ listened.push(t); },
     closest(){ return null; },
     querySelector(){ return el('cam'); },
+    // ★class の付け外し（詳細画面の開閉が使う）
+    classList:{add(){}, remove(){}, contains(){ return false; }},
     getBoundingClientRect(){ return {left:0, top:0, width:1052}; },
     setPointerCapture(){}, onclick:null};
 }
@@ -40,10 +42,20 @@ const DATA = {nodes:{a:[0,0], b:[200,0]}, edges:[['a','b']],
               boxW:176, boxH:46, w:1052, h:926};
 global.document = {
   querySelector: () => el('svg'),
+  // ★複数取り（ダッシュボードの詳細画面が使う）。配列と同じ形で返す
+  querySelectorAll: () => {
+    const a = [el('x'), el('y')];
+    a.forEach = Array.prototype.forEach.bind(a);
+    return a;
+  },
+  // ★document 自身への操作の登録（キー入力・クリック）。本物のブラウザにはある
+  addEventListener: (t) => { listened.push('document:' + t); },
+  body: {style:{}, classList:{add(){}, remove(){}}},
   getElementById: (id) => id === 'wireData'
       ? {textContent: JSON.stringify(DATA)} : el(id)
 };
-global.window = {open: () => ({document:{write(){}}})};
+global.window = {open: () => ({document:{write(){}}}), scrollTo: () => {}};
+global.setTimeout = (f) => { try { f(); } catch (e) {} return 0; };
 global.navigator = {clipboard:{writeText: () => Promise.resolve()}};
 global.__done = () => console.log('LISTENED:' + listened.join(','));
 """
@@ -89,7 +101,13 @@ def main():
         print(f"    {res}")
         if ops:
             print(f"    登録された操作: {', '.join(ops)}")
-            need = {"wheel", "pointerdown", "pointermove", "pointerup"}
+            # ★「何が登録されているべきか」は絵の種類で違う。
+            #   ⚠️配線図の期待値（ドラッグ・ズーム）を全部の HTML に当てると、
+            #     ダッシュボードのように**それが要らない絵**を誤って不合格にする
+            #     （2026-07-31 に実際に出た）。ファイル名で切り替える。
+            base = os.path.basename(p)
+            need = ({"wheel", "pointerdown", "pointermove", "pointerup"}
+                    if "配線図" in base or "wiring" in base else set())
             miss = need - set(ops)
             if miss:
                 print(f"    ⚠️★足りない操作: {sorted(miss)}")

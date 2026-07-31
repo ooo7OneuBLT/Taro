@@ -1,0 +1,25 @@
+{
+  "name": "自己モデル：柵なし・線形成長（0→4ヶ月・seed1）",
+  "note": "2026-07-31。seed0 と同じ条件で乱数の種だけ違う。前回 C_なめらか は seed0 だけが壊れた（26回の測定のうち12回で d_action2<0.5＝固まっていた）ので、2シードで幅を見る。",
+  "scene": "新生児_仰向け_柵なし",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 0.0,
+    "age_to": 4.0,
+    "age_start": 0,
+    "age_ramp": 18000,
+    "age_every": 500,
+    "save": "E/logs/selfmodel_v3/model_柵なし_線形_seed1.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 18000,
+    "seed": 1,
+    "checkpoint": 500,
+    "csv": "E/logs/selfmodel_v3/柵なし_線形_seed1.csv"
+  },
+  "plugins": {
+    "self_model": true,
+    "hand_in_view": true
+  }
+}

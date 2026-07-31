@@ -206,7 +206,10 @@ class Trainer:
         """プラグインに渡す入れ物。★プラグインは読むだけ。"""
         u = self.env.unwrapped
         dt = float(u.model.opt.timestep) * int(u.frame_skip) * self.cfg.K
-        self.ctx = Ctx(env=self.env, spec={"scene": self.cfg.scene, "taro": self.cfg._taro,
+        # ⚠️★name を入れ忘れると、ダッシュボードの見出しが★フォルダ名になる
+        #   （2026-07-31 に実際にそうなっていた）。プラグインは spec しか見られない。
+        self.ctx = Ctx(env=self.env, spec={"name": self.cfg.name,
+                                           "scene": self.cfg.scene, "taro": self.cfg._taro,
                                            "run": self.cfg._run},
                        scene=self.scene, n_steps=self.cfg.steps, dt=dt,
                        brain=self.taro.brain, log=self._log_row)

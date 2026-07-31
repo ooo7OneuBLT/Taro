@@ -24,6 +24,7 @@ import argparse
 import csv
 import glob
 import html
+import json
 import os
 import re
 import sys
@@ -100,6 +101,29 @@ def _read_log(path):
     m = re.search(r"train / (\d+)ステップ", txt)
     if m:
         info["steps"] = int(m.group(1))
+    # ★このログがどのCSVのものかを、ログ自身に書かれた csv のパスから取る。
+    #   （ファイル名の付け方に依存しないため。2026-07-31）
+    m = re.search(r"csv['\"]?\s*[:=]\s*['\"]?([^'\",\s}]+\.csv)", txt)
+    if m:
+        info["csv"] = os.path.basename(m.group(1))
+    m = re.search(r"seed=(\d+)", txt)
+    if m:
+        info["seed"] = int(m.group(1))
+    # ★どんな条件で回したか（run/main.py が冒頭に出す表をそのまま拾う）。
+    #   これを絵に出さないと「どのシーンの学習か」が分からない（2026-07-31 の要望）。
+    for key, pat in (("scene",   r"^\s*シーン\s+(.+)$"),
+                     ("taro",    r"^\s*太郎\s+(.+)$"),
+                     ("howto",   r"^\s*動かし方\s+(.+)$"),
+                     ("tools",   r"^\s*道具\s+(.+)$"),
+                     ("setting", r"^\s*設定\s+(.+)$")):
+        m = re.search(pat, txt, re.M)
+        if m:
+            info[key] = m.group(1).strip()
+    # 体を育てた記録（何回目に何ヶ月へ変えたか）。詳細画面で経過を見せる
+    info["growth"] = re.findall(r"\[body-growth\] (\d+)回目：月齢 ([\d.]+) → ([\d.]+)", txt)
+    # 最後の数行（そのまま見せる＝警告やエラーを見落とさない）
+    lines = [l for l in txt.splitlines() if l.strip()]
+    info["tail"] = lines[-12:]
     for line in txt.splitlines()[:6]:
         s = line.strip()
         if s and not s.startswith(("=", "シーン", "太郎", "動かし方", "道具", "設定")):
@@ -114,13 +138,61 @@ def collect(d):
     for cp in sorted(glob.glob(os.path.join(d, "*.csv"))):
         base = os.path.basename(cp)[:-4]
         rows = _read_csv(cp)
-        # ログの名前は短縮されている場合があるので、前方一致で探す
-        cand = [p for p in glob.glob(os.path.join(d, "*.log"))
-                if base.startswith(os.path.basename(p)[:-4].split("_seed")[0])
-                and base.endswith(os.path.basename(p)[:-4].split("_")[-1])]
-        info = _read_log(cand[0]) if cand else {"real_min": None, "age": None,
-                                                "regrow": 0, "steps": None,
-                                                "name": None}
+        # ★CSVとログの紐づけ。3段構えで探す。
+        #   【なぜ3段か、2026-07-31】以前は「ログ名とCSV名の前方一致」だけだった。
+        #   ログを `seed0.log` のような短い名前にすると一致せず、総ステップ数が読めない。
+        #   すると `steps = 最後のstep` になり、★走行中なのに「完了」と誤判定していた
+        #   （ダッシュボードの進捗バーが常に100%になる）。
+        info = None
+        logs = sorted(glob.glob(os.path.join(d, "*.log")))
+        # ① ログ自身が書いている csv のパスで照合（★名前の付け方に依存しない）
+        for p in logs:
+            i = _read_log(p)
+            if i.get("csv") == os.path.basename(cp):
+                info = i
+                break
+        # ② 従来どおりの前方一致
+        if info is None:
+            cand = [p for p in logs
+                    if base.startswith(os.path.basename(p)[:-4].split("_seed")[0])
+                    and base.endswith(os.path.basename(p)[:-4].split("_")[-1])]
+            if cand:
+                info = _read_log(cand[0])
+        # ③ seed 番号だけで照合（1フォルダ1条件のとき）
+        if info is None:
+            m = re.search(r"_seed(\d+)$", base)
+            if m:
+                for p in logs:
+                    i = _read_log(p)
+                    if i.get("seed") == int(m.group(1)):
+                        info = i
+                        break
+        if info is None:
+            info = {"real_min": None, "age": None, "regrow": 0,
+                    "steps": None, "name": None}
+        # ★条件は「CSVの隣に置かれたメタ情報」を最優先で使う。
+        #   ログの保存（`> seed0.log`）に頼ると、リダイレクトしなかった実験の
+        #   条件が絵に出ない。メタは dashboard プラグインが必ず書く。
+        meta_path = cp[:-4] + ".meta.json"
+        if os.path.exists(meta_path):
+            try:
+                with open(meta_path, encoding="utf-8") as fp:
+                    meta = json.load(fp)
+                info["name"] = meta.get("name") or info.get("name")
+                info["scene"] = meta.get("scene") or info.get("scene")
+                info["meta"] = meta
+                t = meta.get("taro") or {}
+                if t:
+                    info["taro"] = ", ".join(f"{k}={v}" for k, v in t.items())
+                rr = meta.get("run") or {}
+                if rr.get("steps"):
+                    info["steps"] = int(rr["steps"])
+                if rr:
+                    info["howto"] = (f"{rr.get('type','train')} / "
+                                     f"{rr.get('steps','?')}ステップ / "
+                                     f"seed={rr.get('seed', 0)}")
+            except Exception:       # noqa: BLE001
+                pass
         steps = info.get("steps") or (int(rows[-1]["step"]) if rows else 1)
         cur = int(rows[-1]["step"]) if rows else 0
         runs.append({"key": base, "rows": rows, "steps": steps, "cur": cur,
@@ -213,6 +285,103 @@ def _fmt_eta(cur, steps, real_min):
     return f"あと約{rest:.0f}分"
 
 
+def _detail_html(rid, cond, seed, r, col):
+    """★1本の学習の詳細（クリックで開く画面）。
+
+    【なぜ要るか、2026-07-31】一覧は「何本がどこまで進んだか」を見る場所で、
+    ★どんな条件で回しているか（シーン・体の設定・道具）が分からなかった。
+    一覧に全部書くと読めないので、★クリックで開く場所に分ける。
+    """
+    info = r["info"]
+    rows = r["rows"]
+    # 条件の表（run/main.py が冒頭に出すものをそのまま）
+    meta = info.get("meta") or {}
+    world = meta.get("world") or {}
+    body = meta.get("body") or {}
+    # ★環境の中身（柵・おもちゃ・傾き）。これが無いと「どのシーンか」が名前だけになる
+    env_bits = []
+    if world:
+        env_bits.append("柵 " + ("あり" if world.get("fence") else "★なし"))
+        toy = world.get("toy") or {}
+        env_bits.append("おもちゃ " + ("あり" if toy.get("enabled") else "★なし"))
+        env_bits.append(f"傾き {world.get('recline_deg', 0)}度")
+        if world.get("plain"):
+            env_bits.append("視界を貧しく")
+        if world.get("static_tex"):
+            env_bits.append("模様あり")
+    body_bits = []
+    if body:
+        body_bits.append(f"月齢 {body.get('age_months')}ヶ月")
+        if body.get("neck_fix"):
+            body_bits.append("首がすわっていない")
+        if body.get("flexion"):
+            body_bits.append("生理的屈曲")
+    kv = [("実験の名前", info.get("name")),
+          ("環境（シーン）", info.get("scene")),
+          ("環境の中身", " ／ ".join(env_bits) if env_bits else None),
+          ("体の設定", " ／ ".join(body_bits) if body_bits else None),
+          ("太郎の設定", info.get("taro")),
+          ("動かし方", info.get("howto")),
+          ("測る道具", info.get("tools")),
+          ("シーンの説明", meta.get("scene_note")),
+          ("記録（CSV）", r["key"] + ".csv")]
+    rows_html = "".join(
+        f"<tr><th>{html.escape(k)}</th><td>{html.escape(str(v))}</td></tr>"
+        for k, v in kv if v)
+
+    # 体を育てた記録
+    g = info.get("growth") or []
+    if g:
+        first, lastg = g[0], g[-1]
+        grow_html = (f"<p class='sub'>{len(g)} 回。"
+                     f"{first[0]}回目に {first[1]}→{first[2]}ヶ月、"
+                     f"最後は {lastg[0]}回目に {lastg[1]}→{lastg[2]}ヶ月</p>")
+    else:
+        grow_html = "<p class='sub'>体は育てていない（月齢は固定）</p>"
+
+    # 最新の数値（CSVの最後の行を全部）
+    last = rows[-1] if rows else {}
+    nums = "".join(
+        f"<div><em>{html.escape(META.get(k, (k,))[0])}</em><b>{v:,.3f}</b></div>"
+        for k, v in last.items() if k not in ("step",) and isinstance(v, float))
+
+    # ★このランだけのグラフ（一覧は全ランを重ねるので、1本だけの推移が見えない）
+    charts = []
+    found = [k for x in rows for k in x if k not in SKIP]
+    seen = []
+    for k in found:
+        if k not in seen:
+            seen.append(k)
+    cols = [c for c in ORDER if c in seen] + [c for c in seen if c not in ORDER]
+    for col_name in cols:
+        head, eng, unit, base, note, _big = META.get(
+            col_name, (col_name, "", "", None, None, None))
+        pts = [(x["step"], x[col_name]) for x in rows if col_name in x]
+        if len(pts) < 2:
+            continue
+        charts.append(
+            f"<div class='panel'><h3>{html.escape(head)}"
+            f"<span class='eng'>{html.escape(eng)}</span></h3>"
+            + line_chart([(f"seed {seed}", col, pts)], col_name,
+                         base=base, base_note=note, width=720, height=200)
+            + "</div>")
+
+    tail = "\n".join(info.get("tail") or [])
+    return f"""
+<div class="detail" id="d_{rid}">
+  <div class="dhead">
+    <b><span class="dot" style="background:{col}"></span>
+       {html.escape(cond)} <span class="seed">seed {seed}</span></b>
+    <button onclick="hideDetail()">閉じる ✕</button>
+  </div>
+  <table class="kv">{rows_html}</table>
+  <h4>体を育てた記録</h4>{grow_html}
+  <h4>いちばん新しい数値</h4><div class="mets wide">{nums or '<div class="sub">まだ記録がありません</div>'}</div>
+  <h4>この学習だけの推移</h4>{''.join(charts) or '<p class="sub">グラフを描くには2点以上の記録が要ります</p>'}
+  <h4>ログの最後</h4><pre class="tail">{html.escape(tail)}</pre>
+</div>"""
+
+
 def build_html(runs, title):
     conds = {}
     for r in runs:
@@ -224,7 +393,7 @@ def build_html(runs, title):
                  / max(len(runs), 1))
 
     # ---- 上：全体の進み具合 -------------------------------------------------
-    cards = []
+    cards, details = [], []
     for c in sorted(conds):
         col = color_of[c]
         for s, r in sorted(conds[c]):
@@ -233,12 +402,15 @@ def build_html(runs, title):
             age = r["info"].get("age")
             grow = r["info"].get("regrow", 0)
             fresh = (time.time() - r["mtime"]) < 300
+            rid = re.sub(r"\W+", "_", r["key"])
+            scene = r["info"].get("scene") or "—"
             cards.append(f"""
-      <div class="card">
+      <div class="card" onclick="showDetail('{rid}')" title="クリックで詳しく見る">
         <div class="chead"><span class="dot" style="background:{col}"></span>
           <b>{html.escape(c)}</b><span class="seed">seed {s}</span>
           <span class="state {'live' if fresh and pct < 1 else ('fin' if pct>=1 else 'idle')}">
             {'走行中' if fresh and pct < 1 else ('完了' if pct >= 1 else '停止中')}</span></div>
+        <div class="scene">環境 <b>{html.escape(scene)}</b></div>
         {bar(pct, color=col)}
         <div class="nums">
           <span class="big">{pct*100:.0f}%</span>
@@ -251,7 +423,9 @@ def build_html(runs, title):
           <div><em>体の月齢</em><b>{'—' if age is None else f'{age:.2f}ヶ月'}</b></div>
           <div><em>体を作り直した</em><b>{grow} 回</b></div>
         </div>
+        <div class="more">クリックで詳しく ▸</div>
       </div>""")
+            details.append(_detail_html(rid, c, s, r, col))
 
     # ---- 下：グラフ（★CSVにある列を自動で見つけて全部描く）------------------
     found = []
@@ -332,10 +506,43 @@ def build_html(runs, title):
  .lg i {{ display:inline-block; width:11px; height:11px; border-radius:2px; margin-right:5px; }}
  .none {{ color:var(--sub); font-size:.85rem; }}
  footer {{ margin-top:20px; color:var(--sub); font-size:.76rem; }}
+ .card {{ cursor:pointer; transition:box-shadow .12s, transform .12s; }}
+ .card:hover {{ box-shadow:0 3px 12px rgba(0,0,0,.10); transform:translateY(-1px); }}
+ .scene {{ font-size:.78rem; color:var(--sub); margin:-2px 0 7px;
+   overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }}
+ .scene b {{ color:var(--ink); font-weight:600; }}
+ .more {{ margin-top:8px; font-size:.74rem; color:#2b6cb0; text-align:right; }}
+ /* ★詳細画面（クリックで開く）。既定は隠しておく */
+ .detail {{ display:none; position:fixed; inset:0; z-index:50; overflow-y:auto;
+   background:var(--bg); padding:16px 16px 40px; }}
+ .detail.on {{ display:block; }}
+ .dhead {{ display:flex; align-items:center; gap:10px; margin-bottom:12px;
+   position:sticky; top:-16px; background:var(--bg); padding:10px 0; z-index:2;
+   border-bottom:1px solid var(--line); }}
+ .dhead b {{ font-size:1.06rem; display:flex; align-items:center; gap:7px; }}
+ .dhead button {{ margin-left:auto; font:inherit; font-size:.84rem; cursor:pointer;
+   background:var(--card); color:var(--ink); border:1px solid var(--line);
+   border-radius:7px; padding:5px 12px; }}
+ .dhead button:hover {{ border-color:#2b6cb0; color:#2b6cb0; }}
+ .detail h4 {{ font-size:.94rem; margin:18px 0 6px; }}
+ table.kv {{ border-collapse:collapse; width:100%; font-size:.83rem;
+   background:var(--card); border:1px solid var(--line); border-radius:10px; overflow:hidden; }}
+ table.kv th, table.kv td {{ text-align:left; padding:7px 11px; vertical-align:top;
+   border-bottom:1px solid var(--line); }}
+ table.kv th {{ width:8.6em; color:var(--sub); font-weight:600; white-space:nowrap; }}
+ table.kv tr:last-child th, table.kv tr:last-child td {{ border-bottom:0; }}
+ .mets.wide {{ grid-template-columns:repeat(auto-fill,minmax(220px,1fr));
+   background:var(--card); border:1px solid var(--line); border-radius:10px;
+   padding:11px 13px; border-top:1px solid var(--line); }}
+ .sub {{ color:var(--sub); font-size:.83rem; margin:2px 0; }}
+ pre.tail {{ background:var(--card); border:1px solid var(--line); border-radius:10px;
+   padding:11px 13px; font-size:.74rem; line-height:1.5; overflow-x:auto;
+   white-space:pre-wrap; word-break:break-all; margin:0; }}
  @media (prefers-color-scheme: dark) {{
    :root {{ --ink:#e8eef7; --sub:#a0aec0; --line:#2d3748; --bg:#161b22; --card:#1c2230; }}
    svg.bar rect:first-child {{ fill:#2d3748; }}
    text.tick {{ fill:#8f9bb0; }} text.axis {{ fill:#a0aec0; }}
+   .card:hover {{ box-shadow:0 3px 12px rgba(0,0,0,.45); }}
  }}
 </style></head><body>
 <h1>{html.escape(title)}</h1>
@@ -358,6 +565,43 @@ def build_html(runs, title):
   100を超えていたらモデルが壊れている疑い。<br>
   ⚠️絵はこのフォルダのデータだけから描いています（別のランを混ぜていません）。
 </footer>
+{''.join(details)}
+<script>
+// ★カードをクリックすると、その学習だけの詳細を開く。
+//   ⚠️文字列の中に本物の改行を入れないこと（2026-07-30 に配線図の JS が
+//     まるごと動かなくなった原因。check_js.py で構文を確かめる）。
+function showDetail(id) {{
+  hideDetail();
+  var el = document.getElementById('d_' + id);
+  if (!el) return;
+  el.classList.add('on');
+  document.body.style.overflow = 'hidden';
+  window.scrollTo(0, 0);
+}}
+function hideDetail() {{
+  var list = document.querySelectorAll('.detail.on');
+  for (var i = 0; i < list.length; i++) {{ list[i].classList.remove('on'); }}
+  document.body.style.overflow = '';
+}}
+// Esc でも閉じる
+document.addEventListener('keydown', function (e) {{
+  if (e.key === 'Escape') {{ hideDetail(); }}
+}});
+// ⚠️30秒ごとの自動リロードは、詳細を開いている間は止める
+//   （読んでいる最中に一覧へ戻されるのを防ぐ）
+(function () {{
+  var meta = document.querySelector('meta[http-equiv="refresh"]');
+  if (!meta) return;
+  var keep = meta.getAttribute('content');
+  var obs = function () {{
+    var open = document.querySelector('.detail.on');
+    if (open) {{ meta.setAttribute('content', '100000'); }}
+    else {{ meta.setAttribute('content', keep); }}
+  }};
+  document.addEventListener('click', function () {{ setTimeout(obs, 0); }});
+  document.addEventListener('keydown', function () {{ setTimeout(obs, 0); }});
+}})();
+</script>
 </body></html>"""
 
 
@@ -371,10 +615,19 @@ def make(d, title=None):
     title = title or f"学習の様子 ── {os.path.basename(d)}"
     out = os.path.join(d, "ダッシュボード.html")
     runs = collect(d)
-    tmp = out + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fp:
-        fp.write(build_html(runs, title))
-    os.replace(tmp, out)     # ★書き換え中の半端なHTMLを開かせない
+    # ⚠️★一時ファイルの名前にプロセス番号を入れる。
+    #   【なぜ、2026-07-31】同じフォルダへ複数のプロセスが同時に絵を作る
+    #   （2シードを並列で回すと★学習プロセス2つがそれぞれ書き、さらに --watch を
+    #    立てると3つになる）。固定名 `.tmp` だと**書き込みが混ざる**。
+    #   os.replace 自体はアトミックなので、tmp さえ分ければ安全。
+    tmp = f"{out}.{os.getpid()}.tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as fp:
+            fp.write(build_html(runs, title))
+        os.replace(tmp, out)     # ★書き換え中の半端なHTMLを開かせない
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
     return out
 
 

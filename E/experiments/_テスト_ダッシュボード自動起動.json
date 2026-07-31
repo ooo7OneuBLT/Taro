@@ -1,0 +1,19 @@
+{
+  "name": "テスト：ダッシュボードが自動で開くか（600回だけ）",
+  "note": "2026-07-31。run システムに絵の自動表示を組み込んだので動作確認する。本番の実験ではない。出力先は E/logs/_test_dashboard（本番の selfmodel_v3 と混ざらないように別フォルダ）。",
+  "scene": "新生児_仰向け_柵なし",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 0.0
+  },
+  "run": {
+    "type": "train",
+    "steps": 600,
+    "seed": 0,
+    "checkpoint": 300,
+    "csv": "E/logs/_test_dashboard/テスト_seed0.csv"
+  },
+  "plugins": {
+    "self_model": true
+  }
+}

@@ -16,13 +16,27 @@
     "plugins": {"dashboard": false}
 と明示する。
 
+【★ブラウザが自動で開く、2026-07-31】学習を始めると絵を1枚作ってブラウザで開く。
+絵は500回ごとに作り直され、HTML 側に `<meta http-equiv="refresh" content="30">`
+が入っているので**開きっぱなしで進み具合が見える**。
+⇒ 別プロセスで `run.tools.dashboard --watch` を立てる必要はない。
+
+⚠️★同じフォルダへ**複数のシードを並列で流す**とき、全部がブラウザを開くと
+  タブが増えて邪魔になる。そこで「直近10分に誰かが開いていたら開かない」印
+  （`.dashboard_opened`）をフォルダに置いて、★1回だけ開くようにしている。
+
 実験ファイルでの書き方（明示する場合）:
     "plugins": {"dashboard": true}
     "plugins": {"dashboard": {"dir": "E/logs/別のフォルダ", "title": "見出し"}}
+    "plugins": {"dashboard": {"open": false}}     ← ★ブラウザを開かせない
 """
 import os
+import time
 
 from run.plugins.base import Plugin
+
+_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                    os.pardir, os.pardir, os.pardir))
 
 
 class Dashboard(Plugin):
@@ -35,11 +49,70 @@ class Dashboard(Plugin):
             csv_path = (ctx.spec.get("run") or {}).get("csv")
             d = os.path.dirname(csv_path) if csv_path else None
         self.dir = d
-        self.title = self.config.get("title")
+        # 見出しは実験ファイルの name を既定にする（★どの実験の絵か分かるように）
+        self.title = self.config.get("title") or ctx.spec.get("name")
         self.made = None
+        self.open_browser = bool(self.config.get("open", True))
         if not self.dir:
             print("⚠️[dashboard] 出力先が決まらないので絵を作りません"
                   "（run.csv か plugins.dashboard.dir を指定してください）", flush=True)
+            return
+        self._write_meta(ctx)
+        # ★学習の開始時に1枚作ってブラウザで開く（あとは30秒ごとに自動で読み直される）
+        self._make()
+        self._open_once()
+
+    def _write_meta(self, ctx):
+        """★「どんな条件で回したか」を CSV の隣に書く。
+
+        【なぜ要るか、2026-07-31】絵に条件（シーン名・体の設定）を出したかったが、
+        読める場所が**画面に出た文字を保存したログ**しかなかった。
+        ⇒ `> seed0.log` のようにリダイレクトした人だけが条件を見られる、という
+        ★不安定な作りだった。実験ファイルの中身をそのまま横に置いて解決する。
+        """
+        csv_path = (ctx.spec.get("run") or {}).get("csv")
+        if not csv_path:
+            return
+        import json
+        p = csv_path if os.path.isabs(csv_path) else os.path.join(_ROOT, csv_path)
+        try:
+            with open(p[:-4] + ".meta.json", "w", encoding="utf-8") as fp:
+                json.dump({"name": ctx.spec.get("name"),
+                           "scene": ctx.spec.get("scene"),
+                           "taro": ctx.spec.get("taro"),
+                           "run": ctx.spec.get("run"),
+                           "tools": sorted(getattr(ctx, "plugin_names", []) or []),
+                           "scene_note": (ctx.scene or {}).get("note"),
+                           "world": (ctx.scene or {}).get("world"),
+                           "body": (ctx.scene or {}).get("body")},
+                          fp, ensure_ascii=False, indent=2)
+        except Exception as e:      # noqa: BLE001
+            print(f"⚠️[dashboard] 条件を書けませんでした: {type(e).__name__}: {e}",
+                  flush=True)
+
+    def _open_once(self):
+        """★ブラウザで開く。ただし同じフォルダで直近10分に誰かが開いていたら開かない。
+
+        【なぜ印を置くか】2シードを並列で流すと**2つのプロセスがそれぞれ開く**。
+        3本流せば3つ開く。★見たいのは1枚なので、先に開いた者だけが開く。
+        """
+        if not (self.open_browser and self.made):
+            return
+        mark = os.path.join(self.dir, ".dashboard_opened")
+        try:
+            if os.path.exists(mark) and (time.time() - os.path.getmtime(mark)) < 600:
+                return                      # 並列の相方が既に開いている
+            with open(mark, "w", encoding="utf-8") as fp:
+                fp.write(time.strftime("%Y-%m-%d %H:%M:%S"))
+            import webbrowser
+            url = "file:///" + os.path.abspath(self.made).replace("\\", "/")
+            webbrowser.open(url)
+            print(f"[dashboard] ★ブラウザで開きました（30秒ごとに自動で最新になります）\n"
+                  f"            {self.made}", flush=True)
+        except Exception as e:              # noqa: BLE001
+            # ⚠️★開けなくても学習は続ける（画面が無い環境・既定ブラウザが無い等）
+            print(f"⚠️[dashboard] ブラウザを開けませんでした: {type(e).__name__}: {e}\n"
+                  f"            手で開いてください: {self.made}", flush=True)
 
     def _make(self):
         if not self.dir:

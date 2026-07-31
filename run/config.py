@@ -124,7 +124,10 @@ class Config:
       ログのどこから条件が違うのかが追えなくなる。
     """
 
-    def __init__(self, taro=None, run=None, *, scene=None):
+    def __init__(self, taro=None, run=None, *, scene=None, name=None):
+        # ★実験の名前。設定ではないが、絵の見出しや記録に使うので持ち回る
+        #   （2026-07-31：ダッシュボードの見出しがフォルダ名になっていたので追加）
+        self.name = name
         self._taro, self._run = dict(taro or {}), dict(run or {})
         # ★知らないキーはここで止める（書き間違いを黙って無視しない）
         for name, d, given in (("taro", TARO_DEFAULTS, self._taro),
@@ -148,7 +151,8 @@ class Config:
         run = dict(spec.get("run", {}))
         if steps_override is not None:
             run["steps"] = int(steps_override)
-        return cls(spec.get("taro"), run, scene=spec.get("scene"))
+        return cls(spec.get("taro"), run, scene=spec.get("scene"),
+                   name=spec.get("name"))
 
     @classmethod
     def from_env(cls):

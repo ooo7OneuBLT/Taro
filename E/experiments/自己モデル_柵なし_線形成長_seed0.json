@@ -1,0 +1,25 @@
+{
+  "name": "自己モデル：柵なし・線形成長（0→4ヶ月・seed0）",
+  "note": "2026-07-31。柵とおもちゃを外して回し直す。前回（柵あり）は条件A/B/Cで「柵に当たる度合い」が違い、それが交絡していた（A=最初から11箇所固定／B=12000回まで0箇所→突然11箇所／C=0→1→4→5→8→9→11と変わり続ける）。指標の幅は A 5.4 / B 1.2 / C 10.0 で、接触の変化が多い条件ほど不安定だった。柵の目的はコードのコメントによれば『長時間の学習で遠くへ行かない保険』であって学習を助けるものではない。柵なしで長時間動かすと遠くへ行く可能性があるので、終わったらViewerで目視すること。",
+  "scene": "新生児_仰向け_柵なし",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 0.0,
+    "age_to": 4.0,
+    "age_start": 0,
+    "age_ramp": 18000,
+    "age_every": 500,
+    "save": "E/logs/selfmodel_v3/model_柵なし_線形_seed0.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 18000,
+    "seed": 0,
+    "checkpoint": 500,
+    "csv": "E/logs/selfmodel_v3/柵なし_線形_seed0.csv"
+  },
+  "plugins": {
+    "self_model": true,
+    "hand_in_view": true
+  }
+}
