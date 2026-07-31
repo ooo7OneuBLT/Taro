@@ -41,18 +41,22 @@ class MinimalFusion:
     """
 
     def __init__(self, touch_dim=0, vision_res=0, proprio_dim=621,
-                 somatosensory_layout=None):
+                 touch_map=None):
         # proprio_dim：MIMoの observation の次元数。既定621（SpringDamperModel、90関節）だが、
         # MuscleModel（拮抗筋2本/関節）や関節数が変わる身体では違うので、呼び出し側から実測値を
         # 渡せるようにしておく（渡さなければ従来と完全に同一）。
-        # somatosensory_layout：build_sensor_layout の戻り値の1つめ(部位別インデックス表)。
+        # touch_map：build_touch_map の戻り値（点→部位の地図）。
         # 渡されると、触覚エンコーダは1枚の巨大変換層でなく SomatosensoryCortex(=視床VPL+S1
-        # 相当の部位別集約→統合)を使う。この場合 touch_dim は指定不要(layoutから決まる)。
+        # 相当の部位別集約→統合)を使う。この場合 touch_dim は指定不要(地図から決まる)。
+        # 注意：【2026-07-31】引数名を somatosensory_layout から touch_map に変えた。
+        #   中身も「部位ごとのインデックス表」から「点→部位の対応＋位置」に変わっている。
+        #   旧 layout はセンサ点数が層の入力次元に直結していて、体を育てると
+        #   静かに別の部位を読んでいた（落とし穴 項86）。
         self.insula = Insula(state_dim=4, embedding_dim=64)
         self.proprio = ProprioceptionEncoder(input_dim=proprio_dim)
         self.vestibular = VestibularEncoder(input_dim=6)
-        if somatosensory_layout is not None:
-            self.touch = SomatosensoryCortex(somatosensory_layout, embedding_dim=64)
+        if touch_map is not None:
+            self.touch = SomatosensoryCortex(touch_map, embedding_dim=64)
         elif touch_dim:
             self.touch = TouchEncoder(input_dim=touch_dim, hidden_dim=256, embedding_dim=64)
         else:

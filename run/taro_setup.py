@@ -32,6 +32,7 @@ import torch                                                    # noqa: E402
 import numpy as np                                              # noqa: E402
 
 from fusion import MinimalFusion                                # noqa: E402
+from somatosensory_cortex import build_touch_map_from_env       # noqa: E402
 from taro_brain_motor import TaroBrainWithMotor                 # noqa: E402
 from basal_ganglia import TaroLearner                           # noqa: E402
 from dopamine import Dopamine                                   # noqa: E402
@@ -94,25 +95,24 @@ class Taro:
             vres = VISION_RES
 
         # ---- 体性感覚系（触覚ONのときだけ）----------------------------------
-        soma_layout = None
+        touch_map = None
         if cfg.somatosensory and cfg.touch:
-            from somatosensory_cortex import build_sensor_layout
-            soma_layout, soma_total = build_sensor_layout(env.unwrapped.model,
-                                                          env.unwrapped.touch)
-            assert soma_total == touch_dim, f"soma total {soma_total} != {touch_dim}"
+            touch_map = build_touch_map_from_env(env)
+            assert touch_map.total_dim == touch_dim, \
+                f"触覚の地図{touch_map.total_dim} != 観測{touch_dim}"
             if verbose:
-                print(f"[体性感覚系] SomatosensoryCortex 有効：部位数={len(soma_layout)}"
-                      f" 触覚総次元={touch_dim}", flush=True)
+                print(f"[体性感覚系] SomatosensoryCortex 有効：部位数="
+                      f"{len(touch_map.group_names)} 触覚総次元={touch_dim}", flush=True)
 
         # ---- ① 融合層（感覚をまとめる）--------------------------------------
         # target_fusion は**凍結した別インスタンス**（RND式）。予測側と正解側が
         #   同じ学習中の層だと「出力を平坦にすれば当たる」抜け道で崩壊する（目標Cで実際に踏んだ）。
         self.fusion = MinimalFusion(touch_dim, vision_res=vres,
                                     proprio_dim=prop_dim_space,
-                                    somatosensory_layout=soma_layout)
+                                    touch_map=touch_map)
         self.target_fusion = MinimalFusion(touch_dim, vision_res=vres,
                                            proprio_dim=prop_dim_space,
-                                           somatosensory_layout=soma_layout).freeze()
+                                           touch_map=touch_map).freeze()
         if cfg.somatosensory and cfg.touch and self.fusion.touch is not None and verbose:
             print(self.fusion.touch.summary(), flush=True)
 
@@ -222,6 +222,25 @@ class Taro:
                   flush=True)
         if self.cfg.cerebellum and "cereb" in blob:
             _match(self.cereb, blob["cereb"], "小脳")
+
+    # -------------------------------------------------------- 体が変わったとき
+    def on_body_change(self, env):
+        """体を作り直したら、触覚の地図を差し替える。**学習した重みは保つ。**
+
+        【なぜ要るか、2026-07-31】触覚センサの点は成長で増える（0ヶ月4,824 →
+        4ヶ月9,804次元）。SomatosensoryCortex は「点→部位」の対応表と
+        各点の位置を持っているので、これを新しい体のものに入れ替える必要がある。
+
+        注意：入れ替えを忘れても**例外は出ない**。配列が長くなる方向の変化では
+          古いインデックスが範囲内に収まり、静かに別の部位を読む
+          （落とし穴チェックリスト 項86）。ここを通す設計にしてあるのはそのため。
+        """
+        if self.fusion.touch is None or not hasattr(self.fusion.touch, "rebuild"):
+            return None
+        tm = build_touch_map_from_env(env)
+        self.fusion.touch.rebuild(tm)
+        self.target_fusion.touch.rebuild(tm)
+        return tm
 
     # -------------------------------------------------------- 予測の対象
     def encode_target(self, obs):

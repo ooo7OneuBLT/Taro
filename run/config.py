@@ -37,7 +37,7 @@ TARO_DEFAULTS = {
     "age_ramp":      (0, "何回かけて月齢を変えるか。0＝一瞬で", "E_AGE_RAMP"),
     "age_every":     (500, "何回ごとに月齢を見直すか", "E_AGE_EVERY"),
     # ---- 感覚 --------------------------------------------------------------
-    # 注意：触覚ONでは体を育てられない（センサ点が月齢で変わり観測次元がずれる。項75）
+    # 注意：触覚ONで体を育てるには somatosensory=true が要る（項75・項86）
     "touch":         (False, "触覚を足す", "E_TOUCH"),
     "touch_mode":    ("target", "触覚を予測対象にするか input/target", "E_TOUCH_MODE"),
     "somatosensory": (False, "触覚を視床VPL+S1相当の経路にする", "E_SOMATOSENSORY"),
@@ -239,15 +239,20 @@ class Config:
         #   さらに trainer の _regrow は observation キーの次元しか見ておらず、
         #   触覚は別キー（touch）なので、次元が倍になっても検出されない。
         #
-        # ⇒ 直すには (a) 成長のたびに layout を作り直す (b) 部位ごとの出力を
-        #   点数に依存しない形（平均・重心など）にする、のどちらかが要る。
-        #   それができるまでは禁止のままにする。
-        if self.touch and self.age_to is not None:
+        # 【2026-07-31 の作り直しで解決】(b) を実装した。
+        #   SomatosensoryCortex の部位ごとの出力を
+        #   「有無・強さ・重心xyz」の5つ（点数によらず固定）に変えた。
+        #   センサ点数に依存する重みが1つも無くなったので、体が育っても層の形が変わらない。
+        #   成長時は trainer._regrow → taro.on_body_change() で地図だけ差し替える。
+        #   ⇒ touch=true かつ somatosensory=true なら体を育てられる。
+        #     somatosensory=false（1枚の巨大変換層）のままでは今も育てられない。
+        if self.touch and self.age_to is not None and not self.somatosensory:
             raise ValueError(
-                "触覚ONでは体を育てられない。\n"
-                "  センサ点が月齢で変わり（0ヶ月4,824 → 4ヶ月9,804）、\n"
-                "  部位のインデックス表が古いまま使われて**黙って別の部位を読む**。\n"
-                "  somatosensory=true でも直らない（2026-07-31 に実測で確認）。\n"
+                "触覚ONで体を育てるには somatosensory=true が要る。\n"
+                "  センサ点が月齢で変わる（0ヶ月4,824 → 4ヶ月9,804次元）ため、\n"
+                "  1枚の巨大変換層（somatosensory=false）では入力次元が合わなくなる。\n"
+                "  somatosensory=true なら部位ごとの要約（有無/強さ/重心）になり、\n"
+                "  点数が変わっても層の形が変わらない。\n"
                 "  落とし穴チェックリスト 項75・項86")
         if self.goal_babbling:
             print("注意[config] goal_babbling を有効にした。2026-07-30 の実測で"

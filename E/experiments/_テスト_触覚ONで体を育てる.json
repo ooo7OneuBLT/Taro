@@ -1,6 +1,6 @@
 {
   "name": "テスト：触覚ONで体を育てられるか（600回だけ）",
-  "note": "2026-07-31。これまで「触覚ONでは体を育てられない」と禁止していたが、実測でセンサーを持つ部位の数は月齢によらず一定だと分かった（点数だけが倍になる）。somatosensory=true で部位ごとにまとめれば脳への入力次元は固定される。それを確かめるためのテストで、本実験ではない。出力先は E/logs/_test_touch。",
+  "note": "2026-07-31。SomatosensoryCortex を「部位ごとに 有無/強さ/重心xyz」の5次元要約に作り変えた。センサ点数に依存する重みが1つも無くなったので、体が育っても層の形が変わらない。成長時は trainer._regrow → taro.on_body_change() で地図だけ差し替える。単体の検証は run/tools/check_touch_growth.py（5項目すべて合格）。これはその学習ループ上での確認で、本実験ではない。出力先は E/logs/_test_touch。",
   "scene": "新生児_仰向け_柵なし",
   "taro": {
     "actuation": "muscle",
@@ -17,7 +17,7 @@
     "steps": 600,
     "seed": 0,
     "checkpoint": 200,
-    "csv": "E/logs/_test_touch/テスト_seed0.csv"
+    "csv": "E/logs/_test_touch/テスト2_seed0.csv"
   },
   "plugins": {
     "self_model": true

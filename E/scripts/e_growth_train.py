@@ -573,17 +573,18 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
     _prop_dim = int(env.observation_space["observation"].shape[0])
     # 【体性感覚系の脳内経路化】E_SOMATOSENSORY=1 のとき、触覚センサの部位別配置(視床VPL相当)を
     # 環境から取り出してMinimalFusionに渡す。SomatosensoryCortexが1枚の巨大変換層を置き換える。
-    _soma_layout = None
+    _touch_map = None
     if _SOMATOSENSORY and _TOUCH:
-        from somatosensory_cortex import build_sensor_layout
-        _soma_layout, _soma_total = build_sensor_layout(env.unwrapped.model, env.unwrapped.touch)
-        assert _soma_total == touch_dim, f"soma_layout total {_soma_total} != touch_dim {touch_dim}"
-        print(f"[体性感覚系] SomatosensoryCortex を有効化：部位数={len(_soma_layout)}, "
-              f"触覚総次元={touch_dim}", flush=True)
+        from somatosensory_cortex import build_touch_map_from_env
+        _touch_map = build_touch_map_from_env(env)
+        assert _touch_map.total_dim == touch_dim, \
+            f"触覚の地図 {_touch_map.total_dim} != touch_dim {touch_dim}"
+        print(f"[体性感覚系] SomatosensoryCortex を有効化：部位数="
+              f"{len(_touch_map.group_names)}, 触覚総次元={touch_dim}", flush=True)
     fusion = MinimalFusion(touch_dim, vision_res=_vres, proprio_dim=_prop_dim,
-                            somatosensory_layout=_soma_layout)
+                            touch_map=_touch_map)
     target_fusion = MinimalFusion(touch_dim, vision_res=_vres, proprio_dim=_prop_dim,
-                                   somatosensory_layout=_soma_layout).freeze()
+                                   touch_map=_touch_map).freeze()
     if _SOMATOSENSORY and _TOUCH and fusion.touch is not None:
         print(fusion.touch.summary(), flush=True)
     global _TGT_FUSION

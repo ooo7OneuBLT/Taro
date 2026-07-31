@@ -229,6 +229,7 @@ class Trainer:
         cfg = self.cfg
         old = (int(self.env.observation_space["observation"].shape[0]),
                int(self.env.action_space.shape[0]))
+        old_touch = int(self.env.observation_space["touch"].shape[0]) if cfg.touch else 0
         # 視覚のレンダラ（OpenGLの描画用メモリ）を**明示的に閉じる**。
         #   【なぜ、2026-07-30】体を育てる実験で学習が落ちた：
         #     WARNING: OpenGL error 0x505 in or before mjr_makeContext
@@ -246,15 +247,33 @@ class Trainer:
             cfg.scene, taro=spec, seed=cfg.seed, verbose=False, hybrid=True)
         new = (int(self.env.observation_space["observation"].shape[0]),
                int(self.env.action_space.shape[0]))
-        # 注意：触覚ONではセンサ点が月齢で変わる（0ヶ月1734→4ヶ月4274）ので次元が合わなくなる。
-        #   黙って壊れると「体を育てたのに学習が進まない」と読み違えるのでここで止める。
         if old != new:
             # 注意：ここで止めるとき、新しく作った env を閉じてから投げる
             #   （閉じないと描画コンテキストが残る）
             close_env(self.env)
             raise AssertionError(
                 f"体を作り直したら観測/行動の次元が変わった {old} -> {new}。"
-                "触覚ONではこの方式は使えない（落とし穴 項75）")
+                "（落とし穴 項75）")
+        # ---- 触覚の地図を新しい体のものに差し替える -------------------------
+        # 【なぜ、2026-07-31】触覚は `observation` とは別のキーなので、上の
+        #   次元チェックを**素通りする**。実測では observation は801のまま、
+        #   touch だけ 4,824 → 9,804 に変わっていた。
+        #   SomatosensoryCortex は「点→部位」の対応表を持っているので、
+        #   入れ替えないと**静かに別の部位を読む**（落とし穴 項86）。
+        if cfg.touch:
+            new_touch = int(self.env.observation_space["touch"].shape[0])
+            if cfg.somatosensory:
+                self.taro.on_body_change(self.env)
+                if old_touch != new_touch:
+                    print(f"[body-growth] 触覚の地図を差し替え {old_touch} → {new_touch}次元"
+                          "（学習した部位の重みは保持）", flush=True)
+            elif old_touch != new_touch:
+                close_env(self.env)
+                raise AssertionError(
+                    f"体を作り直したら触覚の次元が変わった {old_touch} -> {new_touch}。\n"
+                    "  somatosensory=false の触覚エンコーダは入力次元が固定なので使えない。\n"
+                    "  somatosensory=true にすると部位ごとの要約（有無/強さ/重心）になり、"
+                    "点数が変わっても層の形が変わらない。")
         self.probe_ctx.env = self.env       # 測定器も新しい体を見る
         self.ctx.env = self.env
         u = self.env.unwrapped
