@@ -79,3 +79,6 @@ doc/研究日誌まとめ_A-E.md
 
 # Viewer のランチャーが覚えている「前回開いたシーン」（ローカルの状態）
 E/scenes/_前回開いたシーン.txt
+
+# 配線図（run/tools/wiring.py が実験ファイルごとに生成する）→ 生成物なので追跡しない
+E/experiments/配線図.html
