@@ -181,8 +181,36 @@ def run(spec, *, steps_override=None, verbose=False):
         print(f"  設定     {cfg.summary()}")
         return viewer.view(cfg, plugins=plugins, verbose=verbose)
 
+    # --- ★edit：編集ウィンドウ付きの Viewer（E/scripts/e_viewer.py）を開く ---
+    #   【なぜ実験ファイルから開けるようにしたか、2026-07-31】
+    #   e_viewer は環境変数で設定する古い作りで、「どの条件で開いたか」が
+    #   ★コマンドの履歴にしか残らなかった。実験ファイルにすれば記録が残る。
+    #   ⚠️中身は e_viewer.py のまま（統合の第4段階・ステップ2）。
+    #     環境変数での起動も残す（急に壊さない）。
+    if kind == "edit":
+        import subprocess
+        t = spec.get("taro") or {}
+        envv = dict(os.environ)
+        envv["E_SCENE"] = str(spec["scene"])
+        envv["PYTHONIOENCODING"] = "utf-8"
+        for key, name in (("age_months", "E_AGE"),
+                          ("model", "E_VIEW_MODEL"),
+                          ("view_model_b", "E_VIEW_MODEL_B"),
+                          ("view_std", "E_VIEW_STD")):
+            v = t.get(key, r.get(key))
+            if v is not None:
+                envv[name] = str(v)
+        script = os.path.join(_ROOT, "E", "scripts", "e_viewer.py")
+        print(f"  ★編集ウィンドウ付き Viewer を開きます\n"
+              f"     シーン {envv['E_SCENE']}"
+              + (f" ／ 月齢 {envv['E_AGE']}ヶ月" if "E_AGE" in envv else "")
+              + (f"\n     脳A {envv['E_VIEW_MODEL']}" if "E_VIEW_MODEL" in envv else "")
+              + (f"\n     脳B {envv['E_VIEW_MODEL_B']}" if "E_VIEW_MODEL_B" in envv else ""),
+              flush=True)
+        return {"edit": {"戻り値": subprocess.call([sys.executable, script], env=envv)}}
+
     if kind not in ("measure",):
-        raise ValueError(f"run.type が不明: {kind}（measure / train / view）")
+        raise ValueError(f"run.type が不明: {kind}（measure / train / view / edit）")
 
     # --- measure：太郎の脳を通さず、環境をそのまま進めて測る ---
     import numpy as np

@@ -182,6 +182,20 @@ def main():
     _scene_name = os.environ.get("E_SCENE")
     if _scene_name:
         _scene = e_scene.load(_scene_name)
+        # ★月齢だけは E_AGE で上書きできる（2026-07-31）。
+        #   【なぜ要るか】シーンは「新生児（0ヶ月）」で作ってあるが、
+        #   ★体を育てる実験の学習済みモデルは**終わりの月齢（4ヶ月）の体**で学んでいる。
+        #   シーンの月齢のまま脳を読むと「4ヶ月の脳が新生児の体を動かす」ことになり、
+        #   見たいものと違う状態を見ることになる（2026-07-31 に実際に起きた）。
+        #   ⚠️上書きしたらシーンの指紋とは一致しないので照合を外す。
+        if os.environ.get("E_AGE"):
+            _ov = float(os.environ["E_AGE"])
+            if abs(_ov - float(_scene["body"]["age_months"])) > 1e-9:
+                print(f"[scene] ★月齢を上書き: "
+                      f"{_scene['body']['age_months']} → {_ov} ヶ月"
+                      f"（E_AGE の指定。指紋の照合は外します）", flush=True)
+                _scene["body"]["age_months"] = _ov
+                _scene["fingerprint"] = None
         _AGE = float(_scene["body"]["age_months"])
         _RECLINE = float(_scene["world"]["recline_deg"])
         _EYE_REST_V = float(_scene["body"]["eye_rest_vertical_deg"])
@@ -983,6 +997,60 @@ def main():
     run_label = tk.Label(sec_run.body, text="", font=("Consolas", 9), justify="left")
     run_label.pack(anchor="w", padx=14)
 
+    # ---- 区画6：★脳（学習したモデルで動かす）2026-07-31 新設 --------------
+    # 【なぜ足したか】ユーザーの要望「すべてを編集ウィンドウ付きの Viewer に統合したい」。
+    #   これまで「学習した太郎を見る」のは run/viewer.py にしかなく、
+    #   ★編集パネルを使いながら学習後の動きを見ることができなかった。
+    #   設計は E/docs/実行基盤_設計.md §7.5（第4段階）。
+    sec_brain = Section(colR, "脳（学習したモデル）", op.get("brain", False))
+    brain_a_var = tk.StringVar(value=os.environ.get("E_VIEW_MODEL", ""))
+    brain_b_var = tk.StringVar(value=os.environ.get("E_VIEW_MODEL_B", ""))
+    st_brain = tk.BooleanVar(value=False)
+    brain_which = tk.IntVar(value=0)          # 0=A / 1=B
+    brain_std_var = tk.DoubleVar(value=float(os.environ.get("E_VIEW_STD", "0.174")))
+
+    tk.Label(sec_brain.body, justify="left", fg="#666", font=("", 8),
+             text="学習したモデル(.pt)を読むと、自発運動の代わりに\n"
+                  "★その脳が行動を決めます。2つ入れると見比べられます。").pack(
+        anchor="w", padx=14, pady=(0, 3))
+
+    def _pick_model(var):
+        """ファイル選択のダイアログ。★手で打ち込むのも残す（長いパス対策）。"""
+        from tkinter import filedialog
+        p = filedialog.askopenfilename(
+            title="学習したモデルを選ぶ", initialdir=os.path.join(_ROOT, "E", "logs"),
+            filetypes=[("学習したモデル", "*.pt"), ("すべて", "*.*")])
+        if p:
+            var.set(os.path.relpath(p, _ROOT) if p.startswith(_ROOT) else p)
+
+    for _lab, _var in (("脳A", brain_a_var), ("脳B（比べる用・任意）", brain_b_var)):
+        _f = tk.Frame(sec_brain.body); _f.pack(fill="x", padx=14, pady=1)
+        tk.Label(_f, text=_lab, width=17, anchor="w").pack(side="left")
+        tk.Entry(_f, textvariable=_var, width=30).pack(side="left", fill="x", expand=True)
+        tk.Button(_f, text="選ぶ", command=lambda v=_var: _pick_model(v)).pack(side="left")
+
+    slider(sec_brain.body, "探索の揺らぎ", brain_std_var, 0.0, 0.5, 0.001,
+           note="学習中の実効値≒0.174。0にすると迷いのない動きになる")
+    _bf2 = tk.Frame(sec_brain.body); _bf2.pack(anchor="w", padx=14, pady=2)
+    tk.Checkbutton(_bf2, text="★この脳で動かす", variable=st_brain).pack(side="left")
+    tk.Radiobutton(_bf2, text="A", variable=brain_which, value=0).pack(side="left")
+    tk.Radiobutton(_bf2, text="B", variable=brain_which, value=1).pack(side="left")
+    # ★目標指向の探索（Goal Babbling）。run/viewer.py から移した（2026-07-31）
+    #   ⚠️2026-07-30 の実測で**有害**と判明（おもちゃ接触−32%・persist 1000%）。
+    #     さらに 2026-07-31 に「太郎の実装は Self-Prior ではなかった」と分かった
+    #     （頻度分布を持たず一様ランダムに選ぶ）。★作り直す予定の機能。
+    #     見比べのために残す＝直したときに「前と何が違うか」を目で見るため。
+    st_gb = tk.BooleanVar(value=False)
+    gb_rate_var = tk.DoubleVar(value=0.5)
+    tk.Checkbutton(sec_brain.body, variable=st_gb,
+                   text="目標指向の探索を混ぜる（⚠️今の実装は有害と判明・作り直し予定）"
+                   ).pack(anchor="w", padx=14)
+    slider(sec_brain.body, "目標指向の割合", gb_rate_var, 0.0, 1.0, 0.05,
+           note="学習ループとは違う近似。0.5＝半分の判断で過去の感覚を目標にする")
+    brain_label = tk.Label(sec_brain.body, text="（まだ読み込んでいません）",
+                           font=("Consolas", 9), justify="left", fg="#666")
+    brain_label.pack(anchor="w", padx=14)
+
     # ---- ボタン ---------------------------------------------------------
     msg = tk.Label(root, text="", fg="#0a7", font=("", 9), justify="left")
     msg.pack(pady=(6, 0))
@@ -1147,6 +1215,111 @@ def main():
     from spinal_cord.cpg import ColoredNoiseGenerator
     gen = [ColoredNoiseGenerator(n_act, seed=0)]
     act = [zero.copy()]
+
+    # ================= ★脳（学習したモデル）2026-07-31 =====================
+    # 【なぜここか】メインループの直前。太郎一式（脳・小脳・神経調節）は
+    #   `run/taro_setup.Taro` が組み立てるので、ここでは**呼ぶだけ**にする。
+    # ⚠️★内受容感覚（空腹・眠気・不快・覚醒）が観測に無いと脳の入力次元が合わない。
+    #   ⇒ HybridEnv で包む。e_viewer は `env.step()` の戻り値を使っていないので、
+    #     包んでも既存の編集機能は壊れない（2026-07-31 に確認）。
+    brains = {}          # {"A": (taro, hidden, prev_a), "B": ...}
+    hybrid_env = [None]
+    brain_da2 = []       # 行動の変化量（学習ログの da2 と同じ量）
+    gbuf = []            # 目標指向の探索が使う「過去に経験した感覚」
+    gb_stat = [0, 0]     # [目標指向にした回数, 探索のままにした回数]
+
+    def _load_brain(tag, path):
+        """モデルを読んで太郎一式を作る。失敗しても Viewer は落とさない。"""
+        if not path:
+            return None
+        p = path if os.path.isabs(path) else os.path.join(_ROOT, path)
+        if not os.path.exists(p):
+            brain_label.config(text=f"⚠️見つかりません: {path}", fg="#a33")
+            return None
+        try:
+            if _ROOT not in sys.path:
+                sys.path.insert(0, _ROOT)
+            from run.config import Config
+            from run.taro_setup import Taro
+            if hybrid_env[0] is None:
+                from hybrid_env import HybridEnv
+                hybrid_env[0] = HybridEnv(env)
+                hybrid_env[0].reset(seed=0)
+            # ⚠️★学習時と同じ設定で作らないと、層の形が合わず**黙って白紙**になる
+            #   （Taro._load は形の合う層だけ読む strict=False）。
+            #   駆動モードはシーンが決めた実物（筋肉/関節）に合わせる。
+            cfg = Config({"actuation": "muscle" if n_act > 90 else "joint",
+                          "age_months": _AGE, "model": p},
+                         {"seed": 0, "K": 10}, scene=(_scene or {}).get("name"),
+                         name="viewer")
+            t = Taro(cfg, hybrid_env[0], seed=0, verbose=True)
+            st = t.init_state(t.first_obs)
+            return {"taro": t, "state": st}
+        except Exception as e:      # noqa: BLE001
+            brain_label.config(text=f"⚠️読めません: {type(e).__name__}: {e}", fg="#a33")
+            print(f"⚠️[脳] 読めません: {type(e).__name__}: {e}", flush=True)
+            return None
+
+    def _ensure_brains():
+        """チェックを入れた時に読む（起動を遅くしないため後回しにする）。"""
+        want = {"A": brain_a_var.get().strip(), "B": brain_b_var.get().strip()}
+        for tag, path in want.items():
+            if path and brains.get(tag, {}).get("path") != path:
+                got = _load_brain(tag, path)
+                brains[tag] = ({"path": path, **got} if got else {"path": path})
+            if not path:
+                brains.pop(tag, None)
+        ok = [k for k in ("A", "B") if brains.get(k, {}).get("taro")]
+        if ok:
+            brain_label.config(
+                text=f"読み込み済み: {', '.join(ok)}（いま {'B' if brain_which.get() else 'A'}）",
+                fg="#0a7")
+        return ok
+
+    def _brain_action():
+        """★いま選んでいる脳に、次の行動を決めてもらう。"""
+        tag = "B" if brain_which.get() else "A"
+        b = brains.get(tag) or {}
+        t, stt = b.get("taro"), b.get("state")
+        if not t or stt is None:
+            return None
+        import torch
+        # ⚠️★`torch.no_grad()` で囲んではいけない。
+        #   太郎の潜在推論（予測符号化）は**中で torch.autograd.grad を使う**ので、
+        #   勾配を切ると「element 0 of tensors does not require grad」で落ちる。
+        #   （2026-07-31 に単体テストで踏んだ。run/viewer.py も no_grad を使っていない）
+        #   ⇒ 代わりに各段で detach して、計算グラフが伸び続けないようにする。
+        sv = t.fusion.encode(stt["obs"])
+        cf = t.target_fusion.encode(stt["obs"]).detach()
+        z, _kl, _rc, hn = t.infer_latent(sv, stt["prev_a"], cf, stt["hidden"])
+        z = z.detach()
+        mean = t.act_mean(z)
+        # ★目標指向の探索。⚠️経験のバッファは**常に**溜める。
+        #   （ONのときだけ溜める実装にしたら、切り替えるたび64件たまる前にOFFになり
+        #     一度も発動しなかった。2026-07-30 のユーザー報告「g押してもなんも変わってない」）
+        clp = t.encode_target(stt["obs"]).detach()
+        gbuf.append(clp)
+        if len(gbuf) > 2000:
+            gbuf.pop(0)
+        if st_gb.get() and len(gbuf) >= 64:
+            if torch.rand(1).item() < float(gb_rate_var.get()):
+                g = gbuf[torch.randint(len(gbuf), (1,)).item()]
+                mean = t.infer_goal_action(z, clp, mean, g)
+                gb_stat[0] += 1
+            else:
+                gb_stat[1] += 1
+        std = float(brain_std_var.get())
+        if std > 0:
+            a, _lp = t.brain.explore(mean, torch.full_like(mean, std))
+            a = a.detach()
+        else:
+            a = torch.clamp(mean, -1.0, 1.0).detach()
+        brain_da2.append(float(((a - stt["prev_a"]) ** 2).mean()))
+        if len(brain_da2) > 200:
+            brain_da2.pop(0)
+        stt["hidden"], stt["prev_a"] = hn.detach(), a
+        a_env = t.brain.to_env_action(a)      # 拮抗筋モードなら筋活性化へ写す
+        return a_env
     tone_on = [True]
     head_w, devs, seens, neck_hist = [], [], [], []
     prev_sacc = [0]
@@ -1415,7 +1588,23 @@ def main():
                 d.qacc[:] = 0.0
                 mujoco.mj_forward(m, d)
             else:
-                if st_babble.get():
+                # ★学習した脳が優先（チェックが入っていれば自発運動より上）
+                if st_brain.get():
+                    if tick % 10 == 0:          # 1判断＝10物理ステップ（K=10）
+                        if not brains:
+                            _ensure_brains()
+                        a_env = _brain_action()
+                        if a_env is not None:
+                            from run.taro_setup import rescale_action
+                            act[0] = rescale_action(
+                                a_env, hybrid_env[0].action_space).astype(np.float32)
+                    # ⚠️★HybridEnv 側で進める（内臓の時間も進める）。
+                    #   生の env を進めると内受容感覚が止まったままになる。
+                    obs, _r, _te, _tr, _in = hybrid_env[0].step(act[0])
+                    tag = "B" if brain_which.get() else "A"
+                    if brains.get(tag, {}).get("state") is not None:
+                        brains[tag]["state"]["obs"] = obs
+                elif st_babble.get():
                     if tick % 10 == 0:
                         act[0] = np.clip(0.5 + 0.174 * gen[0].sample(0.7), 0.0, 1.0
                                          ).astype(np.float32)
@@ -1641,7 +1830,12 @@ def main():
                     f"目標{nk_t.get():+.0f}度  "
                     f"{'3軸' if nk_all.get() else '前後だけ'}\n"
                     f"再生      速度{speed_var.get():.1f}倍  "
-                    f"自発運動:{'ON' if st_babble.get() else 'OFF'}\n"
+                    f"自発運動:{'ON' if st_babble.get() else 'OFF'}"
+                    + (f"  ★脳:{'B' if brain_which.get() else 'A'}"
+                       f" dAction2={np.mean(brain_da2[-50:]):.3f}"
+                       + (f" 目標指向{gb_stat[0]}回/探索{gb_stat[1]}回"
+                          if st_gb.get() else "")
+                       if st_brain.get() and brain_da2 else "") + "\n"
                     "\n【今の状態】\n"
                     f"経過 {t_sim:.1f}秒  サッケード {reflex.n_saccades}発\n"
                     f"反応の強さ {reflex.strength:.3f}（閾値 {thr_var.get():.2f}）\n"

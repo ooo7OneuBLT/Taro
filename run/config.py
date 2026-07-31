@@ -91,7 +91,7 @@ RUN_DEFAULTS = {
     "K":          (10, "1判断あたりの物理ステップ数", "E_K"),
     "checkpoint": (600, "何回ごとに測るか", "E_CKPT"),
     "n_eval":     (80, "自己モデルの評価に使う試行数", None),
-    "type":       ("train", "動かし方 train/view/measure", None),
+    "type":       ("train", "動かし方 train/view/measure/edit", None),
     "log":        (None, "画面に出た文字をそのまま残す先（★古い経路のみ）", None),
     "csv":        (None, "チェックポイントの数値を残す先（.csv）", None),
     # ---- 目視（run.type=view）--------------------------------------------
