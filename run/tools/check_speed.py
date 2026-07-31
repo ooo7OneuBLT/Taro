@@ -24,7 +24,10 @@ import numpy as np, torch, mujoco
 import e_scene
 
 STEPS = 3000          # 物理ステップ（K=10 なので判断は300回）
-MODEL = "E/logs/selfmodel_v3/model_柵なし_線形_seed0.pt"
+# 測るモデル。コマンドラインの第1引数で差し替えられる。
+#   .venv/Scripts/python.exe run/tools/check_speed.py E/logs/.../model.pt
+MODEL = (sys.argv[1] if len(sys.argv) > 1
+         else "E/logs/selfmodel_v3/model_柵なし_線形_seed0.pt")
 
 
 def make_env(hybrid):
@@ -82,10 +85,14 @@ env.close()
 
 # ---- ② 学習した脳 ---------------------------------------------------------
 env, sc = make_env(hybrid=True)
-from run.config import Config
+from run.config import Config, touch_setting_of
 from run.taro_setup import Taro, rescale_action
-cfg = Config({"actuation": "muscle", "age_months": 4.0, "model": MODEL},
-             {"seed": 0, "K": 10}, scene=sc["name"], name="speed-test")
+# 注意：触覚の設定はモデルから読み取る。食い違うと**触覚の層だけ白紙**の
+#   別の脳を測ることになる（例外は出ない）。
+_spec = {"actuation": "muscle", "age_months": 4.0, "model": MODEL}
+_spec.update(touch_setting_of(MODEL))
+print(f"\n測るモデル: {MODEL}")
+cfg = Config(_spec, {"seed": 0, "K": 10}, scene=sc["name"], name="speed-test")
 t = Taro(cfg, env, seed=0, verbose=False)
 st = t.init_state(t.first_obs)
 
@@ -116,8 +123,11 @@ print("=" * 70)
 
 # ---- ③ 白紙の脳（学習前）＝「学習で速くなったのか」の切り分け -------------
 env, sc = make_env(hybrid=True)
-cfg0 = Config({"actuation": "muscle", "age_months": 4.0},
-              {"seed": 0, "K": 10}, scene=sc["name"], name="speed-test-blank")
+# 注意：白紙の脳も**同じ触覚設定**で作る。揃えないと「学習の差」でなく
+#   「脳の作りの差」を測ってしまう。
+_spec0 = {"actuation": "muscle", "age_months": 4.0}
+_spec0.update(touch_setting_of(MODEL, verbose=False))
+cfg0 = Config(_spec0, {"seed": 0, "K": 10}, scene=sc["name"], name="speed-test-blank")
 t0 = Taro(cfg0, env, seed=0, verbose=False)
 st0 = t0.init_state(t0.first_obs)
 

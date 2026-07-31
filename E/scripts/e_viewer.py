@@ -34,10 +34,17 @@ import os, sys, json, time, warnings
 warnings.filterwarnings("ignore")
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.abspath(os.path.join(_HERE, os.pardir, os.pardir))
+# 注意：【2026-07-31】wrapper と senses を足した。無いと `hybrid_env` が読めない。
+#   以前は `from run.taro_setup import Taro` が**副作用で**パスを足していたので
+#   たまたま通っていた。taro_setup を通らない経路（内臓つき環境を先に作る等）で
+#   ModuleNotFoundError になる。読み込みの順番に依存させない。
 for p in [os.path.join(_ROOT, "D", "scripts"), os.path.join(_ROOT, "MIMo"),
           os.path.join(_ROOT, "taro_core"),
           os.path.join(_ROOT, "taro_core", "src", "body"),
           os.path.join(_ROOT, "taro_core", "src", "brain"),
+          os.path.join(_ROOT, "taro_core", "src", "wrapper"),
+          os.path.join(_ROOT, "taro_core", "src", "senses"),
+          _ROOT,
           _HERE]:
     if p not in sys.path:
         sys.path.insert(0, p)
@@ -1256,35 +1263,6 @@ def main():
             hybrid_env[0].reset(seed=0)
         return hybrid_env[0]
 
-    def _touch_setting_of(path):
-        """保存されたモデルを覗いて、触覚の設定（touch / somatosensory）を言い当てる。
-
-        【なぜ、2026-07-31】Viewer は触覚の設定を持っていなかったので、
-        触覚ありのモデルを開くと**触覚の層だけ白紙**の脳になっていた。
-        しかも例外は出ない（Taro._load は形の合う層だけ読む）ので気づけない。
-        ⇒ 実験ファイルの書き方に頼らず、モデル自身に聞く。
-
-        見分け方：
-          fusion_touch が無い            → 触覚なし
-          fusion_touch に part_weight    → SomatosensoryCortex（部位ごとの要約）
-          それ以外                       → TouchEncoder（1枚の巨大変換層）
-        """
-        try:
-            import torch as _t
-            blob = _t.load(path, map_location="cpu", weights_only=False)
-        except Exception as e:      # noqa: BLE001
-            print(f"注意[脳] 触覚の設定を読み取れません: {e}。触覚なしとして開きます",
-                  flush=True)
-            return {}
-        ft = blob.get("fusion_touch")
-        if ft is None:
-            print("  [脳] このモデルは触覚なしで学習されています", flush=True)
-            return {"touch": False, "somatosensory": False}
-        soma = any(k.startswith("part_weight") for k in ft)
-        print(f"  [脳] このモデルは触覚ありで学習されています"
-              f"（{'部位ごとの要約' if soma else '1枚の変換層'}）", flush=True)
-        return {"touch": True, "somatosensory": soma}
-
     def _load_brain(tag, path):
         """モデルを読んで太郎一式を作る。失敗しても Viewer は落とさない。"""
         if not path:
@@ -1296,7 +1274,7 @@ def main():
         try:
             if _ROOT not in sys.path:
                 sys.path.insert(0, _ROOT)
-            from run.config import Config
+            from run.config import Config, touch_setting_of
             from run.taro_setup import Taro
             _ensure_hybrid()
             # 注意：学習時と同じ設定で作らないと、層の形が合わず**黙って白紙**になる
@@ -1307,7 +1285,7 @@ def main():
             #   「触覚の層だけ白紙の別の脳」を見ることになる（黙って通る）。
             taro_spec = {"actuation": "muscle" if n_act > 90 else "joint",
                          "age_months": _AGE, "model": p}
-            taro_spec.update(_touch_setting_of(p))
+            taro_spec.update(touch_setting_of(p))
             cfg = Config(taro_spec, {"seed": 0, "K": 10},
                          scene=(_scene or {}).get("name"), name="viewer")
             t = Taro(cfg, hybrid_env[0], seed=0, verbose=True)

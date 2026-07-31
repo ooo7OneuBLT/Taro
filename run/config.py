@@ -322,3 +322,40 @@ class Config:
         d.update({k: getattr(self, k) for k in ("steps", "seed", "K", "checkpoint")})
         d["scene"] = self.scene
         return d
+
+
+def touch_setting_of(model_path, verbose=True):
+    """保存されたモデルを覗いて、触覚の設定（touch / somatosensory）を言い当てる。
+
+    【なぜ要るか、2026-07-31】学習した脳を後から開く道具（Viewer・速度の計測など）は
+    触覚の設定を持っていないことが多い。設定が食い違うと
+    **触覚の層だけ白紙**の脳になる。しかも例外は出ない
+    （`Taro._load` は形の合う層だけ読む strict=False）。
+    ⇒ 実験ファイルの書き方に頼らず、**モデル自身に聞く**。
+
+    見分け方：
+        fusion_touch が無い          → 触覚なし
+        fusion_touch に part_weight  → SomatosensoryCortex（部位ごとの要約）
+        それ以外                     → TouchEncoder（1枚の巨大変換層）
+
+    Returns:
+        dict: Config の taro 欄に混ぜて使う。読めなければ空 dict。
+    """
+    import torch
+    try:
+        blob = torch.load(model_path, map_location="cpu", weights_only=False)
+    except Exception as e:      # noqa: BLE001
+        if verbose:
+            print(f"注意[脳] 触覚の設定を読み取れません: {e}。触覚なしとして開きます",
+                  flush=True)
+        return {}
+    ft = blob.get("fusion_touch")
+    if ft is None:
+        if verbose:
+            print("  [脳] このモデルは触覚なしで学習されています", flush=True)
+        return {"touch": False, "somatosensory": False}
+    soma = any(k.startswith("part_weight") for k in ft)
+    if verbose:
+        print(f"  [脳] このモデルは触覚ありで学習されています"
+              f"（{'部位ごとの要約' if soma else '1枚の変換層'}）", flush=True)
+    return {"touch": True, "somatosensory": soma}
