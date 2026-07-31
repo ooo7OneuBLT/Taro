@@ -213,11 +213,27 @@ class Config:
             raise ValueError(
                 f"age_start={self.age_start} が steps={self.steps} 以上です。\n"
                 "  月齢を変え始める前に学習が終わるので、**体が育ちません**。")
-        # 注意：触覚ONで体を育てると観測次元がずれて黙って壊れる（落とし穴 項75）
-        if self.touch and self.age_to is not None:
+        # 触覚ONで体を育てるときの条件（2026-07-31 に緩和）
+        #
+        # 【もとの禁止】センサ点が月齢で変わるので観測次元がずれ、黙って壊れる。
+        #   0ヶ月1,608点 → 4ヶ月3,268点（落とし穴 項75）
+        #
+        # 【2026-07-31 に分かったこと】これは表現の問題であって構造的限界ではない。
+        #   実測すると、センサーを持つ body の数は月齢によらず一定
+        #   （0ヶ月も4ヶ月も同じ。点数だけが倍になる）。
+        #   somatosensory=true にすると SomatosensoryCortex（視床VPL+S1相当）が
+        #   部位ごとにまとめるので、月齢が変わっても脳への入力次元は固定される。
+        #   確かめる道具：run/tools/check_touch_growth.py
+        #
+        # ⇒ 部位まとめを使っているときだけ、体を育てることを許す。
+        if self.touch and self.age_to is not None and not self.somatosensory:
             raise ValueError(
-                "触覚ONでは体を育てられない（センサ点が月齢で変わり観測次元がずれる）。\n"
-                "  0ヶ月1734点 → 4ヶ月4274点。落とし穴チェックリスト 項75")
+                "触覚ONで体を育てるには somatosensory=true が要る。\n"
+                "  センサ点が月齢で変わるので（0ヶ月1,608点 → 4ヶ月3,268点）、\n"
+                "  部位ごとにまとめないと観測次元がずれて黙って壊れる。\n"
+                "  taro 欄に \"somatosensory\": true を足してください。\n"
+                "  （部位の数は月齢によらず一定なので、まとめれば次元は固定される）\n"
+                "  落とし穴チェックリスト 項75／run/tools/check_touch_growth.py")
         if self.goal_babbling:
             print("注意[config] goal_babbling を有効にした。2026-07-30 の実測で"
                   "**有害**（おもちゃへの接触−32%、margin +30.7%→+17.2%、persist 1000%）。"

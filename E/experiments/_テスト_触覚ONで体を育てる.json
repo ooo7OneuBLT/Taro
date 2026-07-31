@@ -1,0 +1,25 @@
+{
+  "name": "テスト：触覚ONで体を育てられるか（600回だけ）",
+  "note": "2026-07-31。これまで「触覚ONでは体を育てられない」と禁止していたが、実測でセンサーを持つ部位の数は月齢によらず一定だと分かった（点数だけが倍になる）。somatosensory=true で部位ごとにまとめれば脳への入力次元は固定される。それを確かめるためのテストで、本実験ではない。出力先は E/logs/_test_touch。",
+  "scene": "新生児_仰向け_柵なし",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 0.0,
+    "age_to": 4.0,
+    "age_start": 0,
+    "age_ramp": 600,
+    "age_every": 200,
+    "touch": true,
+    "somatosensory": true
+  },
+  "run": {
+    "type": "train",
+    "steps": 600,
+    "seed": 0,
+    "checkpoint": 200,
+    "csv": "E/logs/_test_touch/テスト_seed0.csv"
+  },
+  "plugins": {
+    "self_model": true
+  }
+}
