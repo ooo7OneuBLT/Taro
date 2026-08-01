@@ -1,0 +1,26 @@
+{
+  "name": "自己モデル：柵なし・線形成長・色付きノイズ（0→4ヶ月・seed0）",
+  "note": "2026-08-01。動きの区切りが人間の2倍細かい問題の検証。`自己モデル_柵なし_線形成長_seed0.json` と唯一の違いは noise: colored（既定は white＝毎ステップ独立のガウス）。CPGは1/f^β（β=0.8・既定）でゆっくり変化する摂動を作る（Rolf 2011が原典で要求している性質）。run/tools/check_movement_units.py で白色版と比較すること。",
+  "scene": "新生児_仰向け_柵なし",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 0.0,
+    "age_to": 4.0,
+    "age_start": 0,
+    "age_ramp": 18000,
+    "age_every": 500,
+    "noise": "colored",
+    "save": "E/logs/selfmodel_v3_colored/model_柵なし_線形_色付き_seed0.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 18000,
+    "seed": 0,
+    "checkpoint": 500,
+    "csv": "E/logs/selfmodel_v3_colored/柵なし_線形_色付き_seed0.csv"
+  },
+  "plugins": {
+    "self_model": true,
+    "hand_in_view": true
+  }
+}
