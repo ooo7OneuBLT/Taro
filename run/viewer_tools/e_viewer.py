@@ -12,7 +12,7 @@
 （元の3つは記録として残す。今後はこのファイルを使う）
 
 【使い方】
-    python E/scripts/e_viewer.py
+    python run/viewer_tools/e_viewer.py
 
   見出しをクリックすると、その区画を開いたり畳んだりできる。
   設定は「この設定を保存」で `E/docs/viewer_saved.json` に残り、次回自動で読み込む。
@@ -38,6 +38,14 @@ _ROOT = os.path.abspath(os.path.join(_HERE, os.pardir, os.pardir))
 #   以前は `from run.taro_setup import Taro` が**副作用で**パスを足していたので
 #   たまたま通っていた。taro_setup を通らない経路（内臓つき環境を先に作る等）で
 #   ModuleNotFoundError になる。読み込みの順番に依存させない。
+# 【なぜ、2026-08-07】run/viewer_tools/ へ移設した際に追加。e_visibility（この
+#   ファイル冒頭でimport）・e_orienting_v2・e_toy_env・e_head_hold・e_body_config
+#   （いずれも関数内での遅延import）は E/scripts 直下に残る（目標Eの本能実装群。
+#   今回の移設のスコープ外）。以前は _HERE が E/scripts を指していたため
+#   sys.path に _HERE を足すだけで暗黙に読めていたが、_HERE が run/viewer_tools に
+#   変わった今はこれが効かない。run/scene_tools/e_scene.py が2026-08-05に
+#   実際に踏んだのと同じ罠（設計：作業記録（非公開）
+#   2026-08-07_runSystem移設_統合版.md 2.3節）。
 for p in [os.path.join(_ROOT, "D", "scripts"), os.path.join(_ROOT, "MIMo"),
           os.path.join(_ROOT, "taro_core"),
           os.path.join(_ROOT, "taro_core", "src", "body"),
@@ -45,6 +53,7 @@ for p in [os.path.join(_ROOT, "D", "scripts"), os.path.join(_ROOT, "MIMo"),
           os.path.join(_ROOT, "taro_core", "src", "wrapper"),
           os.path.join(_ROOT, "taro_core", "src", "senses"),
           os.path.join(_ROOT, "run", "scene_tools"),
+          os.path.join(_ROOT, "E", "scripts"),
           _ROOT,
           _HERE]:
     if p not in sys.path:
@@ -58,8 +67,15 @@ import mujoco.viewer
 import tkinter as tk
 import e_visibility as VIS
 
-SAVE_PATH = os.path.join(_HERE, os.pardir, "docs", "viewer_saved.json")
-OLD_SAVE = os.path.join(_HERE, os.pardir, "docs", "pose_editor_saved.json")
+# 【なぜ、2026-08-07】以前は _HERE（E/scripts）の1つ上を"E"と仮定して
+#   os.path.join(_HERE, os.pardir, "docs", ...) と書いていた。run/viewer_tools/ へ
+#   移設すると _HERE の1つ上は "run" になり、この式は run/docs/viewer_saved.json
+#   という存在しないパスを黙って見に行く（エラーは出ない。保存・復元が静かに
+#   壊れる典型例）。保存先そのものは E/docs/ のまま動かさない（現状これを使うのは
+#   目標Eの編集セッションだけで、保存内容はEの実験に紐づくデータのため）。
+#   _ROOT 基準の絶対パスに直すことで、置き場所が変わっても壊れないようにした。
+SAVE_PATH = os.path.join(_ROOT, "E", "docs", "viewer_saved.json")
+OLD_SAVE = os.path.join(_ROOT, "E", "docs", "pose_editor_saved.json")
 
 ARM_REACH = 0.186          # 肩から手先まで[m]（上腕+前腕+手）
 HALF_FOV = 30.0            # 視野の半角[度]（fovy=60）

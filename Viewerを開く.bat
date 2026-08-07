@@ -10,7 +10,7 @@ if not exist "%PY%" (
   exit /b 1
 )
 set PYTHONIOENCODING=utf-8
-"%PY%" "E\scripts\e_launch.py"
+"%PY%" "run\viewer_tools\e_launch.py"
 echo.
 echo ----------------------------------------------------------------
 pause

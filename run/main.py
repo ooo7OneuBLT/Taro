@@ -183,12 +183,15 @@ def run(spec, *, steps_override=None, verbose=False):
         print(f"  設定     {cfg.summary()}")
         return viewer.view(cfg, plugins=plugins, verbose=verbose)
 
-    # --- edit：編集ウィンドウ付きの Viewer（E/scripts/e_viewer.py）を開く ---
+    # --- edit：編集ウィンドウ付きの Viewer（run/viewer_tools/e_viewer.py）を開く ---
     #   【なぜ実験ファイルから開けるようにしたか、2026-07-31】
     #   e_viewer は環境変数で設定する古い作りで、「どの条件で開いたか」が
     #   コマンドの履歴にしか残らなかった。実験ファイルにすれば記録が残る。
     #   注意：中身は e_viewer.py のまま（統合の第4段階・ステップ2）。
     #     環境変数での起動も残す（急に壊さない）。
+    #   【なぜ、2026-08-07】E/scripts/e_viewer.py から run/viewer_tools/e_viewer.py
+    #     へ移設（設計：作業記録（非公開）
+    #     2026-08-07_runSystem移設_統合版.md）。パス参照をここで更新。
     if kind == "edit":
         import subprocess
         t = spec.get("taro") or {}
@@ -202,7 +205,7 @@ def run(spec, *, steps_override=None, verbose=False):
             v = t.get(key, r.get(key))
             if v is not None:
                 envv[name] = str(v)
-        script = os.path.join(_ROOT, "E", "scripts", "e_viewer.py")
+        script = os.path.join(_ROOT, "run", "viewer_tools", "e_viewer.py")
         print(f"  編集ウィンドウ付き Viewer を開きます\n"
               f"     シーン {envv['E_SCENE']}"
               + (f" ／ 月齢 {envv['E_AGE']}ヶ月" if "E_AGE" in envv else "")

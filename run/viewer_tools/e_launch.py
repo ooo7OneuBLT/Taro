@@ -6,7 +6,7 @@
 
 使い方:
     プロジェクト直下の `Viewerを開く.bat` をダブルクリックする
-    （コマンドから直接なら .venv/Scripts/python.exe E/scripts/e_launch.py）
+    （コマンドから直接なら .venv/Scripts/python.exe run/viewer_tools/e_launch.py）
 
     番号を入れて Enter … そのシーンで開く
     そのまま Enter     … 前回と同じシーンで開く
