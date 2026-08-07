@@ -43,16 +43,22 @@ import datetime
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.abspath(os.path.join(_HERE, os.pardir, os.pardir))
+# 【なぜ、2026-08-05】このファイルは元々 E/scripts/ にあり、_HERE（自分のフォルダ）が
+#   暗黙に e_toy_env・e_head_hold・e_visibility（いずれも E/scripts 直下）を
+#   解決していた。run/scene_tools/ へ移動すると _HERE はそちらを指さなくなるため、
+#   E/scripts を明示的にsys.pathへ足す必要がある（設計には無い追加対応。
+#   移動後に import e_toy_env が ModuleNotFoundError になることで実際に発覚した）。
 for _p in [os.path.join(_ROOT, "D", "scripts"), os.path.join(_ROOT, "MIMo"),
            os.path.join(_ROOT, "taro_core"),
-           os.path.join(_ROOT, "taro_core", "src", "body"), _HERE]:
+           os.path.join(_ROOT, "taro_core", "src", "body"),
+           os.path.join(_ROOT, "E", "scripts"), _HERE]:
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
 import numpy as np  # noqa: E402
 import mujoco       # noqa: E402
 
-SCENE_DIR = os.path.join(_ROOT, "E", "scenes")
+SCENE_DIR = os.path.join(_ROOT, "run", "scenes")
 SCHEMA = 1
 
 # 指紋の許容ずれ。ここを超えたら「別の環境」と判定して止める。
@@ -275,6 +281,17 @@ def save(scene, name=None, env=None, hands=None, settle_seconds=3.0,
         print(f"[scene] 保存しました → {os.path.relpath(path, _ROOT)}")
         if drift is not None:
             print("        " + drift["summary"])
+
+    # 【なぜ、2026-08-05】シーンを保存するたびに E/docs/シーン一覧.md を
+    #   自動で作り直す（手書きの一覧が更新漏れで古くなる問題への対策）。
+    #   一覧の自動更新に失敗しても、シーンの保存という主目的は必ず成立させる
+    #   ため try/except で包む。
+    try:
+        import catalog
+        catalog.write_catalog()
+    except Exception as e:
+        print(f"[scene] 注意一覧の自動更新に失敗（シーン保存自体は成立している）: {e}")
+
     return scene, drift
 
 
@@ -392,6 +409,29 @@ def build(scene, orient=None, vor=True, seed=0, verbose=False, actuation_model=N
             _rehold(env, scene, hands)
         _apply_limb_tone(env, scene, verbose=verbose)
         _repin(env, scene, verbose=verbose)
+
+        # ---- 6. 「これ以降の reset で戻る先」を、いま作った姿勢に更新する --------
+        # 【なぜ、2026-08-03】SupineMimoEnv.reset_model()（d_supine_env.py）は
+        #   self.init_position + jitter に戻る。ところが self.init_position は
+        #   super().__init__() の中、settle 直後・上のstep2〜5（リクライニング／
+        #   シーンの state.qpos／筋緊張／固定）より**前**に1度だけ記録される。
+        #   これを更新しないと、この build() が返した直後は正しい姿勢に見えても、
+        #   次に env.reset() が呼ばれた瞬間（Taro.__init__ の2回目のreset、
+        #   学習中にエピソードが終わって trainer.reset_state() が呼ばれる場面）に
+        #   シーンで作り込んだ姿勢が消え、settle直後の既定姿勢へ戻ってしまう。
+        #   実測（run/tools/check_scene_reset_consistency.py、2026-08-03）：
+        #     新生児_仰向け_柵なし_伸展版  肘 -108.41度 → +5.00度（差+113.41度）
+        #     リーチング_リクライニング60度  指・脚に60〜97度規模の不一致
+        #   pin_root/pin_joints で毎step固定される関節は影響を受けない
+        #   （そちらは reset の有無に関係なく毎stepで書き戻されるため）が、
+        #   自由なまま（腕・指など）の関節はここを直さないと戻らない。
+        u = env.unwrapped
+        if hasattr(u, "init_position"):
+            u.init_position = u.data.qpos.copy()
+    summary = constraint_summary(scene)
+    print(f"[scene] 「{scene['name']}」 固定={summary['pinned_groups']} "
+          f"自由={summary['free_groups']} root_pinned={summary['root_pinned']} "
+          f"おもちゃ={'あり' if summary['toy_enabled'] else 'なし'}")
     return env, hands
 
 
@@ -435,6 +475,25 @@ def _rehold(env, scene, hands=None):
     chair = getattr(u, "_chair_support", None)
     if chair is not None and sup and not sup.get("target_deg"):
         chair.hold(stiffness=sup.get("stiffness"))
+
+
+def constraint_summary(scene):
+    """setup/body/world の辞書だけから「何が固定され、何が自由か」を計算する。
+    副作用なし。env が無くても呼べる（load() 直後でも catalog.py でも使える）。
+    """
+    s, w = scene["setup"], scene["world"]
+    sup = s.get("body_support") or {}
+    free = set(sup.get("free") or ("arm", "finger"))
+    all_groups = {"arm", "finger", "leg", "trunk", "head"}
+    pinned = sorted(all_groups - free) if sup.get("pin_joints", True) else []
+    return {
+        "root_pinned": bool(sup.get("pin_root", True)) if sup else False,
+        "pinned_groups": pinned,          # 例：["leg", "trunk"]
+        "free_groups": sorted(free),      # 例：["arm", "finger"]
+        "toy_enabled": bool(w["toy"]["enabled"]),
+        "flexion": bool(scene["body"]["flexion"]),
+        "recline_deg": w["recline_deg"],
+    }
 
 
 def _repin(env, scene, verbose=False):
