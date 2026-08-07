@@ -44,6 +44,7 @@ for p in [os.path.join(_ROOT, "D", "scripts"), os.path.join(_ROOT, "MIMo"),
           os.path.join(_ROOT, "taro_core", "src", "brain"),
           os.path.join(_ROOT, "taro_core", "src", "wrapper"),
           os.path.join(_ROOT, "taro_core", "src", "senses"),
+          os.path.join(_ROOT, "run", "scene_tools"),
           _ROOT,
           _HERE]:
     if p not in sys.path:
@@ -214,14 +215,34 @@ def main():
         print(f"[scene] 「{_scene['name']}」から始めます", flush=True)
         if _scene.get("note"):
             print(f"        {_scene['note']}", flush=True)
-        env, hands = e_scene.build(_scene, orient=True, vor=True, seed=0, verbose=True)
+        _scene_for_build = _scene
+        if (_scene.get("setup") or {}).get("limb_tone"):
+            import copy as _copy_lt
+            _scene_for_build = _copy_lt.deepcopy(_scene)
+            _scene_for_build["setup"]["limb_tone"] = None
+            # 【なぜ、2026-08-07・重大バグ修正】e_scene.build() は scene.setup.limb_tone を
+            #   無条件に物理へ適用するため、Viewer のチェックボックス（st_tone_limb、下記）が
+            #   OFF でも常にONになる混線バグがあった（監査報告
+            #   作業記録（非公開） 2-1）。
+            #   ここで初回構築時は limb_tone を意図的に外し、「四肢の筋緊張を物理へ
+            #   適用する経路」を下の limb_tone_apply()/limb_tone_release()（チェックボックス
+            #   と連動する経路）だけに一本化する。build() は apply_state の後に
+            #   mj_forward するだけで物理ステップは進めないため、limb_tone を外しても
+            #   返ってきた直後の姿勢（qpos）はシーンの state と完全に一致する
+            #   （run/scene_tools/e_scene.py の build()・_apply_limb_tone() で確認済み）。
+        env, hands = e_scene.build(_scene_for_build, orient=True, vor=True, seed=0, verbose=True)
         u = env.unwrapped
         m, d = u.model, u.data
         if hands is None:
             hands = CaregiverHands(m, d)
-        # 保存した状態と本当に同じ環境になったかを確かめる（止めはしない＝
-        # Viewer は直すための道具なので、ずれていても開けた方が直せる）
-        e_scene.verify(_scene, env, strict=False, verbose=True)
+        # 注意：【なぜ、2026-08-07・重大バグ修正の副作用対策】ここで verify() を
+        #   呼ぶのをやめ、on_limb_tone() の初回呼び出し（msg 生成後）のあとへ
+        #   移した。上の修正1aで limb_tone を外した直後のこの時点では、
+        #   四肢の筋緊張がまだ物理へ入っていない（意図的な一時状態）ため、
+        #   ここで照合すると「バネの入った関節数 記録=43 / 今=29」のような
+        #   **偽陽性の食い違い警告**が limb_tone を使う全シーンで毎回出てしまう
+        #   （実測で確認済み）。on_limb_tone() が実行された後なら物理は
+        #   保存時と同じ状態に戻っているので、そちらで照合する。
     else:
         # ---- 従来の起動（環境変数で条件を指定する）--------------------------
         # 注意：こちらは順次たたむ予定。新しい実験はシーンを使うこと。
@@ -998,6 +1019,36 @@ def main():
     st_babble = tk.BooleanVar(value=False)
     tk.Checkbutton(sec_run.body, text="自発運動を流す（もがき運動）",
                    variable=st_babble).pack(anchor="w", padx=14)
+
+    # 【なぜ、2026-08-07】駆動モード（探索ノイズの性質。white=白色ガウス／
+    #   colored=色付きノイズ／colored+synergy=色付き+粗いシナジー）の表示・切替UIを、
+    #   既定で畳まれている「脳」区画から、既定で開いているここ（再生区画・
+    #   もがき運動チェックボックスの直後）へ移した（仕様：もがき運動の駆動モード
+    #   統一とUI移設、2026-08-07）。もがき運動（下の _babble_noise() 相当）は
+    #   「脳」区画の外にあり、UIがそちらにしか無いと実質使えなかった。
+    #   NOISE_MODES / noise_mode / noise_label_dirty は「脳」区画・もがき運動の
+    #   両方から共有される状態なので、ここ1箇所にだけ置く（重複させない）。
+    NOISE_MODES = ["white", "colored", "colored+synergy"]
+    noise_mode = ["white"]          # 循環の現在地。書き換えるのは _set_noise_mode() だけ
+    noise_label_dirty = [True]      # 画面ラベルの更新が要るか（別スレッドから直接
+                                     # tkinterを触らないためのフラグ。下記「注意」参照）
+    noise_mode_var = tk.StringVar(value=noise_mode[0])   # ラジオボタンの選択状態
+    # 実際の適用処理（_set_noise_mode）は「脳」の準備のあとで定義するので、
+    #   ここでは空のフックだけ置く（既存の _switch_hook と同じパターン）。
+    _noise_ui_hook = [lambda *_: None]
+
+    _nf = tk.Frame(sec_run.body); _nf.pack(anchor="w", padx=14, pady=(2, 0))
+    tk.Label(_nf, text="駆動モード:").pack(side="left")
+    for _nv, _nlab in (("white", "白色"), ("colored", "色付き"),
+                        ("colored+synergy", "色付き+シナジー")):
+        tk.Radiobutton(_nf, text=_nlab, variable=noise_mode_var, value=_nv,
+                       command=lambda: _noise_ui_hook[0](noise_mode_var.get())
+                       ).pack(side="left")
+    noise_mode_label = tk.Label(
+        sec_run.body, text="駆動モード: white（Nキー、またはボタンで切替）",
+        font=("Consolas", 9), justify="left", fg="#666")
+    noise_mode_label.pack(anchor="w", padx=14)
+
     st_loop = tk.BooleanVar(value=False)
     tk.Checkbutton(sec_run.body, text=f"{EPISODE_SEC:.0f}秒たったらやり直す",
                    variable=st_loop).pack(anchor="w", padx=14)
@@ -1020,6 +1071,10 @@ def main():
     st_brain = tk.BooleanVar(value=False)
     brain_which = tk.IntVar(value=0)          # 0=A / 1=B
     brain_std_var = tk.DoubleVar(value=float(os.environ.get("E_VIEW_STD", "0.174")))
+    # 注意：駆動モードの切替UI（NOISE_MODES・noise_mode・noise_label_dirty・
+    #   ラジオボタン）は2026-08-07に「再生」区画（もがき運動チェックボックスの
+    #   近く）へ移設した。もがき運動側の探索ノイズも同じ noise_mode で駆動する
+    #   ようになったため（仕様：もがき運動の駆動モード統一とUI移設）。
 
     tk.Label(sec_brain.body, justify="left", fg="#666", font=("", 8),
              text="学習したモデル(.pt)を読むと、自発運動の代わりに\n"
@@ -1067,10 +1122,32 @@ def main():
     brain_label = tk.Label(sec_brain.body, text="（まだ読み込んでいません）",
                            font=("Consolas", 9), justify="left", fg="#666")
     brain_label.pack(anchor="w", padx=14)
+    # 駆動モードの表示・切替UIは「再生」区画へ移設済み（上記「注意」参照）。
 
     # ---- ボタン ---------------------------------------------------------
     msg = tk.Label(root, text="", fg="#0a7", font=("", 9), justify="left")
     msg.pack(pady=(6, 0))
+
+    # 【なぜ、2026-08-07・重大バグ修正】上の修正1aで初回構築時は limb_tone を
+    #   外したので、ここで一度だけ on_limb_tone() を呼び、チェックボックスの
+    #   初期値（=シーンの元の設定）どおりに物理へ反映する。これにより
+    #   _limb_saved[0] が「本当に脱力した状態（剛性0）」を正しく記憶できる
+    #   （修正前は e_scene 側が既に適用済みの状態を誤って「元の状態」として
+    #   記憶してしまい、チェックを外しても何も起きないバグの直接の原因だった）。
+    # 注意：この呼び出しは `on_limb_tone()` の定義直後には置けない。
+    #   `limb_tone_apply()`/`limb_tone_release()` は末尾で `msg.config(...)` を呼ぶが、
+    #   `msg`（tk.Label）はこの位置（区画の組み立てが全部終わったあと）まで
+    #   生成されていないため、定義直後に呼ぶと
+    #   `NameError: free variable 'msg' referenced before assignment` で
+    #   Viewer 起動時に必ず落ちる（実測で確認済み。scratchpad の最小再現で検証した）。
+    #   msg 生成後・メインループ開始前のここなら安全。
+    on_limb_tone()
+    if _scene is not None:
+        # 保存した状態と本当に同じ環境になったかを確かめる（止めはしない＝
+        # Viewer は直すための道具なので、ずれていても開けた方が直せる）。
+        # 【なぜここに移したか】上の e_scene.build() 直後ではなく、on_limb_tone()
+        #   のあとで照合する（詳細はビルド直後のコメント参照）。
+        e_scene.verify(_scene, env, strict=False, verbose=True)
 
     # ---- シーンとして保存する欄（2026-07-29 新設）------------------------
     #   ここで名前を付けて保存すると、測定スクリプトが E_SCENE=名前 で
@@ -1123,6 +1200,13 @@ def main():
         sc["setup"]["limb_tone"] = ({"hold_deg": float(lt_hold.get()),
                                      "groups": ["arm", "leg"]}
                                     if st_tone_limb.get() else None)
+        # 【なぜ、2026-08-07】駆動モード（noise_mode）は「体そのものの設定」ではなく
+        #   実験条件・観察条件なので、build() が使う setup 辞書の中には入れない
+        #   （default_scene() のコメント「setup に無い項目は build() で使われない」の
+        #   前提を壊さないため）。記録専用の追加キーとしてトップレベルに置く。
+        #   load() 側の _merge() は base に無いキーもそのまま引き継ぐので、
+        #   run/scene_tools/e_scene.py 側は一切変更しなくてよい。
+        sc["noise_mode"] = str(noise_mode[0])
         return sc
 
     def save_scene():
@@ -1143,7 +1227,7 @@ def main():
         ok = (drift or {}).get("ok", True)
         fp = saved.get("fingerprint") or {}
         seen = fp.get("toy_visible_left")
-        parts = [f"保存しました → E/scenes/{name}.json"]
+        parts = [f"保存しました → run/scenes/{name}.json"]
         if drift:
             parts.append(drift["summary"].replace("　", " "))
         if seen is not None:
@@ -1180,6 +1264,7 @@ def main():
                 "freeze": bool(st_freeze.get()), "pose_hold": bool(st_hold.get()),
                 "vor": bool(st_vor.get()), "tone": bool(st_tone.get()),
                 "eye_rest_v": float(_EYE_REST_V),
+                "noise_mode": str(noise_mode[0]),
                 "open": {"toy": sec_toy.opened, "pose": sec_pose.opened,
                          "reflex": sec_ref.opened, "neck": sec_neck.opened,
                          "measure": sec_mes.opened, "run": sec_run.opened}}
@@ -1229,8 +1314,40 @@ def main():
     # ================= 再生 =================
     print("\nパネルとビューアを開きました。見出しをクリックで区画を開閉できます。\n", flush=True)
     _ui_ready[0] = True      # ここから先のスライダー操作は「人が動かした」とみなす
-    from spinal_cord.cpg import ColoredNoiseGenerator
-    gen = [ColoredNoiseGenerator(n_act, seed=0)]
+    # 【なぜ、2026-08-07】もがき運動（st_babble）の探索ノイズ生成器を、脳側の
+    #   explore() と同じ CPG（taro_core/src/brain/spinal_cord/cpg.py）経由に
+    #   統一する（仕様：もがき運動の駆動モード統一とUI移設）。以前はここで
+    #   ColoredNoiseGenerator を固定初期化しており、Nキー/UIで選んだ noise_mode
+    #   を一切見ていなかった（常に colored・beta=0.7固定）。
+    # 参照：もがき運動系のツール（e_friction_probe.py 119行目・e_pose_editor.py
+    #   400行目・e_reach_babble_check.py 92行目）はすべて beta=0.7, std=0.174 を
+    #   使っており、その慣例はここでも変えない。syn_w はUIを持たないので脳側と
+    #   同じ既定 0.6 を使う。
+    from spinal_cord.cpg import CPG
+    from run.taro_setup import LEG_R, LEG_L, ARM_R, ARM_L
+    # pair_offset の考え方は下の _set_brain_noise_mode と同じ。このファイル自身の
+    #   慣例（1306行目付近「muscle if n_act > 90」）どおり、n_act>90 を
+    #   筋肉モード（拮抗筋2本展開済み空間）の判定に使う。
+    _babble_pair_offset = (n_act // 2) if n_act > 90 else 0
+    _babble_cpg = CPG(n_act, leg_r=LEG_R, leg_l=LEG_L, arm_r=ARM_R, arm_l=ARM_L,
+                       seed=0, pair_offset=_babble_pair_offset)
+    # white モード用。CPG内部の ColoredNoiseGenerator（乱数系列）と混同しないよう
+    #   完全に別の乱数インスタンスにする。
+    _babble_white_rng = np.random.default_rng(0)
+
+    def _babble_noise():
+        """もがき運動の1tick分の探索ノイズを、いまの駆動モード(noise_mode[0])で作る。
+
+        colored のとき、CPG.sample(0.7, synergy=False) は内部の
+        ColoredNoiseGenerator の出力をそのまま返す（cpg.py 136〜139行目）ので、
+        旧実装 ColoredNoiseGenerator(n_act, seed=0).sample(0.7) と
+        bit-identical（検証済み。実装の作業記録参照）。
+        """
+        if noise_mode[0] == "white":
+            return _babble_white_rng.standard_normal(n_act)
+        return _babble_cpg.sample(
+            0.7, synergy=(noise_mode[0] == "colored+synergy"), syn_w=0.6)
+
     act = [zero.copy()]
 
     # ================= 脳（学習したモデル）2026-07-31 =====================
@@ -1286,6 +1403,21 @@ def main():
             taro_spec = {"actuation": "muscle" if n_act > 90 else "joint",
                          "age_months": _AGE, "model": p}
             taro_spec.update(touch_setting_of(p))
+            # 【なぜ、2026-08-07】いま選ばれている駆動モード(noise_mode[0])を
+            #   毎回 taro_spec に反映する。white のときは TARO_DEFAULTS の
+            #   既定値と完全に同じ値を明示するだけなので、Config の挙動は
+            #   変更前と bit-identical（run/config.py 272〜273行目、
+            #   キーが無ければ既定値を使う仕組みと同じ結果になる）。
+            #   beta/syn_w はUIを持たないので TARO_DEFAULTS の既定値を常に使う
+            #   （0.8/0.6、[Tier3]・変更していない）。
+            _cfg_noise = ("colored" if noise_mode[0] in ("colored", "colored+synergy")
+                          else "white")
+            taro_spec.update({
+                "noise": _cfg_noise,
+                "beta": 0.8,
+                "synergy": (noise_mode[0] == "colored+synergy"),
+                "syn_w": 0.6,
+            })
             cfg = Config(taro_spec, {"seed": 0, "K": 10},
                          scene=(_scene or {}).get("name"), name="viewer")
             t = Taro(cfg, hybrid_env[0], seed=0, verbose=True)
@@ -1387,12 +1519,97 @@ def main():
         stt["hidden"], stt["prev_a"] = hn.detach(), a
         a_env = t.brain.to_env_action(a)      # 拮抗筋モードなら筋活性化へ写す
         return a_env
+
+    def _set_brain_noise_mode(t, mode):
+        """1つの脳(t)に対して、駆動モードをその場で切り替える。
+
+        仕様の設計方針そのまま（run/taro_setup.py 174〜181行目と同じ式）。
+        taro_core・run/taro_setup.py 自体は変更せず、公開の状態
+        （t.brain.spinal_cpg・enable_spinal_babble・_babble_synergy）を使うだけ。
+        """
+        if mode == "white":
+            # TaroBrainWithMotor.__init__ の初期状態と同じ代入。
+            #   次のtickから explore() は白色ガウス分岐に戻る。
+            t.brain.spinal_cpg = None
+            return
+        if t.brain.spinal_cpg is None:
+            # white → colored（またはcolored+synergy）。まだCPGが無いので新規に作る。
+            from run.taro_setup import LEG_R, LEG_L, ARM_R, ARM_L
+            pair_offset = ((t.n_act // 2)
+                           if (t.cfg.is_muscle and not t.cfg.antagonist) else 0)
+            t.brain.enable_spinal_babble(
+                t.n_act, leg_r=LEG_R, leg_l=LEG_L, arm_r=ARM_R, arm_l=ARM_L,
+                beta=t.cfg.beta, synergy=(mode == "colored+synergy"),
+                syn_w=t.cfg.syn_w, seed=t.seed,
+                antagonist=(t.cfg.is_muscle and t.cfg.antagonist),
+                co_activation=t.cfg.coactivation, pair_offset=pair_offset)
+        else:
+            # 既にCPGがある（colored ⇔ colored+synergy の切替）。
+            #   同じインスタンスのバッファ・読み出し位置を保つため、
+            #   synergyフラグだけ書き換える（作り直さない）。
+            t.brain._babble_synergy = (mode == "colored+synergy")
+
+    def _apply_noise_mode_all():
+        """現在ロード済みの全ての脳（A・B）に、いまの駆動モードを適用する。
+
+        【なぜ全部か】片方だけ変えると「AとBの違いを見ているつもりが、実は
+        ノイズモードの違いを見ていた」という交絡が起きるため（仕様2節）。
+        """
+        for _tag in ("A", "B"):
+            _t = (brains.get(_tag) or {}).get("taro")
+            if _t is not None:
+                _set_brain_noise_mode(_t, noise_mode[0])
+
+    def _set_noise_mode(new_mode):
+        """駆動モードを new_mode に切り替える（Nキー・ラジオボタン共通の実体）。
+
+        【なぜ、2026-08-07】もがき運動（_babble_noise）は毎tick noise_mode[0] を
+        直接参照するので、ここで明示的に何かする必要はない。脳（A/B）だけ
+        _apply_noise_mode_all() で明示的に反映する。
+        注意：この関数は key_callback（tkinterのメインスレッドとは別スレッドの
+        可能性がある、1477行目付近の注意参照）とラジオボタンの command
+        （tkinterのメインスレッド）の両方から呼ばれる。単純なPython属性・
+        リストの書き換えだけにし、tk.StringVar.set() 等の tkinter API を
+        直接呼ばない（画面・ラジオボタンの同期はメインループ側の
+        noise_label_dirty 処理でまとめて行う）。
+        """
+        if new_mode not in NOISE_MODES:
+            return
+        noise_mode[0] = new_mode
+        _apply_noise_mode_all()
+        noise_label_dirty[0] = True
+        print(f"[脳] 駆動モードを切り替えました: {noise_mode[0]}", flush=True)
+
+    _noise_ui_hook[0] = _set_noise_mode      # ラジオボタン側の空フックを実体に差し替える
+
+    def _cycle_noise_mode():
+        """N キーで white → colored → colored+synergy → white … と循環させる。"""
+        _i = NOISE_MODES.index(noise_mode[0])
+        _set_noise_mode(NOISE_MODES[(_i + 1) % len(NOISE_MODES)])
+
+    def _key_cb(keycode):
+        # 注意：【2026-08-07】この関数は mujoco.viewer.launch_passive の
+        #   key_callback として渡され、MuJoCo側のイベント処理スレッド（メイン
+        #   ループ＝tkinterを更新しているスレッドとは別）から呼ばれる可能性がある。
+        #   tkinterのウィジェットをここで直接触るのは安全でないと判断し、
+        #   noise_label_dirty フラグだけ立てて、実際の tk.Label.config はメイン
+        #   ループ側（win.update() を呼んでいる箇所と同じスレッド）で行う。
+        #   noise_mode[0]・brains[tag]["taro"].brain の書き換え自体は、
+        #   taro_core/tools/motor_viewer.py の speed_ref 書き換えと同じパターン
+        #   （単純なPython属性の代入）なので、ここで直接行う。
+        try:
+            ch = chr(keycode)
+        except ValueError:
+            return
+        if ch.upper() == "N":
+            _cycle_noise_mode()
+
     tone_on = [True]
     head_w, devs, seens, neck_hist = [], [], [], []
     prev_sacc = [0]
     fire_until = [-1.0]
 
-    with mujoco.viewer.launch_passive(m, d) as viewer:
+    with mujoco.viewer.launch_passive(m, d, key_callback=_key_cb) as viewer:
         # 2026-07-27：初期カメラを太郎の顔に寄せる。
         #   これが無いと MuJoCo の既定カメラ（シーン全体を引きで映す）になり、
         #   柵の外から見下ろす画になる。顔の前にある直径2cmのおもちゃは
@@ -1493,6 +1710,15 @@ def main():
                                            seed=0)
                     if not st_hold_head.get():
                         hands.release()
+                    # 【なぜ、2026-08-07・重大バグ修正】reset_to_scene() は内部で
+                    #   e_scene._apply_limb_tone() を無条件に呼び直す（「姿勢を戻した
+                    #   ので目標角も取り直す」という設計自体は正しい）。ただし
+                    #   チェックボックスの状態を見ないため、OFFにしていても
+                    #   毎回ONに戻ってしまっていた。on_limb_tone() を呼び直し、
+                    #   現在のチェックボックスの状態で明示的に上書きする
+                    #   （ONなら新しい姿勢を目標に取り直す＝従来の意図どおり、
+                    #   OFFなら reset_to_scene が入れたバネを明示的に切る）。
+                    on_limb_tone()
                     # スライダーもシーンの位置に合わせる（食い違いを残さない）
                     toy_pos0 = np.array(d.qpos[toy_qadr:toy_qadr + 3], dtype=float)
                 else:
@@ -1687,7 +1913,7 @@ def main():
                 elif st_babble.get():
                     if tick % 10 == 0:
                         _prev_act = act[0].copy()
-                        act[0] = np.clip(0.5 + 0.174 * gen[0].sample(0.7), 0.0, 1.0
+                        act[0] = np.clip(0.5 + 0.174 * _babble_noise(), 0.0, 1.0
                                          ).astype(np.float32)
                         # もがき運動の変化量も同じ物差しで測る。
                         #   【なぜ、2026-07-31】ユーザーの目視「学習済みの方が
@@ -1923,6 +2149,7 @@ def main():
                     f"自発運動:{'ON' if st_babble.get() else 'OFF'}"
                     + (f"（変化量{np.mean(babble_da2[-50:]):.3f}）"
                        if babble_da2 else "") + "\n"
+                    f"          駆動モード:{noise_mode[0]}\n"
                     # 注意：脳の状態は**常に**出す。
                     #   【なぜ、2026-07-31】「動いているとき」だけ出す作りにしたら、
                     #   チェックを入れ忘れて動かないときに理由が分からなかった。
@@ -1960,6 +2187,20 @@ def main():
                     f"親の介入 {len(_pl2)}回"
                     + (f"（平均 {_navg:.1f}秒おき）" if _gaps else "")
                 )
+
+                # 【なぜ、2026-08-07】key_callback（別スレッドの可能性がある）から
+                #   直接 tkinter を触らず、ここ（win.update() と同じメインループの
+                #   スレッド）でラベルを更新する。フラグが立っているときだけ書く
+                #   （毎tick書くのは無駄なので、変わったときだけでよい）。
+                if noise_label_dirty[0]:
+                    noise_mode_label.config(
+                        text=f"駆動モード: {noise_mode[0]}（Nキー、またはボタンで切替）")
+                    # Nキーで切り替えたときも、ラジオボタンの選択が追従するように。
+                    #   ここは win.update() と同じメインループのスレッドなので
+                    #   tkinterを直接触ってよい（_set_noise_mode 側は触らない設計）。
+                    if noise_mode_var.get() != noise_mode[0]:
+                        noise_mode_var.set(noise_mode[0])
+                    noise_label_dirty[0] = False
 
                 try:
                     win.update()

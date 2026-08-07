@@ -12,6 +12,7 @@
     そのまま Enter     … 前回と同じシーンで開く
 """
 import os
+import re
 import sys
 import subprocess
 
@@ -19,6 +20,9 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.abspath(os.path.join(_HERE, os.pardir, os.pardir))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
+_SCENE_TOOLS = os.path.join(_ROOT, "run", "scene_tools")
+if _SCENE_TOOLS not in sys.path:
+    sys.path.insert(0, _SCENE_TOOLS)
 
 import e_scene  # noqa: E402
 
@@ -63,18 +67,17 @@ def describe(sc):
     return line
 
 
-def main():
-    names = e_scene.list_scenes()
-    if not names:
-        print("シーンが1つもありません。")
-        print("  .venv/Scripts/python.exe E/scripts/e_scene_make.py  で作れます")
-        input("\nEnter で閉じます ")
-        return 1
+# 【なぜ、2026-08-07】以前は①（describe()の短い1行）と③（scene JSONのnote、
+#   数百字規模の長い説明文）を選択肢ごとに常に両方表示していた。シーンが11個ある
+#   と③だけで画面が埋まり、選びにくいというユーザー指摘があった。
+#   ⇒ 既定では①だけを表示し、③は「?9」「d9」のように番号を指定したときだけ
+#   その場で表示する形に変えた（表示するかどうかのon/offだけを変え、①の
+#   テキスト内容そのもの＝describe()の返す文字列は一切変えていない）。
+_DETAIL_RE = re.compile(r"^[?dD]\s*(\d+)$")
 
-    last = read_last()
-    if last not in names:
-        last = names[0]
 
+def print_scene_list(names, last):
+    """①（describe()の1行、警告込み）だけを一覧表示する。③（note）はここでは出さない。"""
     print("=" * 74)
     print(" どのシーンで太郎を見ますか")
     print("=" * 74)
@@ -86,34 +89,87 @@ def main():
             info = f"（読めない: {e}）"
         print(f"  {i}. {n}  {mark}")
         print(f"       {info}")
-        try:
-            note = e_scene.load(n).get("note")
-            if note:
-                print(f"       {note}")
-        except Exception:
-            pass
-    print("-" * 74)
-    print(f"  番号を入れて Enter ／ そのまま Enter で「{last}」")
 
+
+def print_footer(last):
+    print("-" * 74)
+    print(f"  番号を入れて Enter ／ そのまま Enter で「{last}」／ 詳しい説明は ?番号 か d番号")
+
+
+def show_detail(names, idx):
+    """番号idx（1始まり）のシーンのnote（③）を表示する。範囲外ならエラー文だけ出す。"""
+    print("-" * 74)
+    if not (1 <= idx <= len(names)):
+        print(f"  {idx} は範囲外です（1〜{len(names)}で指定してください）")
+        return
+    n = names[idx - 1]
     try:
-        s = input("  > ").strip()
-    except (EOFError, KeyboardInterrupt):
-        return 0
-    pick = last
-    if s:
+        note = e_scene.load(n).get("note")
+    except Exception as e:
+        print(f"  {idx}. {n}  （読めない: {e}）")
+        return
+    print(f"  {idx}. {n}")
+    if note:
+        print(f"       {note}")
+    else:
+        print("       （詳しい説明はありません）")
+
+
+def select_scene(names, last):
+    """一覧を表示し、選択を受け付ける。戻り値は選んだシーン名。
+    EOF/中断なら None を返す（呼び出し側はそのまま終了する）。
+    ・数字だけ入力     → その番号を選ぶ
+    ・空Enter          → 前回選択（last）
+    ・名前の一部だけ入力 → 部分一致で1件に絞れればそれを選ぶ
+    ・?9 / d9 のような入力 → その番号のnote（③）を表示し、footerだけ出し直して再度入力を待つ
+    """
+    print_scene_list(names, last)
+    print_footer(last)
+    while True:
+        try:
+            s = input("  > ").strip()
+        except (EOFError, KeyboardInterrupt):
+            return None
+
+        if not s:
+            return last
+
+        m = _DETAIL_RE.match(s)
+        if m:
+            show_detail(names, int(m.group(1)))
+            print_footer(last)
+            continue
+
         try:
             i = int(s)
             if 1 <= i <= len(names):
-                pick = names[i - 1]
-            else:
-                print(f"  {i} は範囲外なので「{last}」で開きます")
+                return names[i - 1]
+            print(f"  {i} は範囲外なので「{last}」で開きます")
+            return last
         except ValueError:
             # 名前の一部でも選べるようにする
             cand = [n for n in names if s in n]
             if len(cand) == 1:
-                pick = cand[0]
-            else:
-                print(f"  「{s}」では決まらないので「{last}」で開きます")
+                return cand[0]
+            print(f"  「{s}」では決まらないので「{last}」で開きます")
+            return last
+
+
+def main():
+    names = e_scene.list_scenes()
+    if not names:
+        print("シーンが1つもありません。")
+        print("  .venv/Scripts/python.exe run/scene_tools/e_scene_make.py  で作れます")
+        input("\nEnter で閉じます ")
+        return 1
+
+    last = read_last()
+    if last not in names:
+        last = names[0]
+
+    pick = select_scene(names, last)
+    if pick is None:
+        return 0
     write_last(pick)
 
     print(f"\n  「{pick}」で開きます。体を作るのに数十秒かかります …\n")
