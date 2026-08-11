@@ -1,0 +1,25 @@
+{
+  "name": "目視：フラット姿勢（リクライニング0度）自己接触・recline0_seed1（頭0.52%・胸0.93%）",
+  "note": "2026-08-05。ユーザーが「なぜ自己接触が少ないか」を自分の目で確認するための目視専用実験。学習済みモデル E/logs/posture_free_compare/recline0_seed1_model.pt を読み込んで等倍速で見る（追加学習はしない）。taro欄は学習に使った E/experiments/selftouch_free_recline0_seed1.json と同一の設定を複製し、model欄だけを足した（saveは付けない）。自己接触は稀（数百stepに1回程度）なので、ある程度の時間見続ける必要がある。",
+  "scene": "リーチング_リクライニング0度_自己接触版",
+  "taro": {
+    "goal_babbling": true,
+    "goal_space": "reach_self",
+    "goal_trajectory": true,
+    "goal_traj_len": 25,
+    "goal_home_prob": 0.1,
+    "goal_negative_control": false,
+    "reach_arm_side": "right",
+    "touch": true,
+    "somatosensory": true,
+    "vision": true,
+    "double_touch_threshold": 0.5,
+    "double_touch_bonus": 0.0,
+    "model": "E/logs/posture_free_compare/recline0_seed1_model.pt"
+  },
+  "run": {
+    "type": "view",
+    "seed": 1
+  },
+  "plugins": {}
+}

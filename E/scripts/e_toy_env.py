@@ -68,6 +68,35 @@ REST_DIST = 0.158          # 静止時の肩→手の距離[m]
 #       18.0        3.9度      0.00mm  ← 腕の長さぎりぎり
 TOY_DISTANCE = float(os.environ.get("E_TOY_DIST", "0.086"))
                            #   （新生児の適切な注視距離は文献調査中。決まり次第ここを更新）
+
+# 【2026-08-03 追加】おもちゃの配置が、屈曲した腕（手・前腕）と重なる問題への対処。
+#   仕様：作業記録（非公開）
+#
+# 【なぜ要るか】肘のlimb_tone目標角度を屈曲側（-130度）にする姿勢バイアス版シーンで、
+#   肘が顔・胸の近くまで曲がった状態のまま「おもちゃを視線の正面へ再配置する」処理
+#   （_set_anchor）を通すと、その位置がちょうど屈曲した手の位置と重なり、次の
+#   mj_forward／stepで接触の反力によって腕が弾かれることが実測で判明した
+#   （2秒沈めた時点 右肘-125.22度・左肘-123.96度 → 再配置0.3秒後 右肘-63.84度・
+#   左肘-53.74度＝狙いと逆の伸展側。報告：作業記録（非公開）
+#   報告\2026-08-03_姿勢バイアス版の実装.md 3節）。
+#
+# 【対処方針】狙った腕の角度（limb_toneの目標）を優先し、腕の角度そのものは動かさない。
+#   代わりに、置こうとした位置が手・前腕と重なるときだけ、重ならなくなるまで
+#   おもちゃ側を最小限ずらす（＝案B、ユーザー確認済み）。重ならない通常のシーンでは
+#   この判定は常にFalseのまま何もせず、既存の配置と1ビットも変わらない。
+#
+# 【判定の仕方】geom単位の正確な衝突検出（mj_step相当）は行わず、MuJoCoが自動計算する
+#   bounding sphere半径（geom_rbound、各geomを覆う最小の球の半径）を使った簡易判定。
+#   「おもちゃの中心と、手・前腕の各geomの中心の距離」が「両者の半径の和＋マージン」
+#   より小さければ重なっていると見なす。厳密な形状ではなく球で近似するぶん、
+#   実際にはまだ余裕がある位置でもずらすことがあるが、安全側（もし重ならないと判定を
+#   誤っても、それは「めり込んだまま」より安全）。
+#
+# 注意：[Tier3・工学的判断] マージン(5mm)・対象部位(手・前腕のみ、指の詳細geomは含まない
+#   代わりに手bodyの全geomを見る)に文献根拠はない。doc/人間模倣からの逸脱リスト.md 参照。
+TOY_COLLIDE_BODIES = ("right_hand", "left_hand", "right_lower_arm", "left_lower_arm")
+TOY_COLLIDE_MARGIN = 0.005   # 5mm。geom表面のさらに外側に残す隙間[m]（恣意的）
+TOY_COLLIDE_ITERS = 8        # ずらす処理の反復回数（1回のずらしで別のgeomに近づく場合があるため）
 TOY_OFFSET = np.array([-0.05, 0.0, 0.07])   # 旧方式（アブレーション用に残す）
 # 【2026-07-20 修正】吊り方を「バネ」から「紐（振り子）」へ。
 # 旧：変位に比例するバネ＋重力補償 → 強く叩かれるとバネが伸びきって**柵の外へ飛んでいった**
@@ -907,7 +936,44 @@ class ToySupineEnv(SupineMimoEnv):
             self._rest_pos[1] = float(np.clip(self._rest_pos[1],
                                               -FENCE_HALF_Y + _mgn, FENCE_HALF_Y - _mgn))
         self._rest_pos[2] = float(max(self._rest_pos[2], 0.04))   # 床にめり込ませない
+        # 【2026-08-03】屈曲した手・前腕と重なるときだけ最小限ずらす（上のコメント参照）。
+        #   重ならなければ無変化＝既存シーンの配置は1ビットも変わらない。
+        self._rest_pos = self._avoid_arm_collision(self._rest_pos)
         self._anchor = self._rest_pos + np.array([0.0, 0.0, self._tether_len])
+
+    def _avoid_arm_collision(self, pos):
+        """おもちゃの候補位置 pos が、屈曲した手・前腕(TOY_COLLIDE_BODIES)と重ならない
+        よう最小限ずらす。重ならなければ pos をそのまま返す。
+
+        定数・判定方法の根拠は TOY_COLLIDE_* のコメント参照（2026-08-03 追加）。
+        """
+        p = np.array(pos, dtype=float)
+        for _ in range(TOY_COLLIDE_ITERS):
+            moved = False
+            for name in TOY_COLLIDE_BODIES:
+                try:
+                    bid = int(self.model.body(name).id)
+                except Exception:
+                    continue           # このモデルに無い名前は無視（体型により変わりうる）
+                # そのbodyが持つ全geomのうち、最大のbounding球半径を使う（大まかな近似）。
+                radius = 0.0
+                n = int(self.model.body_geomnum[bid])
+                adr = int(self.model.body_geomadr[bid])
+                for gi in range(adr, adr + n):
+                    radius = max(radius, float(self.model.geom_rbound[gi]))
+                if radius <= 0.0:
+                    continue
+                bpos = np.array(self.data.xpos[bid], dtype=float)
+                d = p - bpos
+                dist = float(np.linalg.norm(d))
+                need = radius + self._toy_radius + TOY_COLLIDE_MARGIN
+                if dist < need:
+                    moved = True
+                    direction = (d / dist) if dist > 1e-9 else np.array([0.0, 0.0, 1.0])
+                    p = bpos + direction * need
+            if not moved:
+                break
+        return p
 
     def _carry_toy(self):
         """親がおもちゃを運んでくる。TOY_APPEAR_DELAY 秒待ってから TOY_APPROACH_SEC 秒かけて動かす。

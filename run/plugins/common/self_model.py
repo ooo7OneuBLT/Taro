@@ -20,6 +20,13 @@
 実験ファイルでの書き方:
     "plugins": {"self_model": true}
     "plugins": {"self_model": {"agency": true}}   ← 再現性が無いことを承知の上で
+    "plugins": {"self_model": {"inverse": true, "inverse_exec": true, "closed_loop": true}}
+
+【2026-08-06追記】inverse/inverse_exec/closed_loop（旧・目標C/E側の`inverse_probe`・
+`inverse_exec_probe`・`closed_loop_probe`）をrunシステムから呼べるようにした。
+これらは学習後に**1回だけ**（`report()`で）呼ぶ運用（元のスクリプトでもチェックポイント
+毎ではなく学習後の1回運用だった）。`closed_loop`は`ctx.goal_buf`（`run/trainer.py`の
+`_build_ctx`が渡す経験バッファ）が要る。
 """
 import os
 import sys
@@ -45,6 +52,10 @@ class SelfModel(Plugin):
         if self.want_agency:
             print("注意[self_model] agency を測るよう指定された。再現性が無い指標なので"
                   "（同条件で48.0%→46.0%）、これを根拠に主張しないこと", flush=True)
+        # 2026-08-06追記：学習後に1回だけ呼ぶ重い診断（旧C/E側の逆モデル・閉ループ診断）
+        self.want_inverse = bool(self.config.get("inverse", False))
+        self.want_inverse_exec = bool(self.config.get("inverse_exec", False))
+        self.want_closed_loop = bool(self.config.get("closed_loop", False))
         self.rows = []
         self._last = None
 
@@ -85,20 +96,47 @@ class SelfModel(Plugin):
 
     def report(self, ctx):
         if not self.rows:
-            return None
-        import statistics as st
-        k = min(8, len(self.rows))
-        tail = self.rows[-k:]
-        out = {"終盤の平均": {}, "測った回数": len(self.rows), "終盤の点数": k}
-        for key in ("classify", "margin", "corr", "persist"):
-            out["終盤の平均"][key] = round(st.mean(r[key] for r in tail), 3)
-        if self.want_agency:
-            out["終盤の平均"]["agency"] = round(
-                st.mean(r["agency"] for r in tail), 2)
-            out["注意注意"] = "agency は再現性が無い（同条件で48.0→46.0）"
-        # persist が100を超えていたら黙って通さない
-        if out["終盤の平均"]["persist"] > 100.0:
-            out["警告"] = ("persist が100超＝「何もしない」と予測した場合より下手。"
-                          "モデルが壊れている疑い（2026-07-30 に Goal Babbling で"
-                          "1000%になった）")
+            out = None
+        else:
+            import statistics as st
+            k = min(8, len(self.rows))
+            tail = self.rows[-k:]
+            out = {"終盤の平均": {}, "測った回数": len(self.rows), "終盤の点数": k}
+            for key in ("classify", "margin", "corr", "persist"):
+                out["終盤の平均"][key] = round(st.mean(r[key] for r in tail), 3)
+            if self.want_agency:
+                out["終盤の平均"]["agency"] = round(
+                    st.mean(r["agency"] for r in tail), 2)
+                out["注意注意"] = "agency は再現性が無い（同条件で48.0→46.0）"
+            # persist が100を超えていたら黙って通さない
+            if out["終盤の平均"]["persist"] > 100.0:
+                out["警告"] = ("persist が100超＝「何もしない」と予測した場合より下手。"
+                              "モデルが壊れている疑い（2026-07-30 に Goal Babbling で"
+                              "1000%になった）")
+        # 2026-08-06追記：inverse/inverse_exec/closed_loop は学習後に1回だけ呼ぶ
+        #   （on_checkpoint 毎ではない。元のC/E側スクリプトの運用と同じ）。
+        if self.want_inverse or self.want_inverse_exec or self.want_closed_loop:
+            import e_probes
+            probe_ctx = getattr(ctx, "probe_ctx", None)
+            if probe_ctx is None:
+                raise RuntimeError(
+                    "self_model のinverse/inverse_exec/closed_loopは太郎の脳を通す"
+                    "実行（run.type=train）が要る")
+            if out is None:
+                out = {}
+            if self.want_inverse:
+                out["inverse"] = e_probes.inverse_probe(probe_ctx)
+            if self.want_inverse_exec:
+                out["inverse_exec"] = e_probes.inverse_exec_probe(probe_ctx)
+            if self.want_closed_loop:
+                goal_buf = getattr(ctx, "goal_buf", None)
+                if not goal_buf:
+                    raise RuntimeError(
+                        "self_model のclosed_loopには ctx.goal_buf（経験バッファ）が"
+                        "要る。中身が空（学習ステップが少なすぎる）か、trainer側の"
+                        "配線が無い可能性がある")
+                e_probes.closed_loop_probe(probe_ctx, goal_buf)
+                # closed_loop_probe は戻り値が無い（内部でprint・ファイル書き出しのみ）。
+                # 「呼んだこと」だけ report に残す。
+                out["closed_loop"] = "実行済み（結果は log_dir の closed_loop_seed*.txt へ）"
         return out

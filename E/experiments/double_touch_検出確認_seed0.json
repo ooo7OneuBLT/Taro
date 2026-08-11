@@ -1,0 +1,29 @@
+{
+  "name": "ダブルタッチ検出器の実機確認（seed0・短時間）",
+  "note": "仕様：作業記録（非公開） 3節。報酬・学習ロジックは一切触っていない。既存の6本（goal_stage1_v2配下）は上書きしない。",
+  "scene": "リーチング_リクライニング60度",
+  "taro": {
+    "goal_babbling": true,
+    "goal_space": "reach_self",
+    "goal_trajectory": true,
+    "goal_traj_len": 25,
+    "goal_home_prob": 0.1,
+    "goal_negative_control": false,
+    "reach_arm_side": "right",
+    "touch": true,
+    "somatosensory": true,
+    "vision": true,
+    "save": "E/logs/double_touch_check/B_new_seed0_model.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 800,
+    "checkpoint": 100,
+    "seed": 0,
+    "csv": "E/logs/double_touch_check/B_new_seed0.csv"
+  },
+  "plugins": {
+    "reach_success": true,
+    "double_touch": true
+  }
+}

@@ -31,7 +31,7 @@ if _ROOT not in sys.path:
 import numpy as np                                              # noqa: E402
 import torch                                                    # noqa: E402
 
-from run.taro_setup import Taro, rescale_action, mse            # noqa: E402
+from run.taro_setup import Taro, rescale_action, mse, to_tensor  # noqa: E402
 from run.context import Ctx                                     # noqa: E402
 
 torch.set_num_threads(1)
@@ -152,6 +152,15 @@ class Trainer:
         #   太郎は生ベクトルをFIFOに貯めて**一様ランダムに1つ選ぶだけ**で、
         #   頻度の重みが完全に消えている。⇒ doc/人間模倣からの逸脱リスト.md
         self.goal_buf = []
+        # 手先位置の目標表現（案C・Goal Babbling段階1）。既存の goal_buf とは
+        #   **別の**リストにする（encode_target/goal_buf は一切変更しない、という
+        #   仕様の要求を厳密に満たすため。設計の統合判断「決定4」）。
+        #   既定（goal_space!="reach_self"）ではこのリストは一度も使われない。
+        self.reach_goal_buf = []
+        self.reach_traj = None
+        if cfg.goal_babbling and cfg.goal_space == "reach_self":
+            from goal_babbling.trajectory import GoalTrajectory
+            self.reach_traj = GoalTrajectory(L=cfg.goal_traj_len)
         self._t0 = time.time()
         self._build_probe_ctx()
         self._build_ctx()
@@ -189,6 +198,13 @@ class Trainer:
         """`E/scripts/e_probes.py` に渡す入れ物。判定の実体は e_probes 側にある。"""
         import e_probes
         t = self.taro
+        _probe_log_dir = os.path.join(_ROOT, os.path.dirname(self.cfg.log or "")
+                                      or os.path.join("E", "logs", "run"))
+        # 【なぜ、2026-08-06】inverse_probe等（追加依頼1）はこのディレクトリへ
+        #   直接ファイルを書く（evaluate/agency_probeは書かないので、これまで
+        #   runシステム経由では未作成でも表面化しなかった）。無いと
+        #   FileNotFoundErrorで落ちるので、ここで作っておく。
+        os.makedirs(_probe_log_dir, exist_ok=True)
         self.probe_ctx = e_probes.ProbeContext(
             brain=t.brain, fusion=t.fusion, target_fusion=t.target_fusion,
             nat_head=t.nat_head, env=self.env, rescale_action=rescale_action,
@@ -199,8 +215,11 @@ class Trainer:
             K=self.cfg.K, DT=DT, seed=self.cfg.seed,
             # 注意：リポジトリのルート基準にする。cwd 相対だと、どこから実行したかで
             #   逆モデルの診断ログ（inv_probe_*.txt 等）の出力先が変わる。
-            log_dir=os.path.join(_ROOT, os.path.dirname(self.cfg.log or "")
-                                 or os.path.join("E", "logs", "run")))
+            log_dir=_probe_log_dir,
+            # 【なぜ、2026-08-06】学習側(cfg.efference_copy)と測定側(effcopy)が
+            #   食い違うと「学習側は無効化したのに測定側だけこっそり有効」という
+            #   事故になる（監査指摘）。必ず同じ設定値を渡す。
+            effcopy=self.cfg.efference_copy)
 
     def _build_ctx(self):
         """プラグインに渡す入れ物。プラグインは読むだけ。"""
@@ -216,6 +235,9 @@ class Trainer:
         # 自己モデルのプラグインが測るのに使う（e_probes への入れ物）
         self.ctx.probe_ctx = self.probe_ctx
         self.ctx.taro = self.taro
+        # closed_loop_probe が目標姿勢のサンプリングに使う経験バッファ（参照を渡すだけ、
+        #   中身は学習ループが書き足す＝2026-08-06、追加依頼1）
+        self.ctx.goal_buf = self.goal_buf
 
     # ---------------------------------------------------------- 体を育てる
     def _regrow(self, new_age):
@@ -274,6 +296,24 @@ class Trainer:
                     "  somatosensory=false の触覚エンコーダは入力次元が固定なので使えない。\n"
                     "  somatosensory=true にすると部位ごとの要約（有無/強さ/重心）になり、"
                     "点数が変わっても層の形が変わらない。")
+        elif self.taro.double_touch is not None:
+            # 【2026-08-05追記：全身一般化】cfg.touch=False（taro自身の脳が触覚を
+            #   使っていない）シーンでは、上の `if cfg.touch:` ブロックに一度も
+            #   入らないため、taro.on_body_change 自体がこれまで一度も呼ばれて
+            #   いなかった。double_touch（taro自身の fusion.touch/target_fusion.touch
+            #   とは別の自前の SomatosensoryCortex インスタンス）は cfg.touch に
+            #   関わらず存在しうるので、cfg.touch=False でも呼ぶ必要がある。
+            #   （taro_setup.py の on_body_change 内部で fusion.touch が None の
+            #   ときは即座に return するだけなので、これを追加しても cfg.touch=False
+            #   の既存の挙動には一切影響しない。設計1-7節・実装ノウハウ
+            #   2026-08-05項が指摘した早期returnの問題と同根＝「成長のたびに
+            #   呼ばれるべき処理が、既存のtouch専用ガードの内側に置かれていて
+            #   touch=falseでは一度も実行されない」という同型のバグを、
+            #   trainer.py側の呼び出し元でも見つけて直した。実装時に検証スクリプト
+            #   （run/tools/check_double_touch_generalized.py [6]）で実際に
+            #   再現・確認済み：この修正が無いと、成長後にdetect()が
+            #   AssertionError（触覚の次元が地図と合わない）で必ず落ちる）。
+            self.taro.on_body_change(self.env)
         self.probe_ctx.env = self.env       # 測定器も新しい体を見る
         self.ctx.env = self.env
         u = self.env.unwrapped
@@ -283,7 +323,18 @@ class Trainer:
         #     参照していた＝体を育てる実験では接触を古い体で見ていた。
         for p in self.plugins:
             p.on_body_change(self.ctx)
+        # 【なぜ、2026-08-03・Tier3】体が変わると固有感覚などの分布が変わり、次に来る
+        #   生の予測誤差が急変しうる。自己接触と同じ機序（速い平均だけが跳ねてprogressが
+        #   マイナスに振れる）が成長イベント直後にも起きる恐れがある（調査報告
+        #   2026-08-03 1-3節）。pe_fast/pe_slowを同じ値に揃えてprogressを0から
+        #   再スタートさせる（ゼロリセットはしない。理由はresync()のdocstring参照）。
+        self.taro.lp.resync()
         self.reset_state()                  # 新しい体で立て直す。脳と経験は保持されたまま
+        # 手先位置の目標表現（案C）：ホーム姿勢を作り直した体で再計算する
+        #   （設計の決定7。可動域自体が成長で変わりうるため、初期姿勢を1回だけ
+        #   固定すると成長後に古い基準のまま目標を作ることになる）。
+        if cfg.goal_babbling and cfg.goal_space == "reach_self":
+            self.taro.home_reach_goal = self.taro.encode_reach_goal(self.state["obs"]).detach()
 
     # ------------------------------------------------------------ 睡眠
     def consolidate(self, n_batches=200, bs=128):
@@ -554,7 +605,13 @@ class Trainer:
         n_train = cfg.steps
         ckpt = cfg.checkpoint
         self._act_accum, self._eff_accum, self._caps_accum = [], [], []
-        from learning_progress import smoothness_cost
+        from learning_progress import smoothness_cost, LearningProgress
+        # 自己接触の興味度ボーナス（reach_self専用、2026-08-03）用の、progress本体
+        #   （t.lp）とは完全に独立な新しいトラッカー。初回tickで実測値から初期化する
+        #   （固定init=1.0は使わない。落とし穴チェックリスト項96と同じ初期化
+        #   アーティファクトを避けるため）。設計：作業記録（非公開）
+        #   2026-08-03_reach_self専用新奇性報酬の設計.md（3.3節）。
+        self._self_touch_lp = None
         pe_fast, pe_slow = t.lp.pe_fast, t.lp.pe_slow
         reach_goal, reach_prev_dist = None, 0.0
 
@@ -579,13 +636,24 @@ class Trainer:
             sv = t.fusion.encode(state["obs"])
             cf = t.target_fusion.encode(state["obs"]).detach()
             clp = t.encode_target(state["obs"])
+            # 手先位置の目標表現（案C）。既存の clp/encode_target とは別枠で並行に
+            #   計算する（設計の統合判断「決定3・決定4」）。既定では None のまま
+            #   ＝下の分岐は一度も実行されない。
+            gclp = None
+            reach_space = bool(cfg.goal_babbling and cfg.goal_space == "reach_self")
+            if reach_space:
+                gclp = t.encode_reach_goal(state["obs"])
             z, kl, rc, hn = t.infer_latent(sv, state["prev_a"], cf, state["hidden"].detach())
             # ---- 行動を作る（運動野＋小脳のブレンド）--------------------------
             mean, std, _w_c, e_c = t.motor_drive(z)
             # ---- 目標指向の探索（Goal Babbling）------------------------------
             # 切替：fixed=i%2固定／ne=ノルアドレナリン／pe=予測誤差+NE（既定）
+            # 注意：どちらの実装（legacy=goal_buf／reach_self=reach_goal_buf）を
+            #   使っているかで、判定に使うバッファを変える（決定4）。
+            #   goal_space!="reach_self" のときは _gbuf=self.goal_buf で従来と完全に同一。
             goal_step = False
-            if cfg.goal_babbling and len(self.goal_buf) >= 64:
+            _gbuf = self.reach_goal_buf if reach_space else self.goal_buf
+            if cfg.goal_babbling and len(_gbuf) >= 64:
                 if cfg.goal_switch == "fixed":
                     goal_step = (i % 2 == 0)
                 elif cfg.goal_switch == "ne":
@@ -597,18 +665,46 @@ class Trainer:
                     explore_drive = min(t.ne.get_ne_level() + rel, 1.0)
                     goal_step = torch.rand(1).item() < (1.0 - explore_drive)
             if goal_step:
-                if cfg.closed_loop_reach:
-                    # 1つの目標を「届く/停滞」まで保持してにじり寄る（held goal）
+                if reach_space:
+                    # ---- 手先位置の目標表現（案C・Goal Babbling段階1）--------
+                    if cfg.goal_trajectory:
+                        if not self.reach_traj.active():
+                            use_home = torch.rand(1).item() < cfg.goal_home_prob
+                            if cfg.goal_negative_control:
+                                target_g = t.dummy_reach_goal(gclp)
+                            elif use_home:
+                                target_g = t.home_reach_goal
+                            else:
+                                target_g = self.reach_goal_buf[
+                                    torch.randint(len(self.reach_goal_buf), (1,)).item()]
+                            self.reach_traj.begin(target_g)
+                        g_step = self.reach_traj.waypoint(gclp)
+                    else:
+                        # 診断用：軌道を使わず、いきなり目標へ向かう（goal_trajectory=False）
+                        use_home = torch.rand(1).item() < cfg.goal_home_prob
+                        if cfg.goal_negative_control:
+                            g_step = t.dummy_reach_goal(gclp)
+                        elif use_home:
+                            g_step = t.home_reach_goal
+                        else:
+                            g_step = self.reach_goal_buf[
+                                torch.randint(len(self.reach_goal_buf), (1,)).item()]
+                    mean = t.infer_reach_goal_action(z.detach(), gclp, mean, g_step)
+                elif cfg.closed_loop_reach:
+                    # 1つの目標を「届く/停滞」まで保持してにじり寄る（held goal、legacy）
                     if reach_goal is None:
                         reach_goal = self.goal_buf[
                             torch.randint(len(self.goal_buf), (1,)).item()].clone()
                         reach_prev_dist = mse(clp, reach_goal).item()
                     g = reach_goal
+                    mean = t.infer_goal_action(z.detach(), clp, mean, g)
                 else:
                     g = self.goal_buf[torch.randint(len(self.goal_buf), (1,)).item()]
-                mean = t.infer_goal_action(z.detach(), clp, mean, g)
+                    mean = t.infer_goal_action(z.detach(), clp, mean, g)
             else:
-                reach_goal = None            # 探索に切替 → リーチ終了
+                reach_goal = None            # 探索に切替 → リーチ終了（legacy）
+                if self.reach_traj is not None:
+                    self.reach_traj.reset()  # 探索に切替 → 軌道は打ち切り（reach_self）
             a, lp = t.brain.explore(mean, std)
             self.goal_buf.append(clp.detach())
             if len(self.goal_buf) > 2000:
@@ -616,11 +712,18 @@ class Trainer:
                 #   （離散版は 30,000ステップ通して累積し、それで「馴化」が起きる）。
                 #   太郎は古い方から捨てるので、昔の経験の頻度情報が消える。
                 self.goal_buf.pop(0)
+            reach_pred = None
+            if reach_space:
+                self.reach_goal_buf.append(gclp.detach())
+                if len(self.reach_goal_buf) > 2000:
+                    self.reach_goal_buf.pop(0)
+                reach_pred = gclp + t.reach_head(z.detach(), a.detach())
             pred = clp + t.nat_head(torch.cat([z, a.detach()], dim=-1))
             # 拮抗筋モード：a(n_joint) → to_env_action で筋活性化へ写像。OFFなら a_env==a
             a_env = t.brain.to_env_action(a)
             state["obs"], term = self.step_k(rescale_action(a_env, env.action_space))
             nlp = t.encode_target(state["obs"])
+            n_gclp = t.encode_reach_goal(state["obs"]) if reach_space else None
             if cfg.closed_loop_reach and reach_goal is not None:
                 nd = mse(nlp, reach_goal).item()
                 if nd >= reach_prev_dist:
@@ -666,10 +769,130 @@ class Trainer:
             if cfg.caps:
                 rew = rew - cfg.caps * smooth
             self._act_accum.append(float(a.detach().abs().mean().item()))
+            # 頭へのダブルタッチを報酬に直結する（2026-08-03、2026-08-05に全身一般化）。
+            #   t.double_touch が None（既定）のときはこのブロックは一度も実行されない
+            #   ＝既存実験の挙動は1ビットも変わらない。
+            #   【足す順序】効果コスト・CAPSペナルティを引いた"後"の rew に足す
+            #   （＝「疲れても・急変しても、頭に触れたことそのものは変わらず報われる」。
+            #   努力コストで割り引かれると、ダブルタッチのボーナスが埋もれて
+            #   探索を駆動しにくくなるため。CAPSも同様＝接触の瞬間の速い動きを
+            #   罰でかき消したくない）。
+            #   【2026-08-05：全身一般化・設計1-4節/1-6節】
+            #   ・ガードから reach_space を外し、t.double_touch is not None のみにした
+            #     （reach_self・touch=true専用という制約を断つ）。
+            #   ・detect() は自前構築のtouch_map経由（引数から t.target_fusion.touch を
+            #     渡す旧経路は廃止）で、touched_names=cfg.double_touch_touched_groups を渡す。
+            #   ・「hitならボーナスを足す」1行は t.reward_contributors のforループへ
+            #     切り出した（compute(ctx)->floatを持つオブジェクトのリスト）。
+            if t.double_touch is not None:
+                hit, toucher_p, touched_p, hit_names = t.double_touch.detect(
+                    to_tensor(state["obs"]["touch"]),
+                    toucher_name=f"{cfg.reach_arm_side}_palm",
+                    touched_names=cfg.double_touch_touched_groups)
+                # ログ用に生のpresenceを置いておく（プラグインが on_step 後に読める
+                #   ようにするため。self.ctx.last と同じ「置いておくだけ」の流儀）。
+                #   contributor.compute(ctx) はこの値（'hit'）を読むので、
+                #   forループより"前"に必ず置く。
+                self.ctx.last_double_touch = {
+                    "hit": hit, "toucher_presence": toucher_p,
+                    "touched_presence": touched_p, "hit_names": hit_names,
+                    "self_interest_touch_pe": None,
+                    "self_interest_progress": None,
+                    "self_interest_bonus": 0.0}
+                for contributor in t.reward_contributors:
+                    rew = rew + contributor.compute(self.ctx)
+                # 自己接触の興味度ボーナス（reach_self専用、2026-08-03）。
+                #   設計：作業記録（非公開）
+                #   2026-08-03_reach_self専用新奇性報酬の設計.md（3.4節）＋
+                #   レビュー（同フォルダ\2026-08-03_reach_self新奇性報酬_レビュー.md、
+                #   命名をnovelty→interestへ修正）。
+                #   【2026-08-05】以前は外側の if reach_space and t.double_touch is
+                #   not None: に暗黙に含まれていたため reach_space ガードが効いて
+                #   いた。外側のガードから reach_space を外したので、この
+                #   reach_self専用ブロックだけ明示的に reach_space で囲み、挙動を
+                #   変えない（設計1-4節：このボーナスは t.reward_contributors に
+                #   含めない）。
+                #   既定 self_touch_interest_bonus=0.0＝OFF。このifの中身は一度も
+                #   実行されない＝既存実験の挙動は1ビットも変わらない
+                #   （double_touch_bonusのように「0.0を足す」のではなく、
+                #   そもそも計算自体をスキップする、より強い保証）。
+                interest_touch_pe, interest_progress, interest_bonus = None, None, 0.0
+                if reach_space and cfg.self_touch_interest_bonus:
+                    # 【実装上の重大な注意】t.block_pe(pred, nlp, blocks=touch_blocks) は
+                    #   使わない。taro_setup.py の block_pe は「ブロック数が1個以下なら
+                    #   固有感覚のみの旧実装と完全に同一にする」特例
+                    #   （if not use_blocks or len(use_blocks) <= 1: return mse(pred, target)）
+                    #   を持ち、touch_embed は通常1個しかないため、この特例に落ちて
+                    #   「触覚だけの誤差」のつもりが全身まるごとの誤差を返してしまう
+                    #   （値が返るので例外が出ず気づきにくい、設計3.5節）。
+                    #   ここでは対象ブロックだけを自分でスライスしてMSEを取る。
+                    touch_blocks = [(s, e, nm) for (s, e, nm) in (t.blocks or ())
+                                    if nm in ("touch_embed", "touch")]
+                    if not touch_blocks:
+                        raise ValueError(
+                            "self_touch_interest_bonus には touch_embed ブロックが要る"
+                            "（cfg.touch_mode=\"target\"。config._checkで弾いているはず"
+                            "だが、ここに来た場合は t.blocks の構成が想定と違う）。")
+                    tot, wsum = 0.0, 0.0
+                    for (s, e, nm) in touch_blocks:
+                        tot = tot + mse(pred[..., s:e], nlp[..., s:e])
+                        wsum += 1.0
+                    interest_touch_pe = float((tot / wsum).item())
+                    if self._self_touch_lp is None:
+                        self._self_touch_lp = LearningProgress(
+                            tau_fast=t.lp.tau_fast, tau_slow=t.lp.tau_slow,
+                            init=interest_touch_pe)
+                    else:
+                        interest_progress = self._self_touch_lp.update(interest_touch_pe)
+                    # SAGG-RIAC式：符号を捨てて絶対値を興味度にする（Baranes & Oudeyer
+                    #   2013。「増加も減少も両方に興味を持つ」）。hitのtickだけに足す
+                    #   （毎tick追跡はするが、報酬に足すのは自己接触の瞬間のみ）。
+                    if hit and interest_progress is not None:
+                        interest_bonus = cfg.self_touch_interest_bonus * abs(interest_progress)
+                        rew = rew + interest_bonus
+                if os.environ.get("TARO_DEBUG_SELF_TOUCH_INTEREST"):
+                    # progress（progress本体、t.lp由来）も同じ行に出す。8.2(c)の
+                    #   「既存progressが同じtickでマイナスなのに、新しいボーナスは
+                    #   0以上」を直接見比べるため（progressはこの少し上で確定済み）。
+                    print(f"[DEBUG_SELF_TOUCH_INTEREST] step={i+1} hit={hit} "
+                          f"touch_pe={interest_touch_pe} local_progress={interest_progress} "
+                          f"bonus={interest_bonus} body_progress={progress}", flush=True)
+                # interest系の値を確定させてからログ辞書へ反映する（reach_self以外
+                #   では None/0.0 のまま＝上で先に置いた初期値と同じ）。
+                self.ctx.last_double_touch["self_interest_touch_pe"] = interest_touch_pe
+                self.ctx.last_double_touch["self_interest_progress"] = interest_progress
+                self.ctx.last_double_touch["self_interest_bonus"] = interest_bonus
             # 方策の学習（ドーパミン）は努力コスト込みの報酬を見る＝「疲れは損」を学ぶ
-            pl = t.learner.learn_action([lp], t.dop.compute_rpe(rew))
+            rpe = t.dop.compute_rpe(rew)
+            pl = t.learner.learn_action([lp], rpe)
             hl = t.homeo.homeostatic_loss(sv); t.homeo.observe(sv)
             t.learner.update(pe + hl + kl + rc, pl)
+            # ---- 測る（プラグイン、rew・rpe確定後）--------------------------
+            #   on_step（694行目付近）はrew・rpe確定"前"に呼ばれるため、これらを
+            #   読みたいプラグインはここで新設した on_step_late を実装する
+            #   （2026-08-03、設計「接触時の報酬直接測定の設計」1節）。
+            #   pe_fast/pe_slow/progress_core/surprise_trace/progress は
+            #   2026-08-04追加（設計「progress報酬の内訳露出と検証実験の設計」1節）。
+            #   既存キー（rew, rpe）は変更しない。t.lp が既に持っている値を読むだけで、
+            #   新規計算・学習への副作用は一切無い。
+            self.ctx.last_reward = {
+                "rew": rew, "rpe": rpe,
+                "pe_fast": pe_fast, "pe_slow": pe_slow,
+                "progress_core": pe_slow - pe_fast,
+                "surprise_trace": t.lp._surprise_trace,
+                "progress": progress,
+            }
+            for p in self.plugins:
+                p.on_step_late(self.ctx)
+            if reach_space:
+                # 手先位置の目標表現（案C）：reach_head の学習は**独立optimizer**
+                #   （設計の統合判断「決定2」）。既存の自己モデル学習（pe+hl+kl+rc）
+                #   には混ぜない＝2026-07-30までの全実験の学習曲線の基準を汚さない。
+                #   reach_pred/n_gclp は z.detach()/a.detach() 経由なので、この
+                #   backward は reach_head のパラメータにしか勾配を流さない
+                #   （小脳(cere_opt)と同じ「別のAdamで独立に更新する」パターン）。
+                reach_pe = t.block_pe(reach_pred, n_gclp, blocks=t.reach_blocks)
+                t.reach_opt.zero_grad(); reach_pe.backward(); t.reach_opt.step()
             if cfg.cerebellum:
                 # 小脳は方策とは別に、実際に行った運動を教師なしで真似て自動化する
                 closs = t.cereb.imitation_loss(z.detach(), a.detach())
@@ -682,10 +905,17 @@ class Trainer:
             t.ne.observe_reward(rew_task); t.ne.release_ne()
             if term:
                 reach_goal = None
+                if self.reach_traj is not None:
+                    self.reach_traj.reset()
             if cfg.mature:
                 # 成熟は sim秒でなく発達年齢（学習回数）で駆動する
                 t.ne.mature(t.dev_clock.progress(n_train))
-            state["hidden"] = hn.detach(); state["prev_a"] = a.detach()
+            state["hidden"] = hn.detach()
+            if cfg.efference_copy:
+                # 【なぜ、2026-08-06】遠心性コピー切替(cfg.efference_copy)。既定True＝
+                #   これまでの無条件更新と完全に同じ挙動。Falseにするとprev_aが
+                #   常にゼロのまま固定される（C側のC_EFFCOPYと同じ形）。
+                state["prev_a"] = a.detach()
             if term:
                 self.reset_state()
             if cfg.replay and (i + 1) % ckpt == 0:

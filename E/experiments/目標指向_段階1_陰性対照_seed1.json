@@ -1,0 +1,30 @@
+{
+  "name": "手先位置の目標表現（案C）検証：条件D 陰性対照（seed1）",
+  "note": "2026-08-02。Goal Babbling段階1の4条件比較のうちD。条件Bと機構は完全に同一（22次元・区分線形軌道・ホーム回帰・reach_headの学習）で、軌道の目標（終点）だけをランダムなダミーに差し替える（goal_negative_control=true）。現在地（gclp、実測値）は汚さない。B-Dの差だけを見れば、目標の中身が効いているかを切り出せる（仕様2節・確定3）。設計：作業記録（非公開）。",
+  "scene": "リーチング_リクライニング60度",
+  "taro": {
+    "goal_babbling": true,
+    "goal_space": "reach_self",
+    "goal_trajectory": true,
+    "goal_traj_len": 25,
+    "goal_home_prob": 0.1,
+    "goal_negative_control": true,
+    "reach_arm_side": "right",
+    "touch": true,
+    "somatosensory": true,
+    "vision": true
+  },
+  "run": {
+    "type": "train",
+    "steps": 6000,
+    "seed": 1,
+    "checkpoint": 500,
+    "csv": "E/logs/goal_stage1/D_negctrl_seed1.csv"
+  },
+  "plugins": {
+    "self_model": true,
+    "hand_in_view": true,
+    "toy_touch": true,
+    "movement_units": true
+  }
+}

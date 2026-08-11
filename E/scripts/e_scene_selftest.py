@@ -33,8 +33,12 @@ import warnings
 
 warnings.filterwarnings("ignore")
 _HERE = os.path.dirname(os.path.abspath(__file__))
+_ROOT = os.path.abspath(os.path.join(_HERE, os.pardir, os.pardir))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
+_SCENE_TOOLS = os.path.join(_ROOT, "run", "scene_tools")
+if _SCENE_TOOLS not in sys.path:
+    sys.path.insert(0, _SCENE_TOOLS)
 
 import numpy as np      # noqa: E402
 import e_scene          # noqa: E402

@@ -1,0 +1,19 @@
+{
+  "name": "目視：駆動モード比較 C（colored＝色付きノイズ1/f^β、粗いシナジーあり）",
+  "note": "2026-08-07。測定が対応。太郎の自発運動の『駆動モード』を見比べたいという依頼を受けて作成。Bとの唯一の違いはtaro.synergy=trueのみ（脚・左右腕のシナジー相関を色付きノイズに追加で混ぜる。cpg.py CPG参照）。学習済みモデルは E/logs/selfmodel_v3/model_柵なし_線形_seed0.pt（A・Bと完全に同一のモデル・シーン・月齢・K・探索std）。追加学習はしない。起動時にE_REALTIME=1を必ず明示すること。起動ログに『[脊髄CPG] 色付き探索ON: β=0.8 synergy=True』と出ることを確認してから比較に使うこと。",
+  "scene": "新生児_仰向け_柵なし",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 4.0,
+    "model": "E/logs/selfmodel_v3/model_柵なし_線形_seed0.pt",
+    "noise": "colored",
+    "beta": 0.8,
+    "synergy": true
+  },
+  "run": {
+    "type": "view",
+    "seed": 0,
+    "view_std": 0.174
+  },
+  "plugins": {}
+}

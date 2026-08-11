@@ -1,0 +1,23 @@
+{
+  "name": "[検証専用・削除可] 柵ありシーンでworld_targets=fence_postの外界接触検出確認",
+  "note": "2026-08-05。実装の検証。新生児_仰向け_柵あり（fence=True, age_months=0）でworld_targets:[\"fence_post\"]を指定し、外界接触(ext)が1回以上検出されることを確認する。",
+  "scene": "新生児_仰向け_柵あり",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 0.0
+  },
+  "run": {
+    "type": "train",
+    "steps": 4000,
+    "seed": 0,
+    "checkpoint": 200,
+    "csv": "E/logs/_verify_contact_reward/world_fence_yes.csv"
+  },
+  "plugins": {
+    "contact_reward": {
+      "toucher": "right_palm",
+      "touched_groups": ["head", "chest"],
+      "world_targets": ["fence_post"]
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "name": "目視：筋活性化tau比較（10ms基準 対 60ms・月齢4ヶ月固定）",
+  "note": "2026-08-08。震え問題の候補『筋活性化の時定数tau』の目視確認。数値上はtauが大きいほど区切り/秒・手の速度が単調に減った（10ms:13.033/秒 対 60ms:11.367/秒）が、効果が小さく主因とは言えなさそうだった。Viewerで脳A(10ms基準)・脳B(60ms)を並べて実際の動きを見比べる。学習済みモデルはE/logs/muscle_tau/配下（2026-08-08、18000step・1シード）。",
+  "scene": "新生児_仰向け_柵なし",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 4.0,
+    "model": "E/logs/muscle_tau/model_10ms_seed0.pt",
+    "view_model_b": "E/logs/muscle_tau/model_60ms_seed0.pt",
+    "view_std": 0.174
+  },
+  "run": {
+    "type": "edit"
+  },
+  "plugins": {}
+}

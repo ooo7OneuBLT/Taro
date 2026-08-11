@@ -1,0 +1,28 @@
+{
+  "name": "0ヶ月仰向け(屈曲版)でreach_self(reach_success/double_touch)が動くかの短時間確認",
+  "note": "仕様：作業記録（非公開） 5・6節。学習ロジック・報酬は一切見ない。1000ステップ・1回だけ・GPU負荷対策で1本ずつ順番に実行する。scene=新生児_仰向け_柵なし（既存、変更なし）。",
+  "scene": "新生児_仰向け_柵なし",
+  "taro": {
+    "goal_babbling": true,
+    "goal_space": "reach_self",
+    "goal_trajectory": true,
+    "goal_traj_len": 25,
+    "goal_home_prob": 0.1,
+    "goal_negative_control": false,
+    "reach_arm_side": "right",
+    "touch": true,
+    "somatosensory": true,
+    "vision": false
+  },
+  "run": {
+    "type": "train",
+    "steps": 1000,
+    "seed": 0,
+    "checkpoint": 500,
+    "csv": "E/logs/verify_0mo_flexion_check/flexion_true_seed0.csv"
+  },
+  "plugins": {
+    "reach_success": true,
+    "double_touch": true
+  }
+}

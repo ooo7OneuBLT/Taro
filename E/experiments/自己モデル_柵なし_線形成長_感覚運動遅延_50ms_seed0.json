@@ -1,0 +1,28 @@
+{
+  "name": "自己モデル：柵なし・線形成長・感覚運動遅延candidate_50ms（seed0）",
+  "note": "2026-08-02。候補5の検証：感覚遅延50ms（MIMo grows!のIV-Cが比較した0/50/200msのうちの中間値、成人の反応時間文献からの転用[Tier2]）・運動遅延は本環境で表せる最小値10ms(=1 env.step、dt=timestep0.005s*frame_skip2)。`自己モデル_柵なし_線形成長_感覚運動遅延_0ms_seed0.json` が基準。動きの区切りが人間の2倍細かい問題（太郎12.5〜13.5個/秒 vs 人間5.3個/秒）を、伝達遅延ゼロが原因とする仮説の検証。この数値は乳児向けの確立した推奨値ではない（乳児の一次文献の値はモロー反射の潜時：目視450ms[Bijesh 2013・Tier1だが粗い]／光学式117〜129ms[Rönnqvist 1995・Tier2孫引き]で、成人反応時間の50msとは一致しない）。run/tools/check_movement_units.py で基準と比較すること。",
+  "scene": "新生児_仰向け_柵なし",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 0.0,
+    "age_to": 4.0,
+    "age_start": 0,
+    "age_ramp": 18000,
+    "age_every": 500,
+    "sensory_delay_ms": 50,
+    "motor_delay_ms": 10,
+    "save": "E/logs/sensorimotor_delay/model_50ms_seed0.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 18000,
+    "seed": 0,
+    "checkpoint": 500,
+    "csv": "E/logs/sensorimotor_delay/50ms_seed0.csv"
+  },
+  "plugins": {
+    "self_model": true,
+    "hand_in_view": true,
+    "movement_units": true
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "name": "目視：自発運動（柵なし・線形成長 seed0・4ヶ月）今夜の『一番良かった自発運動』確認用",
+  "note": "2026-08-05。測定が対応。ユーザーが『今までで一番良かった自発運動』を自分の目でViewerで確認したいという依頼を受けて作成。E/docs/figures/spontaneous_movement_topdown_flat_2026-08-03.mp4（既に目視で確認済み・脚が活発に動く拘束のない自発運動）を作った run/tools/record_topdown_flat_clip.py と全く同じ構成（モデル・シーン・月齢・K・探索std）を、run/main.pyのrun.type=viewでライブに再現する。taro欄は既存の目視専用実験ファイル『目視_柵なし_2シードを見比べる.json』（2026-07-31作成・A/B見比べモード）からview_model_bを外し、seed0単独のシンプルな目視に絞ったもの。学習済みモデルは E/logs/selfmodel_v3/model_柵なし_線形_seed0.pt（自己モデル学習：柵なし・線形成長0→4ヶ月・18000回・筋肉モード・触覚なし）。追加学習はしない。",
+  "scene": "新生児_仰向け_柵なし",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 4.0,
+    "model": "E/logs/selfmodel_v3/model_柵なし_線形_seed0.pt"
+  },
+  "run": {
+    "type": "view",
+    "seed": 0,
+    "view_std": 0.174
+  },
+  "plugins": {}
+}

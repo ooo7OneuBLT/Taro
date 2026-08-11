@@ -43,6 +43,18 @@ class Plugin:
     def on_step(self, ctx):
         """毎ステップ。重い処理は書かない（学習が遅くなる）。"""
 
+    def on_step_late(self, ctx):
+        """毎ステップ、報酬(rew)・RPE(rpe)が確定した"後"に呼ばれる（2026-08-03新設）。
+
+        【なぜ、2026-08-03】on_step は rew/rpe が確定する"前"に呼ばれる
+        （`run/trainer.py` の呼び出し順が先）。rew・rpeを扱いたいプラグインは
+        on_step ではなく必ずこちらを実装する。ctx.last_reward
+        （{"rew":..., "rpe":...}）から読む。
+        既定は何もしない空実装＝既存プラグイン（reach_success・double_touch・
+        toy_touch ほか）は誰もこれを実装しておらず、追加しても既存実験の
+        挙動・学習の数値は変わらない。
+        """
+
     def on_body_change(self, ctx):
         """体を作り直した直後（体を育てる実験）。model/data が別物になっている。
 

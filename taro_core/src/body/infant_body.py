@@ -612,6 +612,13 @@ TONE_TARGETS = {
 #   目標 105.3 ± 14.2度（Farmania 2017）に対し **0.2 が差 2.1度** で最も近い。
 # このプロジェクトで珍しく、目視でなく文献の実測から決まった値 [Tier2]。
 #   注意：暫定で置いていた 0.02 は10倍小さく、較正しなければ気づけなかった。
+#
+# 【2026-08-08】この定数はもうどこからも直接は参照されない（旧 apply_flexor_tone は
+#   `infant_limbs.apply_limb_tone` の `profile="newborn_flexor"` へ統合され、剛性は
+#   重力から逆算する方式＝`tone_from_gravity(..., hold_deg=8.38)` に置き換わった）。
+#   ただし hold_deg=8.38 は「0ヶ月体・肘の重力モーメント÷この0.2」から逆算した値
+#   （`degrees(τ/0.2)`）であり、この0.2という較正の経緯そのものが hold_deg の根拠に
+#   なっている。記録として残す。
 TONE_STIFFNESS = 0.2
 # 屈筋トーンが解消する月齢。注意[Tier3] 一次典拠が見つかっていない（2026-07-20/26 の調査）。
 # 拘縮の解消（膝 21.4→10.7(3ヶ月)→3.3度(6ヶ月)、Broughton 1993）を目安に置く。
@@ -782,56 +789,16 @@ def apply_physiological_flexion(model, age=0.0, stiffness=None, verbose=True,
     return dict(n=n, mode="range", clamped=clamped)
 
 
-def apply_flexor_tone(model, age=0.0, stiffness=None, targets=None,
-                      verbose=True, data=None):
-    """屈筋トーン＝安静姿勢へ戻ろうとする弱いバネ（伸張反射の近似）。
-
-    上の `apply_physiological_flexion`（壁＝伸展の限界）と**併用する**。
-    壁は「これ以上は伸ばせない」を決めるだけで、屈曲側の深さを決めない。
-    新生児が脱力しても手足が曲がったままなのは、曲げる筋肉が常にうっすら
-    働いているから（＝屈筋トーン）。それをバネで近似する。
-
-    注意：2026-07-25 の "spring" 実装との違い：あれはバネの中立位置に
-      **拘縮の限界**（膝-21度）を使っていたので、深く曲がった肘を逆に伸ばしていた。
-      ここでは中立位置を**安静姿勢**（膝-107度）にする。根拠は上の TONE_TARGETS 参照。
-
-    Args:
-        data: 渡すと現在の qpos も目標角へ揃える（初期姿勢を安静姿勢にする）
-    """
-    import numpy as np
-    if float(age) >= TONE_UNTIL_MO:
-        if verbose:
-            print(f"[tone] age={age}mo >= {TONE_UNTIL_MO}mo: no correction")
-        return dict(n=0)
-    k = TONE_STIFFNESS if stiffness is None else float(stiffness)
-    tgts = TONE_TARGETS if targets is None else dict(targets)
-    n, applied = 0, []
-    for base, target in tgts.items():
-        tgt = np.radians(target)
-        for side in ("right_", "left_"):
-            try:
-                j = model.joint("robot:" + side + base)
-            except Exception:
-                continue
-            jid = int(j.id)
-            qadr = int(model.jnt_qposadr[jid])
-            lo, hi = float(model.jnt_range[jid, 0]), float(model.jnt_range[jid, 1])
-            tgt_c = float(np.clip(tgt, lo, hi))     # 壁の内側に収める
-            model.qpos_spring[qadr] = tgt_c
-            model.jnt_stiffness[jid] = k
-            # 注意：【2026-07-26 修正】model.qpos0 は書き換えない。
-            #   MuJoCo の関節の回転は qpos - qpos0 なので、qpos0 を動かすと
-            #   角度のゼロ点ごとずれる。ここで qpos0 = qpos = -105度 にしていたため
-            #   回転が 0 になり、**数値は曲がっているのに実際は真っ直ぐ**だった
-            #   （→ チェックリスト項49）。初期姿勢は data.qpos だけで設定する。
-            if data is not None:
-                data.qpos[qadr] = tgt_c
-            n += 1
-        applied.append(f"{base}{target:+.0f}")
-    if verbose:
-        print(f"[tone] age={age}mo: {n} joints, stiffness={k} ({' '.join(applied)}) "
-              f"[Tier2: 肘はarm recoil実測／Tier3: 股・膝は目視（安静時の文献なし）]")
-    return dict(n=n, stiffness=k)
+# 【2026-08-08 統合】旧 apply_flexor_tone（屈筋トーン＝安静姿勢へ戻ろうとする弱いバネ）は
+#   `infant_limbs.apply_limb_tone` の `profile="newborn_flexor"` へ統合した
+#   （設計：作業記録（非公開）。
+#   実装：作業記録（非公開））。
+#   剛性は「全関節0.2固定」から「重力から逆算（tone_from_gravity）」に置き換えた。
+#   旧関数本体は削除済み。呼び出しは下の apply_runtime_corrections を参照。
+#   上の TONE_TARGETS・TONE_STIFFNESS・TONE_UNTIL_MO の3定数は、
+#   `infant_limbs.apply_limb_tone` の `profile="newborn_flexor"` から遅延importで
+#   参照される（TONE_TARGETS・TONE_UNTIL_MOはそのまま値として、TONE_STIFFNESSは
+#   もう直接参照されないが、旧剛性0.2との等価性を較正した経緯の記録として残す）。
 
 
 def apply_runtime_corrections(model, data, age, neck=True, limbs=True, head_mass=True,
@@ -849,6 +816,17 @@ def apply_runtime_corrections(model, data, age, neck=True, limbs=True, head_mass
     - **四肢の筋力**（`infant_limbs`）：同じ理由で四肢も発達の向きが逆転しているのを解消。
 
     注意：MIMo本体は書き換えない（Git管理外で再現性が失われるため）＝実行時に上書きする。
+
+    注意（2026-08-10・二重の入口）：`flexion=True` かつ `tone=True`（既定True）のとき、
+    下の本体で `apply_limb_tone(model, data, age, profile="newborn_flexor",
+    stiffness=tone_stiffness)` を呼び、四肢の筋緊張（バネ）を起動する。これは
+    `run/scene_tools/e_scene.py` の `_apply_limb_tone()`（`scene["setup"]["limb_tone"]`を読む、
+    ViewerのGUIチェックボックスもここだけを見ている）とは**完全に別の入口**。
+    GUIとの整合は `setup.limb_tone` 側でのみ保証されており、この関数の `flexion` 引数だけで
+    バネを起動するシーンでは、GUI表示と物理が食い違いうる。この食い違いの検出（警告）は
+    `run/scene_tools/e_scene.py` の `build()` 側で行っている（`setup.limb_tone` が
+    未設定のまま `flexion=True` のときに警告を出す）。詳細は監査
+    作業記録（非公開）「中1」。
     """
     # 頭の質量は首・四肢より先。首の補正が頭の質量を前提に計算するため。
     if head_mass:
@@ -873,8 +851,12 @@ def apply_runtime_corrections(model, data, age, neck=True, limbs=True, head_mass
         apply_physiological_flexion(model, float(age), stiffness=flexion_stiffness,
                                     data=data)
         # 屈筋トーン（バネ）は壁の後。壁の内側に目標角を収めるため順序が必要。
+        # 【2026-08-08】旧 apply_flexor_tone を統合し、infant_limbs.apply_limb_tone の
+        #   profile="newborn_flexor" を呼ぶ形に変えた（本体は infant_limbs.py に移設）。
         if tone:
-            apply_flexor_tone(model, float(age), stiffness=tone_stiffness, data=data)
+            from infant_limbs import apply_limb_tone
+            apply_limb_tone(model, data, float(age), profile="newborn_flexor",
+                            stiffness=tone_stiffness)
     # 首の筋緊張は生理的屈曲（flexion）と独立に効かせる。
     #   屈曲の壁（jnt_range）は四肢だけの話で、首には壁が無い。
     #   首にバネが無いと重力で頭が倒れ続ける（実測：120秒で -25→+45度、止まらない）。

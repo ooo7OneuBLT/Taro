@@ -1,0 +1,31 @@
+{
+  "name": "頭へのダブルタッチ→報酬 の配線確認（seed0・1000ステップ）",
+  "note": "仕様：作業記録（非公開） 3節。double_touch_検出確認_6000_seed0.jsonをコピーし、taro.double_touch_bonusを明示的に設定した版。既存ログ(double_touch_check配下)は一切上書きしない。double_touch_thresholdは0.05に下げている＝これは配線確認専用の値（1000ステップ以内に自然な頭タッチが起きるまで待てないため）。本番の比較実験(次段階)は既定の0.5に戻して行うこと。",
+  "scene": "リーチング_リクライニング60度",
+  "taro": {
+    "goal_babbling": true,
+    "goal_space": "reach_self",
+    "goal_trajectory": true,
+    "goal_traj_len": 25,
+    "goal_home_prob": 0.1,
+    "goal_negative_control": false,
+    "reach_arm_side": "right",
+    "touch": true,
+    "somatosensory": true,
+    "vision": true,
+    "double_touch_threshold": 0.05,
+    "double_touch_bonus": 0.2,
+    "save": "E/logs/double_touch_reward_check/wiring_check_seed0_model.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 1000,
+    "checkpoint": 100,
+    "seed": 0,
+    "csv": "E/logs/double_touch_reward_check/wiring_check_seed0.csv"
+  },
+  "plugins": {
+    "reach_success": true,
+    "double_touch": true
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "name": "[検証専用・削除可] self_model拡張(inverse/inverse_exec/closed_loop)の配線確認（seed0）",
+  "note": "2026-08-06。追加依頼1の検証用。300stepの短い学習後、report()でinverse/inverse_exec/closed_loopが例外なく完走し値が出るかを確認する。",
+  "scene": "リーチング_リクライニング60度_自己接触版",
+  "taro": {
+    "vision": false,
+    "save": "E/logs/_verify_effcopy/probes_seed0_model.pt"
+  },
+  "run": {"type": "train", "steps": 300, "checkpoint": 100, "seed": 0,
+          "csv": "E/logs/_verify_effcopy/probes_seed0.csv"},
+  "plugins": {"self_model": {"inverse": true, "inverse_exec": true, "closed_loop": true}}
+}

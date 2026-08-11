@@ -18,9 +18,21 @@
   record_video       … 学習後の太郎を等速で録画（指標が退化を高評価する罠への対抗＝目視）
 """
 import os
+import sys
 import numpy as np
 import torch
 import torch.nn.functional as F
+
+# 【なぜ、2026-08-06】しきい値・反復回数の既定値を一元化した場所（監査指摘・
+# 検証の落とし穴チェックリスト項30）。E/scripts はスクリプト自身のディレクトリが
+# sys.path に自動で入る形で動くため（e_growth_train.py が「import e_probes」を
+# 素で書けているのと同じ理由）、run パッケージを読むには Taro ルートを明示的に
+# sys.path へ足す必要がある。
+_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                    os.pardir, os.pardir))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+from run.plugins.common import probe_defaults as _pd
 
 mse = F.mse_loss
 
@@ -35,7 +47,14 @@ class ProbeContext:
 
     def __init__(self, *, brain, fusion, target_fusion, nat_head, env, rescale_action,
                  zc, act_mean, step_k, ln_prop, reset_state, infer_goal_action,
-                 state, n_act, n_eval, K, DT, seed, log_dir):
+                 state, n_act, n_eval, K, DT, seed, log_dir, effcopy=True):
+        # effcopy: 既定True＝これまでのE側の無条件コピーと完全に同じ挙動を保つ。
+        # 【なぜ、2026-08-06】C側(run_c_metrics_ac_lr.py)にはC_EFFCOPYという設定
+        # （遠心性コピーのON/OFF）があるが、E側にはまだ相当する設定が無い
+        # （実装担当が事前に確認済み・grep確認済み）。この引数はC側の
+        # evaluate等をこのファイルへ委譲統合するために追加したもので、
+        # E側の既存の呼び出し（常にeffcopy未指定＝True）では挙動は一切変わらない。
+        self.effcopy = effcopy
         self.brain = brain
         self.fusion = fusion
         self.target_fusion = target_fusion
@@ -68,6 +87,27 @@ class ProbeContext:
         self.seed = seed
         self.log_dir = log_dir
 
+    def advance_state(self, hn, next_a):
+        """毎tick共通の状態更新：GRU隠れ状態を進め、prev_a（遠心性コピー）を更新する。
+
+        【2026-08-06追記】C側(C/scripts/run_c_metrics_ac_lr.py)で、全く同じ
+        「state["hidden"]・state["prev_a"]を更新する」処理が、学習ループ1箇所＋
+        評価関数6箇所に別々にコピーされていたため、設定変更（C_EFFCOPY追加）時に
+        学習ループしか直さず評価関数側を見落とすバグが起きた（`検証の落とし穴
+        チェックリスト.md`項98）。このE側の測定器ファイルにも同じ6箇所の重複が
+        あったため、監査の指摘（2026-08-06）を受けて同様に一本化した。今後
+        同種の設定（遠心性コピーのON/OFFなど）を足すときは、必ずこの関数だけを
+        直せば全箇所に反映される。
+
+        【2026-08-06追記】effcopy引数を追加（既定True）。C側の
+        run_c_metrics_ac_lr.py がこのProbeContextへ委譲統合できるようにするための
+        ものだが、E側の既存呼び出し（effcopy未指定）では常にTrue＝以前と同じ
+        無条件コピーのまま挙動は変わらない。
+        """
+        self.state["hidden"] = hn.detach()
+        if self.effcopy:
+            self.state["prev_a"] = next_a.detach()
+
 
 def evaluate(ctx):
     fusion, target_fusion, ln_prop = ctx.fusion, ctx.target_fusion, ctx.ln_prop
@@ -86,7 +126,7 @@ def evaluate(ctx):
         self_err.append(mse(clp + pd, nlp).item()); ep.append(mse(clp, nlp).item())
         pdel.append(pd.numpy()); adel.append((nlp - clp).numpy())
         Zs.append(z); acts.append(a); nx.append(nlp); cu.append(clp)
-        state["hidden"] = hn.detach(); state["prev_a"] = a
+        ctx.advance_state(hn, a)
         if term:
             reset_state()
     N = len(Zs); correct = total = 0; other_errs = []
@@ -107,7 +147,7 @@ def evaluate(ctx):
     return classify, margin, corr, persist
 
 
-def agency_probe(ctx, n=30):
+def agency_probe(ctx, n=_pd.AGENCY_PROBE_N):
     # 遠心性コピー(=太郎の意図a_self)は両トライアル共通。体が自分の意図どおり(自己)か
     # 外部指令(外因)かだけが違う。GRUに渡す前回行動は常に「太郎自身の意図」。
     fusion, target_fusion, ln_prop = ctx.fusion, ctx.target_fusion, ctx.ln_prop
@@ -124,7 +164,7 @@ def agency_probe(ctx, n=30):
         nlp = ln_prop(state["obs"])
         self_errs.append(mse(clp + pred, nlp).item())
         self_mag.append((nlp - clp).abs().mean().item())
-        self_acts.append(a); state["hidden"] = hn.detach(); state["prev_a"] = a
+        self_acts.append(a); ctx.advance_state(hn, a)
         if term:
             reset_state()
     perm = np.random.permutation(len(self_acts))
@@ -138,7 +178,7 @@ def agency_probe(ctx, n=30):
         nlp = ln_prop(state["obs"])
         ext_errs.append(mse(clp + pred, nlp).item())
         ext_mag.append((nlp - clp).abs().mean().item())
-        state["hidden"] = hn.detach(); state["prev_a"] = a_self  # 遠心性コピーは意図
+        ctx.advance_state(hn, a_self)  # 遠心性コピーは意図
         if term:
             reset_state()
     correct = total = 0
@@ -150,7 +190,8 @@ def agency_probe(ctx, n=30):
     return agency, mag_ratio
 
 
-def inverse_probe(ctx, n=60, n_steps=40, n_restarts=3, lr_inf=0.1):
+def inverse_probe(ctx, n=_pd.INVERSE_PROBE_N, n_steps=_pd.INVERSE_PROBE_STEPS,
+                   n_restarts=_pd.INVERSE_PROBE_RESTARTS, lr_inf=_pd.INVERSE_PROBE_LR):
     """逆モデルStage1診断：凍結した順モデル(nat_head)を"反転"して、望む次感覚に当てる
     行動を推論できるか。goal＝実際に到達した次固有感覚(到達可能)。
     主眼＝①行動レバレッジ(err_random − err_infer：行動が予測にどれだけ効くか)、
@@ -184,7 +225,7 @@ def inverse_probe(ctx, n=60, n_steps=40, n_restarts=3, lr_inf=0.1):
         ei.append(best_e); ea.append(ferr(a_real).item())
         er.append(ferr(torch.empty(n_act).uniform_(-1.0, 1.0)).item())
         astar_all.append(best_a.numpy()); areal_all.append(a_real.numpy())
-        state["hidden"] = hn.detach(); state["prev_a"] = a_real
+        ctx.advance_state(hn, a_real)
         if term:
             reset_state()
     A = np.concatenate(astar_all); B = np.concatenate(areal_all)
@@ -201,7 +242,8 @@ def inverse_probe(ctx, n=60, n_steps=40, n_restarts=3, lr_inf=0.1):
     return {"infer_over_random": mi / max(mr, 1e-9), "recover_corr": rec}
 
 
-def inverse_exec_probe(ctx, n=40, n_steps=40, n_restarts=3, lr_inf=0.1):
+def inverse_exec_probe(ctx, n=_pd.INVERSE_EXEC_PROBE_N, n_steps=_pd.INVERSE_EXEC_PROBE_STEPS,
+                        n_restarts=_pd.INVERSE_EXEC_PROBE_RESTARTS, lr_inf=_pd.INVERSE_EXEC_PROBE_LR):
     """逆モデルStage1.5＝実行テスト：推論a*を"実際にMIMoで実行"し、現実の次感覚が
     目標に届くか。同じ物理状態(qpos/qvel)から a_real / a* / random を実行して現実の
     到達誤差を比較（MuJoCo state save/restore でカウンターファクト）。
@@ -250,7 +292,7 @@ def inverse_exec_probe(ctx, n=40, n_steps=40, n_restarts=3, lr_inf=0.1):
         mi_model.append(best_e)
         # 実トラジェクトリを a_real で1歩進める（他プローブと同様に状態を歩かせる）
         state["obs"], term = step_k(ctx._to_env_ctrl(a_real))
-        state["hidden"] = hn.detach(); state["prev_a"] = a_real
+        ctx.advance_state(hn, a_real)
         if term:
             reset_state()
     ds, dr, df = float(np.mean(d_star)), float(np.mean(d_rand)), float(np.mean(d_floor))
@@ -265,7 +307,8 @@ def inverse_exec_probe(ctx, n=40, n_steps=40, n_restarts=3, lr_inf=0.1):
     return {"star_over_random": ds / max(dr, 1e-9), "model_err": mm}
 
 
-def closed_loop_probe(ctx, goal_buf, n=30, max_reach=10):
+def closed_loop_probe(ctx, goal_buf, n=_pd.CLOSED_LOOP_PROBE_N,
+                       max_reach=_pd.CLOSED_LOOP_PROBE_MAX_REACH):
     """C4診断：閉ループ制御 vs 開ループ で、目標姿勢へどれだけ届くか。
     目標g＝過去に経験した姿勢(goal_buf)。同じ物理状態(MuJoCo save/restore)から比較。
     補正の刻み k_inner ＝ K（順モデルの予測幅に合わせる。第1版はK//8でミスマッチ→負けた）。
@@ -325,7 +368,7 @@ def closed_loop_probe(ctx, goal_buf, n=30, max_reach=10):
         dr.append(mse(o_rand, g).item()); dn.append(mse(clp0, g).item()); steps.append(nstep)
         mj.set_state(qpos, qvel)  # 実トラジェクトリを1リーチぶん進める
         state["obs"], term = step_k(ctx._to_env_ctrl(a_open))
-        state["hidden"] = hn0.detach(); state["prev_a"] = a_open
+        ctx.advance_state(hn0, a_open)
         if term:
             reset_state()
     mc, mo, mr, mn, ms = (float(np.mean(dc)), float(np.mean(do)), float(np.mean(dr)),

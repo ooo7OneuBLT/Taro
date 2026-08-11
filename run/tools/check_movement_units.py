@@ -20,7 +20,7 @@ import sys
 
 sys.stdout.reconfigure(encoding="utf-8")
 _R = r"C:\claude\AI\Taro"
-for p in ("E/scripts", "D/scripts", "taro_core/src/body", "taro_core/src/brain",
+for p in ("run/scene_tools", "D/scripts", "taro_core/src/body", "taro_core/src/brain",
           "taro_core/src/senses", "taro_core/src/wrapper", "MIMo", ""):
     sys.path.insert(0, os.path.join(_R, p))
 os.chdir(_R)

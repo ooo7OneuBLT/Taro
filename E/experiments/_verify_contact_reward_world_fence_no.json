@@ -1,0 +1,23 @@
+{
+  "name": "[検証専用・削除可] 柵なしシーンでworld_targets=fence_postの偽陽性確認",
+  "note": "2026-08-05。実装の検証。新生児_仰向け_柵なし（fence=False, age_months=0）でworld_targets:[\"fence_post\"]を指定し、外界接触(ext)が0のままであることを確認する（偽陽性が無いことの確認）。",
+  "scene": "新生児_仰向け_柵なし",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 0.0
+  },
+  "run": {
+    "type": "train",
+    "steps": 1000,
+    "seed": 0,
+    "checkpoint": 200,
+    "csv": "E/logs/_verify_contact_reward/world_fence_no.csv"
+  },
+  "plugins": {
+    "contact_reward": {
+      "toucher": "right_palm",
+      "touched_groups": ["head", "chest"],
+      "world_targets": ["fence_post"]
+    }
+  }
+}

@@ -10,6 +10,11 @@ E/logs/
 # リプレイビューア用に書き出したトレース（大量・生成物）
 replayViewer/data/
 
+# AppMap（コード実行の可視化ツール。試行用、成果物としては管理しない）
+appmap.yml
+tmp/appmap/
+*.appmap.json
+
 # Python
 __pycache__/
 *.pyc
@@ -78,7 +83,10 @@ doc/_private/
 doc/研究日誌まとめ_A-E.md
 
 # Viewer のランチャーが覚えている「前回開いたシーン」（ローカルの状態）
-E/scenes/_前回開いたシーン.txt
+run/scenes/_前回開いたシーン.txt
 
 # 配線図（run/tools/wiring.py が実験ファイルごとに生成する）→ 生成物なので追跡しない
 E/experiments/配線図.html
+
+# 作業台帳（Claude自身の作業ログ。太郎の研究記録とは別レイヤーなので非公開）
+doc/作業台帳.md

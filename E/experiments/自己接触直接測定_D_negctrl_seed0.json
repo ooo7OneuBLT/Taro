@@ -1,0 +1,31 @@
+{
+  "name": "自己接触の直接測定：D陰性対照 seed0",
+  "scene": "リーチング_リクライニング60度",
+  "taro": {
+    "goal_babbling": true,
+    "goal_space": "reach_self",
+    "goal_trajectory": true,
+    "goal_traj_len": 25,
+    "goal_home_prob": 0.1,
+    "goal_negative_control": true,
+    "reach_arm_side": "right",
+    "touch": true,
+    "somatosensory": true,
+    "vision": true,
+    "save": "E/logs/goal_stage1_v2/D_negctrl_seed0_model.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 6000,
+    "checkpoint": 500,
+    "seed": 0,
+    "csv": "E/logs/goal_stage1_v2/D_negctrl_seed0.csv"
+  },
+  "plugins": {
+    "self_model": true,
+    "hand_in_view": true,
+    "toy_touch": true,
+    "movement_units": true,
+    "reach_success": true
+  }
+}

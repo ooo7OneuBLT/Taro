@@ -1,0 +1,23 @@
+{
+  "name": "[検証専用・削除可] 柵ありシーンでworld_targets=[](絞り込みなし)の外界接触内訳確認",
+  "note": "2026-08-05。実装の検証。world_targets:[]で太郎自身以外の全geomを対象にし、right_palmが実際に何に触れているかの内訳を見る（fence_postが低頻度な場合の切り分け）。",
+  "scene": "新生児_仰向け_柵あり",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 0.0
+  },
+  "run": {
+    "type": "train",
+    "steps": 4000,
+    "seed": 0,
+    "checkpoint": 200,
+    "csv": "E/logs/_verify_contact_reward/world_fence_yes_unrestricted.csv"
+  },
+  "plugins": {
+    "contact_reward": {
+      "toucher": "right_palm",
+      "touched_groups": ["head", "chest"],
+      "world_targets": []
+    }
+  }
+}

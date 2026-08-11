@@ -1,0 +1,23 @@
+{
+  "name": "手先位置の目標表現（案C）検証：条件C 旧実装 prop_full（seed1）",
+  "note": "2026-08-02。Goal Babbling段階1の4条件比較のうちC。2026-07-30に『有害』と判定された旧実装（固有感覚まるごとを目標にする、goal_space=prop_full＝既定）の再現。touchはOFF（2026-07-30の元の実測条件に合わせる）。仕様2節の論点2：もしCがD（陰性対照）と有意差なしと判明したら、この『有害』判定は撤回される（ユーザーが記録に反映）。設計：作業記録（非公開）。",
+  "scene": "リーチング_リクライニング60度",
+  "taro": {
+    "goal_babbling": true,
+    "goal_space": "prop_full",
+    "vision": true
+  },
+  "run": {
+    "type": "train",
+    "steps": 6000,
+    "seed": 1,
+    "checkpoint": 500,
+    "csv": "E/logs/goal_stage1/C_legacy_seed1.csv"
+  },
+  "plugins": {
+    "self_model": true,
+    "hand_in_view": true,
+    "toy_touch": true,
+    "movement_units": true
+  }
+}

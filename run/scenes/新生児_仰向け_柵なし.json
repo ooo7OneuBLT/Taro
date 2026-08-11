@@ -45,7 +45,31 @@
       "target_deg": null,
       "stiffness": null
     },
-    "limb_tone": null,
+    "limb_tone": {
+      "hold_deg": 20.0,
+      "groups": [
+        "shoulder",
+        "elbow",
+        "hip_sagittal",
+        "knee"
+      ],
+      "target_deg": {
+        "right_hip1": -71.0,
+        "left_hip1": -71.0,
+        "right_hip2": -36.0,
+        "left_hip2": -36.0,
+        "right_knee": -90.0,
+        "left_knee": -90.0,
+        "right_shoulder_horizontal": 58.0,
+        "left_shoulder_horizontal": 58.0,
+        "right_shoulder_ad_ab": 3.0,
+        "left_shoulder_ad_ab": 3.0,
+        "right_shoulder_rotation": -65.0,
+        "left_shoulder_rotation": -65.0,
+        "right_elbow": -111.0,
+        "left_elbow": -111.0
+      }
+    },
     "head_hold": null,
     "body_support": null
   },
@@ -262,10 +286,10 @@
     "ngeom": 78,
     "model": {
       "spring_n": 15,
-      "spring_k_sum": 3.2,
+      "spring_k_sum": 5.0055,
       "spring_target_sum_deg": 730.611,
       "jnt_range_sum": 30.4385,
-      "damping_sum": 0.9896,
+      "damping_sum": 1.0627,
       "seat": null,
       "body_qpos0": [
         0.0,
@@ -277,7 +301,7 @@
         0.0
       ]
     },
-    "config_hash": "9e82c8d6c907",
+    "config_hash": "74daf50bc201",
     "head_angles_deg": {
       "head_swivel": -0.28,
       "head_tilt": -36.32,
@@ -297,17 +321,17 @@
     "settle": {
       "seconds": 3.0,
       "head_drift_deg": {
-        "head_swivel": 0.12,
-        "head_tilt": 1.3,
-        "head_tilt_side": 0.12
+        "head_swivel": 0.56,
+        "head_tilt": 1.59,
+        "head_tilt_side": 1.2
       },
       "trunk_tilt_before": 11.67,
-      "trunk_tilt_after": 11.23,
-      "eye_drift_m": 0.00135,
+      "trunk_tilt_after": 11.39,
+      "eye_drift_m": 0.04064,
       "toy_drift_m": null,
-      "worst_angle_deg": 1.3,
-      "ok": true,
-      "summary": "3秒進めた結果：  首の最大ずれ 1.30度  目の移動 0.13cm  → 姿勢は保てます"
+      "worst_angle_deg": 1.59,
+      "ok": false,
+      "summary": "3秒進めた結果：  首の最大ずれ 1.59度  目の移動 4.06cm  → 注意この姿勢は保てません"
     }
   }
 }

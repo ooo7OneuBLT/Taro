@@ -126,6 +126,39 @@ _BODY_GROUPS = [
     ("left_foot", ["left_foot", "left_toes", "left_big_toe"], "lower_limb"),
 ]
 
+def body_names_of_group(group_name):
+    """触覚グループ名（例："right_palm"）から、実際のMuJoCoのbody名のリストを引く。
+
+    【なぜ要るか、2026-08-05】`_BODY_GROUPS` の1つ目の要素（グループ名）は
+    人間に分かりやすい名前で、2つ目の要素（実際のMuJoCoのbody名リスト）とは
+    必ずしも一致しない（例："right_palm" → 実body名は ["right_hand"]）。
+    グループ名から「そのグループが実際にどのbodyを指すか」を引きたい呼び出し側
+    （例：`run/plugins/common/contact_reward.py` の world_toucher_bodies の
+    自動導出）向けに、この対応表を検索するだけの読み取り専用の関数を用意する。
+
+    注意：この関数は `_BODY_GROUPS` を検索するだけで、既存のクラス・関数・
+    挙動には一切影響しない（追記のみ）。
+
+    Args:
+        group_name: str  例 "right_palm"・"head"・"chest"
+
+    Returns:
+        list[str]  実際のMuJoCoのbody名のリスト（コピー。呼び出し側が書き換えても
+        `_BODY_GROUPS` 自体は壊れない）
+
+    Raises:
+        ValueError: group_name が `_BODY_GROUPS` に存在しないとき。
+            既知のグループ名の一覧をメッセージに含める。
+    """
+    for gname, body_names, _category in _BODY_GROUPS:
+        if gname == group_name:
+            return list(body_names)
+    known = [gname for gname, _bn, _cat in _BODY_GROUPS]
+    raise ValueError(
+        f"body_names_of_group: 未知のグループ名 '{group_name}'。\n"
+        f"  既知のグループ名: {known}")
+
+
 # 一次体性感覚野の割り当て（％）。[Tier1] Saadon-Grosman, Loewenstein, Arzy 2020
 #   *Hum Brain Mapp* 41(13):3620-3646
 # 注意：唇28.9％は head に合算している（MIMoに唇のbodyが無い）。

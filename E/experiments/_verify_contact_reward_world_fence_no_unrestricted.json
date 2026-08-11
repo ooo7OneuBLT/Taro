@@ -1,0 +1,23 @@
+{
+  "name": "[検証専用・削除可] 柵なしシーンでworld_targets=[](絞り込みなし)の偽陽性確認",
+  "note": "2026-08-05。実装の検証。新生児_仰向け_柵なし（fence_postのgeom自体が存在しないシーン）でworld_targets:[\"fence_post\"]を指定するとQ2の設計どおりAssertionErrorで止まる（別途確認済み）。ここではworld_targets:[]（絞り込みなし）で走らせ、外界物体の内訳に'fence_post'という名前が絶対に現れないこと（存在しないgeomをでっち上げていないこと）を確認する。",
+  "scene": "新生児_仰向け_柵なし",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 0.0
+  },
+  "run": {
+    "type": "train",
+    "steps": 4000,
+    "seed": 0,
+    "checkpoint": 1000,
+    "csv": "E/logs/_verify_contact_reward/world_fence_no_unrestricted.csv"
+  },
+  "plugins": {
+    "contact_reward": {
+      "toucher": "right_palm",
+      "touched_groups": ["head", "chest"],
+      "world_targets": []
+    }
+  }
+}

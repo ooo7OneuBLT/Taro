@@ -1,0 +1,23 @@
+{
+  "name": "[検証専用・削除可] world_targets指定時に架空のtoucher名で即座に例外が出るかの確認",
+  "note": "2026-08-05。実装の検証。toucherに存在しないグループ名を指定し、world_targetsも指定した状態でsetup直後に例外で止まることを確認する。",
+  "scene": "新生児_仰向け_柵あり",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 0.0
+  },
+  "run": {
+    "type": "train",
+    "steps": 50,
+    "seed": 0,
+    "checkpoint": 25,
+    "csv": "E/logs/_verify_contact_reward/world_bad_toucher.csv"
+  },
+  "plugins": {
+    "contact_reward": {
+      "toucher": "no_such_group_xyz",
+      "touched_groups": ["head"],
+      "world_targets": ["fence_post"]
+    }
+  }
+}

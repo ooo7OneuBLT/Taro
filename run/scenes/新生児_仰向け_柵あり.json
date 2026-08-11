@@ -45,6 +45,31 @@
       "target_deg": null,
       "stiffness": null
     },
+    "limb_tone": {
+      "hold_deg": 20.0,
+      "groups": [
+        "shoulder",
+        "elbow",
+        "hip_sagittal",
+        "knee"
+      ],
+      "target_deg": {
+        "right_hip1": -71.0,
+        "left_hip1": -71.0,
+        "right_hip2": -36.0,
+        "left_hip2": -36.0,
+        "right_knee": -90.0,
+        "left_knee": -90.0,
+        "right_shoulder_horizontal": 58.0,
+        "left_shoulder_horizontal": 58.0,
+        "right_shoulder_ad_ab": 3.0,
+        "left_shoulder_ad_ab": 3.0,
+        "right_shoulder_rotation": -65.0,
+        "left_shoulder_rotation": -65.0,
+        "right_elbow": -111.0,
+        "left_elbow": -111.0
+      }
+    },
     "head_hold": null,
     "body_support": null
   },
@@ -266,10 +291,10 @@
     "ngeom": 108,
     "model": {
       "spring_n": 15,
-      "spring_k_sum": 3.2,
+      "spring_k_sum": 5.2249,
       "spring_target_sum_deg": 730.611,
       "jnt_range_sum": 30.4385,
-      "damping_sum": 0.9903,
+      "damping_sum": 1.0619,
       "seat": null,
       "body_qpos0": [
         0.0,
@@ -281,7 +306,7 @@
         0.0
       ]
     },
-    "config_hash": "c4db168d381f",
+    "config_hash": "47464502d27c",
     "head_angles_deg": {
       "head_swivel": 0.08,
       "head_tilt": -41.92,
@@ -315,17 +340,17 @@
     "settle": {
       "seconds": 3.0,
       "head_drift_deg": {
-        "head_swivel": 0.25,
-        "head_tilt": 1.84,
-        "head_tilt_side": 0.2
+        "head_swivel": 0.37,
+        "head_tilt": 1.92,
+        "head_tilt_side": 0.31
       },
       "trunk_tilt_before": 16.13,
-      "trunk_tilt_after": 15.76,
-      "eye_drift_m": 0.00098,
-      "toy_drift_m": 0.20879,
-      "worst_angle_deg": 1.84,
+      "trunk_tilt_after": 15.81,
+      "eye_drift_m": 0.00196,
+      "toy_drift_m": 0.00019,
+      "worst_angle_deg": 1.92,
       "ok": true,
-      "summary": "3秒進めた結果：  首の最大ずれ 1.84度  目の移動 0.10cm  おもちゃ 20.88cm（紐で吊るす設定なので揺れて当然）  → 姿勢は保てます"
+      "summary": "3秒進めた結果：  首の最大ずれ 1.92度  目の移動 0.20cm  おもちゃ 0.02cm（紐で吊るす設定なので揺れて当然）  → 姿勢は保てます"
     }
   }
 }

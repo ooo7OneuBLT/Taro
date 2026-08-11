@@ -1,0 +1,26 @@
+{
+  "name": "progress報酬の内訳検証（良い自発運動モデル継続・自己接触時、頭・胸を区別）",
+  "note": "2026-08-05。今日一日かけてモジュール化した2つの道具（contact_reward.pyのreach_self・touch非依存化、頭・胸の区別）を使い、昨夜ユーザーが目視確認した『良い自発運動』モデル（E/logs/selfmodel_v3/model_柵なし_線形_seed0.pt、touch=false・柵なし・脚も自由）をそのまま継続させながら、progress_surprise_bonus=1.0で自己接触の瞬間の報酬内訳（pe_fast・pe_slow・progress_core・surprise_trace・progress・rew・rpe・part）をtickごとに記録する。検証専用の800step smoke test（_verify_contact_reward_generalized_selfmodelv3.json）で216件/800stepの自己接触（頭・胸・頭+胸の3パターン全て）を確認済みなので、本実験は3000stepに伸ばして十分なサンプル数を狙う。",
+  "scene": "新生児_仰向け_柵なし",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 4.0,
+    "model": "E/logs/selfmodel_v3/model_柵なし_線形_seed0.pt",
+    "progress_surprise_bonus": 1.0,
+    "save": "E/logs/progress_breakdown_selfmodel/seed0_model.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 3000,
+    "seed": 0,
+    "checkpoint": 500,
+    "csv": "E/logs/progress_breakdown_selfmodel/seed0.csv"
+  },
+  "plugins": {
+    "contact_reward": {
+      "toucher": "right_palm",
+      "touched_groups": ["head", "chest"],
+      "self_trace_out": "E/logs/progress_breakdown_selfmodel/seed0_self_trace.csv"
+    }
+  }
+}

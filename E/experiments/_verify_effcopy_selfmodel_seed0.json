@@ -1,0 +1,12 @@
+{
+  "name": "[検証専用・削除可] efference_copy切替とself_model拡張の配線確認（seed0）",
+  "note": "2026-08-06。追加依頼2の検証用。short-step（300step）でclassify/margin/corr/persistの前後一致と、efference_copy=false時のprev_a固定を確認する。",
+  "scene": "リーチング_リクライニング60度_自己接触版",
+  "taro": {
+    "vision": false,
+    "save": "E/logs/_verify_effcopy/seed0_model.pt"
+  },
+  "run": {"type": "train", "steps": 300, "checkpoint": 100, "seed": 0,
+          "csv": "E/logs/_verify_effcopy/seed0.csv"},
+  "plugins": {"self_model": true}
+}

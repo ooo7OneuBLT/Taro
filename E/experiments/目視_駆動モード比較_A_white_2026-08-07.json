@@ -1,0 +1,16 @@
+{
+  "name": "目視：駆動モード比較 A（white＝白色ガウス、既定）",
+  "note": "2026-08-07。測定が対応。太郎の自発運動の『駆動モード』（探索ノイズの性質）を見比べたいという依頼を受けて作成。E/docs/figures/駆動モード比較_2026-08-07/ のmp4（run.tools外の使い捨てスクリプトで撮影）と同一のモデル・シーン・月齢・K・探索stdの組み合わせを、run.type=viewでライブに見るための実験ファイル。taro.noiseは既定値white（未指定）のまま＝比較の基準。学習済みモデルは E/logs/selfmodel_v3/model_柵なし_線形_seed0.pt（自己モデル学習：柵なし・線形成長0→4ヶ月・18000回・筋肉モード・触覚なし）。追加学習はしない。起動時にE_REALTIME=1を必ず明示すること（run/viewer.pyは既定でcfg.view_explore=Trueなので自発運動は自動で出る）。",
+  "scene": "新生児_仰向け_柵なし",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 4.0,
+    "model": "E/logs/selfmodel_v3/model_柵なし_線形_seed0.pt"
+  },
+  "run": {
+    "type": "view",
+    "seed": 0,
+    "view_std": 0.174
+  },
+  "plugins": {}
+}

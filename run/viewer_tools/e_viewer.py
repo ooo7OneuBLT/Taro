@@ -194,6 +194,27 @@ def main():
     from e_head_hold import CaregiverHands
     import e_scene
 
+    # ---- 駆動モード（筋肉／関節）2026-08-10 新設 --------------------------
+    #   【なぜ】run.type=edit（このファイル）は taro.actuation を一切見ておらず、
+    #   常に筋肉モードで体を組み立てていた（監査：作業記録（非公開）
+    #   2026-08-10_run系システムとViewerの型バグ横断監査.md「中2」）。
+    #   run/plugins/common/scene.py 57〜66行目と同じ語彙判定にする
+    #   （joint/spring/springdamper/torque → 関節、それ以外→筋肉、不明値はエラー）。
+    #   E_ACTUATION 未指定（既定）は "muscle" ＝今までと完全に同じ挙動。
+    def _resolve_actuation(varname="E_ACTUATION"):
+        mode = str(os.environ.get(varname, "muscle")).lower()
+        if mode in ("joint", "spring", "springdamper", "torque"):
+            from mimoActuation.actuation import SpringDamperModel
+            print("注意[actuation] 関節モード（90関節を独立に駆動）＝逸脱リスト 逸脱5 の"
+                  "逸脱を選んでいます。人間の新生児は拮抗筋を同時に力ませる[Tier1]",
+                  flush=True)
+            return SpringDamperModel, "joint"
+        if mode in ("muscle", "muscles", ""):
+            return MuscleModel, "muscle"
+        raise ValueError(f"{varname} が不明: {mode}（muscle か joint）")
+
+    _ACT_MODEL, _ACTUATION_MODE = _resolve_actuation()
+
     # ========================================================================
     # シーン方式（2026-07-29 新設）— E_SCENE=名前 でシーンから始める
     # ------------------------------------------------------------------------
@@ -246,7 +267,8 @@ def main():
             #   mj_forward するだけで物理ステップは進めないため、limb_tone を外しても
             #   返ってきた直後の姿勢（qpos）はシーンの state と完全に一致する
             #   （run/scene_tools/e_scene.py の build()・_apply_limb_tone() で確認済み）。
-        env, hands = e_scene.build(_scene_for_build, orient=True, vor=True, seed=0, verbose=True)
+        env, hands = e_scene.build(_scene_for_build, orient=True, vor=True, seed=0,
+                                   verbose=True, actuation_model=_ACT_MODEL)
         u = env.unwrapped
         m, d = u.model, u.data
         if hands is None:
@@ -268,7 +290,7 @@ def main():
         _RECLINE = float(os.environ.get("E_RECLINE", "0"))
         _EYE_REST_V = float(os.environ.get("E_EYE_REST_V", "0"))
         kw = body_kwargs_from_env(_AGE, verbose=True)
-        env = ToySupineEnv(actuation_model=MuscleModel,
+        env = ToySupineEnv(actuation_model=_ACT_MODEL,
                            vision_params=infant_vision_params(acuity_age=_AGE),
                            age=_AGE, toy=True, vor=True, orient=True,
                            recline_deg=_RECLINE, **kw)
@@ -300,8 +322,6 @@ def main():
 
     reflex = u._orienting
     vor = u._vor
-    tone_joints = [j for j in range(m.njnt) if float(m.jnt_stiffness[j]) > 0.0]
-    tone_k = {j: float(m.jnt_stiffness[j]) for j in tone_joints}
 
     # 首の3軸（前後の傾き／左右のひねり／左右の傾き）
     neck_ids = {}
@@ -808,14 +828,30 @@ def main():
     # 注意：意思ではなく**身体の性質**。太郎の脳（方策）は通らない。
     _lt0 = ((_scene or {}).get("setup") or {}).get("limb_tone") or {}
     st_tone_limb = tk.BooleanVar(value=bool(_lt0))
+    # 【なぜ、2026-08-08】旧「屈筋トーン」（st_tone、反射区画）と
+    #   この「四肢の筋緊張」（st_tone_limb、姿勢区画）は別々のチェックボックスだったが、
+    #   apply_limb_tone() が profile 引数（"newborn_flexor"/"reach_limb"）を受けるように
+    #   なったので、目標角の種類を選ぶラジオボタンに統合した。
+    #   _lt0 に target_deg があれば「新生児の既定姿勢（文献）」で保存されたシーン
+    #   （もう1人の実装担当が作る run/scenes/新生児_*.json 想定）とみなし、
+    #   無ければ従来どおり「今の姿勢を保つ」を初期モードにする。
+    lt_mode = tk.StringVar(value=("newborn" if _lt0.get("target_deg") else "reach"))
     lt_hold = tk.DoubleVar(value=float(_lt0.get("hold_deg", 10.0)))
     _limb_saved = [None]
 
     def limb_tone_apply(*_a):
-        """いまの姿勢を四肢の筋緊張の目標にする。"""
+        """いまの姿勢、または新生児の既定姿勢を四肢の筋緊張の目標にする。"""
         from infant_limbs import apply_limb_tone, limb_tone_joints
+        profile = "newborn_flexor" if lt_mode.get() == "newborn" else "reach_limb"
         if _limb_saved[0] is None:      # 最初の1回だけ元の値を控える（OFFで戻すため）
-            names = set(limb_tone_joints(m))
+            # 【なぜ groups=("arm","leg") で集めるか】"newborn_flexor" は
+            #   ("shoulder","elbow","hip_sagittal","knee")、"reach_limb" は
+            #   ("arm","leg") を対象にする。"arm"+"leg" は両方の対象関節を
+            #   包含する上位集合（"hip_sagittal"はhip1・hip2で、"leg"のhip
+            #   グループhip1/hip2/hip3に含まれる）なので、モードを問わず
+            #   この集合で保存しておけば、どちらのモードで適用してもOFFに
+            #   戻すときに正しく復元できる。
+            names = set(limb_tone_joints(m, groups=("arm", "leg")))
             sv = {}
             for j in range(m.njnt):
                 nm = (m.joint(j).name or "").split(":")[-1]
@@ -824,9 +860,10 @@ def main():
                     sv[nm] = (float(m.jnt_stiffness[j]), float(m.qpos_spring[adr]),
                               float(m.dof_damping[dof]), j, adr, dof)
             _limb_saved[0] = sv
-        r = apply_limb_tone(m, d, age=_AGE, hold_deg=float(lt_hold.get()),
-                            verbose=True)
-        msg.config(text=f"いまの姿勢を四肢の筋緊張の目標にしました"
+        r = apply_limb_tone(m, d, age=_AGE, profile=profile,
+                            hold_deg=float(lt_hold.get()), verbose=True)
+        _mode_jp = "新生児の既定姿勢（文献）" if profile == "newborn_flexor" else "今の姿勢"
+        msg.config(text=f"四肢の筋緊張の目標を「{_mode_jp}」にしました"
                         f"（{r['n']}関節・許すずれ{lt_hold.get():g}度）", fg="#0a7")
 
     def limb_tone_release(*_a):
@@ -843,14 +880,30 @@ def main():
         (limb_tone_apply if st_tone_limb.get() else limb_tone_release)()
 
     tk.Checkbutton(sec_pose.body,
-                   text="四肢の筋緊張（脱力しても腕が体の前に保たれる）",
+                   text="四肢の筋緊張（脱力しても四肢が既定の姿勢に保たれる）",
                    variable=st_tone_limb, fg="#06a",
                    command=on_limb_tone).pack(anchor="w", padx=14)
+    _ltf = tk.Frame(sec_pose.body); _ltf.pack(anchor="w", padx=28)
+    tk.Radiobutton(_ltf, text="新生児の既定姿勢（文献）", variable=lt_mode,
+                   value="newborn", command=on_limb_tone).pack(side="left")
+    tk.Radiobutton(_ltf, text="今の姿勢を保つ", variable=lt_mode,
+                   value="reach", command=on_limb_tone).pack(side="left")
     slider(sec_pose.body, "  許すずれ[度]", lt_hold, 2, 40, 1, width=13, length=200,
            note="　 小さいほど硬い。注意乳児の四肢の筋緊張の実測値は文献に存在しない"
                 "（Tier3・感度分析の対象）")
+
+    def limb_tone_capture_current():
+        """このボタンは常に『今の姿勢』を目標にする（ラジオボタンの選択を上書きする）。
+        押した瞬間の姿勢を目標に固定したい、という操作の意味そのものが
+        「新生児の既定姿勢」モードとは両立しないため、押すと自動的に
+        「今の姿勢を保つ」モードへ切り替える。
+        """
+        lt_mode.set("reach")
+        st_tone_limb.set(True)
+        on_limb_tone()
+
     tk.Button(sec_pose.body, text="いまの姿勢を筋緊張の目標にする",
-              command=limb_tone_apply, width=28).pack(anchor="w", padx=14, pady=(0, 2))
+              command=limb_tone_capture_current, width=28).pack(anchor="w", padx=14, pady=(0, 2))
 
     def _make_sym_hook(jd, var):
         def _hook(*_a):
@@ -924,9 +977,6 @@ def main():
     st_vor = tk.BooleanVar(value=True)
     tk.Checkbutton(sec_ref.body, text="前庭動眼反射（頭の動きを眼で打ち消す）",
                    variable=st_vor).pack(anchor="w", padx=14)
-    st_tone = tk.BooleanVar(value=True)
-    tk.Checkbutton(sec_ref.body, text=f"屈筋トーンのバネ（四肢 {len(tone_joints)}関節）",
-                   variable=st_tone).pack(anchor="w", padx=14)
 
     # ---- 区画3b：首のバネ（調整中。値が決まったら core に実装する）----------
     sec_neck = Section(colL, "首のバネ（調整中）", op.get("neck", True))
@@ -1064,6 +1114,53 @@ def main():
         sec_run.body, text="駆動モード: white（Nキー、またはボタンで切替）",
         font=("Consolas", 9), justify="left", fg="#666")
     noise_mode_label.pack(anchor="w", padx=14)
+
+    # ---- もがき運動パラメータ調整（2026-08-11 新設）----------------------
+    #
+    # 【なぜ】0ヶ月児の自発運動（もがき運動）が人間の乳児らしくない問題を追う際、
+    #   1条件の測定に数分〜20分かかり非効率だった。パラメータをスライダーで
+    #   動かしながら探索できるようにする（実装仕様 2026-08-11）。
+    #
+    # 【最重要・過去に3回踏んだ罠への対策】このファイルには「GUIの表示と
+    #   実際の物理適用が別経路で、GUIを操作しても反映されない」バグが過去に
+    #   3回見つかっている（監査報告 2026-08-07・2026-08-10）。ここで作る
+    #   5変数は、下の `_babble_noise()` と駆動ループの `elif st_babble.get():`
+    #   ブロックが**毎tick `.get()` で直接読む**（起動時に1回だけ読んで
+    #   別の変数へコピーしない）。柵（st_fence）・実験者の手（st_hold_head）と
+    #   同じ配線パターン。
+    #
+    # 初期値は、これまでハードコードされていた値と完全に一致させる
+    # （std=0.174 / cocon=0.5 / syn_w=0.6 / K=10 / beta=0.7）。
+    #   ＝「何も操作しなければ挙動は1ビットも変わらない」ことがこの一致で保証される。
+    _BAB_DEFAULTS = dict(std=0.174, cocon=0.5, syn_w=0.6, k=10, beta=0.7)
+    bab_std_var = tk.DoubleVar(value=_BAB_DEFAULTS["std"])
+    bab_cocon_var = tk.DoubleVar(value=_BAB_DEFAULTS["cocon"])
+    bab_synw_var = tk.DoubleVar(value=_BAB_DEFAULTS["syn_w"])
+    bab_k_var = tk.IntVar(value=_BAB_DEFAULTS["k"])
+    bab_beta_var = tk.DoubleVar(value=_BAB_DEFAULTS["beta"])
+
+    sec_bab = Section(sec_run.body, "もがき運動パラメータ調整", True)
+    slider(sec_bab.body, "①ゆらぎの大きさ", bab_std_var, 0.0, 0.6, 0.01,
+           note="act = 共収縮の下駄 + ①×ノイズ。既定0.174")
+    slider(sec_bab.body, "②共収縮の下駄", bab_cocon_var, 0.0, 1.0, 0.01,
+           note="拮抗筋の同時収縮量。既定0.5")
+    slider(sec_bab.body, "③シナジーの重み", bab_synw_var, 0.0, 1.0, 0.01,
+           note="駆動モード「色付き+シナジー」のときだけ効く。既定0.6")
+    slider(sec_bab.body, "④保持の長さK", bab_k_var, 1, 40, 1,
+           note="この物理ステップ数ごとに1回、新しい行動を選び直す。既定10")
+    slider(sec_bab.body, "⑤ノイズの色 beta", bab_beta_var, 0.0, 2.0, 0.01,
+           note="駆動モード「色付き」「色付き+シナジー」のときだけ効く。既定0.7")
+
+    def _bab_reset_defaults():
+        bab_std_var.set(_BAB_DEFAULTS["std"])
+        bab_cocon_var.set(_BAB_DEFAULTS["cocon"])
+        bab_synw_var.set(_BAB_DEFAULTS["syn_w"])
+        bab_k_var.set(_BAB_DEFAULTS["k"])
+        bab_beta_var.set(_BAB_DEFAULTS["beta"])
+        msg.config(text="もがき運動のパラメータを既定値に戻しました", fg="#0a7")
+
+    tk.Button(sec_bab.body, text="既定値に戻す", command=_bab_reset_defaults,
+              width=16).pack(anchor="w", padx=14, pady=(2, 6))
 
     st_loop = tk.BooleanVar(value=False)
     tk.Checkbutton(sec_run.body, text=f"{EPISODE_SEC:.0f}秒たったらやり直す",
@@ -1278,7 +1375,7 @@ def main():
                 "hold_tilt": (float(_HOLD_TILT) if _HOLD_TILT else None),
                 "neck_all_axes": bool(nk_all.get()),
                 "freeze": bool(st_freeze.get()), "pose_hold": bool(st_hold.get()),
-                "vor": bool(st_vor.get()), "tone": bool(st_tone.get()),
+                "vor": bool(st_vor.get()),
                 "eye_rest_v": float(_EYE_REST_V),
                 "noise_mode": str(noise_mode[0]),
                 "open": {"toy": sec_toy.opened, "pose": sec_pose.opened,
@@ -1354,15 +1451,23 @@ def main():
     def _babble_noise():
         """もがき運動の1tick分の探索ノイズを、いまの駆動モード(noise_mode[0])で作る。
 
-        colored のとき、CPG.sample(0.7, synergy=False) は内部の
+        colored のとき、CPG.sample(beta, synergy=False) は内部の
         ColoredNoiseGenerator の出力をそのまま返す（cpg.py 136〜139行目）ので、
         旧実装 ColoredNoiseGenerator(n_act, seed=0).sample(0.7) と
-        bit-identical（検証済み。実装の作業記録参照）。
+        bit-identical（検証済み。実装の作業記録参照。beta既定0.7のとき）。
+
+        【なぜ、2026-08-11】beta・syn_w は以前 0.7・0.6 に固定されていたが、
+        「もがき運動パラメータ調整」スライダー（bab_beta_var・bab_synw_var）で
+        毎tick変えられるようにした。ここで`.get()`するので、GUIの現在値が
+        必ず反映される（起動時に1回だけ読んで別変数に保存する、という
+        過去に3回踏んだ罠は避けている）。
         """
         if noise_mode[0] == "white":
             return _babble_white_rng.standard_normal(n_act)
         return _babble_cpg.sample(
-            0.7, synergy=(noise_mode[0] == "colored+synergy"), syn_w=0.6)
+            float(bab_beta_var.get()),
+            synergy=(noise_mode[0] == "colored+synergy"),
+            syn_w=float(bab_synw_var.get()))
 
     act = [zero.copy()]
 
@@ -1410,14 +1515,60 @@ def main():
             from run.config import Config, touch_setting_of
             from run.taro_setup import Taro
             _ensure_hybrid()
-            # 注意：学習時と同じ設定で作らないと、層の形が合わず**黙って白紙**になる
-            #   （Taro._load は形の合う層だけ読む strict=False）。
-            #   駆動モードはシーンが決めた実物（筋肉/関節）に合わせる。
-            # 【2026-07-31】触覚の設定は**保存されたモデルから読み取る**。
-            #   実験ファイルに書き忘れると、触覚ありのモデルを触覚なしで開いて
-            #   「触覚の層だけ白紙の別の脳」を見ることになる（黙って通る）。
-            taro_spec = {"actuation": "muscle" if n_act > 90 else "joint",
+            # 【なぜ、2026-08-10】以前は n_act（今の環境の行動次元）から
+            #   "muscle 90超/joint" を逆算していたが、この環境は常に筋肉モードで
+            #   作られていたため n_act は常に180超＝常に"muscle"と誤判定していた
+            #   （監査：作業記録（非公開）
+            #   2026-08-10_run系システムとViewerの型バグ横断監査.md「中2」）。
+            #   実際に環境を組み立てたときの駆動モード（_ACTUATION_MODE、上で
+            #   E_ACTUATION から決定済み）をそのまま使う。これで少なくとも
+            #   「今の環境」と「今から作る脳の設計」は必ず一致する。
+            taro_spec = {"actuation": _ACTUATION_MODE,
                          "age_months": _AGE, "model": p}
+            # 【なぜ、2026-08-10・さらに確認】上記だけでは「今の環境と脳の設計」は
+            #   一致しても、「このチェックポイント自身が実際にどちらの駆動モードで
+            #   学習されたか」までは保証できない。学習側（run/taro_setup.py
+            #   Taro.save()）は Config の全項目（actuation を含む）を
+            #   blob["config"] に保存しているので、touch_setting_of() と同じ
+            #   「モデル自身に聞く」考え方でここも確認する。食い違っていたら
+            #   黙って読まず、明示的なエラーを出して中止する（Taro._load は
+            #   strict=False なので、形の合わない層は例外を出さずに白紙のまま
+            #   読み込まれてしまうため）。
+            import torch as _torch
+            try:
+                _blob = _torch.load(p, map_location="cpu", weights_only=False)
+                _ckpt_cfg = _blob.get("config") or {}
+                _ckpt_act = _ckpt_cfg.get("actuation")
+            except Exception as _e:      # noqa: BLE001
+                _ckpt_act = None
+                print(f"注意[脳] 保存された駆動モードを読み取れません: "
+                      f"{type(_e).__name__}: {_e}。この確認はスキップします",
+                      flush=True)
+            if _ckpt_act is None:
+                # 古い形式（config が無い、または actuation キーが無い）保存ファイル。
+                #   食い違いの検出はできないが、読み込みそのものは止めない
+                #   （touch_setting_of も同様に「読めなければ既定扱い」の方針）。
+                print("注意[脳] このモデルの保存データに駆動モードの記録がありません"
+                      "（古い形式の可能性）。食い違いの確認をスキップして読み込みます",
+                      flush=True)
+                # 【なぜ、2026-08-10】上のprintだけだとGUI上には何も出ず、
+                #   コンソールを見ないユーザーには気づかれない（2026-07-31付の
+                #   別コメントと同じ轍。GUIツールでコンソール出力は見落とされる）。
+                #   この分岐は読み込みを継続して最終的に成功するため、直後に
+                #   _update_brain_label() が brain_label を上書きしてしまい、
+                #   そちらに書いても一瞬で消える。msg は成功後も上書きされない
+                #   共通のメッセージ欄なので、こちらに警告を残す。
+                msg.config(text="注意このモデルの保存データに駆動モードの記録が"
+                                 "ありません（古い形式の可能性）。食い違いの確認を"
+                                 "スキップして読み込みました",
+                           fg="#c60")
+            elif str(_ckpt_act).lower() != _ACTUATION_MODE:
+                _msg = (f"駆動モードが食い違います（今の体={_ACTUATION_MODE} / "
+                        f"このモデルの学習時={_ckpt_act}）。層の形が合わないため"
+                        "読み込みを中止します")
+                brain_label.config(text=f"注意{_msg}", fg="#a33")
+                print(f"注意[脳] {_msg}", flush=True)
+                return None
             taro_spec.update(touch_setting_of(p))
             # 【なぜ、2026-08-07】いま選ばれている駆動モード(noise_mode[0])を
             #   毎回 taro_spec に反映する。white のときは TARO_DEFAULTS の
@@ -1620,7 +1771,6 @@ def main():
         if ch.upper() == "N":
             _cycle_noise_mode()
 
-    tone_on = [True]
     head_w, devs, seens, neck_hist = [], [], [], []
     prev_sacc = [0]
     fire_until = [-1.0]
@@ -1771,11 +1921,6 @@ def main():
             OR.SACCADE_MIN_STRENGTH = float(thr_var.get())
             u._orienting = reflex if st_orient.get() else None
             u._vor = vor if st_vor.get() else None
-            want_tone = st_tone.get()
-            if want_tone != tone_on[0]:
-                for j in tone_joints:
-                    m.jnt_stiffness[j] = tone_k[j] if want_tone else 0.0
-                tone_on[0] = want_tone
 
             # 【2026-07-28 修正】頭を抑えているあいだは、このスライダーを**適用しない**。
             #   実験者の手も首のバネも同じ `jnt_stiffness` を使うので、毎tickここで
@@ -1927,10 +2072,17 @@ def main():
                     if brains.get(tag, {}).get("state") is not None:
                         brains[tag]["state"]["obs"] = obs
                 elif st_babble.get():
-                    if tick % 10 == 0:
+                    # 【なぜ、2026-08-11】④保持の長さK・②共収縮の下駄・①ゆらぎの大きさを
+                    #   もがき運動パラメータ調整スライダーから毎tick読む（過去に3回
+                    #   踏んだ「GUIの表示と物理適用が別経路」バグを避けるため、
+                    #   ここでキャッシュせず`.get()`のたびに実体へ反映する）。
+                    _bab_k = max(1, int(bab_k_var.get()))
+                    if tick % _bab_k == 0:
                         _prev_act = act[0].copy()
-                        act[0] = np.clip(0.5 + 0.174 * _babble_noise(), 0.0, 1.0
-                                         ).astype(np.float32)
+                        act[0] = np.clip(
+                            float(bab_cocon_var.get())
+                            + float(bab_std_var.get()) * _babble_noise(),
+                            0.0, 1.0).astype(np.float32)
                         # もがき運動の変化量も同じ物差しで測る。
                         #   【なぜ、2026-07-31】ユーザーの目視「学習済みの方が
                         #   ちょっと激しく動いている気がする」を数字で確かめるため。
@@ -2155,8 +2307,10 @@ def main():
                     f"角度を固定:{'ON' if st_hold.get() else 'OFF'}\n"
                     f"反射      視線誘導:{'ON' if st_orient.get() else 'OFF'}"
                     f"（間隔{lat_var.get():.2f}秒 閾値{thr_var.get():.2f}）  "
-                    f"VOR:{'ON' if st_vor.get() else 'OFF'}  "
-                    f"屈筋トーン:{'ON' if st_tone.get() else 'OFF'}\n"
+                    f"VOR:{'ON' if st_vor.get() else 'OFF'}\n"
+                    f"四肢の筋緊張  {'ON' if st_tone_limb.get() else 'OFF'}"
+                    f"（{'新生児の既定姿勢' if lt_mode.get()=='newborn' else '今の姿勢を保つ'}・"
+                    f"許すずれ{lt_hold.get():g}度）\n"
                     f"首のバネ  {'ON' if st_neck.get() else 'OFF'}  "
                     f"剛性{nk_k.get():.2f}  減衰{nk_c.get():.4f}  "
                     f"目標{nk_t.get():+.0f}度  "

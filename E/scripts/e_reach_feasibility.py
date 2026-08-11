@@ -48,7 +48,7 @@ warnings.filterwarnings("ignore")
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.abspath(os.path.join(_HERE, os.pardir, os.pardir))
 for _p in ("E/scripts", "D/scripts", "taro_core/src/body",
-           "taro_core/src/wrapper", "taro_core/src/senses"):
+           "taro_core/src/wrapper", "taro_core/src/senses", "run/scene_tools"):
     sys.path.insert(0, os.path.join(_ROOT, *_p.split("/")))
 
 import numpy as np      # noqa: E402

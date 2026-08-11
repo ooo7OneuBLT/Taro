@@ -1,0 +1,27 @@
+{
+  "name": "[検証専用・削除可] 体を作り直す実験でworld側のgeom集合が正しく更新されるかの確認",
+  "note": "2026-08-05。実装の検証。age_months 0.0→1.0・age_every=50で短時間に複数回on_body_changeを起こし、その都度world_targets(fence_post)のgeom再取得（_check_world_targetsの再チェック含む）が例外なく通ること、体作り直し後も外界接触の検出・累積カウンタが引き継がれることを確認する。",
+  "scene": "新生児_仰向け_柵あり",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 0.0,
+    "age_to": 1.0,
+    "age_start": 0,
+    "age_ramp": 150,
+    "age_every": 50
+  },
+  "run": {
+    "type": "train",
+    "steps": 300,
+    "seed": 0,
+    "checkpoint": 100,
+    "csv": "E/logs/_verify_contact_reward/world_bodychange.csv"
+  },
+  "plugins": {
+    "contact_reward": {
+      "toucher": "right_palm",
+      "touched_groups": ["head", "chest"],
+      "world_targets": ["fence_post"]
+    }
+  }
+}

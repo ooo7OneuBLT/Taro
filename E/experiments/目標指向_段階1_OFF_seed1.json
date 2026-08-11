@@ -1,0 +1,22 @@
+{
+  "name": "手先位置の目標表現（案C）検証：条件A OFF（seed1）",
+  "note": "2026-08-02。Goal Babbling段階1の4条件比較（A:OFF/B:新実装/C:旧実装/D:陰性対照）のうちA。goal_babbling自体を切った基準条件。設計：作業記録（非公開）。検証計画（Level0〜6）はrun/tools/check_reach_goal_wiring.py 等を先に通してから、この4本を回すこと。指標はtoy_touch/self_model/hand_in_view/movement_unitsで、SDでなくSE(差の標準誤差)で判定する（落とし穴チェックリスト項15）。",
+  "scene": "リーチング_リクライニング60度",
+  "taro": {
+    "goal_babbling": false,
+    "vision": true
+  },
+  "run": {
+    "type": "train",
+    "steps": 6000,
+    "seed": 1,
+    "checkpoint": 500,
+    "csv": "E/logs/goal_stage1/A_off_seed1.csv"
+  },
+  "plugins": {
+    "self_model": true,
+    "hand_in_view": true,
+    "toy_touch": true,
+    "movement_units": true
+  }
+}

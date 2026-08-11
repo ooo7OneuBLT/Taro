@@ -33,7 +33,8 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.abspath(os.path.join(_HERE, os.pardir, os.pardir))
 for p in [os.path.join(_ROOT, "D", "scripts"), os.path.join(_ROOT, "MIMo"),
           os.path.join(_ROOT, "taro_core"),
-          os.path.join(_ROOT, "taro_core", "src", "body"), _HERE]:
+          os.path.join(_ROOT, "taro_core", "src", "body"),
+          os.path.join(_ROOT, "run", "scene_tools"), _HERE]:
     if p not in sys.path:
         sys.path.insert(0, p)
 try: sys.stdout.reconfigure(errors="replace")

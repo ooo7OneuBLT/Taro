@@ -56,6 +56,13 @@ TARO_DEFAULTS = {
     "reward":        ("progress", "内発的動機 progress/predict", "E_REWARD"),
     "ne_relative":   (True, "ノルアドレナリンを相対基準で出す", "E_NE_RELATIVE"),
     "replay":        (True, "睡眠中の経験リプレイ（記憶定着）", "E_REPLAY"),
+    # 遠心性コピー＝直前の行動を次tickの入力(prev_a)として渡す仕組み。
+    #   Falseだとprev_aが更新されなくなる（常にゼロのまま固定）。
+    #   【なぜ、2026-08-06】C側(run_c_metrics_ac_lr.py)のC_EFFCOPYに相当する切替が
+    #   E側（runシステム）に無かったため新設。既定Trueで既存実験の挙動は変わらない。
+    "efference_copy": (True, "直前の行動を次tickの入力(prev_a)として渡す遠心性コピー。"
+                       "Falseだとprev_aが更新されなくなる（常にゼロのまま固定）",
+                       "E_EFFCOPY"),
     "cerebellum":    (True, "運動小脳（自動化・結晶化）", "E_CEREBELLUM"),
     "mature":        (False, "学習進行に合わせて探索を結晶化", "E_MATURE"),
     # 【taro-C5】努力コスト＝代謝コストを報酬から引く[Tier3・二乗の形は恣意的]
@@ -77,7 +84,138 @@ TARO_DEFAULTS = {
     #   （原典＝手先位置の低次元／太郎＝固有感覚621次元まるごと）。作り直し予定。
     "goal_babbling": (False, "目標指向の探索（現状は有害と判明）", "E_GOALBABBLE"),
     "goal_switch":   ("pe", "探索/目標の切替 fixed/ne/pe", "E_GB_SWITCH"),
-    "closed_loop_reach": (False, "目標を保持してにじり寄る", "E_CLTRAIN"),
+    "closed_loop_reach": (False, "目標を保持してにじり寄る（goal_space=prop_full用）", "E_CLTRAIN"),
+    # ---- 手先位置の目標表現（案C・Goal Babbling段階1、2026-08-02）------------
+    # 設計：作業記録（非公開）
+    # 座標を作らず、腕の固有感覚(7)＋自己接触(15)＝22次元を目標にする。
+    "goal_space":     ("prop_full", "目標表現 prop_full(旧・固有感覚まるごと、既定)/"
+                       "reach_self(新・腕7+自己接触15、案C)", "E_GOAL_SPACE"),
+    "goal_trajectory": (True, "区分線形の軌道で目標に近づく(reach_selfのみ有効)"
+                        "[Tier1: Rolf 2011実測]", "E_GOAL_TRAJ"),
+    "goal_traj_len":  (25, "区分線形軌道のステップ数L[Tier1: Rolf 2011実測]", "E_GOAL_TRAJ_L"),
+    "goal_home_prob": (0.1, "確率でホーム姿勢へ戻る[Tier1: Rolf 2011実測]", "E_GOAL_HOME_P"),
+    "goal_negative_control": (False, "陰性対照：目標をランダムなダミーに置き換える"
+                              "（検証用・reach_selfのみ）", "E_GOAL_NEGCTRL"),
+    "reach_arm_side": ("right", "reach_selfで目標にする腕 right/left", "E_REACH_ARM"),
+    # ---- 頭へのダブルタッチを報酬に直結する（2026-08-03）---------------------
+    # 仕様：作業記録（非公開）
+    # `run/plugins/common/double_touch.py`（測定専用）で6000ステップ実測した結果、
+    #   「頭」でのダブルタッチだけが reach_success.py の頭タッチ回数と完全一致する
+    #   信頼できる指標だった（胸は座面confound、反対の手は未検出）。
+    #   reach_space（goal_babbling and goal_space=="reach_self"）が有効なときだけ
+    #   taro_setup.py が taro.double_touch を構築する（既定は None のまま）。
+    "double_touch_threshold": (0.5, "頭への自己接触presenceのしきい値[Tier3・工学的判断、"
+                               "既存プラグインと同じ値]", "E_DTOUCH_THRESH"),
+    "double_touch_bonus": (0.0, "頭へのダブルタッチが起きたtickに足す報酬ボーナス"
+                           "[Tier3・工学的判断。既定0.0＝OFF。実験ファイルで明示的に"
+                           "指定したときだけ有効にする（他の実験的な機構と同じ既定OFFの"
+                           "流儀に揃えた。2026-08-03、既定0.2だったのは設計ミスと判明し訂正）。"
+                           "有効時の目安0.2＝progress報酬の典型値≈0.04の約5倍で埋もれない"
+                           "大きさとして暫定的に選んだだけで文献的根拠は無い", "E_DTOUCH_BONUS"),
+    # ---- ダブルタッチ対象部位の全身一般化（2026-08-05）-----------------------
+    # 設計：作業記録（非公開）
+    # 仕様：作業記録（非公開）
+    #   [Tier3・工学的判断]「機構として複数部位（list）を扱えるようにしたこと」
+    #   自体に文献根拠は無い。Rochat(1998)の定義は「手の皮膚が顔（頭）の皮膚に
+    #   触れる」という組み合わせを他の全ての接触と対比させて定義したものであり、
+    #   「顔以外の自分の体の部位」への一般化を許すものではない。既定は頭のみの
+    #   まま変えていない＝実験ファイルで明示指定しない限り既存実験の挙動は
+    #   1ビットも変わらない。胸などを加える場合は座面confound等、部位ごとの
+    #   個別の混同源の確認が要る。「目」は防御的な瞬目反射が知られ、人間の
+    #   赤ちゃんが自分の目を触れて報われる行動として確立していないため対象に
+    #   加えないこと（`前提.md`「人間の赤ちゃんがしないことは入れない」）。
+    "double_touch_touched_groups": (["head"], "ダブルタッチの「触れられる側」の"
+                                    "部位一覧（触覚グループ名のリスト、OR判定）"
+                                    "[Tier3・工学的判断。既定は頭のみ]。"
+                                    "list型のため実験ファイルからのみ指定可能"
+                                    "（環境変数からは指定できない、envname=None）",
+                                    None),
+    # ---- 自己接触の興味度ボーナス（reach_self専用、2026-08-03）--------------
+    # 設計：作業記録（非公開）
+    # レビュー：同フォルダ\2026-08-03_reach_self新奇性報酬_レビュー.md
+    #   （レビューの修正1により、設計の"novelty"という名前を"interest"に統一した。
+    #    根拠：Baranes & Oudeyer 2013 SAGG-RIACはこの量を「興味度(interest)」と呼び、
+    #    著者自身は"novelty"という語を使っていない。理論分類上もこの量（速い/遅い
+    #    移動平均の差の絶対値＝予測器の出力）は "novelty"（記憶に無いことの検出）
+    #    ではなく"surprise"（予測との食い違い）に分類される（Barto, Mirolli &
+    #    Baldassarre 2013）。名前は依拠する文献（SAGG-RIAC）の用語に合わせた）。
+    #   double_touch_bonus（固定値の下駄）とは独立に有効化できる別項目。
+    #   既定0.0＝OFF。頭へのダブルタッチが起きたtickに、触覚チャンネルだけを
+    #   切り出した局所的な学習進度の絶対値（SAGG-RIAC式・符号を捨てて興味度にする）
+    #   を報酬に足す。progress本体（t.lp）には一切触れない、reach_self専用の
+    #   実験段階の上書き。
+    "self_touch_interest_bonus": (0.0, "頭への自己接触tickに足す興味度ボーナス"
+                                  "（触覚チャンネルだけの局所学習進度の絶対値に比例）"
+                                  "[Tier3・工学的近似。SAGG-RIAC(Baranes & Oudeyer 2013)の"
+                                  "興味度の式を借りた。既定0.0＝OFF]", "E_SELFTOUCH_INTEREST"),
+    # ---- progress報酬のsurpriseボーナス（機構1、2026-08-04）------------------
+    # 設計：作業記録（非公開）
+    #   （案C・機構1のみ。設計は"novelty"と呼んでいるが、この量は理論分類上
+    #   surprise（予測との食い違い）であり、novelty（記憶に無いことの検出）とは
+    #   異なる（Barto, Mirolli & Baldassarre 2013。self_touch_interest_bonusの
+    #   命名訂正と同じ理由）。よってconfigキー名・コードとも"surprise"に統一する。
+    "progress_surprise_bonus": (0.0, "レアな予測誤差の急上昇を検出し一時的にprogressへ"
+                                "加算するボーナスの利得（trace更新式のgainを兼ねる）"
+                                "[Tier3・工学的近似。Kakade&Dayan 2002の二相性反応の"
+                                "第一相のみを模す。既定0.0＝OFF]", "E_PROGRESS_SURPRISE_BONUS"),
+    "progress_surprise_decay": (0.9, "surprise_bonusのtraceの減衰率[Tier3・恣意的]",
+                                "E_PROGRESS_SURPRISE_DECAY"),
+    "progress_surprise_var_tau": (0.99, "surprise検出に使う分散の移動平均率[Tier3・恣意的]",
+                                  "E_PROGRESS_SURPRISE_VAR_TAU"),
+    "progress_surprise_threshold": (5.0, "zスコア（devを直近のばらつきの標準偏差で"
+                                    "割った値）が何σを超えたら\"レアな驚き\"とみなすかの"
+                                    "しきい値。しきい値を超えた分だけ(超過量型・ヒンジ)を"
+                                    "traceに足す[Tier3・工学的近似。"
+                                    "2026-08-04実データ検証(check_progress_surprise.py、"
+                                    "reach_self・4シード・4500step)で当初案の既定4.0は"
+                                    "noneカテゴリtrace平均0.061（要件0.05未満に不合格）、"
+                                    "4.5は0.045（4シード集計では合格だが個別には2/4シードが"
+                                    "0.05を超えていた）だったため、5.0"
+                                    "（集計0.034、個別も1/4シードのみ僅かに超過）を既定にした]",
+                                    "E_PROGRESS_SURPRISE_THRESHOLD"),
+    # ---- 感覚運動の伝達遅延（候補5、2026-08-02）------------------------------
+    # 【なぜ既定0のままか（人間との逸脱を明示）】太郎は運動指令を出したその
+    #   env.step()で即座に力が出て、感覚もその場で脳に届く。人間には末梢神経の
+    #   伝導に時間がかかる（新生児は特に神経が未髄鞘化で成人よりさらに遅い）。
+    #   これは逸脱リスト「感覚運動遅延（神経伝導の遅れ）が無い」に既に登録済みの
+    #   既知の逸脱で、太郎の自発運動が人間の2倍細かく震える問題の候補5
+    #   （arXiv:2606.17456 のDiscussionが"speculate"として挙げた、遅延が
+    #   振動を抑える可能性）。
+    #   ⇒ 既定は0（今までと同じ）のまま。実験ファイルで明示的に指定したときだけ
+    #   run/plugins/common/scene.py が配線する（run/tools/check_sensorimotor_delay.py
+    #   で既定0で1ビットも挙動が変わらないことを確認済み）。
+    #
+    # 【値の根拠。乳児に「正しい」と確立した決定版の数値は無い（2026-08-02 調査）】
+    #   MIMo grows!（López et al. 2025 IEEE ICDL, arXiv:2509.09805）IV-Cは
+    #     感覚遅延0/50/200msの3条件を比較（成人の反応時間文献からの転用値[Tier2]）。
+    #     運動遅延は最小値1タイムステップ(5ms)に固定し、振っていない。
+    #     乳児(0〜4ヶ月)向けの発達段階別の推奨値ではない。
+    #   新生児のモロー反射の実測（孫引き含む）：
+    #     目視判定 約450ms（Bijesh et al. 2013, Indian Pediatrics、原文確認済み[Tier1だが粗い測定]）
+    #     光学式モーションキャプチャ 右腕117.0ms/左腕129.2ms
+    #       （Rönnqvist 1995, Neuropsychologia、孫引き[Tier2]）
+    #   旧記述「人間には神経伝導の0.1〜0.2秒の遅れがある」（doc/参考文献リスト.md）は
+    #     一次文献の出典が確認できず、2026-08-02に訂正した（逸脱リスト参照）。
+    #   ⇒ 根拠の強さが違う複数の値を[Tier2]候補として実験ファイルで選べるようにする。
+    #     候補：50ms（MIMo grows!の中間値）/120ms（モロー反射・機器計測の平均に近い、
+    #     乳児実測に最も近い）/200ms（MIMo grows!の最大値）。
+    #
+    # 【単位の変換】MIMoEnv(mimo_env.py)のsensory_delay/motor_delayは
+    #   「env.step()を何回分遅らせるか」という整数。実測 dt=timestep(5ms)*frame_skip(2)
+    #   =10ms/env.step()。ミリ秒→ステップ数は round(delay_ms/1000/dt)（scene.pyで変換）。
+    #   50ms→5step, 120ms→12step, 200ms→20step（run/tools/check_sensorimotor_delay.pyで検算済み）。
+    "sensory_delay_ms": (0, "感覚が脳に届くまでの遅延（ミリ秒）。既定0=現状と同じ", "E_SENSORY_DELAY_MS"),
+    "motor_delay_ms":  (0, "指令が体に届くまでの遅延（ミリ秒）。既定0=現状と同じ", "E_MOTOR_DELAY_MS"),
+    # ---- 筋活性化の時定数（震え問題への感度確認、2026-08-07）-----------------
+    # MuscleModel（MIMo/mimoActuation/muscle.py）内の一次遅れ（ローパスフィルタ）の
+    #   時定数。既定はNone（未指定）＝MuscleModelのハードコード値0.01秒（10ms）の
+    #   まま変えない。太郎の自発運動が人間の乳児より2倍細かく震える問題の候補として、
+    #   この時定数への感度を確かめるために実験ファイルから振れるようにした
+    #   [Tier3・muscle.py既定の0.01秒自体が実測較正されたものではないと既に注記済み]。
+    #   actuation=joint（SpringDamperModel）には tau 属性が無いため無視される
+    #   （run/plugins/common/scene.py で hasattr確認のうえ配線）。
+    "muscle_tau":      (None, "筋活性化の一次遅れの時定数（秒）。既定None=MuscleModelの"
+                        "既定0.01秒のまま", "E_MUSCLE_TAU"),
     # ---- モデルの読み書き ---------------------------------------------------
     "model":         (None, "続きから学習するモデルのパス", "E_LOADMODEL"),
     "save":          (None, "学習後にモデルを保存するパス", "E_SAVEMODEL"),
@@ -112,9 +250,13 @@ RUN_DEFAULTS = {
 # 環境変数から読むときの型変換
 _BOOLS = {k for k, (d, _, _) in TARO_DEFAULTS.items() if isinstance(d, bool)}
 _FLOATS = {"lr", "effort_cost", "caps", "beta", "syn_w", "coactivation", "lam_v",
-           "age_months", "age_to"}
+           "age_months", "age_to", "goal_home_prob",
+           "sensory_delay_ms", "motor_delay_ms", "muscle_tau",
+           "double_touch_threshold", "double_touch_bonus", "self_touch_interest_bonus",
+           "progress_surprise_bonus", "progress_surprise_decay", "progress_surprise_var_tau",
+           "progress_surprise_threshold"}
 _INTS = {"age_start", "age_ramp", "age_every", "steps", "seed", "K", "checkpoint",
-         "n_eval"}
+         "n_eval", "goal_traj_len"}
 
 
 class Config:
@@ -201,6 +343,18 @@ class Config:
             raise ValueError(f"actuation が不明: {self.actuation}（muscle / joint）")
         if self.antagonist and not self.is_muscle:
             raise ValueError("antagonist（拮抗筋モード）は actuation=muscle が要る")
+        if str(self.goal_space) not in ("prop_full", "reach_self"):
+            raise ValueError(f"goal_space が不明: {self.goal_space}（prop_full / reach_self）")
+        if str(self.reach_arm_side) not in ("right", "left"):
+            raise ValueError(f"reach_arm_side が不明: {self.reach_arm_side}（right / left）")
+        # goal_space=reach_self は自己接触(q_touch)を目標に使うので touch/somatosensory が要る。
+        #   （落とし穴チェックリスト「通ってはいけない条件」。静かに壊れた値を返さず、
+        #    学習開始前に明確な ValueError で止める）
+        if self.goal_babbling and self.goal_space == "reach_self" \
+                and not (self.touch and self.somatosensory):
+            raise ValueError(
+                "goal_space=reach_self には touch=true, somatosensory=true が要る。\n"
+                "  自己接触(q_touch, head/chest/opposite_palmの3部位)を目標に使うため。")
         # 体を育てる設定なのに育たない組み合わせを止める。
         #   【なぜ、2026-07-30】`age_every<=0` だと月齢を見直す処理が**一度も走らない**のに、
         #     起動時には「月齢 0.0 → 4.0」と表示される＝典型的な「黙って壊れる」。
@@ -254,9 +408,66 @@ class Config:
                 "  somatosensory=true なら部位ごとの要約（有無/強さ/重心）になり、\n"
                 "  点数が変わっても層の形が変わらない。\n"
                 "  落とし穴チェックリスト 項75・項86")
-        if self.goal_babbling:
-            print("注意[config] goal_babbling を有効にした。2026-07-30 の実測で"
-                  "**有害**（おもちゃへの接触−32%、margin +30.7%→+17.2%、persist 1000%）。"
+        # 自己接触の興味度ボーナス（reach_self専用、2026-08-03）のバリデーション。
+        #   設計レビューの修正1〜3反映（作業記録（非公開）
+        #   2026-08-03_reach_self新奇性報酬_レビュー.md）。
+        if self.self_touch_interest_bonus:
+            if self.self_touch_interest_bonus < 0:
+                raise ValueError(
+                    f"self_touch_interest_bonus={self.self_touch_interest_bonus} は負の値です。\n"
+                    "  加点専用（SAGG-RIAC式の興味度＝絶対値）として設計されており、\n"
+                    "  罰として使うことは想定していません。0以上の値にしてください。")
+            if str(self.touch_mode) != "target":
+                raise ValueError(
+                    f"self_touch_interest_bonus を有効にするには touch_mode=\"target\" が要る"
+                    f"（今 touch_mode={self.touch_mode!r}）。\n"
+                    "  この機構は t.blocks の中の touch_embed ブロックを直接スライスして\n"
+                    "  誤差を取る（touch_mode=\"input\" だと touch_embed が予測対象の"
+                    "ブロックに無く、対象が見つからない）。")
+            # 【レビュー修正3】体を育てる実験（cfg.grows、age_toが指定されている）との
+            #   同時使用をコードで機械的に止める。ドキュメントの言葉だけに頼らない。
+            #   理由：新設する self._self_touch_lp は、成長イベント時に t.lp が持つ
+            #   resync()相当の手当てを一切受けない（trainer._regrow はこの新しい
+            #   トラッカーに触れない）。そのままだと、成長直後の予測しづらい期間が
+            #   自己接触と同じ機序（速い平均だけが跳ねる）で構造的に歪む恐れがある
+            #   （レビュー報告2節「体が育っても壊れないか」）。この制限を外すときは、
+            #   trainer._regrow に self._self_touch_lp.resync() を足してから外すこと。
+            if self.grows:
+                raise ValueError(
+                    f"self_touch_interest_bonus を有効にした状態で、体を育てる設定"
+                    f"（age_to={self.age_to}）を同時に指定することはできません。\n"
+                    "  新設のトラッカー(self._self_touch_lp)は成長イベントでの手当て"
+                    "（t.lpのresync()相当）を持たないため、成長直後の期間が\n"
+                    "  自己接触と同じ機序で構造的に歪む恐れがあります。\n"
+                    "  体を固定した実験にとどめるか、age_to=None にしてください。")
+        # progress報酬のsurpriseボーナス（機構1、2026-08-04）のバリデーション。
+        #   self_touch_interest_bonusと同じ「ゲートしてから中身を検証する」パターン。
+        if self.progress_surprise_bonus:
+            if self.progress_surprise_bonus < 0:
+                raise ValueError(
+                    f"progress_surprise_bonus={self.progress_surprise_bonus} は負の値です。\n"
+                    "  レアな驚きを罰にしないための加点専用の機構です。0以上にしてください。")
+            if not (0.0 <= self.progress_surprise_decay <= 1.0):
+                raise ValueError(
+                    f"progress_surprise_decay={self.progress_surprise_decay} は0〜1の範囲外です。")
+            if not (0.0 <= self.progress_surprise_var_tau <= 1.0):
+                raise ValueError(
+                    f"progress_surprise_var_tau={self.progress_surprise_var_tau} は0〜1の範囲外です。")
+            if self.progress_surprise_threshold < 0:
+                raise ValueError(
+                    f"progress_surprise_threshold={self.progress_surprise_threshold} は"
+                    "負の値です。しきい値は0以上にしてください"
+                    "（負にすると平常時のブレまで拾ってしまい、修正前の不具合が再現します）。")
+        if self.goal_babbling and self.goal_space == "reach_self":
+            print("注意[config] goal_babbling(goal_space=reach_self) を有効にした。"
+                  "2026-08-02時点で本番の効果は未検証（診断段階）。"
+                  "2026-07-30の『有害』判定は旧実装(goal_space=prop_full)に対するもの"
+                  "であり、この新実装には当てはまらない（設計：2026-08-02_案Cの実装設計.md）",
+                  flush=True)
+        elif self.goal_babbling:
+            print("注意[config] goal_babbling を有効にした（goal_space=prop_full、旧実装）。"
+                  "2026-07-30 の実測で**有害**（おもちゃへの接触−32%、"
+                  "margin +30.7%→+17.2%、persist 1000%）。"
                   "原典と目標空間が違う（原典＝手先位置の低次元）", flush=True)
         if self.reward == "predict":
             print("注意[config] reward=predict は【既知の欠陥】（大行動バイアス＝"
@@ -264,6 +475,17 @@ class Config:
         if not self.is_muscle:
             print("注意[config] 関節モード（90関節を独立に駆動）＝逸脱リスト 逸脱5 の逸脱を"
                   "選んでいます。人間の新生児は拮抗筋を同時に力ませる[Tier1]", flush=True)
+        # ダブルタッチ対象部位の全身一般化（2026-08-05）のバリデーション。
+        #   触覚グループ名として実際に存在するかどうかは、taro_core側の
+        #   DoubleTouchDetector.__init__（構築時、学習開始前）のAssertionErrorに
+        #   委ねる（config.py単体は taro_core の部位一覧を知らないため、実行時の
+        #   検証は与えない。実装の裁量、仕様4節）。ここでは型（空でない
+        #   文字列のリスト）だけを確認する。
+        if not self.double_touch_touched_groups or \
+                not all(isinstance(nm, str) for nm in self.double_touch_touched_groups):
+            raise ValueError(
+                f"double_touch_touched_groups は空でない文字列のリストである必要がある: "
+                f"{self.double_touch_touched_groups!r}")
         if self.K >= 100:
             print(f"[!] K={self.K}（{100/self.K:.0f}Hz）＝人間の最遅神経発火7Hzより遅い。"
                   f"比較・再現目的でなければ K=10 を使うこと", flush=True)

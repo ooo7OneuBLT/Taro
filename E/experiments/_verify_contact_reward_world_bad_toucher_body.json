@@ -1,0 +1,24 @@
+{
+  "name": "[検証専用・削除可] world_toucher_bodiesに架空のbody名を指定した時に例外が出るかの確認",
+  "note": "2026-08-05。実装の検証。toucherグループ名は正しいが、world_toucher_bodiesを明示指定した際、存在しないbody名を渡すとgeoms_of_bodyのValueErrorで止まることを確認する。",
+  "scene": "新生児_仰向け_柵あり",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 0.0
+  },
+  "run": {
+    "type": "train",
+    "steps": 50,
+    "seed": 0,
+    "checkpoint": 25,
+    "csv": "E/logs/_verify_contact_reward/world_bad_toucher_body.csv"
+  },
+  "plugins": {
+    "contact_reward": {
+      "toucher": "right_palm",
+      "touched_groups": ["head"],
+      "world_toucher_bodies": ["no_such_body_xyz"],
+      "world_targets": ["fence_post"]
+    }
+  }
+}

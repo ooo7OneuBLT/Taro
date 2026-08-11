@@ -1,0 +1,26 @@
+{
+  "name": "検証：progress内部状態(pe_fast/pe_slow)保存の修正・手順A（旧形式チェックポイントから続き）",
+  "note": "2026-08-05。run/taro_setup.pyのsave()/_load()を修正し、pe_fast/pe_slowをチェックポイントに保存・復元するようにした。手順Aでは、修正前に保存された旧形式チェックポイント(lp_pe_fast/lp_pe_slowを含まない)から続きから学習し、(1)『旧形式のチェックポイントです』という注意メッセージが出ること、(2)このモデル保存時には新形式(lp_pe_fast/lp_pe_slow入り)で保存されることを確認する。",
+  "scene": "新生児_仰向け_柵なし",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 4.0,
+    "model": "E/logs/progress_breakdown_selfmodel/seed0_model_8000.pt",
+    "progress_surprise_bonus": 1.0,
+    "save": "E/logs/progress_breakdown_selfmodel/_verify_lp_resume_a.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 200,
+    "seed": 0,
+    "checkpoint": 100,
+    "csv": "E/logs/progress_breakdown_selfmodel/_verify_lp_resume_a.csv"
+  },
+  "plugins": {
+    "contact_reward": {
+      "toucher": "right_palm",
+      "touched_groups": ["head", "chest"],
+      "self_trace_out": "E/logs/progress_breakdown_selfmodel/_verify_lp_resume_a_trace.csv"
+    }
+  }
+}

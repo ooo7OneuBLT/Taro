@@ -1,0 +1,32 @@
+{
+  "name": "自己接触の興味度ボーナス 比較実験（interest_bonus=0.0・OFF・seed1）",
+  "scene": "リーチング_リクライニング60度_自己接触版",
+  "taro": {
+    "goal_babbling": true,
+    "goal_space": "reach_self",
+    "goal_trajectory": true,
+    "goal_traj_len": 25,
+    "goal_home_prob": 0.1,
+    "goal_negative_control": false,
+    "reach_arm_side": "right",
+    "touch": true,
+    "somatosensory": true,
+    "vision": true,
+    "double_touch_threshold": 0.5,
+    "double_touch_bonus": 0.0,
+    "self_touch_interest_bonus": 0.0,
+    "save": "E/logs/self_touch_interest_compare/off_seed1_model.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 6000,
+    "checkpoint": 500,
+    "seed": 1,
+    "csv": "E/logs/self_touch_interest_compare/off_seed1.csv"
+  },
+  "plugins": {
+    "reach_success": true,
+    "double_touch": true,
+    "contact_reward": true
+  }
+}

@@ -34,7 +34,8 @@ warnings.filterwarnings("ignore")
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.abspath(os.path.join(_HERE, os.pardir, os.pardir))
 # 注意：自発運動の生成器は `taro_core/src/brain/spinal_cord/cpg.py`（脊髄）にある
-for _p in [os.path.join(_ROOT, "taro_core", "src", "brain"), _HERE]:
+for _p in [os.path.join(_ROOT, "taro_core", "src", "brain"),
+           os.path.join(_ROOT, "run", "scene_tools"), _HERE]:
     if _p not in sys.path:
         sys.path.insert(0, _p)
 

@@ -1,0 +1,18 @@
+{
+  "name": "目視：自発運動（柵なし・線形成長・触覚あり seed0・4ヶ月）自己接触の土台候補確認用",
+  "note": "2026-08-05。ユーザーが直接起動（既存モデルの読み取り専用の目視のため、前提.md4節の例外に該当）。E/logs/selfmodel_v3_touch/model_柵なし_線形_触覚_seed0.pt（2026-07-31学習・柵なし・線形成長0→4ヶ月・18000回・筋肉モード・触覚あり）を、対応する学習時の実験ファイル（自己モデル_柵なし_線形成長_触覚あり_seed0.json）と同じtaro設定（touch/somatosensory=true）でrun.type=view。追加学習はしない。",
+  "scene": "新生児_仰向け_柵なし",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 4.0,
+    "touch": true,
+    "somatosensory": true,
+    "model": "E/logs/selfmodel_v3_touch/model_柵なし_線形_触覚_seed0.pt"
+  },
+  "run": {
+    "type": "view",
+    "seed": 0,
+    "view_std": 0.174
+  },
+  "plugins": {}
+}

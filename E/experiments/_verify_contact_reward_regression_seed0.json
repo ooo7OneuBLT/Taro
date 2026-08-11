@@ -1,0 +1,18 @@
+{
+  "name": "[検証専用・削除可] contact_reward一般化の前後比較（reach_self・touch=true・seed0）",
+  "note": "2026-08-05。run/plugins/common/contact_reward.py の一般化（reach_self依存除去・自前SomatosensoryCortex化）が既存挙動を変えていないかを確認するための、progress_surprise_selftouch_on_seed0.json の縮小コピー。stepsを6000→800に減らし、csv/saveの出力先を検証専用に変えてある。scene/taro/pluginsの中身は元ファイルと同一。",
+  "scene": "リーチング_リクライニング60度_自己接触版",
+  "taro": {
+    "goal_babbling": true, "goal_space": "reach_self", "goal_trajectory": true,
+    "goal_traj_len": 25, "goal_home_prob": 0.1, "goal_negative_control": false,
+    "reach_arm_side": "right", "touch": true, "somatosensory": true, "vision": true,
+    "double_touch_threshold": 0.5, "double_touch_bonus": 0.0,
+    "self_touch_interest_bonus": 0.0,
+    "progress_surprise_bonus": 1.0,
+    "save": "E/logs/_verify_contact_reward/regression_seed0_model.pt"
+  },
+  "run": {"type": "train", "steps": 800, "checkpoint": 100, "seed": 0,
+          "csv": "E/logs/_verify_contact_reward/regression_seed0.csv"},
+  "plugins": {"reach_success": true, "double_touch": true,
+              "contact_reward": {"self_trace_out": "E/logs/_verify_contact_reward/regression_seed0_selftrace.csv"}}
+}

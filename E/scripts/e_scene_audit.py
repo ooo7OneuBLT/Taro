@@ -90,7 +90,8 @@ def scene_coverage():
       （呼び出し側が上書きできないようにするため）。
       これを見落とすと「入れ忘れ」を7件も誤検出する（2026-07-29 に実際にやった）。
     """
-    src = open(os.path.join(_HERE, "e_scene.py"), encoding="utf-8").read()
+    _e_scene_path = os.path.join(_ROOT, "run", "scene_tools", "e_scene.py")
+    src = open(_e_scene_path, encoding="utf-8").read()
     by_env = set(re.findall(r'os\.environ\["(E_[A-Z0-9_]+)"\]', src))
     # 引数で直接渡しているもの＝シーンの項目名 → 対応する環境変数
     by_arg = {

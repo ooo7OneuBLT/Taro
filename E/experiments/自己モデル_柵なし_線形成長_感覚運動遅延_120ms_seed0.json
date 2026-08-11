@@ -1,0 +1,28 @@
+{
+  "name": "自己モデル：柵なし・線形成長・感覚運動遅延candidate_120ms（seed0）",
+  "note": "2026-08-02。候補5の検証：感覚遅延120ms（新生児のモロー反射の光学式モーションキャプチャ実測、右腕117.0ms/左腕129.2ms＝Rönnqvist 1995, Neuropsychologia、孫引き[Tier2]の平均に近い、乳児実測に最も近い候補）・運動遅延は最小値10ms。`自己モデル_柵なし_線形成長_感覚運動遅延_0ms_seed0.json` が基準。他の候補（50ms・200ms）と合わせて3点で振る。run/tools/check_movement_units.py で比較すること。",
+  "scene": "新生児_仰向け_柵なし",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 0.0,
+    "age_to": 4.0,
+    "age_start": 0,
+    "age_ramp": 18000,
+    "age_every": 500,
+    "sensory_delay_ms": 120,
+    "motor_delay_ms": 10,
+    "save": "E/logs/sensorimotor_delay/model_120ms_seed0.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 18000,
+    "seed": 0,
+    "checkpoint": 500,
+    "csv": "E/logs/sensorimotor_delay/120ms_seed0.csv"
+  },
+  "plugins": {
+    "self_model": true,
+    "hand_in_view": true,
+    "movement_units": true
+  }
+}

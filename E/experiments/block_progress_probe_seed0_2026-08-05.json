@@ -1,0 +1,29 @@
+{
+  "name": "感覚ブロック別progress可視化（seed0継続・prop/vest breakdown）",
+  "note": "2026-08-05。新設したblock_progress_probeを使い、1個に混ぜたprogress報酬の裏で各感覚ブロック(prop/vest。このモデルはtouch=falseなのでtouch_embedは出ない)のprogressがどう動くかを見る。既存のseed0_model_8000.ptの続きから1500step。",
+  "scene": "新生児_仰向け_柵なし",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 4.0,
+    "model": "E/logs/progress_breakdown_selfmodel/seed0_model_8000.pt",
+    "progress_surprise_bonus": 1.0,
+    "save": "E/logs/progress_breakdown_selfmodel/seed0_model_blockprobe.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 1500,
+    "seed": 0,
+    "checkpoint": 500,
+    "csv": "E/logs/progress_breakdown_selfmodel/seed0_blockprobe.csv"
+  },
+  "plugins": {
+    "contact_reward": {
+      "toucher": "right_palm",
+      "touched_groups": ["head", "chest"],
+      "self_trace_out": "E/logs/progress_breakdown_selfmodel/seed0_blockprobe_self_trace.csv"
+    },
+    "block_progress_probe": {
+      "out_path": "E/logs/progress_breakdown_selfmodel/seed0_blockprobe_blocks.csv"
+    }
+  }
+}

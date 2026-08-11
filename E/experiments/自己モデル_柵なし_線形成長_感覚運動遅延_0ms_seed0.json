@@ -1,0 +1,28 @@
+{
+  "name": "自己モデル：柵なし・線形成長・感覚運動遅延の基準（delay=0ms・seed0）",
+  "note": "2026-08-02。動きの区切りが人間の2倍細かい問題の検証・候補5（感覚運動の伝達遅延がゼロであること）。`自己モデル_柵なし_線形成長_seed0.json` と条件は同じで、sensory_delay_ms/motor_delay_ms を0で明示しただけ（何も変わらないはずの対照）。50/120/200msの各候補（同フォルダの `自己モデル_柵なし_線形成長_感覚運動遅延_{50,120,200}ms_seed0.json`）と比較する基準。根拠：MIMo grows!(López et al. 2025, arXiv:2509.09805)のIV-CがFIFOバッファで実装済み（未使用だった機構を配線しただけ・taro_coreへの新規実装はしていない）。Philipp, López & Triesch(2026, arXiv:2606.17456)のDiscussionは伝達遅延が振動を抑える可能性を'speculate'（未検証の推測）としている。run/tools/check_movement_units.py で比較すること。",
+  "scene": "新生児_仰向け_柵なし",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 0.0,
+    "age_to": 4.0,
+    "age_start": 0,
+    "age_ramp": 18000,
+    "age_every": 500,
+    "sensory_delay_ms": 0,
+    "motor_delay_ms": 0,
+    "save": "E/logs/sensorimotor_delay/model_0ms_seed0.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 18000,
+    "seed": 0,
+    "checkpoint": 500,
+    "csv": "E/logs/sensorimotor_delay/0ms_seed0.csv"
+  },
+  "plugins": {
+    "self_model": true,
+    "hand_in_view": true,
+    "movement_units": true
+  }
+}

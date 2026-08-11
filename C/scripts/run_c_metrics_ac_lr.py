@@ -38,6 +38,19 @@ from insula import Insula
 # 仰向け環境（D側で定義）。C_SUPINE=1 のときだけ使う。
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 os.pardir, os.pardir, "D", "scripts"))
+# 【なぜ、2026-08-06】測定器（evaluate/agency_probe/inverse_probe/inverse_exec_probe/
+# closed_loop_probe/infer_goal_action）のしきい値・反復回数の既定値を、
+# `run/plugins/common/probe_defaults.py` へ一元化した（監査報告
+# `2026-08-06_測定器コピペ重複の監査.md`）。数値は一切変えていない。
+# 注意：関数本体をE側の e_probes.py（ProbeContext）へ委譲する統合は見送った
+# （検証で、同一コード・同一シードでも実行のたびにINVEXEC/CLOSEDLOOPの数値が変わる
+# 非決定性が既にこのファイルに存在すると判明し、「完全一致」の確認基準を満たせな
+# かったため。実装担当報告2026-08-06参照）。probe_defaults を参照するには run
+# パッケージが読めるようTaroルートをsys.pathへ足す必要がある
+# （run/plugins/common/self_model.pyが`run.plugins.base`を読むのと同じ要領）。
+# _BRIDGE = Taro/C なので、その1つ上が Taro ルート。
+sys.path.insert(0, os.path.dirname(_BRIDGE))
+from run.plugins.common import probe_defaults as _pd  # noqa
 from gymnasium.envs.registration import register
 if os.environ.get("C_SUPINE", "0") == "1":
     from d_supine_env import SupineMimoEnv  # noqa
@@ -53,6 +66,11 @@ LOG_DIR = os.environ.get("C_LOGDIR", os.path.join(_BRIDGE, "logs", "C", "ac_prot
 _LR = float(os.environ.get("C_LR", "0.005"))
 _MATURE = os.environ.get("C_MATURE", "0") == "1"  # 1=学習進行に合わせて探索を結晶化
 _REPLAY = os.environ.get("C_REPLAY", "1") == "1"  # 既定ON＝睡眠中の経験リプレイ（記憶定着）。自己モデル確立の本命機構(taro-C2＝margin+11→+48の頭打ち突破)。C_REPLAY=0で無効化可（アブレーション用）
+# 【2026-08-06追記・4条件アブレーション用】既定ON＝直前の行動を次tickの入力(prev_a)として渡す
+#   遠心性コピー。C_EFFCOPY=0で無効化（state["prev_a"]を常にゼロのまま＝行動しても
+#   「自分が何をしたか」の情報が入力に載らない）。既存のG2診断（本物vs偽コピーのシャッフル）
+#   とは別物：あちらは診断時だけの一時的な差し替え、こちらは学習全体を通した無効化。
+_EFFCOPY = os.environ.get("C_EFFCOPY", "1") == "1"
 # 【注意すべき機能】既定ON＝運動小脳（自動化/結晶化）。良性は検証済み（発散・フリーズ・
 # agency崩壊なし）だが、現指標では効果ほぼ不変・常時稼働（約26%ブレンド）。将来の壁の
 # 切り分け時は「小脳が効いている可能性」を必ず確認する（`注意すべき機能リスト.md` 参照）。
@@ -145,7 +163,7 @@ def _touch_params():
     from d_supine_env import infant_touch_params
     return infant_touch_params(2.0)
 CSV_COLUMNS = ["life_min", "train_step", "classify", "margin", "corr", "persist",
-               "agency", "mag_ratio", "real_min", "hand_in_view"]
+               "agency", "mag_ratio", "real_min", "hand_in_view", "agency_blind"]
 
 
 def hand_in_view_rate(model, data):
@@ -231,10 +249,19 @@ def ln_prop(obs):
     """
     ln = torch.nn.functional.layer_norm
     v = to_tensor(obs["observation"])
-    if _TOUCH and _TOUCH_MODE == "target":
-        v = torch.cat([v, to_tensor(obs["touch"])])
     parts = [ln(v, v.shape).detach()]
     names = ["prop"]
+    # 【なぜ、2026-08-07】以前はここで touch を固有感覚ベクトルに直接連結してから
+    # まとめて1回 layer_norm していた（v = torch.cat([v, touch])）。すると
+    # block_pe が触覚を独立ブロックとして見られず、"prop"という1つの巨大ブロックに
+    # 固有感覚と触覚が混ざったまま次元数の罠（621+touchの次元比で寄与が決まる）が
+    # 残っていた。視覚（下のE1_TARGET_ALLブロック）と同じ理屈＝**別々にlayer_norm
+    # してから名前付きで parts/names に追加**に揃えた。C_TOUCH=0（既定）では
+    # このifが素通りするので挙動は変わらない。
+    if _TOUCH and _TOUCH_MODE == "target":
+        t = to_tensor(obs["touch"])
+        parts.append(ln(t, t.shape).detach())
+        names.append("touch")
     f = _TGT_FUSION
     if _E1_TARGET and f is not None:
         with torch.no_grad():                   # 正解側は勾配を流さない（RND式）
@@ -403,13 +430,27 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
         state["hidden"] = brain.init_motor_hidden()
         state["prev_a"] = torch.zeros(n_act)
 
+    def advance_state(hn, next_a):
+        """毎tick共通の状態更新：GRU隠れ状態を進め、_EFFCOPY設定に従ってprev_aを更新する。
+
+        【2026-08-06新設】以前はこの2行が7箇所（学習ループ1＋評価/診断関数6）に
+        それぞれ独立にコピーされていた。C_EFFCOPYを追加したとき学習ループの1箇所
+        しか直さず、残り5箇所（評価関数側）を見落として、C_EFFCOPY=0で学習させても
+        評価時だけ正しい遠心性コピーがこっそり使われる、という事故を起こした
+        （`検証の落とし穴チェックリスト.md`項98）。今後の設定追加は必ずこの関数の
+        中だけ直せばよい形にして、同じ事故を構造的に防ぐ。
+        """
+        state["hidden"] = hn.detach()
+        if _EFFCOPY:
+            state["prev_a"] = next_a.detach()
+
     def act_mean(z):
         # 決定的な行動平均（評価・agency用、ノイズなし）。小脳ONなら自動化ブレンドを適用。
         # 【2026-07-25】太郎の act_deterministic を呼ぶだけに変更（core へ一元化）。
         # 旧実装は同じ式を手書きしていた＝数値は完全に同一。
         return brain.act_deterministic(z, cerebellum=(cereb if _CEREB else None))
 
-    def infer_goal_action(z, clp, init_mean, g, n_steps=15, lr_inf=0.1):
+    def infer_goal_action(z, clp, init_mean, g, n_steps=_pd.GOAL_INFER_STEPS, lr_inf=_pd.GOAL_INFER_LR):
         # Goal Babbling: 凍結した順モデル(nat_head)を反転し、望む感覚 g に届く行動を推論。
         # 逆モデル(Stage1)の機構をオンラインで使う＝目標指向の行動生成。
         target = (g - clp).detach()
@@ -421,6 +462,12 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
             opt.step()
         return torch.tanh(raw).detach()
 
+    # 【2026-08-06・測定器の数値一元化のみ】関数本体をE側の e_probes.py へ委譲する統合は
+    # 見送った（検証で、同一コード・同一シードでも実行のたびに評価/診断関数の数値が
+    # 変わる非決定性がこのファイルに既に存在すると判明し、仕様が求める「変更前後で
+    # 完全一致」の確認基準を満たせなかったため。実装担当への報告参照）。
+    # 各関数の本体は変更せず、デフォルト引数の値だけを `run/plugins/common/
+    # probe_defaults.py` の定数へ差し替える（値そのものは一切変えていない）。
     def evaluate():
         Zs, acts, nx, cu, self_err, ep = [], [], [], [], [], []
         pdel, adel = [], []
@@ -434,7 +481,7 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
             self_err.append(mse(clp + pd, nlp).item()); ep.append(mse(clp, nlp).item())
             pdel.append(pd.numpy()); adel.append((nlp - clp).numpy())
             Zs.append(z); acts.append(a); nx.append(nlp); cu.append(clp)
-            state["hidden"] = hn.detach(); state["prev_a"] = a
+            advance_state(hn, a)
             if term:
                 reset_state()
         N = len(Zs); correct = total = 0; other_errs = []
@@ -454,20 +501,28 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
         corr = float(np.corrcoef(P, A)[0, 1])
         return classify, margin, corr, persist
 
-    def agency_probe(n=30):
+    def agency_probe(n=_pd.AGENCY_PROBE_N, action_blind=False):
         # 遠心性コピー(=太郎の意図a_self)は両トライアル共通。体が自分の意図どおり(自己)か
         # 外部指令(外因)かだけが違う。GRUに渡す前回行動は常に「太郎自身の意図」。
+        #
+        # 【2026-08-06追記・action_blind】nat_head(predict関数)は「今の行動」を直接
+        # 受け取って予測する作りなので、C_EFFCOPY=0でもこの直接入力は常に生きている
+        # （再帰的な遠心性コピーとは別経路）。action_blind=Trueのときは、予測に渡す
+        # 行動だけをゼロに固定し、この直接経路を無効化する。実際に体を動かす行動・
+        # advance_state()に渡す行動（再帰的な遠心性コピー）は変えない＝学習も
+        # 物理的な動きも一切変えず、測定のときだけ直接経路を見えなくする。
         self_errs, ext_errs, self_mag, ext_mag, self_acts = [], [], [], [], []
         for _ in range(n):
             sv = fusion.encode(state["obs"]); cf = target_fusion.encode(state["obs"]).detach(); clp = ln_prop(state["obs"])
             z, _, _, hn = zc(sv, state["prev_a"], cf, state["hidden"]); z = z.detach()
             a = torch.clamp(act_mean(z), -1.0, 1.0).detach()
-            pred = nat_head(torch.cat([z, a], dim=-1)).detach()
+            pred_a = torch.zeros_like(a) if action_blind else a
+            pred = nat_head(torch.cat([z, pred_a], dim=-1)).detach()
             state["obs"], term = step_k(rescale_action(a, env.action_space))
             nlp = ln_prop(state["obs"])
             self_errs.append(mse(clp + pred, nlp).item())
             self_mag.append((nlp - clp).abs().mean().item())
-            self_acts.append(a); state["hidden"] = hn.detach(); state["prev_a"] = a
+            self_acts.append(a); advance_state(hn, a)
             if term:
                 reset_state()
         perm = np.random.permutation(len(self_acts))
@@ -476,12 +531,13 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
             z, _, _, hn = zc(sv, state["prev_a"], cf, state["hidden"]); z = z.detach()
             a_self = torch.clamp(act_mean(z), -1.0, 1.0).detach()
             a_ext = self_acts[perm[k]]
-            pred = nat_head(torch.cat([z, a_self], dim=-1)).detach()
+            pred_a = torch.zeros_like(a_self) if action_blind else a_self
+            pred = nat_head(torch.cat([z, pred_a], dim=-1)).detach()
             state["obs"], term = step_k(rescale_action(a_ext, env.action_space))
             nlp = ln_prop(state["obs"])
             ext_errs.append(mse(clp + pred, nlp).item())
             ext_mag.append((nlp - clp).abs().mean().item())
-            state["hidden"] = hn.detach(); state["prev_a"] = a_self  # 遠心性コピーは意図
+            advance_state(hn, a_self)  # 遠心性コピーは意図
             if term:
                 reset_state()
         correct = total = 0
@@ -492,7 +548,8 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
         mag_ratio = np.mean(ext_mag) / max(np.mean(self_mag), 1e-9) * 100
         return agency, mag_ratio
 
-    def inverse_probe(n=60, n_steps=40, n_restarts=3, lr_inf=0.1):
+    def inverse_probe(n=_pd.INVERSE_PROBE_N, n_steps=_pd.INVERSE_PROBE_STEPS,
+                       n_restarts=_pd.INVERSE_PROBE_RESTARTS, lr_inf=_pd.INVERSE_PROBE_LR):
         """逆モデルStage1診断：凍結した順モデル(nat_head)を"反転"して、望む次感覚に当てる
         行動を推論できるか。goal＝実際に到達した次固有感覚(到達可能)。
         主眼＝①行動レバレッジ(err_random − err_infer：行動が予測にどれだけ効くか)、
@@ -522,7 +579,7 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
             ei.append(best_e); ea.append(ferr(a_real).item())
             er.append(ferr(torch.empty(n_act).uniform_(-1.0, 1.0)).item())
             astar_all.append(best_a.numpy()); areal_all.append(a_real.numpy())
-            state["hidden"] = hn.detach(); state["prev_a"] = a_real
+            advance_state(hn, a_real)
             if term:
                 reset_state()
         A = np.concatenate(astar_all); B = np.concatenate(areal_all)
@@ -538,7 +595,8 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
                      f"recover_corr,{rec}\n")
         return {"infer_over_random": mi / max(mr, 1e-9), "recover_corr": rec}
 
-    def inverse_exec_probe(n=40, n_steps=40, n_restarts=3, lr_inf=0.1):
+    def inverse_exec_probe(n=_pd.INVERSE_EXEC_PROBE_N, n_steps=_pd.INVERSE_EXEC_PROBE_STEPS,
+                           n_restarts=_pd.INVERSE_EXEC_PROBE_RESTARTS, lr_inf=_pd.INVERSE_EXEC_PROBE_LR):
         """逆モデルStage1.5＝実行テスト：推論a*を"実際にMIMoで実行"し、現実の次感覚が
         目標に届くか。同じ物理状態(qpos/qvel)から a_real / a* / random を実行して現実の
         到達誤差を比較（MuJoCo state save/restore でカウンターファクト）。
@@ -583,7 +641,7 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
             mi_model.append(best_e)
             # 実トラジェクトリを a_real で1歩進める（他プローブと同様に状態を歩かせる）
             state["obs"], term = step_k(rescale_action(a_real, env.action_space))
-            state["hidden"] = hn.detach(); state["prev_a"] = a_real
+            advance_state(hn, a_real)
             if term:
                 reset_state()
         ds, dr, df = float(np.mean(d_star)), float(np.mean(d_rand)), float(np.mean(d_floor))
@@ -597,7 +655,7 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
                      f"model_err_star,{mm}\n")
         return {"star_over_random": ds / max(dr, 1e-9), "model_err": mm}
 
-    def closed_loop_probe(n=30, max_reach=10):
+    def closed_loop_probe(n=_pd.CLOSED_LOOP_PROBE_N, max_reach=_pd.CLOSED_LOOP_PROBE_MAX_REACH):
         """C4診断：閉ループ制御 vs 開ループ で、目標姿勢へどれだけ届くか。
         目標g＝過去に経験した姿勢(goal_buf)。同じ物理状態(MuJoCo save/restore)から比較。
         補正の刻み k_inner ＝ K（順モデルの予測幅に合わせる。第1版はK//8でミスマッチ→負けた）。
@@ -653,7 +711,7 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
             dr.append(mse(o_rand, g).item()); dn.append(mse(clp0, g).item()); steps.append(nstep)
             mj.set_state(qpos, qvel)  # 実トラジェクトリを1リーチぶん進める
             state["obs"], term = step_k(rescale_action(a_open, env.action_space))
-            state["hidden"] = hn0.detach(); state["prev_a"] = a_open
+            advance_state(hn0, a_open)
             if term:
                 reset_state()
         mc, mo, mr, mn, ms = (float(np.mean(dc)), float(np.mean(do)), float(np.mean(dr)),
@@ -668,12 +726,16 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
     def checkpoint(step):
         cl, mg, co, pr = evaluate()
         ag, magr = agency_probe()
+        # 【2026-08-06追記】直接経路（今の行動をpredictへそのまま渡す経路）を
+        # 測定時だけ無効化した参考値。再帰的な遠心性コピーだけの効果を見るため。
+        ag_blind, _ = agency_probe(action_blind=True)
         life_min = step * K * DT / 60.0
         real_min = (time.time() - t0) / 60.0
         # E1の主指標：直近区間で手が視野に入っていた割合（段階1では記録のみ・報酬に不使用）
         _hv = (100.0 * hv["hit"] / hv["tot"]) if hv["tot"] else float("nan")
         log_row([f"{life_min:.1f}", step, f"{cl:.2f}", f"{mg:.2f}", f"{co:.4f}",
-                 f"{pr:.2f}", f"{ag:.2f}", f"{magr:.1f}", f"{real_min:.1f}", f"{_hv:.2f}"])
+                 f"{pr:.2f}", f"{ag:.2f}", f"{magr:.1f}", f"{real_min:.1f}", f"{_hv:.2f}",
+                 f"{ag_blind:.2f}"])
         hv["hit"] = 0; hv["tot"] = 0        # 区間ごとにリセット＝推移が見える
         noise = 0.05 + ne.get_ne_level() * 0.45
         cereb_tag = f" cereb=on(err={cereb.err_ema.item():.2f})" if _CEREB else " cereb=off"
@@ -684,7 +746,7 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
             if _EFFORT and eff_accum:
                 act_tag += f" effort={np.mean(eff_accum[-200:]):.3f}(λ={_EFFORT})"
         print(f"[AC seed{seed} rew={_REWARD} ne={'rel' if _NE_REL else 'abs'} touch={_TOUCH_MODE if _TOUCH else 'off'}] life={life_min:.0f}min | classify={cl:.1f}% margin={mg:+.1f}% "
-              f"corr={co:.3f} persist={pr:.1f}% agency={ag:.1f}%(mag {magr:.0f}%) | "
+              f"corr={co:.3f} persist={pr:.1f}% agency={ag:.1f}%(mag {magr:.0f}%) agency_blind={ag_blind:.1f}% | "
               f"noise={noise:.3f}(mat={ne.maturation:.2f}){cereb_tag}{act_tag} real={real_min:.0f}min", flush=True)
 
     # 経験バッファ（睡眠中リプレイ用）。各ステップの予測に必要な材料を貯める。
@@ -822,7 +884,7 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
         if _MATURE:
             # 成熟は sim秒でなく発達年齢(学習回数)で駆動。n_train学習で完全成熟。
             ne.mature(dev_clock.progress(n_train))
-        state["hidden"] = hn.detach(); state["prev_a"] = a.detach()
+        advance_state(hn, a)
         if term:
             reset_state()
         if _REPLAY and (i + 1) % ckpt == 0:

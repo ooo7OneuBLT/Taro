@@ -1,0 +1,22 @@
+{
+  "name": "自己モデル：月齢4ヶ月固定・最小訓練（1000step）・筋肉tau既定・seed0",
+  "note": "2026-08-08。震え問題の検証で使ってきた『月齢0→4ヶ月・18000ステップ』の本番訓練テンプレートは、震え測定のために選ばれた値ではなく、自己モデル実験のテンプレート（age_ramp=18000）をそのまま流用しただけだった。震えの実測は`run/tools/check_movement_units.py`が月齢4ヶ月固定でモデルを読み込み直して測るため、『0→4ヶ月かけて育てる過程』自体が震え測定に必要かをユーザーが疑問視（『だとしても18000もやる必要ある？』）。本ファイルは`自己モデル_柵なし_線形成長_感覚運動遅延_0ms_seed0.json`を土台に、訓練の長さだけを変数にして比較するための最小構成。土台との差分：(1)age_toを指定せず、age_months=4.0のみ指定＝月齢を最初から4ヶ月固定（0→4ヶ月のランプを一切しない。run/config.pyのage_at()はage_to=Noneのとき常にage_monthsを返す設計で、これはcheck_movement_units.py自身が測定時にモデルを読み込み直す際の設定と同じ考え方）。仕様には『age_to=4.0のままage_rampを小さくする』という案もあったが、age_ramp<=0でもage_start=0の場合はstep=0から一瞬でa1=4.0に切り替わる一方、age_ramp=1等の小さい正の値では最初の数stepだけage=0.0からの遷移が挟まり『完全な固定』にならないため、より厳密に『最初から4ヶ月固定』を再現できるage_to省略を採用した。(2)run.steps=1000（18000ではない）。(3)sensory_delay_ms/motor_delay_ms/muscle_tauは指定しない（既定値のまま。tau=0.01秒はtaro_core/src/body/smooth_actuation.pyのコメントに明記の既定値）。それ以外（scene・actuation・plugins）は土台と同一。比較対象：E/logs/sensorimotor_delay/model_0ms_seed0.pt（18000ステップ本番訓練・tau既定・0→4ヶ月線形ランプ）。run/tools/check_movement_units.pyで両モデルの震え指標を比較する。",
+  "scene": "新生児_仰向け_柵なし",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 4.0,
+    "save": "E/logs/muscle_tau_shortcheck/model_min1000_seed0.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 1000,
+    "seed": 0,
+    "checkpoint": 500,
+    "csv": "E/logs/muscle_tau_shortcheck/min1000_seed0.csv"
+  },
+  "plugins": {
+    "self_model": true,
+    "hand_in_view": true,
+    "movement_units": true
+  }
+}

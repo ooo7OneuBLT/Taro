@@ -1,0 +1,31 @@
+{
+  "name": "接触時の報酬直接測定 比較実験（self vs none・seed9）",
+  "scene": "リーチング_リクライニング60度",
+  "taro": {
+    "goal_babbling": true,
+    "goal_space": "reach_self",
+    "goal_trajectory": true,
+    "goal_traj_len": 25,
+    "goal_home_prob": 0.1,
+    "goal_negative_control": false,
+    "reach_arm_side": "right",
+    "touch": true,
+    "somatosensory": true,
+    "vision": true,
+    "double_touch_threshold": 0.5,
+    "double_touch_bonus": 0.0,
+    "save": "E/logs/contact_reward_compare/seed9_model.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 18000,
+    "checkpoint": 500,
+    "seed": 9,
+    "csv": "E/logs/contact_reward_compare/seed9.csv"
+  },
+  "plugins": {
+    "reach_success": true,
+    "double_touch": true,
+    "contact_reward": true
+  }
+}

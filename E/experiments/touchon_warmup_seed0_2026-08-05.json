@@ -1,0 +1,27 @@
+{
+  "name": "touch=ON土台作り（良い自発運動の続きから触覚エンコーダを追加学習）",
+  "note": "2026-08-05。①(全身への二重接触ボーナス一般化)②(感覚ごとに分けた報酬)の4条件比較実験のための共通の土台。seed0_model_8000.pt（良い自発運動・touch=falseで学習済み）の続きから、touchとsomatosensoryをONにして3000step追加学習する。運動の質はそのまま引き継ぎ、触覚のエンコーダだけ新規に学習させる（taro_setup.py _load()の仕様：fusion_touchが保存モデルに無ければ白紙から学習）。",
+  "scene": "新生児_仰向け_柵なし",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 4.0,
+    "model": "E/logs/progress_breakdown_selfmodel/seed0_model_8000.pt",
+    "touch": true,
+    "somatosensory": true,
+    "save": "E/logs/progress_breakdown_selfmodel/seed0_touchon_base.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 3000,
+    "seed": 0,
+    "checkpoint": 500,
+    "csv": "E/logs/progress_breakdown_selfmodel/seed0_touchon_base.csv"
+  },
+  "plugins": {
+    "contact_reward": {
+      "toucher": "right_palm",
+      "touched_groups": ["head", "chest"],
+      "self_trace_out": "E/logs/progress_breakdown_selfmodel/seed0_touchon_base_trace.csv"
+    }
+  }
+}

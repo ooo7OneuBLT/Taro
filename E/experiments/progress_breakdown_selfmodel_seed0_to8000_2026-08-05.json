@@ -1,0 +1,26 @@
+{
+  "name": "progress報酬の内訳検証（良い自発運動モデル・seed0の続きから8000stepまで延長）",
+  "note": "2026-08-05。progress_breakdown_selfmodel_seed0_2026-08-05.json（3000step）で、自己接触時の報酬平均が前半(0〜1500step)はマイナス・後半(1500〜3000step)はプラスに転じる兆候が見えた（seed0.csvのcreward_self_rew_mean参照）。触覚チャンネルの予測精度が学習で改善し続けて反転が続くのか、それとも3000step時点だけの偶然の変動かを見るため、同じseed0の続き（E/logs/progress_breakdown_selfmodel/seed0_model.pt）から追加5000step（合計8000step相当）継続する。",
+  "scene": "新生児_仰向け_柵なし",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 4.0,
+    "model": "E/logs/progress_breakdown_selfmodel/seed0_model.pt",
+    "progress_surprise_bonus": 1.0,
+    "save": "E/logs/progress_breakdown_selfmodel/seed0_model_8000.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 5000,
+    "seed": 0,
+    "checkpoint": 500,
+    "csv": "E/logs/progress_breakdown_selfmodel/seed0_8000.csv"
+  },
+  "plugins": {
+    "contact_reward": {
+      "toucher": "right_palm",
+      "touched_groups": ["head", "chest"],
+      "self_trace_out": "E/logs/progress_breakdown_selfmodel/seed0_8000_self_trace.csv"
+    }
+  }
+}

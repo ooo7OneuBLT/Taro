@@ -1,0 +1,27 @@
+{
+  "name": "自己モデル：柵なし・線形成長・筋肉タウ=60ms（seed0）",
+  "note": "2026-08-07。`自己モデル_柵なし_線形成長_筋肉tau_10ms_seed0.json`（基準・既定tau=0.01秒）との比較用。muscle_tauを0.06秒に指定した以外は基準と完全に同一条件。run/tools/check_movement_units.py で比較すること。1シードのみの探索的確認。",
+  "scene": "新生児_仰向け_柵なし",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 0.0,
+    "age_to": 4.0,
+    "age_start": 0,
+    "age_ramp": 18000,
+    "age_every": 500,
+    "muscle_tau": 0.06,
+    "save": "E/logs/muscle_tau/model_60ms_seed0.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 18000,
+    "seed": 0,
+    "checkpoint": 500,
+    "csv": "E/logs/muscle_tau/60ms_seed0.csv"
+  },
+  "plugins": {
+    "self_model": true,
+    "hand_in_view": true,
+    "movement_units": true
+  }
+}

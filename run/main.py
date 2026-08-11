@@ -11,7 +11,7 @@
     .venv/Scripts/python.exe -m run.main E/experiments/<名前>.json --steps 600
 
 【実験ファイル（JSON）の4つの欄】境界を混ぜない
-    scene    どんな環境か（E/scenes/*.json の名前）
+    scene    どんな環境か（run/scenes/*.json の名前）
     taro     太郎の中身の設定（本能のON/OFF・月齢・駆動モード）
              → 実装は taro_core にある。ここは「どれを使うか」だけ
     run      動かし方（type / steps / seed）
@@ -59,14 +59,23 @@ def _register():
     from run.plugins.common.trace import Trace
     from run.plugins.common.dashboard import Dashboard
     from run.plugins.common.movement_units import MovementUnits
+    from run.plugins.common.reach_success import ReachSuccess
+    from run.plugins.common.double_touch import DoubleTouch
+    from run.plugins.common.contact_reward import ContactReward
+    from run.plugins.common.block_progress_probe import BlockProgressProbe
     PLUGINS["toy_touch"] = ToyTouch
     PLUGINS["hand_in_view"] = HandInView
     PLUGINS["self_model"] = SelfModel
     PLUGINS["movement_units"] = MovementUnits   # 動きが滑らかか（リーチングの指標）
+    PLUGINS["reach_success"] = ReachSuccess     # 自己接触が実際に起きているか（直接測る）
+    PLUGINS["double_touch"] = DoubleTouch       # ダブルタッチ（自己接触の一致）検出（報酬には未接続）
+    PLUGINS["contact_reward"] = ContactReward   # 自己接触あり/なしで報酬・RPEを直接比較する
+    PLUGINS["block_progress_probe"] = BlockProgressProbe   # ブロックごとのprogressを見るだけ（読むだけ）
     PLUGINS["trace"] = Trace           # 内部の値の指紋を残す（原因追跡用）
     PLUGINS["dashboard"] = Dashboard   # 学習の様子の絵を自動で作り直す
-    # 注意：self_model / trace は太郎の脳が要る（run.type=train のみ）。
-    #   measure（脳を通さず環境だけ進める）では使えない。
+    # 注意：self_model / trace / reach_success / double_touch は太郎の脳が要る
+    #   （run.type=train のみ）。measure（脳を通さず環境だけ進める）では使えない。
+    #   reach_success・double_touch はさらに taro.goal_space="reach_self" も要る。
 
 
 def load_spec(path):
@@ -205,6 +214,16 @@ def run(spec, *, steps_override=None, verbose=False):
             v = t.get(key, r.get(key))
             if v is not None:
                 envv[name] = str(v)
+        # 【なぜ、2026-08-10】taro.actuation（駆動モード）が e_viewer.py に
+        #   渡っていなかった。渡さないと e_viewer.py は常に筋肉モードで体を
+        #   作ってしまう（監査：作業記録（非公開）
+        #   2026-08-10_run系システムとViewerの型バグ横断監査.md「中2」）。
+        #   既定（未指定）は run/plugins/common/scene.py と同じ "muscle"。
+        #   ここで既定値をそのまま明示しても、e_viewer.py 側の分岐で
+        #   "muscle" は今までどおり MuscleModel を選ぶだけなので、既存の
+        #   挙動（全実験が muscle）は変わらない。
+        if t.get("actuation") is not None:
+            envv["E_ACTUATION"] = str(t["actuation"])
         script = os.path.join(_ROOT, "run", "viewer_tools", "e_viewer.py")
         print(f"  編集ウィンドウ付き Viewer を開きます\n"
               f"     シーン {envv['E_SCENE']}"

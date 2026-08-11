@@ -46,15 +46,26 @@ import numpy as np
 
 TARGET_RECOIL = 105.3      # Farmania 2017（満期産 n=74）
 TARGET_SD = 14.2
-STIFFNESS_LEVELS = [0.005, 0.01, 0.02, 0.05, 0.1, 0.2]
 SETTLE_SEC = 3.0           # 離してから測るまでの時間
 
+# 【2026-08-08 統合】旧 infant_body.apply_flexor_tone（剛性の絶対値stiffnessを直接
+#   振る）は infant_limbs.apply_limb_tone の profile="newborn_flexor" へ統合され、
+#   剛性は重力から逆算する方式（hold_deg＝「許すずれ」度数）に変わった。
+#   旧stiffness=0.2に「肘単体では」等価なhold_degは、0ヶ月体・肘の重力モーメント
+#   τ=0.02925N·m から degrees(τ/0.2)=8.38度と算出できるが、新実装は肩・股・膝も
+#   同時に重力から逆算した（旧実装より硬い）剛性で駆動するため、多体の力学的結合を
+#   通じて肘の軌道が変わり、8.38度では実測が範囲外（反跳121.2度、差15.9度）になった。
+#   1〜8度で振り直し、4.0度が最も近い（反跳110.4度、差5.1度）と分かった
+#   （詳細は `taro_core/src/body/infant_limbs.py` の TONE_PROFILES["newborn_flexor"]
+#   のコメント参照）。
+HOLD_DEG_LEVELS = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]
 
-def run(stiffness):
+
+def run(hold_deg):
     from d_supine_env import SupineMimoEnv
     from mimoActuation.muscle import MuscleModel
     from e_body_config import body_kwargs_from_env
-    from infant_body import apply_flexor_tone
+    from infant_limbs import apply_limb_tone
 
     kw = body_kwargs_from_env(0.0, verbose=False)
     kw["flexion"] = True
@@ -62,7 +73,8 @@ def run(stiffness):
                         age=0.0, **kw)
     m, d = env.unwrapped.model, env.unwrapped.data
     # 強さを上書きして適用し直す
-    apply_flexor_tone(m, 0.0, stiffness=stiffness, verbose=False, data=d)
+    apply_limb_tone(m, d, age=0.0, profile="newborn_flexor", hold_deg=hold_deg,
+                    verbose=False)
     env.reset(seed=0)
 
     qadr = {}
@@ -101,11 +113,11 @@ def main():
     print(f"        Farmania et al. 2017 [PMC5602260] 満期産 n=74")
     print(f"  手順: 肘を伸展位にして離し、{SETTLE_SEC}秒後の角度を測る\n")
 
-    print(f"{'stiffness':>10}{'伸展位':>10}{'落ち着いた角度':>16}"
+    print(f"{'hold_deg':>10}{'伸展位':>10}{'落ち着いた角度':>16}"
           f"{'反跳量':>10}{'目標との差':>12}  判定")
     print("-" * 76)
     best, best_err = None, 1e9
-    for k in STIFFNESS_LEVELS:
+    for k in HOLD_DEG_LEVELS:
         try:
             r = run(k)
         except Exception as e:
@@ -119,7 +131,7 @@ def main():
               f"{r['recoil']:>10.1f}{r['recoil']-TARGET_RECOIL:>+12.1f}"
               f"  {'○ 範囲内' if inside else '× 範囲外'}")
 
-    print(f"\n  最も近い強さ: stiffness = {best}（差 {best_err:.1f}度）")
+    print(f"\n  最も近い hold_deg = {best}（差 {best_err:.1f}度）")
     if best_err <= TARGET_SD:
         print(f"  → 実測の 1SD（{TARGET_SD}度）以内。この値を採用できる")
     else:

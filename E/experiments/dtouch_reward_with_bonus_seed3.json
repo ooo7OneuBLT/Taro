@@ -1,0 +1,30 @@
+{
+  "name": "頭へのダブルタッチ報酬 比較実験（ボーナスあり・seed3）",
+  "scene": "リーチング_リクライニング60度",
+  "taro": {
+    "goal_babbling": true,
+    "goal_space": "reach_self",
+    "goal_trajectory": true,
+    "goal_traj_len": 25,
+    "goal_home_prob": 0.1,
+    "goal_negative_control": false,
+    "reach_arm_side": "right",
+    "touch": true,
+    "somatosensory": true,
+    "vision": true,
+    "double_touch_threshold": 0.5,
+    "double_touch_bonus": 0.2,
+    "save": "E/logs/double_touch_reward_compare/with_bonus_seed3_model.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 6000,
+    "checkpoint": 500,
+    "seed": 3,
+    "csv": "E/logs/double_touch_reward_compare/with_bonus_seed3.csv"
+  },
+  "plugins": {
+    "reach_success": true,
+    "double_touch": true
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "name": "検証：progress内部状態(pe_fast/pe_slow)保存の修正・手順B（新形式チェックポイントから続き）",
+  "note": "2026-08-05。手順Aで新形式(lp_pe_fast/lp_pe_slow入り)で保存したチェックポイントから、さらに続きから学習する。(1)『pe_fast/pe_slowを保存値から復元』というメッセージが出ること、(2)最初のcheckpoint区間(0〜100step)のcreward_none_rew_meanが、修正前に見られた起動直後の異常な高値(+0.16前後)ではなく、後続の区間と近い水準になっていることを確認する。",
+  "scene": "新生児_仰向け_柵なし",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 4.0,
+    "model": "E/logs/progress_breakdown_selfmodel/_verify_lp_resume_a.pt",
+    "progress_surprise_bonus": 1.0,
+    "save": "E/logs/progress_breakdown_selfmodel/_verify_lp_resume_b.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 500,
+    "seed": 0,
+    "checkpoint": 100,
+    "csv": "E/logs/progress_breakdown_selfmodel/_verify_lp_resume_b.csv"
+  },
+  "plugins": {
+    "contact_reward": {
+      "toucher": "right_palm",
+      "touched_groups": ["head", "chest"],
+      "self_trace_out": "E/logs/progress_breakdown_selfmodel/_verify_lp_resume_b_trace.csv"
+    }
+  }
+}

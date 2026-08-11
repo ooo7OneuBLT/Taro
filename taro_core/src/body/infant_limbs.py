@@ -265,6 +265,11 @@ LIMB_TONE_GROUPS = {
     "hip": ("hip1", "hip2", "hip3"),
     "knee": ("knee",),
     "ankle": ("foot1", "foot2", "foot3"),
+    # 【2026-08-08 統合で追加】旧 infant_body.apply_flexor_tone（TONE_TARGETS）が
+    #   対象にしていたのは股の前後・開き（hip1, hip2）のみで、回旋（hip3）は
+    #   含まれない。"hip"（hip1/hip2/hip3全部）とは別に、この部分集合を指定できる
+    #   ようにする（下の TONE_PROFILES["newborn_flexor"] から使う）。
+    "hip_sagittal": ("hip1", "hip2"),
 }
 # まとめて指定するための別名（従来の "arm" / "leg" もそのまま使える）
 LIMB_TONE_ALIASES = {
@@ -272,7 +277,8 @@ LIMB_TONE_ALIASES = {
     "leg": ("hip", "knee", "ankle"),
 }
 GROUP_JP_LIMB = {"shoulder": "肩", "elbow": "ひじ", "wrist": "手首",
-                 "hip": "股", "knee": "ひざ", "ankle": "足首"}
+                 "hip": "股", "knee": "ひざ", "ankle": "足首",
+                 "hip_sagittal": "股(前後開き)"}
 
 
 def _expand_groups(groups):
@@ -376,21 +382,114 @@ def tone_from_gravity(model, data, joint_name, hold_deg=20.0):
     return float(tau / max(_np.radians(float(hold_deg)), 1e-9))
 
 
-def apply_limb_tone(model, data, age=0.0, target=None, stiffness=None,
-                    hold_deg=20.0, groups=("arm", "leg"),
-                    until_mo=LIMB_TONE_UNTIL_MO, verbose=True):
+# 【2026-08-08 統合】旧 infant_body.apply_flexor_tone と、この関数
+#   （apply_limb_tone）は、ほぼ同じ関節（肩・肘・股・膝）を対象に独立に実装され、
+#   月齢窓（旧<3ヶ月／こちら<6ヶ月）が重なる区間で二重に力を受ける恐れがあった
+#   （監査報告 作業記録（非公開） 2-4）。
+#   段階1の統合（部署/設計の設計に基づく）で、旧 apply_flexor_tone を廃止し、
+#   この関数の `profile` 引数へ「宣言的な設定」として吸収した。
+#
+# 【profile の考え方】旧実装は2つの別々の使われ方をしていた：
+#     旧 apply_flexor_tone … 新生児(0〜3ヶ月)・固定の解剖学的目標角(TONE_TARGETS)へ
+#                            戻す・剛性は全関節0.2固定
+#     旧 apply_limb_tone   … 四肢(0〜6ヶ月)・"今の姿勢"へ戻す・剛性は重力から逆算
+#   この2つの使い方を "newborn_flexor" / "reach_limb" という名前の設定として
+#   下にまとめて持たせ、`apply_limb_tone(..., profile="newborn_flexor")` のように
+#   呼べば旧 apply_flexor_tone と同じ挙動になる（剛性だけは重力から逆算する方式に
+#   統一した。全関節0.2固定は較正の結果、hold_deg一定という等価な表現に置き換えた。
+#   較正の詳細は TONE_PROFILES["newborn_flexor"]["hold_deg"] の直前のコメント参照）。
+#
+#   `target="TONE_TARGETS"` / `until_mo="TONE_UNTIL_MO"` は**値そのものではなく
+#   文字列の目印**。`infant_body` への参照はこのファイルの他の関数
+#   （`actuator_ratios`・`apply_limb_inversion_fix`）と同じく、モジュール読み込み時
+#   ではなく `apply_limb_tone` の呼び出し時に遅延importして解決する（循環import
+#   を避けるため。モジュール先頭に `from infant_body import ...` は書かない）。
+TONE_PROFILES = {
+    # 旧 infant_body.apply_flexor_tone 相当（新生児・0〜3ヶ月・固定の解剖学的目標角）
+    "newborn_flexor": dict(
+        groups=("shoulder", "elbow", "hip_sagittal", "knee"),
+        target="TONE_TARGETS",      # 目印。infant_body.TONE_TARGETS に解決する
+        stiffness=None,             # 重力から逆算（旧：全関節0.2固定 → 統合で廃止）
+        # 【較正・2026-08-08】
+        #   手順1〜2：0ヶ月体・肘関節の重力モーメント τ=0.02925 N·m（worst-case、
+        #     `gravity_moment` で実測）に対し、旧stiffness=0.2と**肘単体では**
+        #     等価な hold_deg = degrees(τ/0.2) = 8.38度を初期候補として算出した。
+        #   手順3〜4：`E/scripts/e_arm_recoil_test.py` の手法（肘を伸展位から離して
+        #     3秒後の角度を測る）で hold_deg=8.38 を検証したところ、反跳量121.2度
+        #     （Farmania et al. 2017の105.3±14.2度から差15.9度、1SD**外**）だった。
+        #     原因：旧実装は全関節（肩・肘・股・膝）を同じ剛性0.2で駆動していたが、
+        #     新実装は関節ごとに重力から逆算した剛性になり、肩・股・膝が肘より
+        #     大きく硬くなった（実測 中央値0.576N·m/rad、肘0.20に対し股1.6〜1.9・
+        #     膝0.58）。この違いが多体の力学的な結合を通じて肘の軌道を変え、
+        #     「肘単体の計算では等価」でも系全体では旧実装と一致しなかった
+        #     （検証の落とし穴チェックリスト項17「設定した値が効いていると
+        #     思い込まない」の実例）。
+        #     そこで hold_deg を 1〜8度で振り直したところ（全水準とも1SD以内、
+        #     8度のみ範囲外）、hold_deg=4.0 で反跳量110.4度（差5.1度）と最も近く、
+        #     4.0を採用する。
+        # 【2026-08-10・[Tier3]・トレードオフの開示】上のhold_deg=4.0はFarmania 2017の
+        #   肘反跳実測に合わせた値（Tier2の較正）だが、測定の複数シード比較（頭への
+        #   自己接触検出、0ヶ月児・脳なし・6000判断×3シード）で、この値では3シードとも
+        #   自己接触が0回だった（hold_deg=20/40/60では平均3.67〜9.67回）。統計的に
+        #   20/40/60の優劣は区別できない（Welch t値最大2.60、有意水準未達）が、
+        #   apply_limb_tone()の既定値がhold_deg=20であること、hold_deg=20のときの肩剛性
+        #   （実測0.2254N·m/rad）が2026-08-08統合前の一律剛性0.2とほぼ一致すること
+        #   （＝統合で6倍に強くしすぎた分を元の水準へ戻す形になる）を根拠にhold_deg=20を
+        #   採用する。これはFarmania実測との整合（Tier2の錨）を手放し、能動的な運動の
+        #   自由を優先する判断であり、腕の反跳量はもはや人間の実測範囲に一致しない。
+        #   根本原因は「常時一定の受動バネ1本で、受動的な反跳の再現と能動的に動く自由の
+        #   両方を満たそうとしていること」＝実際の乳児は脳が能動的に伸張反射を調節するため
+        #   この二律背反が生じない。太郎のモデルの構造的限界として
+        #   doc/人間模倣からの逸脱リスト.md へ登録済み（2026-08-10追記）。
+        #   出典：作業記録（非公開）
+        hold_deg=20.0,
+        until_mo="TONE_UNTIL_MO",   # 目印。infant_body.TONE_UNTIL_MO(=3.0) に解決する
+        clamp_to_range=True,        # 旧実装は目標角を可動域の内側にクランプしていた
+        force_qpos=True,            # 旧実装は初期姿勢も目標角へ強制していた
+    ),
+    # 旧 apply_limb_tone 相当（四肢の筋緊張・0〜6ヶ月・その都度の姿勢を保持）
+    "reach_limb": dict(
+        groups=("arm", "leg"),
+        target=None,                 # 今の姿勢
+        stiffness=None,              # 重力から逆算
+        hold_deg=10.0,               # 既存のリーチング系シーンの既定値（変更しない）
+        until_mo=LIMB_TONE_UNTIL_MO,
+        clamp_to_range=False,
+        force_qpos=False,
+    ),
+}
+
+
+def apply_limb_tone(model, data, age=0.0, profile=None, target=None, stiffness=None,
+                    hold_deg=None, groups=None, until_mo=None,
+                    clamp_to_range=None, force_qpos=None, verbose=True):
     """四肢の筋緊張＝脱力しても腕が体の前に保たれる弱いバネ。
 
+    2026-08-08：旧 `infant_body.apply_flexor_tone`（新生児・固定の解剖学的目標角・
+    剛性0.2固定）をこの関数に統合した。`profile="newborn_flexor"` を渡すと
+    旧関数と同じ設定（重力から逆算した剛性に置き換え済み・較正済み）で動く。
+    `profile` を渡さない、または既存の呼び出し（旧シグネチャのまま）は
+    従来どおり「今の姿勢を保つ」筋緊張として動く（後方互換）。
+
     Args:
+        profile: `TONE_PROFILES` のキー（"newborn_flexor" / "reach_limb"）。
+            指定すると、そのプロファイルの値が下記の各引数の既定値になる。
+            **呼び出し側が明示的に渡した値は常に優先される**（Noneの引数だけ
+            プロファイルの値で埋める）。
         target: 戻る目標角の辞書 {関節名: 度}。**None なら「今の姿勢」を目標にする**
             ＝Viewer で作った姿勢がそのまま筋緊張の落ち着き先になる
+            （`profile="newborn_flexor"` では `infant_body.TONE_TARGETS` になる）
         stiffness: 剛性 [N·m/rad]。None なら重力から逆算（`tone_from_gravity`）
         hold_deg: 逆算に使う「許すずれ」[度]。小さいほど硬い。
             **辞書 {部位名: 度} を渡すと部位ごとに変えられる**
             （例 {"shoulder":10, "elbow":60}）。数値なら全部位に同じ値。
         groups: "arm" / "leg"、または細かい部位（"shoulder" / "elbow" / "wrist" /
-            "hip" / "knee" / "ankle"）
+            "hip" / "knee" / "ankle" / "hip_sagittal"）
         until_mo: この月齢を超えたら何もしない
+        clamp_to_range: True なら目標角を関節の可動域の内側へクランプする
+            （旧 apply_flexor_tone の挙動。既定 False）
+        force_qpos: True なら現在の姿勢(data.qpos)も目標角へ強制する
+            （旧 apply_flexor_tone の挙動。既定 False）
 
     注意：部位ごとに変えられるようにした理由（2026-07-29 の実測）：
       ひじだけ筋緊張がきつすぎて可動域151度のうち**28度しか使えず**、
@@ -402,6 +501,43 @@ def apply_limb_tone(model, data, age=0.0, target=None, stiffness=None,
     """
     import numpy as _np
     import mujoco as _mj
+
+    prof = {}
+    if profile:
+        prof = dict(TONE_PROFILES.get(profile) or {})
+        if prof.get("target") == "TONE_TARGETS":
+            from infant_body import TONE_TARGETS as _tt
+            # 【なぜ、2026-08-08】TONE_TARGETS は「関節の基底名（側の接頭辞なし）」
+            #   をキーに持つ（例 "elbow"）。一方この関数の下のループは、
+            #   関節の**フル名**（"right_elbow"のように側の接頭辞つき）でtarget辞書を
+            #   引く（target引数のdocstring「{関節名: 度}」＝フル名を渡す前提）。
+            #   このズレをそのままにすると `nm in target` が常に False になり、
+            #   TONE_TARGETS の目標角が一切適用されない（＝旧 apply_flexor_tone の
+            #   「安静姿勢へ深く曲げる」効果が消え、"今の姿勢"のまま何もしない
+            #   のと同じになる。実際に較正の実行時、肘が伸展位の壁で固まって
+            #   1ミリも動かないという形で発覚した）。ここで両側へ展開して防ぐ。
+            prof["target"] = {}
+            for _base, _deg in _tt.items():
+                prof["target"]["right_" + _base] = _deg
+                prof["target"]["left_" + _base] = _deg
+        if prof.get("until_mo") == "TONE_UNTIL_MO":
+            from infant_body import TONE_UNTIL_MO as _tu
+            prof["until_mo"] = _tu
+    if target is None:
+        target = prof.get("target")
+    if stiffness is None:
+        stiffness = prof.get("stiffness")
+    if hold_deg is None:
+        hold_deg = prof.get("hold_deg", 20.0)
+    if groups is None:
+        groups = prof.get("groups", ("arm", "leg"))
+    if until_mo is None:
+        until_mo = prof.get("until_mo", LIMB_TONE_UNTIL_MO)
+    if clamp_to_range is None:
+        clamp_to_range = bool(prof.get("clamp_to_range", False))
+    if force_qpos is None:
+        force_qpos = bool(prof.get("force_qpos", False))
+
     if float(age) >= float(until_mo):
         if verbose:
             print(f"[limb-tone] age={age}mo >= {until_mo}mo: 何もしない")
@@ -427,8 +563,15 @@ def apply_limb_tone(model, data, age=0.0, target=None, stiffness=None,
             continue
         tgt = (_np.radians(float(target[nm])) if (target and nm in target)
                else float(data.qpos[adr]))       # None なら今の角度
+        if clamp_to_range:
+            # 旧 apply_flexor_tone の挙動：目標角を関節の可動域の内側へ収める
+            lo, hi = float(model.jnt_range[j, 0]), float(model.jnt_range[j, 1])
+            tgt = float(_np.clip(tgt, lo, hi))
         model.jnt_stiffness[j] = k
         model.qpos_spring[adr] = tgt
+        if force_qpos:
+            # 旧 apply_flexor_tone の挙動：初期姿勢も目標角へ強制する
+            data.qpos[adr] = tgt
         # 減衰は臨界減衰（ちょうど振動しない値）。注意工学的判断で実測ではない[Tier3]
         #   首（apply_neck_tone）と同じ式にそろえてある
         bid = int(model.jnt_bodyid[j])

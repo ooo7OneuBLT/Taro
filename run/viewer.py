@@ -11,7 +11,8 @@
 `taro_core/tools/motor_viewer.py` にあり、ここは太郎を繋ぐだけ。
 
 注意：【2026-07-31・統合済み】新しい実験は `run.type = "edit"` を使うこと。
-  `E/scripts/e_viewer.py`（編集ウィンドウ付き）に**この viewer の機能が全部入った**：
+  `run/viewer_tools/e_viewer.py`（編集ウィンドウ付き、2026-08-07に
+  E/scripts/e_viewer.py から移設）に**この viewer の機能が全部入った**：
     ・学習済みモデルを読む（脳A・脳B）
     ・2つの脳を切り替えて見比べる（ラジオボタン）
     ・行動の変化量（dAction2）を画面に出す

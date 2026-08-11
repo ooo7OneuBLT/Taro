@@ -1,0 +1,30 @@
+{
+  "name": "手先位置の目標表現（案C）検証：条件B 新実装 reach_self（seed1）",
+  "note": "2026-08-02。Goal Babbling段階1の4条件比較のうちB。座標を作らず、腕の固有感覚(7)＋自己接触(15)=22次元を目標にする（案C）。区分線形の軌道(L=25)で近づき、確率10%でホーム姿勢へ戻る。goal_space=reach_self には touch=true, somatosensory=true が要る（config.pyでバリデーション済み）。2026-08-02時点で未検証・診断段階（起動時に注意printが出る）。設計：作業記録（非公開）。回す前にrun/tools/check_reach_goal_wiring.py 等のLevel0〜4を通すこと。",
+  "scene": "リーチング_リクライニング60度",
+  "taro": {
+    "goal_babbling": true,
+    "goal_space": "reach_self",
+    "goal_trajectory": true,
+    "goal_traj_len": 25,
+    "goal_home_prob": 0.1,
+    "goal_negative_control": false,
+    "reach_arm_side": "right",
+    "touch": true,
+    "somatosensory": true,
+    "vision": true
+  },
+  "run": {
+    "type": "train",
+    "steps": 6000,
+    "seed": 1,
+    "checkpoint": 500,
+    "csv": "E/logs/goal_stage1/B_new_seed1.csv"
+  },
+  "plugins": {
+    "self_model": true,
+    "hand_in_view": true,
+    "toy_touch": true,
+    "movement_units": true
+  }
+}

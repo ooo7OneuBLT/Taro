@@ -1,0 +1,26 @@
+{
+  "name": "自己モデル：柵なし・線形成長・筋肉タウの基準（tau=既定10ms・seed0）",
+  "note": "2026-08-07。動きの区切りが人間の2倍細かい問題の検証・筋肉の活性化ダイナミクス（一次遅れの時定数tau）が速すぎるのではという候補。`自己モデル_柵なし_線形成長_seed0.json`と条件は同じで、muscle_tauを指定していない（既定None=MuscleModelのハードコード値0.01秒のまま）＝基準。30ms/60msの各候補（同フォルダの`自己モデル_柵なし_線形成長_筋肉tau_{30,60}ms_seed0.json`）と比較する。根拠：既定tau=0.01秒は探索ノイズの更新間隔0.1秒（K=10×物理ステップ10ms）に対して十分速く、フィルタがほぼ効いていない可能性がある。run/tools/check_movement_units.py で比較すること。1シードのみの探索的確認。",
+  "scene": "新生児_仰向け_柵なし",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 0.0,
+    "age_to": 4.0,
+    "age_start": 0,
+    "age_ramp": 18000,
+    "age_every": 500,
+    "save": "E/logs/muscle_tau/model_10ms_seed0.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 18000,
+    "seed": 0,
+    "checkpoint": 500,
+    "csv": "E/logs/muscle_tau/10ms_seed0.csv"
+  },
+  "plugins": {
+    "self_model": true,
+    "hand_in_view": true,
+    "movement_units": true
+  }
+}

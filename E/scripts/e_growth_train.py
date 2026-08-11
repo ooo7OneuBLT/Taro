@@ -58,6 +58,10 @@ from test_phase8_motor_learning import CombinedParams, rescale_action, to_tensor
 from sensory_encoders import ProprioceptionEncoder, VestibularEncoder, TouchEncoder
 from insula import Insula
 import e_probes  # 測定器（probe類・録画）＝太郎の外から測る道具。学習ループ本体からは独立。
+# 【なぜ、2026-08-06】infer_goal_actionのデフォルト値（n_steps/lr_inf）を、監査指摘
+# （測定器の数値がC/E双方に同一の値でコピーされていた）を受けて一元化した場所から参照する。
+# e_probes.py が既に Taro ルートを sys.path へ足しているので、ここでは import するだけでよい。
+from run.plugins.common import probe_defaults as _pd
 
 # 仰向け環境（D側で定義）。E_SUPINE=1 のときだけ使う。
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -117,16 +121,23 @@ _AGE = os.environ.get("E_AGE", "")
 # 注意：触覚ONでは使えない：センサ点が月齢で変わり(0ヶ月1734→4ヶ月4274)、観測の次元が
 #   変わって脳の入力層と合わなくなる。下の assert で止める（既知の構造的限界）。
 # 【2026-07-30】シーンから環境を作る。空なら従来どおり環境変数で組み立てる。
-#   E_SCENE=リーチング_リクライニング60度 のように名前で指定する（E/scenes/*.json）。
+#   E_SCENE=リーチング_リクライニング60度 のように名前で指定する（run/scenes/*.json）。
 _SCENE_NAME = os.environ.get("E_SCENE", "")
 if _SCENE_NAME:
     # シーンは体の月齢（body.age_months）を持っているので、E_AGE を書かずに済ませる。
     # 注意：E_AGE も指定されている場合はそちらを使う（E_AGE_TO で月齢を動かす実験では
     #   開始月齢がシーンと違って当たり前なので、止めずに**食い違いを知らせるだけ**にする）。
-    _sp = os.path.join(_BRIDGE, "scenes", _SCENE_NAME + ".json")
+    # 【2026-08-05】シーンの置き場所はe_scene.pyのSCENE_DIRを唯一の正とし、
+    #   ここで独自にパスを組み立てない（配置整理の設計:
+    #   作業記録（非公開） 4-2節）。
+    _scene_tools_dir = os.path.join(_BRIDGE, os.pardir, "run", "scene_tools")
+    if _scene_tools_dir not in sys.path:
+        sys.path.insert(0, _scene_tools_dir)
+    import e_scene
+    _sp = e_scene.scene_path(_SCENE_NAME)
     if not os.path.exists(_sp):
         raise FileNotFoundError(f"シーンが見つからない: {_sp}\n"
-                                f"  一覧: {os.path.join(_BRIDGE, 'scenes')}")
+                                f"  使えるシーン: {'、'.join(e_scene.list_scenes())}")
     import json as _json
     _scene_age = float(_json.load(open(_sp, encoding="utf-8"))["body"]["age_months"])
     if not _AGE:
@@ -722,7 +733,7 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
         # 決定的な行動平均（評価・agency用）＝太郎の act_deterministic を呼ぶだけ。
         return brain.act_deterministic(z, cerebellum=(cereb if _CEREB else None))
 
-    def infer_goal_action(z, clp, init_mean, g, n_steps=15, lr_inf=0.1):
+    def infer_goal_action(z, clp, init_mean, g, n_steps=_pd.GOAL_INFER_STEPS, lr_inf=_pd.GOAL_INFER_LR):
         # Goal Babbling: 凍結した順モデル(nat_head)を反転し、望む感覚 g に届く行動を推論。
         # 逆モデル(Stage1)の機構をオンラインで使う＝目標指向の行動生成。
         target = (g - clp).detach()

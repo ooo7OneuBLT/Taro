@@ -1,0 +1,25 @@
+{
+  "name": "[検証専用・削除可] contact_reward一般化の新用途確認（touch=false・goal_babbling無し・selfmodel_v3モデル継続）",
+  "note": "2026-08-05。run/plugins/common/contact_reward.py がreach_self・touch=trueに依存しない一般化ができたかを、実際にtouch=false（既定）で学習されたモデル（E/logs/selfmodel_v3/model_柵なし_線形_seed0.pt、良い自発運動と確認済み＝2026-08-04夜にユーザーが確認）を使って確認するための短時間の検証実験。plugins.contact_reward に toucher・touched_groups を明示指定している点が、この検証の眼目（reach_self設定が無いのでこれが無いと動かないはず）。age_months=4.0で固定（学習済みモデルの最終体格に近い状態からの継続。年齢の連続性を厳密に保証するものではなく、あくまで配線・検出の確認が目的の短時間smoke test）。",
+  "scene": "新生児_仰向け_柵なし",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 4.0,
+    "model": "E/logs/selfmodel_v3/model_柵なし_線形_seed0.pt",
+    "save": "E/logs/_verify_contact_reward/generalized_selfmodelv3_model.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 800,
+    "seed": 0,
+    "checkpoint": 100,
+    "csv": "E/logs/_verify_contact_reward/generalized_selfmodelv3.csv"
+  },
+  "plugins": {
+    "contact_reward": {
+      "toucher": "right_palm",
+      "touched_groups": ["head", "chest"],
+      "self_trace_out": "E/logs/_verify_contact_reward/generalized_selfmodelv3_selftrace.csv"
+    }
+  }
+}

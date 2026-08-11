@@ -42,6 +42,13 @@ from cerebellum_motor import MotorCerebellum                    # noqa: E402
 from learning_progress import LearningProgress                  # noqa: E402
 from homeostatic_scaling import HomeostaticScaling              # noqa: E402
 from test_phase8_motor_learning import CombinedParams, rescale_action, to_tensor  # noqa: E402
+# 手先位置の目標表現（案C）。既定（goal_space != "reach_self"）では一度も使われない
+#   （Taro.__init__ 内で条件付きに構築する。設計の統合判断「決定1」）。
+from proprioceptive_map import build_arm_proprio_map_from_env, _opposite_side  # noqa: E402
+from goal_babbling.reach_goal_head import ReachGoalHead          # noqa: E402
+# 頭へのダブルタッチを報酬に直結する（2026-08-03）。既定（reach_space無効）では
+#   一度も使われない（Taro.__init__ 内で条件付きに構築する。決定1と同じパターン）。
+from double_touch import DoubleTouchDetector                     # noqa: E402
 
 mse = torch.nn.functional.mse_loss
 
@@ -58,6 +65,26 @@ LEG_R = [72, 73, 75, 76]
 LEG_L = [81, 82, 84, 85]
 ARM_R = [14, 15, 17, 19]
 ARM_L = [43, 44, 46, 48]
+
+
+class _DoubleTouchBonusContributor:
+    """taro.reward_contributors の1要素（2026-08-05・全身一般化の設計1-4節）。
+
+    「compute(ctx)->floatを持つオブジェクト」という緩い規約に従うだけの、
+    抽象基底クラスを持たない最小の実装。ctx.last_double_touch['hit'] が
+    True なら bonus を返し、そうでなければ0を返す（run/trainer.py 749行付近が
+    以前「hitならcfg.double_touch_bonusを足す」と1行で書いていたのを、
+    このオブジェクトへ切り出しただけで中身の判定は変えていない）。
+    """
+
+    def __init__(self, bonus):
+        self.bonus = float(bonus)
+
+    def compute(self, ctx):
+        ld = getattr(ctx, "last_double_touch", None)
+        if ld is not None and ld.get("hit"):
+            return self.bonus
+        return 0.0
 
 
 class Taro:
@@ -175,7 +202,11 @@ class Taro:
         self.cereb = MotorCerebellum(self.brain.latent_dim, self.n_act)
         self.cere_opt = torch.optim.Adam(self.cereb.parameters(), lr=cfg.lr)
         self.hippo = self.brain.hippocampus     # 睡眠リプレイのバッファ（core に一元化済み）
-        self.lp = LearningProgress()            # 予測誤差の速い/遅い走行平均
+        self.lp = LearningProgress(surprise_bonus=cfg.progress_surprise_bonus,
+                                    surprise_decay=cfg.progress_surprise_decay,
+                                    surprise_var_tau=cfg.progress_surprise_var_tau,
+                                    surprise_threshold=cfg.progress_surprise_threshold)
+        # 予測誤差の速い/遅い走行平均（surprise_bonus既定0.0なら現状と同じ計算のみ）
 
         # ---- ⑦ 続きから学習する（形が合う層だけ）------------------------------
         if cfg.model:
@@ -188,6 +219,68 @@ class Taro:
         gear = np.abs(env.unwrapped.model.actuator_gear[:self.n_act, 0]).astype(np.float32)
         self.eff_w = torch.tensor(gear / (gear.sum() + 1e-8))
         self.first_obs = obs
+
+        # ---- ⑨ 手先位置の目標表現（案C・Goal Babbling段階1）------------------
+        # 【なぜ①〜⑧の"あと"に置くか、2026-08-02】乱数を消費する順序を守るため
+        #   （このファイル冒頭の注記と同じ理由）。既定（goal_space!="reach_self"）
+        #   ではこのブロックは一度も実行されない＝乱数消費もパラメータ数も
+        #   現状と完全に不変（spinal_cpgの「条件付き構築」パターンを踏襲。
+        #   設計の統合判断「決定1」。taro_brain_motor.py は1行も変更しない）。
+        self.arm_map = None
+        self.reach_touch_groups = None
+        self.reach_blocks = None
+        self.reach_dim = 0
+        self.reach_head = None
+        self.reach_opt = None
+        self.home_reach_goal = None
+        # 頭へのダブルタッチを報酬に直結する（2026-08-03、2026-08-05に全身一般化）。
+        #   既定は None のまま＝run/trainer.py の `t.double_touch is not None`
+        #   ガードで一切実行されない。
+        self.double_touch = None
+        # 【2026-08-05追記：全身一般化】報酬に足す寄与を集めるリスト。
+        #   「compute(ctx)->floatを持つオブジェクト」という緩い規約
+        #   （設計1-4節。抽象基底クラスは作らない）。空のままなら
+        #   run/trainer.py のforループは0回まわり既存挙動を1ビットも変えない。
+        self.reward_contributors = []
+        reach_space = cfg.goal_babbling and cfg.goal_space == "reach_self"
+        if reach_space:
+            self.arm_map = build_arm_proprio_map_from_env(env, side=cfg.reach_arm_side)
+            self.reach_touch_groups = ["head", "chest",
+                                       f"{_opposite_side(cfg.reach_arm_side)}_palm"]
+            g0 = self.encode_reach_goal(obs)
+            self.reach_dim = int(g0.shape[0])
+            self.reach_blocks = [(0, 7, "arm"), (7, self.reach_dim, "touch")]
+            self.reach_head = ReachGoalHead(self.brain.latent_dim, self.n_act, self.reach_dim)
+            # 独立optimizer（設計の統合判断「決定2」）。既存の自己モデル学習
+            #   （nat_head・pe）の loss には混ぜない＝既存の学習曲線を汚さない。
+            self.reach_opt = torch.optim.Adam(self.reach_head.parameters(), lr=cfg.lr)
+            # ホーム姿勢＝reset直後の初期姿勢（成長のたびに on_body_change 側で
+            #   再計算する。可動域自体が成長で変わりうるため）
+            self.home_reach_goal = g0.detach()
+            if verbose:
+                print(f"[goal_babbling] reach_self 有効：目標{self.reach_dim}次元"
+                      f"（腕7＋自己接触{self.reach_dim - 7}） 腕={cfg.reach_arm_side}"
+                      f" 対象部位={self.reach_touch_groups}（2026-08-02時点で未検証・診断段階）",
+                      flush=True)
+        # 【2026-08-05：全身一般化・reach_self依存の除去】
+        #   構築条件を「reach_space（既存、後方互換）または
+        #   cfg.double_touch_bonus != 0.0」のORへ拡張した（仕様2節）。
+        #   自前でSomatosensoryCortexを構築する（taro_setup.py冒頭の
+        #   build_touch_map_from_env を使い、taro自身の target_fusion.touch には
+        #   一切依存しない＝touch=false のシーンでも動く。double_touch.py
+        #   冒頭docstring(2)参照）。
+        if reach_space or cfg.double_touch_bonus != 0.0:
+            touch_map = build_touch_map_from_env(env)
+            self.double_touch = DoubleTouchDetector(
+                touch_map=touch_map, threshold=cfg.double_touch_threshold,
+                touched_names=cfg.double_touch_touched_groups)
+            self.reward_contributors.append(
+                _DoubleTouchBonusContributor(cfg.double_touch_bonus))
+            if verbose:
+                print(f"[double_touch] 有効：対象部位={cfg.double_touch_touched_groups}"
+                      f" しきい値={cfg.double_touch_threshold} ボーナス={cfg.double_touch_bonus}"
+                      f"（2026-08-05・全身一般化。既定headのみでは既存実験の挙動は不変）",
+                      flush=True)
 
     # ------------------------------------------------------------ 読み込み
     def _load(self, path, *, verbose=True):
@@ -222,6 +315,26 @@ class Taro:
                   flush=True)
         if self.cfg.cerebellum and "cereb" in blob:
             _match(self.cereb, blob["cereb"], "小脳")
+        # progress報酬の内部状態（pe_fast/pe_slow）。2026-08-05に発覚：これを
+        #   読み戻していなかったため、続きから学習するたびにpe_fast/pe_slowが
+        #   既定init=1.0からゼロスタートし、起動直後のprogressが「自己接触とは
+        #   無関係の助走アーティファクト」として見かけ上大きくプラスに振れていた
+        #   （progress_breakdown_selfmodel_seed0系実験、累計step500と3500でほぼ
+        #   同じ値が再現したことで発覚）。fusion_touch読み戻し漏れ（2026-07-30）
+        #   と同じ種類の見落とし。
+        if "lp_pe_fast" in blob and "lp_pe_slow" in blob:
+            self.lp.pe_fast = blob["lp_pe_fast"]
+            self.lp.pe_slow = blob["lp_pe_slow"]
+            if verbose:
+                print(f"  [progress] pe_fast/pe_slowを保存値から復元"
+                      f"（pe_fast={self.lp.pe_fast:.4f}, pe_slow={self.lp.pe_slow:.4f}）",
+                      flush=True)
+        else:
+            print("注意[load] 保存されたモデルにprogress報酬の内部状態(pe_fast/pe_slow)が"
+                  "ありません（2026-08-05より前の旧形式のチェックポイント）。"
+                  f"既定init={self.lp.pe_fast:.1f}からの助走が入り、続きから学習した直後の"
+                  "progressがしばらく大きくプラスに振れます（自己接触とは無関係の"
+                  "アーティファクト）。", flush=True)
 
     # -------------------------------------------------------- 体が変わったとき
     def on_body_change(self, env):
@@ -235,11 +348,39 @@ class Taro:
           古いインデックスが範囲内に収まり、静かに別の部位を読む
           （落とし穴チェックリスト 項86）。ここを通す設計にしてあるのはそのため。
         """
+        # 【2026-08-05追記：全身一般化】self.double_touch は taro自身の
+        #   fusion.touch/target_fusion.touch とは別の、自前のSomatosensoryCortex
+        #   インスタンスを持つ（double_touch.py冒頭docstring(2)参照）。
+        #   下の早期return（fusion.touchがNoneなら戻る）は既存の2インスタンス
+        #   専用のガードであり、これより"後"にrebuild呼び出しを置くと
+        #   cfg.touch=False のシーンでは一度も実行されない＝成長後も古い触覚地図を
+        #   参照し続け、しかも例外が出ない（落とし穴チェックリスト項86と同型）。
+        #   したがって、この早期returnより**前**に置く（設計1-7節・実装
+        #   ノウハウ2026-08-05項の必須要件）。
+        if self.double_touch is not None:
+            tm_dt = build_touch_map_from_env(env)
+            self.double_touch.rebuild(tm_dt)
         if self.fusion.touch is None or not hasattr(self.fusion.touch, "rebuild"):
             return None
         tm = build_touch_map_from_env(env)
         self.fusion.touch.rebuild(tm)
         self.target_fusion.touch.rebuild(tm)
+        # ---- 手先位置の目標表現（案C）：腕の索引を引き直す ------------------
+        # 【なぜ、2026-08-02】腕の関節構成は月齢で不変と実装確認済みだが、
+        #   「不変のはず」を仮定にせず、体を作り直すたびに必ず引き直す
+        #   （落とし穴チェックリスト 項86。q_touch側は名前で毎回引くのでキャッシュしない）。
+        if self.cfg.goal_babbling and self.cfg.goal_space == "reach_self":
+            old_idx = list(self.arm_map.idx) if self.arm_map is not None else None
+            self.arm_map = build_arm_proprio_map_from_env(env, side=self.cfg.reach_arm_side)
+            if old_idx is not None and self.arm_map.idx != old_idx:
+                print(f"注意[goal_babbling] 体を作り直したら腕の固有感覚indexが変わった"
+                      f"（{old_idx} → {self.arm_map.idx}）。想定外なので確認すること。",
+                      flush=True)
+            missing = [nm for nm in self.reach_touch_groups if nm not in tm.group_names]
+            if missing:
+                raise AssertionError(
+                    f"体を作り直したら reach_goal の対象部位が消えた: {missing}\n"
+                    f"  いまの部位: {tm.group_names}")
         return tm
 
     # -------------------------------------------------------- 予測の対象
@@ -276,6 +417,18 @@ class Taro:
                                          ("touch", getattr(f, "touch", None), "touch")):
                         if enc is None or key not in obs:
                             continue
+                        # 【なぜ、2026-08-03バグ修正】somatosensory かつ touch かつ
+                        #   touch_mode=="target" のとき、上のブロック（326-330行付近）で
+                        #   既に同じ f.touch エンコーダを同じ obs["touch"] に適用し
+                        #   "touch_embed" として parts/names に追加済み。ここでまた
+                        #   "touch" として追加すると、数値的に同一の埋め込みが2つの
+                        #   別ブロックとして block_pe に渡り、触覚の予測誤差だけ構造的に
+                        #   2倍の重みで progress の計算に効いてしまう（調査報告
+                        #   2026-08-03 1-4節）。既に追加済みならここでは足さない。
+                        #   既定設定（touch=False）ではこの分岐に到達しないため、
+                        #   既存実験の数値には影響しない。
+                        if nm == "touch" and "touch_embed" in names:
+                            continue
                         e = enc(to_tensor(obs[key]))
                         parts.append(ln(e, e.shape)); names.append(nm)
                 if getattr(f, "vision", None) is not None and "eye_left" in obs:
@@ -288,7 +441,69 @@ class Taro:
                 o += int(p.shape[-1])
         return torch.cat(parts, dim=-1).detach() if len(parts) > 1 else parts[0]
 
-    def block_pe(self, pred, target):
+    # -------------------------------------------------- 手先位置の目標表現（案C）
+    def encode_reach_goal(self, obs):
+        """目標ベクトル g（22次元）＝腕の固有感覚(7)＋自己接触(15)。座標は作らない。
+
+        【なぜ encode_target と別の関数か】`encode_target`（予測誤差の"正解"を作る
+        既存関数）は一切変更しない、という仕様の要求を厳密に守るため
+        （設計の統合判断「決定3」）。中身の設計は同じ思想（凍結した別インスタンス
+        から取る＝RND式、勾配は流さない）だが、対象・次元・用途が別物。
+
+        q_arm（7次元）：腕（cfg.reach_arm_side）の肩3・肘1・手首3の関節角度を、
+          可動域(jnt_range、固定の身体定数)で[-1,1]に線形正規化したもの。
+          座標変換は一切挟まない（ユーザー確認済み・2026-08-02仕様2節 論点1）。
+        q_touch（15次元＝3部位×5）：head（顔+口相当）・chest（胸）・
+          opposite_palm（反対の手）の3部位。SomatosensoryCortex.part_features()の
+          [有無,強さ,重心x,y,z]を、**凍結した target_fusion 側**から取る
+          （予測側と正解側が同じ学習中の層だと崩壊する、目標Cで実際に踏んだ罠）。
+        部位のインデックスは**毎回「名前」で検索する**（整数indexをキャッシュしない。
+        rebuild後にグループの並びが変わったとき、静かに別の部位を読まないため）。
+
+        呼ぶ前提：self.arm_map / self.reach_touch_groups が構築済みであること
+          （cfg.goal_babbling and cfg.goal_space=="reach_self" のときだけ Taro.__init__
+          が構築する。それ以外のときにこのメソッドを呼ぶのは呼び出し側の誤り）。
+        """
+        v = to_tensor(obs["observation"])
+        lo = torch.as_tensor(self.arm_map.lo, dtype=v.dtype)
+        hi = torch.as_tensor(self.arm_map.hi, dtype=v.dtype)
+        raw = v[self.arm_map.idx]
+        q_arm = torch.clamp(2.0 * (raw - lo) / (hi - lo) - 1.0, -1.05, 1.05)
+        f = self.target_fusion
+        with torch.no_grad():
+            feat = f.touch.part_features(to_tensor(obs["touch"]))     # (G, 5)
+        names = f.touch.group_names
+        parts = [q_arm]
+        for nm in self.reach_touch_groups:
+            gi = names.index(nm)
+            parts.append(feat[gi])
+        return torch.cat(parts, dim=-1).detach()
+
+    def dummy_reach_goal(self, like=None):
+        """陰性対照：実在の目標と似た値域だが、意味的な相関の無いランダム目標を作る。
+
+        仕様の確定3（陰性対照を必ず入れる）の実装。太郎の外から与える測定器で
+        あり、太郎の機能ではない（検証の落とし穴チェックリスト 項28の分類）。
+        q_arm は可動域内(=[-1,1])の一様乱数、q_touch は部位ごとに「有無」を確率0.3で
+        決めてから、有無=1のときだけ強さ・重心を一様乱数でサンプルする（完全な
+        無構造乱数だと「可動域外テスト」と見分けがつかなくなるため、"もっともらしい
+        値域だが意味的な相関はない"という設計にする。設計Q6を踏襲）。
+        現在地（gclp、実測値）は一切汚さない。軌道の**終点だけ**をこれに差し替える。
+        """
+        q_arm = torch.rand(7) * 2.0 - 1.0
+        parts = [q_arm]
+        for _ in self.reach_touch_groups:
+            presence = (torch.rand(1) < 0.3).float()
+            if presence.item() > 0.5:
+                strength = torch.rand(1) * 2.0 - 1.0
+                centroid = torch.rand(3) * 2.0 - 1.0
+            else:
+                strength = torch.zeros(1)
+                centroid = torch.zeros(3)
+            parts.append(torch.cat([presence, strength, centroid]))
+        return torch.cat(parts, dim=-1)
+
+    def block_pe(self, pred, target, blocks=None):
         """予測誤差＝**ブロックごとに平均してから足す**（次元数の影響を除く）。
 
         【なぜ】従来は連結したベクトル全体を1回で平均していたので、寄与が次元数比で
@@ -299,11 +514,17 @@ class Taro:
         Ichiwara & Ogata 2022（`1/(H·W·C)`）。［参考文献リスト §目標E-17］
         注意：(1+λ_v) で割るのは全体のスケールを保つため（割らないと「視覚を足した効果」と
           「学習率が実質変わった効果」が混ざる＝交絡）。
+
+        引数 blocks（既定 None）：省略時は self.blocks（既存の予測対象のブロック）を
+          使う＝既存呼び出し `t.block_pe(pred, nlp)` は無変更で従来どおり動く。
+          2026-08-02、手先位置の目標表現（案C）で q_arm(7次元)とq_touch(15次元)を
+          同じ理由（次元数の希釈、落とし穴 項11）で分けて合成するために追加した。
         """
-        if not self.blocks or len(self.blocks) <= 1:
+        use_blocks = self.blocks if blocks is None else blocks
+        if not use_blocks or len(use_blocks) <= 1:
             return mse(pred, target)          # 固有感覚のみ＝従来と完全に同一
         tot, wsum = 0.0, 0.0
-        for (s, e, nm) in self.blocks:
+        for (s, e, nm) in use_blocks:
             lam = self.cfg.lam_v if nm == "vision" else 1.0
             tot = tot + lam * mse(pred[..., s:e], target[..., s:e])
             wsum += lam
@@ -341,6 +562,27 @@ class Taro:
             opt.step()
         return torch.tanh(raw).detach()
 
+    def infer_reach_goal_action(self, z, gclp, init_mean, g, n_steps=15, lr_inf=0.1):
+        """目標指向（手先位置の目標表現・案C版）：凍結した reach_head を反転し、
+        望む reach_goal g に届く行動を推論する。
+
+        `infer_goal_action` とは別の新設メソッド（既存は1文字も変更しない、
+        設計の統合判断「決定3」）。解き方（distal teacher、凍結ヘッドをAdamで
+        n_steps回逆算）は全く同じで、対象を nat_head→reach_head に差し替えただけ。
+
+        注意：段階1ではこの解き方（distal teacher）を一時的に残す。Rolfが名指しで
+          批判する方式だが、`doc/やることリスト.md` で段階1の診断目的として
+          既に合意済み。段階2で局所線形マップに置き換える前提。
+        """
+        target = (g - gclp).detach()
+        raw = torch.atanh(torch.clamp(init_mean, -0.999, 0.999)).detach().requires_grad_(True)
+        opt = torch.optim.Adam([raw], lr=lr_inf)
+        for _ in range(n_steps):
+            opt.zero_grad()
+            ((self.reach_head(z, torch.tanh(raw)) - target) ** 2).mean().backward()
+            opt.step()
+        return torch.tanh(raw).detach()
+
     def init_state(self, obs):
         """学習ループが持つ「いまの状態」の初期値。"""
         return {"obs": obs, "hidden": self.brain.init_motor_hidden(),
@@ -358,6 +600,8 @@ class Taro:
                 "fusion_proprio": self.fusion.proprio.state_dict(),
                 "fusion_vestibular": self.fusion.vestibular.state_dict(),
                 "cereb": self.cereb.state_dict(),
+                "lp_pe_fast": self.lp.pe_fast,
+                "lp_pe_slow": self.lp.pe_slow,
                 "config": dict(self.cfg.as_dict(),
                                sdim=self.sdim, prop_dim=self.prop_dim,
                                out_dim=self.out_dim, n_act=self.n_act,

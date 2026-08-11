@@ -1,0 +1,28 @@
+{
+  "name": "起動直後フリーズ修正の実データ検証（seed0_touchon_baseの続きから）",
+  "note": "2026-08-05。progress報酬の1tick目のzスコアが機械的に約10へ固定されるバグを直した（learning_progress.py、resync()と同じfreeze機構を起動直後にも適用）。この修正が効いているかを、実際に続きから学習して確認する。過去の継続実験（seed0_8000.csv・seed0_blockprobe.csv）では、続きから学習した直後の最初の区間だけ報酬が異常に高い値（+0.16前後、時には+0.96）を示していた。修正が効いていれば、この最初の区間だけが突出しなくなるはず。checkpointを250と細かくして、最初の区間の挙動をはっきり見る。",
+  "scene": "新生児_仰向け_柵なし",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 4.0,
+    "model": "E/logs/progress_breakdown_selfmodel/seed0_touchon_base.pt",
+    "touch": true,
+    "somatosensory": true,
+    "progress_surprise_bonus": 1.0,
+    "save": "E/logs/progress_breakdown_selfmodel/seed0_freezefix_check.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 1500,
+    "seed": 0,
+    "checkpoint": 250,
+    "csv": "E/logs/progress_breakdown_selfmodel/seed0_freezefix_check.csv"
+  },
+  "plugins": {
+    "contact_reward": {
+      "toucher": "right_palm",
+      "touched_groups": ["head", "chest"],
+      "self_trace_out": "E/logs/progress_breakdown_selfmodel/seed0_freezefix_check_trace.csv"
+    }
+  }
+}

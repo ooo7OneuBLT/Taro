@@ -18,7 +18,7 @@ import sys
 
 _ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                     os.pardir, os.pardir, os.pardir))
-for _p in (os.path.join(_ROOT, "E", "scripts"),
+for _p in (os.path.join(_ROOT, "run", "scene_tools"),
            os.path.join(_ROOT, "D", "scripts"),
            os.path.join(_ROOT, "taro_core", "src", "body"),
            os.path.join(_ROOT, "taro_core", "src", "brain"),
@@ -32,7 +32,7 @@ def build(scene_name, *, taro=None, seed=0, verbose=False, hybrid=False):
     """シーンの名前から環境を作る。
 
     Args:
-        scene_name: E/scenes/<名前>.json の名前
+        scene_name: run/scenes/<名前>.json の名前
         taro: 実験ファイルの `taro` 欄（月齢の上書き・駆動モードの指定に使う）
         seed: リセットの乱数の種
         hybrid: 内臓（内受容感覚）を足すか。**学習では必須**。
@@ -68,6 +68,74 @@ def build(scene_name, *, taro=None, seed=0, verbose=False, hybrid=False):
     env, hands = e_scene.build(sc, orient=bool(taro.get("orienting_reflex", False)),
                                vor=bool(taro.get("vor", True)),
                                seed=seed, verbose=verbose, actuation_model=act)
+
+    # ---- 感覚運動の伝達遅延（候補5、2026-08-02）----------------------------
+    #   【なぜここで配線するか】TE.ToySupineEnv(...) を実際に呼んでいるのは
+    #   run/scene_tools/e_scene.py の build()（このファイルは「組み立てるのはここだけ」と
+    #   自分の docstring に書いているが、それは「e_scene.build() を呼ぶ場所を1つに
+    #   絞る」という意味で、TE.ToySupineEnv(...) 自体の呼び出し箇所ではない）。
+    #   e_scene.py は今回の実装範囲外（触ってよいファイルの一覧に無い）なので、
+    #   コンストラクタに直接 sensory_delay=/motor_delay= を渡すのではなく、
+    #   組み立て終わった env に対して同じ属性を書き換える形で配線する。
+    #
+    #   これで元の実装と等価かどうか：MIMoEnv.__init__（mimo_env.py 299-339行）は
+    #   sensory_delay/motor_delay を**属性に代入するだけ**で、他の初期化処理は
+    #   この値に依存しない（分岐は無い）。実際に使われるのは
+    #   _delayed_action/_delayed_observation（同ファイル593-813行）で、これらは
+    #   env.step() が呼ばれる**たびに** self.sensory_delay/self.motor_delay を読む。
+    #   ⇒ コンストラクタ引数で渡しても、構築直後に属性を書き換えても、
+    #     以後の env.step() から見える挙動は同一。
+    #
+    #   既定 0ms のときは何もしない（既存の属性 0 のままなので1行も実行されず、
+    #   コード的に「触っていない」のと同じ状態になる）。
+    sensory_ms = float(taro.get("sensory_delay_ms", 0) or 0)
+    motor_ms = float(taro.get("motor_delay_ms", 0) or 0)
+    if sensory_ms > 0 or motor_ms > 0:
+        u = env.unwrapped
+        dt = float(u.model.opt.timestep) * float(u.frame_skip)
+        sensory_steps = int(round((sensory_ms / 1000.0) / dt)) if sensory_ms > 0 else 0
+        motor_steps = int(round((motor_ms / 1000.0) / dt)) if motor_ms > 0 else 0
+        if sensory_steps > 0:
+            u.sensory_delay = sensory_steps
+            u._obs_history = []
+        if motor_steps > 0:
+            u.motor_delay = motor_steps
+            u._action_history = []
+        print(f"注意[delay] 感覚運動遅延を配線: sensory_delay_ms={sensory_ms}"
+              f"({sensory_steps}step, dt={dt*1000:.1f}ms) "
+              f"motor_delay_ms={motor_ms}({motor_steps}step)。"
+              f"[Tier2/Tier3、根拠は run/config.py のコメントを参照]", flush=True)
+
+    # ---- 筋肉の活性化の時定数（震え問題への感度確認、2026-08-07）------------
+    #   【なぜここで配線するか】上の感覚運動遅延と同じ理由。MuscleModel.tau
+    #   （MIMo/mimoActuation/muscle.py 53行目）は self.tau = 0.01 とハードコード
+    #   されており、実測較正されたものではないと既に注記されている。
+    #   MuscleModel.__init__ はコンストラクタ引数で tau を受け取らないため、
+    #   e_scene.py（触ってよいファイルの一覧に無い）を変更せずに済むよう、
+    #   組み立て終わった env の actuation_model に対して属性を直接書き換える形で配線する。
+    #
+    #   _update_activity（muscle.py 291行）は env.step() が呼ばれるたびに
+    #   self.tau を読むので、コンストラクタ引数で渡しても構築直後に属性を
+    #   書き換えても、以後の env.step() から見える挙動は同一。
+    #
+    #   既定 None のときは何もしない（既存の属性 0.01 のままなので1行も実行されず、
+    #   コード的に「触っていない」のと同じ状態になる）。
+    #   関節モード（SpringDamperModel）には tau 属性が無いので hasattr で確認して
+    #   から代入する（無ければ何もしない）。
+    muscle_tau = taro.get("muscle_tau", None)
+    if muscle_tau is not None:
+        u = env.unwrapped
+        if hasattr(u.actuation_model, "tau"):
+            old_tau = u.actuation_model.tau
+            u.actuation_model.tau = float(muscle_tau)
+            print(f"注意[muscle_tau] 筋活性化の時定数を配線: tau={old_tau}"
+                  f"→{float(muscle_tau)}秒。既定0.01秒は実測較正されていない値"
+                  f"[Tier3、根拠は run/config.py のコメントを参照]", flush=True)
+        else:
+            print(f"注意[muscle_tau] taro.muscle_tau={muscle_tau} が指定されましたが、"
+                  f"actuation_model に tau 属性がありません（関節モード等）。無視します。",
+                  flush=True)
+
     if hybrid:
         # 注意：内臓を足す（内受容感覚が観測に入る）。学習ではこれが要る。
         from hybrid_env import HybridEnv

@@ -320,6 +320,25 @@ def build(scene, orient=None, vor=True, seed=0, verbose=False, actuation_model=N
     b, w, s = scene["body"], scene["world"], scene["setup"]
     toy = w["toy"]
 
+    # 【なぜ、2026-08-10】body.flexion=True のとき、infant_body.apply_runtime_corrections が
+    #   環境構築の途中で apply_limb_tone(profile="newborn_flexor") を隠れて呼び、
+    #   四肢の筋緊張バネを起動する（setup.limb_tone とは完全に別の入口）。
+    #   Viewerの「四肢の筋緊張」チェックボックスは setup.limb_tone だけを見ているため、
+    #   setup.limb_tone を設定しないシーンでは、GUI表示OFFのまま物理にはバネが常時入る
+    #   （既知の型バグ。監査 作業記録（非公開）
+    #   2026-08-10_run系システムとViewerの型バグ横断監査.md「中1」参照）。
+    #   現存シーンは両方のキーが整合しているため実害は無いが、今後の新規シーンで
+    #   食い違いが混入するのを早期に発見できるよう、ここで検出して警告する。
+    #   verboseに関係なく常に出す＝学習ログにも出て見つけやすくするため
+    #   （constraint_summaryの[scene]ログと同じ扱い）。
+    if b.get("flexion") and not s.get("limb_tone"):
+        print("[scene] 注意 body.flexion=True ですが setup.limb_tone が設定されていません。"
+              "Viewerの「四肢の筋緊張」チェックボックスはOFF表示のままですが、"
+              "infant_body.apply_runtime_corrections 経由で四肢の筋緊張バネが物理には"
+              "常時入ります（既知の型バグ。監査 作業記録（非公開）"
+              "2026-08-10_run系システムとViewerの型バグ横断監査.md『中1』参照）。"
+              "GUIと物理を一致させたい場合は setup.limb_tone を明示的に設定してください。")
+
     # --- 1. モジュールの定数として読まれる値を先に決める ---------------------
     #   注意：`e_toy_env` は import した瞬間に環境変数を読んで定数を固める作りなので、
     #     import より前に環境変数を置き、import 後にも定数を直接上書きする
@@ -482,12 +501,31 @@ def constraint_summary(scene):
     副作用なし。env が無くても呼べる（load() 直後でも catalog.py でも使える）。
     """
     s, w = scene["setup"], scene["world"]
-    sup = s.get("body_support") or {}
-    free = set(sup.get("free") or ("arm", "finger"))
     all_groups = {"arm", "finger", "leg", "trunk", "head"}
+    # 【なぜ、2026-08-10】以前は `sup = s.get("body_support") or {}` のあと
+    #   `free = set(sup.get("free") or ("arm","finger"))` としていた。
+    #   body_support が None（未設定）のときも空dictへ読み替えられ、
+    #   "arm","finger" だけ自由という**既定値**にフォールバックしていた。
+    #   ところが実際に固定処理を行う _apply_setup()・_repin() はどちらも
+    #   body_support が None/falsy なら**即return し、何も固定しない**
+    #   （＝実際の物理は全関節が自由）。表示だけが「腕・指以外は固定」という
+    #   誤った要約を返していた（監査 2026-08-10横断監査 既知③）。
+    #   ⇒ _apply_setup()・_repin() と同じ真偽判定（body_support がfalsyなら
+    #   何も固定しない）に合わせ、実際の物理と表示を一致させる。
+    sup = s.get("body_support")
+    if not sup:
+        return {
+            "root_pinned": False,
+            "pinned_groups": [],
+            "free_groups": sorted(all_groups),
+            "toy_enabled": bool(w["toy"]["enabled"]),
+            "flexion": bool(scene["body"]["flexion"]),
+            "recline_deg": w["recline_deg"],
+        }
+    free = set(sup.get("free") or ("arm", "finger"))
     pinned = sorted(all_groups - free) if sup.get("pin_joints", True) else []
     return {
-        "root_pinned": bool(sup.get("pin_root", True)) if sup else False,
+        "root_pinned": bool(sup.get("pin_root", True)),
         "pinned_groups": pinned,          # 例：["leg", "trunk"]
         "free_groups": sorted(free),      # 例：["arm", "finger"]
         "toy_enabled": bool(w["toy"]["enabled"]),
