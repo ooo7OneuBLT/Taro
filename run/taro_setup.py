@@ -61,10 +61,154 @@ mse = torch.nn.functional.mse_loss
 #   「複数筋を協調させる回路を一切事前に組み込まずに」全身協調運動を創発させている。
 #   ⇒ 人間模倣からの逸脱リスト「2026-07-30 シナジーを配線で作っている」を参照。
 #     注意：太郎の環境には羊水も子宮壁もないので、外すと単に消える可能性がある（要検証）。
-LEG_R = [72, 73, 75, 76]
-LEG_L = [81, 82, 84, 85]
-ARM_R = [14, 15, 17, 19]
-ARM_L = [43, 44, 46, 48]
+#
+# 【2026-08-11・符号バグの修正】各要素は (index, sign) のタプル。sign は
+# 「生のqpos正方向が屈曲なら+1、伸展なら-1」（`spinal_cord/cpg.py` の `_blend` が使う）。
+# MuJoCoの関節は正方向の定義が関節ごとにバラバラで統一されていないため、
+# グループへ同符号の共通信号をそのまま配ると、屈曲側で符号が揃わず
+# 「肩が曲がると肘は伸びる」のように関節同士が打ち消し合っていた
+# （引用元の実測：肩-肘の屈曲量相関 修正前 −0.253±0.098、膝-足首 修正前 0.462±0.385。
+#   この2つの値は監査報告・依頼文が引用したもの。今回の修正実装（本ファイルの
+#   sign値）を実際にsyn_w=1.0・3シード・6000stepで検算した結果は
+#   肩水平-肘 −0.254±0.098 → +0.204±0.164、膝-足首 0.462±0.385 → +0.744±0.200
+#   （syn_w=0.6の標準テンプレートではより穏やかな改善：肩水平-肘 +0.013→+0.177、
+#   膝-足首 +0.818→+0.897）。詳細・数値の出所は実装の作業記録を参照）。
+# 根拠（静的mj_kinematicsスイープ7点＋動力学つき複数シード検算。詳細は
+# 作業記録（非公開））：
+#   shoulder_horizontal(14/43)  sign=+1（+方向=屈曲。動力学つき・複数シードで確定）
+#   elbow(17/46)                sign=-1（+方向=伸展。静的スイープで単調・確定）
+#   hip1(72/81)                 sign=-1（+方向=伸展。静的スイープで単調・確定）
+#   knee(75/84)                 sign=-1（+方向=伸展。静的スイープで単調・確定）
+#   foot1/ankle(76/85)          sign=+1（+方向=屈曲。静的スイープで単調・確定）
+# 次の関節は符号を推測せず、シナジーグループから除外した（推測で割り当てない）：
+#   shoulder_ad_ab(15/44)：静的スイープで非単調・確定した符号の記載なし
+#   hand2/wrist_flexion(19/48)：neutral付近が最伸展という構造で二値の符号判定が
+#     原理的に成り立たない
+#   hip2/hip_abduction(73/82)：静的スイープでは単調だが、Dominici 2011の
+#     kicking synergy（股矢状面・膝・足首の協調）に外転内転は含まれない
+LEG_R = [(72, -1), (75, -1), (76, 1)]
+LEG_L = [(81, -1), (84, -1), (85, 1)]
+ARM_R = [(14, 1), (17, -1)]
+ARM_L = [(43, 1), (46, -1)]
+
+
+# 【2026-08-11・新しい駆動モジュール：伸張反射＋揺らぐ振動子の共通駆動】
+# 設計：作業記録（非公開）
+#
+# 【なぜCPGのLEG_R等（(index, sign)タプル、一部関節のみ）を再利用しないか】
+# moment_1/moment_2経由の変換（taro_core側、common_drive.py・stretch_reflex.py）は
+# 「生のqpos正方向が屈曲か伸展か」を人力で判定する必要が構造的に無い（設計4節）。
+# したがって cpg.py が符号確定できず除外した関節（shoulder_ad_ab・hand2など）も
+# 含めて、四肢すべての関節を対象にできる（ユーザー確定Q2・Q3）。
+# 生の配列インデックスをここで決め打ちせず、**関節の基底名**
+# （`infant_limbs.LIMB_TONE_ALIASES`・`LIMB_TONE_GROUPS`と同じ命名規則）で
+# actuator名から引き直す（ノウハウ2026-08-11「グループへ共通信号を一括で配るとき、
+# 各要素の符号が揃っている保証はない」の教訓＝生のインデックスを直接書かない）。
+def _reflex_common_joint_indices(env):
+    """4肢（両腕・両脚）すべての関節を、行動配列における関節index(0..n_joint-1、
+    neg側のインデックス。moment_1/moment_2と同じ並び）で返す。
+
+    Returns:
+        {"right_arm": [index, ...], "left_arm": [...],
+         "right_leg": [...], "left_leg": [...]}
+    """
+    from infant_limbs import LIMB_TONE_ALIASES, LIMB_TONE_GROUPS
+    u = env.unwrapped
+    am = u.actuation_model
+    base_names = {}
+    for limb, groups in LIMB_TONE_ALIASES.items():        # "arm"->(shoulder,elbow,wrist) 等
+        s = set()
+        for g in groups:
+            s.update(LIMB_TONE_GROUPS.get(g, ()))
+        base_names[limb] = s
+    out = {"right_arm": [], "left_arm": [], "right_leg": [], "left_leg": []}
+    for i, aid in enumerate(am.actuators):
+        nm = (u.model.actuator(int(aid)).name or "").split(":")[-1]
+        for side in ("right_", "left_"):
+            if not nm.startswith(side):
+                continue
+            base = nm[len(side):]
+            side_key = side.rstrip("_")
+            for limb, names in base_names.items():
+                if base in names:
+                    out[f"{side_key}_{limb}"].append(i)
+            break
+    return out
+
+
+def _reflex_common_groups(grouping, idx_by_limb):
+    """common_drive_grouping設定から {group名: [関節index, ...]} を作る（設計7-4節）。
+
+    "none"     ：各関節を1要素だけの個別グループにする（RhythmicCommonDriveGroupの
+                性質上、1要素グループでは「共通」成分も他の関節と共有されないため、
+                関節間の相関は生まれない＝設計の「相関なし」と数値的に等価。
+                検証2で確認する）。
+    "per_limb" ：右腕・左腕・右脚・左脚をそれぞれ1グループ
+    "whole_body"：四肢全体を1グループ
+    辞書        ：{group名: [limb名 または 関節index, ...]}（limb名は
+                "right_arm"等をそのまま展開、数値はindexとして扱う）
+    """
+    if grouping in (None, "none"):
+        out = {}
+        for limb, idxs in idx_by_limb.items():
+            for i in idxs:
+                out[f"{limb}_{i}"] = [i]
+        return out
+    if grouping == "per_limb":
+        return {limb: list(idxs) for limb, idxs in idx_by_limb.items() if idxs}
+    if grouping == "whole_body":
+        allidx = [i for idxs in idx_by_limb.values() for i in idxs]
+        return {"whole_body": allidx} if allidx else {}
+    if isinstance(grouping, dict):
+        out = {}
+        for gname, members in grouping.items():
+            idxs = []
+            for m in members:
+                if isinstance(m, str) and m in idx_by_limb:
+                    idxs.extend(idx_by_limb[m])
+                else:
+                    idxs.append(int(m))
+            out[gname] = idxs
+        return out
+    raise ValueError(f"common_drive_grouping が不明: {grouping!r}")
+
+
+def _setup_reflex_common(taro, cfg, env, *, verbose=True):
+    """Taro.__init__・on_body_change の両方から呼ぶ、reflex_commonの配線本体。
+
+    【なぜ両方から呼ぶ必要があるか】moment_1/moment_2・関節indexは env（MuJoCoモデル）
+    ごとに固定される値。体を作り直す実験（cfg.grows）では env が作り直されるたびに
+    これらが変わりうるため、初回構築（__init__）だけでなく、体が変わるたび
+    （on_body_change、trainer.py._regrowから呼ばれる）にも組み立て直す必要がある。
+    注意：組み立て直すと振動子（WanderingOscillator）の内部状態は初期値へリセットされる
+    （継続はしない）。今回のスコープの主眼（検証1〜4・既定挙動不変）には影響しない
+    軽微な簡略化のため、作業記録に明記する。
+    """
+    if str(cfg.spinal_drive_mode) != "reflex_common":
+        return False
+    am = env.unwrapped.actuation_model
+    idx_by_limb = _reflex_common_joint_indices(env)
+    groups = _reflex_common_groups(cfg.common_drive_grouping, idx_by_limb)
+    osc_params = dict(cfg.common_drive_osc_params or {})
+    # "amp"（基準長オフセットへの変換スケールA、案C4-2節）はWanderingOscillator自身の
+    #   引数ではないので、ここで取り出してから残りをoscillator_kwargsとして渡す。
+    amp = float(osc_params.pop("amp", 1.0))
+    taro.brain.enable_reflex_common(
+        n_joint=int(am.n_actuators), moment_1=am.moment_1, moment_2=am.moment_2,
+        groups=groups, rho=float(cfg.common_drive_rho), osc_params=osc_params,
+        amp=amp, seed=taro.seed)
+    taro.brain.set_reflex_common_baseline(am.muscle_lengths)
+    # apply_limb_tone（run/scene_tools/e_scene.py、触ってよいファイルの一覧に無い）が
+    #   四肢に効かせた「継続的なバネ」役割を事後的に無効化する（infant_limbs.py参照）。
+    from infant_limbs import disable_limb_tone_spring
+    n_disabled = disable_limb_tone_spring(env.unwrapped.model, groups=("arm", "leg"))
+    if verbose:
+        n_joints_total = sum(len(v) for v in groups.values())
+        print(f"[反射+共通駆動] reflex_common ON: grouping={cfg.common_drive_grouping} "
+              f"rho={cfg.common_drive_rho} amp={amp} 対象関節数={n_joints_total} "
+              f"（apply_limb_toneの継続的バネ役割を{n_disabled}関節ぶん無効化。"
+              f"初期姿勢の設定＝役割Aは維持）", flush=True)
+    return True
 
 
 class _DoubleTouchBonusContributor:
@@ -185,6 +329,13 @@ class Taro:
                       f"{f' pair_offset={pair_offset}' if pair_offset else ''}"
                       f"{' 【拮抗筋モードON】coactivation=' + str(cfg.coactivation) if cfg.is_muscle and cfg.antagonist else ''}",
                       flush=True)
+        # 【2026-08-11・新しい駆動モジュール】伸張反射＋揺らぐ振動子の共通駆動。
+        # 既定 spinal_drive_mode="cpg" では _setup_reflex_common が即 False を返して
+        # 何もしない＝self.brain.reflex_common は None のまま＝既存の経路（explore()・
+        # spinal_cpg）は1バイトも変わらない。cfg._check() で actuation=muscle・
+        # noise!=colored であることは既に保証済み（config.pyのバリデーション）。
+        self.reflex_common_active = _setup_reflex_common(self, cfg, env, verbose=verbose)
+
         # 【2026-07-25】D-a/D-b の層は**太郎の中（core）のもの**を使う。
         # 旧実装はここで別に作っており、core の層は作られるだけで使われていなかった
         # （＝脳が二重に存在していた）。旧名を別名として残す（参照箇所が多いため）。
@@ -360,6 +511,12 @@ class Taro:
         if self.double_touch is not None:
             tm_dt = build_touch_map_from_env(env)
             self.double_touch.rebuild(tm_dt)
+        # 【2026-08-11・新しい駆動モジュール】体を作り直す実験（cfg.grows）では
+        #   moment_1/moment_2・関節indexがenvごとに変わりうるため、体が変わるたびに
+        #   組み立て直す（_setup_reflex_common のdocstring参照。既定"cpg"では
+        #   self.cfg.spinal_drive_mode!="reflex_common" のため即Falseで戻り、
+        #   何も実行しない＝既存の成長実験の挙動は1ビットも変わらない）。
+        self.reflex_common_active = _setup_reflex_common(self, self.cfg, env, verbose=False)
         if self.fusion.touch is None or not hasattr(self.fusion.touch, "rebuild"):
             return None
         tm = build_touch_map_from_env(env)

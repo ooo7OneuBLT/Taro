@@ -179,8 +179,27 @@ class Trainer:
             遅れそのものは入っていない。
           MIMo grows!（López et al. 2025）は FIFO バッファとして実装している。
           → 人間模倣からの逸脱リスト「2026-07-30 感覚運動遅延が無い」
+
+        【2026-08-11・新しい駆動モジュール】spinal_drive_mode="reflex_common"のとき、
+          K tick中は**毎tick**（既存は a を固定してK回env.stepを呼ぶだけ）、
+          伸張反射＋共通駆動を計算し直し、その tick のクリップ済み行動を
+          env.step に渡す（案①4-3節「探索側の命令に加算」・設計8節「trainer.py」）。
+          未指定（既定"cpg"）のときは、現状と1バイト差ない経路（この分岐を
+          一度も通らない・従来通りK回同じaでenv.step）をそのまま使う。
         """
         o, term = self.state["obs"], False
+        t = self.taro
+        if getattr(t, "reflex_common_active", False):
+            am = self.env.unwrapped.actuation_model
+            a_np = np.asarray(a, dtype=np.float64)
+            for _ in range(self.cfg.K):
+                r = t.brain.step_reflex_common(DT, am.muscle_lengths, am.muscle_velocities)
+                a_tick = np.clip(a_np + r, 0.0, 1.0).astype(np.float32)
+                o, rew, te, tr, info = self.env.step(a_tick)
+                if te or tr:
+                    term = True
+                    break
+            return o, term
         for _ in range(self.cfg.K):
             o, r, te, tr, info = self.env.step(a)
             if te or tr:

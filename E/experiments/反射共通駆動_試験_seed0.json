@@ -1,0 +1,27 @@
+{
+  "name": "新しい駆動モジュール（伸張反射＋揺らぐ振動子の共通駆動）試験・seed0",
+  "scene": "新生児_仰向け_柵なし",
+  "taro": {
+    "vision": true,
+    "touch": true,
+    "somatosensory": true,
+    "spinal_drive_mode": "reflex_common",
+    "common_drive_rho": 0.3,
+    "common_drive_grouping": "per_limb",
+    "common_drive_osc_params": {
+      "f0": 0.5,
+      "A0": 1.0,
+      "tau_f": 2.0,
+      "tau_A": 2.0,
+      "amp": 1.0
+    }
+  },
+  "run": {
+    "type": "train",
+    "steps": 600,
+    "checkpoint": 100,
+    "seed": 0,
+    "csv": "E/logs/reflex_common_trial/seed0.csv"
+  },
+  "plugins": {}
+}

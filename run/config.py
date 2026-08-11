@@ -216,6 +216,28 @@ TARO_DEFAULTS = {
     #   （run/plugins/common/scene.py で hasattr確認のうえ配線）。
     "muscle_tau":      (None, "筋活性化の一次遅れの時定数（秒）。既定None=MuscleModelの"
                         "既定0.01秒のまま", "E_MUSCLE_TAU"),
+    # ---- 新しい駆動モジュール：伸張反射＋揺らぐ振動子の共通駆動（2026-08-11）--
+    # 設計：作業記録（非公開）
+    #   （冒頭「改訂：ユーザーからの修正指示を反映」節が最重要）
+    # 仕様：作業記録（非公開）
+    #   既定は全部"現状不変"（spinal_drive_mode="cpg"）＝既存の自発運動生成
+    #   （spinal_cord/cpg.pyのColoredNoiseGenerator）の経路は1バイトも変わらない。
+    "spinal_drive_mode": ("cpg", "脊髄の駆動方式 cpg(既存・既定)/reflex_common(新規、"
+                          "伸張反射＋揺らぐ振動子の共通駆動。actuation=muscleが必須)", None),
+    "common_drive_rho": (0.0, "グループ内の共通駆動の強さ（0〜1の相関に相当）"
+                         "[Tier3・感度分析対象、既定0=相関なし相当]", None),
+    "common_drive_grouping": ("none", "関節のグループ分け none(相関なし)/"
+                              "per_limb(右腕・左腕・右脚・左脚)/whole_body(四肢全体)/"
+                              "辞書（任意の組み合わせ）", None),
+    # 既定は7-2節の推奨値（f0=0.5Hz等）。値そのものは[Tier3・感度分析対象]で、
+    #   実験ファイルから丸ごと上書きできる（辞書のキーはWanderingOscillatorの
+    #   引数名 f0/A0/tau_f/sigma_f/tau_A/sigma_A/f_min/f_max/A_min/A_max、
+    #   および基準長オフセットへの変換スケール"amp"（案C 4-2節のA、
+    #   WanderingOscillator自体の引数ではないためstretch_reflex.py側で取り出して使う）。
+    "common_drive_osc_params": (
+        {"f0": 0.5, "A0": 1.0, "tau_f": 2.0, "tau_A": 2.0, "amp": 1.0},
+        "振動子の周波数・振幅・揺らぎの大きさ・基準長への変換スケール"
+        "[Tier3・感度分析対象、統合版7-2節の推奨値]", None),
     # ---- モデルの読み書き ---------------------------------------------------
     "model":         (None, "続きから学習するモデルのパス", "E_LOADMODEL"),
     "save":          (None, "学習後にモデルを保存するパス", "E_SAVEMODEL"),
@@ -343,6 +365,39 @@ class Config:
             raise ValueError(f"actuation が不明: {self.actuation}（muscle / joint）")
         if self.antagonist and not self.is_muscle:
             raise ValueError("antagonist（拮抗筋モード）は actuation=muscle が要る")
+        # 新しい駆動モジュール（伸張反射＋揺らぐ振動子の共通駆動、2026-08-11）のバリデーション。
+        #   設計7-6節「追加の制約」：moment_1/moment_2はMuscleModel構築時にしか
+        #   計算されない値のため、actuation=muscle のシーンでしか使えない。
+        #   黙って無視する・別経路へ静かにフォールバックする、を避け、起動時に
+        #   分かりやすいエラーで止める（落とし穴チェックリスト項86）。
+        if str(self.spinal_drive_mode) not in ("cpg", "reflex_common"):
+            raise ValueError(
+                f"spinal_drive_mode が不明: {self.spinal_drive_mode}（cpg / reflex_common）")
+        if self.spinal_drive_mode == "reflex_common":
+            if not self.is_muscle:
+                raise ValueError(
+                    "spinal_drive_mode=reflex_common には actuation=muscle が要る。\n"
+                    "  moment_1/moment_2はMuscleModel構築時にしか計算されない値のため、"
+                    "  関節モード（SpringDamperModel）では使えません。")
+            # 【実装担当の判断・作業記録に明記】既存のnoise=coloredなCPG（色付き探索）と
+            #   新しい駆動モジュールを同時に有効化する組み合わせは、今回のスコープでは
+            #   想定しない（両方が行動配列へ別々に加算/上書きすると混乱の元になる）。
+            #   どちらか一方を黙って優先するのではなく、明示的なエラーで止める
+            #   （落とし穴チェックリスト項86と同じ考え方＝通ってはいけない組み合わせを
+            #   黙って通さない）。
+            if str(self.noise) == "colored":
+                raise ValueError(
+                    "spinal_drive_mode=reflex_common と noise=colored（既存CPGの色付き"
+                    "探索）は同時に指定できません。今回のスコープでは組み合わせを"
+                    "想定していません。どちらか一方を選んでください。")
+            if not (0.0 <= float(self.common_drive_rho) <= 1.0):
+                raise ValueError(
+                    f"common_drive_rho={self.common_drive_rho} は0〜1の範囲外です。")
+            if not (isinstance(self.common_drive_grouping, dict)
+                    or str(self.common_drive_grouping) in ("none", "per_limb", "whole_body")):
+                raise ValueError(
+                    f"common_drive_grouping が不明: {self.common_drive_grouping!r}"
+                    "（none / per_limb / whole_body / 辞書）")
         if str(self.goal_space) not in ("prop_full", "reach_self"):
             raise ValueError(f"goal_space が不明: {self.goal_space}（prop_full / reach_self）")
         if str(self.reach_arm_side) not in ("right", "left"):

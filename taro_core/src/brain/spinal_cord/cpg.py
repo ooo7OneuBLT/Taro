@@ -109,6 +109,45 @@ class CPG:
       （e_growth_train.py の `_use_syn = _E_SYNERGY and not _MUSCLE`）。
       ＝文献が一致して言う新生児の特徴「まとめてしか動かせない」が、
       学習に使う設定では一度も効いていなかった。
+
+    【2026-08-11・符号バグの修正】上の「曲げる側」というラベルは、行動配列の前半
+      （index i、pair_offset実装上の"neg方向筋"）を指すだけの**配列上の呼び名**であり、
+      実際にその筋がMuJoCoの関節のどちら向き（生の qpos の +/-）を屈曲とするかとは
+      無関係だった。ところがMuJoCoの関節は正方向の定義が関節ごとにバラバラ
+      （実測：肩水平は `+`=屈曲・肘は `+`=伸展、股関節1・膝は `-`=屈曲・足首は `+`=屈曲）。
+      旧実装は「index i を常に-1（曲げる方向）とみなして+s寄せ」ていたため、
+      肘・股関節1・膝のように「生の+方向が屈曲でない」関節では、シナジーで作った
+      「まとまった屈伸」が符号レベルで逆になり、肩が曲がると肘が伸びる＝
+      関節同士が打ち消し合っていた（肩-肘の屈曲量相関 実測 −0.253±0.098）。
+
+      修正：leg_r/leg_l/arm_r/arm_l の各要素に、`(index, sign)` のタプルで
+      「生のqpos正方向が屈曲なら sign=+1、伸展なら sign=-1」を持たせられるようにした
+      （後方互換のため、単なる int も引き続き受け付ける＝sign不明・無補正の旧来どおりの式）。
+      sign を持つ要素は、`_blend()` 内で以下のように補正する：
+        pair_offset==0（関節空間・符号つき直接指令モード）：
+          gen_np[i] を sign*s に近づける
+        pair_offset!=0（拮抗筋2チャンネル・活性化[0,1]モード。既定の使用モード）：
+          gen_np[i]（"曲げる側"ラベルの筋）を -sign*s に、
+          対になる筋 gen_np[i+pair_offset] を +sign*s に近づける
+      （pair_offset!=0モードで符号が反転する理由：index iは配列上「常にneg方向筋
+       （曲げる側ラベル）」だが、sign=+1の関節（生の+方向が屈曲）ではラベルと実際の
+       屈曲方向が逆になるため、シナジー信号 s の符号を反転してからneg筋に与える必要が
+       ある。sign=-1の関節ではラベルと実際が一致するので式は変わらない＝旧来どおり）。
+
+      符号の根拠（実測。詳細は作業記録（非公開）
+      2026-08-11_自発運動3日間横断監査.md`・作業記録（非公開）
+      2026-08-11_CPGシナジー符号バグ修正.md`）：
+        shoulder_horizontal（腕index14/43）  sign=+1（+方向=屈曲。動力学つき・複数シードで確定）
+        elbow（腕index17/46）                sign=-1（+方向=伸展。静的mj_kinematicsスイープで単調・確定）
+        hip1（脚index72/81）                 sign=-1（+方向=伸展。静的スイープで単調・確定）
+        knee（脚index75/84）                 sign=-1（+方向=伸展。静的スイープで単調・確定）
+        foot1/ankle（脚index76/85）          sign=+1（+方向=屈曲。静的スイープで単調・確定）
+      次の関節は符号を推測せず、シナジーグループから**除外**した（詳細は仕様参照）：
+        shoulder_ad_ab（腕index15/44）：静的スイープで非単調・確定した符号の記載なし
+        hand2/wrist_flexion（腕index19/48）：neutral付近が最伸展という構造で
+          単純な二値の符号判定が原理的に成り立たない
+        hip2/hip_abduction（脚index73/82）：静的スイープでは単調だが、Dominici 2011の
+          kicking synergy（股矢状面・膝・足首の協調）に外転内転は含まれない
     """
 
     def __init__(self, n_act, leg_r=(), leg_l=(), arm_r=(), arm_l=(), seed=None,
@@ -124,14 +163,33 @@ class CPG:
 
     def _blend(self, gen_np, idx, s, syn_w):
         """関節indexの集合 idx にシナジー信号 s を syn_w の重みで混ぜる。
-        pair_offset があれば対になる筋（伸ばす側）に -s を混ぜる。"""
+
+        idx の各要素は `(index, sign)` のタプル、または（後方互換）単なる int。
+        sign は「生のqpos正方向が屈曲なら+1、伸展なら-1」（Noneなら符号不明＝無補正の
+        旧来どおりの式を使う。上のクラスdocstring「2026-08-11・符号バグの修正」参照）。
+        pair_offset があれば対になる筋（伸ばす側ラベル）にも混ぜる。"""
         n = len(gen_np)
-        for i in idx:
-            if i < n:
-                gen_np[i] = (1 - syn_w) * gen_np[i] + syn_w * s
-            j = i + self._pair_offset
-            if self._pair_offset and j < n:
-                gen_np[j] = (1 - syn_w) * gen_np[j] + syn_w * (-s)
+        for entry in idx:
+            if isinstance(entry, tuple):
+                i, sign = entry
+            else:
+                i, sign = entry, None
+            if i >= n:
+                continue
+            if self._pair_offset:
+                # 拮抗筋2チャンネル（活性化[0,1]）モード。index iは配列上「常にneg方向筋
+                # （曲げる側ラベル）」なので、signがラベルと逆（sign=+1）のときだけ
+                # シナジー信号の符号を反転してから混ぜる（sign=Noneは旧来どおり無補正）。
+                target_i = s if sign is None else -sign * s
+                target_j = -s if sign is None else sign * s
+                gen_np[i] = (1 - syn_w) * gen_np[i] + syn_w * target_i
+                j = i + self._pair_offset
+                if j < n:
+                    gen_np[j] = (1 - syn_w) * gen_np[j] + syn_w * target_j
+            else:
+                # 関節空間・符号つき直接指令モード。
+                target_i = s if sign is None else sign * s
+                gen_np[i] = (1 - syn_w) * gen_np[i] + syn_w * target_i
 
     def sample(self, beta, synergy=False, syn_w=0.6):
         gen_np = self.gen.sample(beta)

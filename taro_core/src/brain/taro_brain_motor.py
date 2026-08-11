@@ -21,6 +21,7 @@
 二重に持つ必要がないための判断。
 """
 
+import numpy as np
 import torch
 import torch.nn as nn
 
@@ -87,6 +88,18 @@ class TaroBrainWithMotor(TaroBrain):
         self._babble_syn_w = 0.6
         self._babble_antagonist = False
         self._babble_coactivation = 0.3
+
+        # 【2026-08-11・新しい駆動モジュール】伸張反射＋揺らぐ振動子の共通駆動
+        # （`spinal_cord/stretch_reflex.py`・`spinal_cord/common_drive.py`）。
+        # 既定は未初期化（None）＝spinal_drive_mode="cpg"（既定）では一度も使われず、
+        # 既存の経路（self.spinal_cpg・explore()）は1バイトも変わらない。
+        # `self.spinal_cpg` と対になる立て付け（`enable_reflex_common()` で有効化する）。
+        self.reflex_common = None
+        self._common_drive_groups = None      # {group名: (関節index一覧, RhythmicCommonDriveGroup)}
+        self._reflex_common_moment_1 = None   # (n_joint,) MuscleModelから読み取るだけ・書き換えない
+        self._reflex_common_moment_2 = None
+        self._reflex_common_amp = 1.0
+        self._reflex_common_L0_init = None    # (2*n_joint,) 反射のL0(0)（env.reset直後の基準）
 
         # ─── 目標E（egomotion割引）：視覚版の順モデル ───
         # forward_model_head（固有感覚版）と全く同じ形。予測対象を視覚エンコーダの
@@ -333,6 +346,88 @@ class TaroBrainWithMotor(TaroBrain):
         a_np = policy_action.detach().numpy() if isinstance(policy_action, torch.Tensor) else policy_action
         a_env = antagonist_map(a_np, self._babble_coactivation)
         return torch.as_tensor(a_env, dtype=torch.float32)
+
+    # ─── 新しい駆動モジュール：伸張反射＋揺らぐ振動子の共通駆動（2026-08-11）───
+    #
+    # 【なぜ太郎の中か】既存のenable_spinal_babble()と同じ理由＝自発運動の駆動方式は
+    # 太郎の身体機能（脊髄・脳幹の自律回路）であって、学習スクリプトや測定器が毎回
+    # 組み立てるものではない。呼び出し側（run/taro_setup.py）は、環境から読み取った
+    # moment_1/moment_2・関節のグループ分けを渡すだけの「配線」役に留める
+    # （taro_core側＝計算ロジック、run側＝環境から値を読んで渡す、という既存の
+    # 切り分け方針。設計8節）。
+    def enable_reflex_common(self, n_joint, moment_1, moment_2, groups, *, rho=0.0,
+                             osc_params=None, gain_config=None, amp=1.0, seed=None):
+        """伸張反射＋揺らぐ振動子の共通駆動を太郎の中で有効化する。
+
+        Args:
+            n_joint: 関節数（拮抗筋ペアの数。行動配列は2*n_joint次元）。
+            moment_1, moment_2: (n_joint,) 各関節の neg/pos 筋への換算係数
+                （`env.unwrapped.actuation_model.moment_1/.moment_2`。
+                読み取るだけで書き換えない。moment_1は常に正・moment_2は常に負）。
+            groups: {group名: [関節index, ...]}（関節indexは行動配列の前半
+                [0, n_joint) のインデックス）。1つのgroupにつき1つの
+                RhythmicCommonDriveGroupを作る。グループ分けそのもの（"none"/
+                "per_limb"/"whole_body"/辞書の解釈）は呼び出し側（run/taro_setup.py）
+                が組み立てる（taro_core側は環境・身体の名前を知らない）。
+            rho: グループ内の共通駆動の強さ（0〜1）。全グループ共通の値を使う
+                （設計のスコープでは1点のグローバルなρ）。
+            osc_params: WanderingOscillatorへ渡すkwargs（f0/A0/tau_f/sigma_f/
+                tau_A/sigma_A/f_min/f_max/A_min/A_max）。Noneなら
+                WanderingOscillatorの既定値を使う。
+            gain_config: StretchReflexのゲイン{"k_s","k_v","deadzone","r_max"}。
+                Noneなら stretch_reflex.py の既定値（Tier3・工学的判断）を使う。
+            amp: 共通駆動の無次元信号 c_j(t) を基準長オフセットへ変換するときの
+                スケールA（案C 4-2節）。[Tier3・工学的判断、既定1.0]。
+            seed: 乱数の種（グループごと・関節ごとに内部でオフセットして使う）。
+        """
+        from spinal_cord.common_drive import RhythmicCommonDriveGroup
+        from spinal_cord import stretch_reflex as _sr
+        gc = dict(gain_config or {})
+        self.reflex_common = _sr.StretchReflex(
+            n_joint=n_joint,
+            k_s=gc["k_s"] if gc.get("k_s") is not None else _sr.DEFAULT_K_S,
+            k_v=gc["k_v"] if gc.get("k_v") is not None else _sr.DEFAULT_K_V,
+            deadzone=gc["deadzone"] if gc.get("deadzone") is not None else _sr.DEFAULT_DEADZONE,
+            r_max=gc["r_max"] if gc.get("r_max") is not None else _sr.DEFAULT_R_MAX)
+        self._reflex_common_moment_1 = np.asarray(moment_1, dtype=np.float64)
+        self._reflex_common_moment_2 = np.asarray(moment_2, dtype=np.float64)
+        self._reflex_common_amp = float(amp)
+        s = (lambda k: seed + k) if seed is not None else (lambda k: None)
+        self._common_drive_groups = {}
+        for gi, (gname, idxs) in enumerate(groups.items()):
+            idxs = list(idxs)
+            self._common_drive_groups[gname] = (
+                idxs, RhythmicCommonDriveGroup(idxs, rho, osc_params or {}, seed=s(gi * 1000)))
+        self._reflex_common_L0_init = None   # set_reflex_common_baseline() で与える
+
+    def set_reflex_common_baseline(self, muscle_lengths):
+        """反射の基準長L0(0)を、env.reset()直後の実際のmuscle_lengthsで初期化する
+        （案①4-2節「既定」）。enable_reflex_common() の直後、env.reset()の後に呼ぶこと。"""
+        self.reflex_common.init_reference(muscle_lengths)
+        self._reflex_common_L0_init = np.array(muscle_lengths, dtype=np.float64).copy()
+
+    def step_reflex_common(self, dt, muscle_lengths, muscle_velocities):
+        """共通駆動を1tick進め、moment_1/moment_2経由で基準長オフセットに変換して
+        StretchReflexのL0を更新し、その上で伸張反射の活性化(2*n_joint次元)を返す。
+
+        呼び出し側（run/trainer.py）はこれを毎物理tick呼び、返り値を行動配列に
+        加算する（案①4-3節「探索側の命令に加算」）。
+        """
+        n = self.reflex_common.n_joint
+        c = np.zeros(n, dtype=np.float64)
+        for idxs, group in self._common_drive_groups.values():
+            vals = group.step(dt)
+            for j, v in vals.items():
+                c[int(j)] = v
+        from spinal_cord.common_drive import joint_signal_to_L0_offset
+        d_neg, d_pos = joint_signal_to_L0_offset(
+            c, self._reflex_common_moment_1, self._reflex_common_moment_2,
+            self._reflex_common_amp)
+        L0 = self._reflex_common_L0_init.copy()
+        L0[:n] += d_neg
+        L0[n:] += d_pos
+        self.reflex_common.set_reference(L0)
+        return self.reflex_common.compute(muscle_lengths, muscle_velocities)
 
     def consolidate(self, learner, n_batches=200, batch_size=128):
         """睡眠リプレイ：海馬に貯めた経験を再生し、順モデル（自己内部モデル）を定着させる。

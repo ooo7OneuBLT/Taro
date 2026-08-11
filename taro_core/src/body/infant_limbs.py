@@ -460,6 +460,46 @@ TONE_PROFILES = {
 }
 
 
+def disable_limb_tone_spring(model, groups=("arm", "leg")):
+    """apply_limb_tone が四肢に効かせた「継続的なバネ」役割(jnt_stiffness)を無効化する。
+
+    【なぜ、2026-08-11】新しい駆動モジュール（伸張反射＋揺らぐ振動子の共通駆動、
+    `spinal_cord/stretch_reflex.py`・`spinal_cord/common_drive.py`）は、
+    apply_limb_tone の「継続的な復元バネ」役割（reach_limbプロファイル・
+    newborn_flexorのstiffness）を置き換える設計（設計8節「変更 infant_limbs.py」）。
+
+    【想定外・実装判断の記録】設計は「spinal_drive_modeをapply_limb_toneへどう
+    渡すか（引数追加／呼び出し側で条件分岐して関数自体を呼ばない）は実装担当の判断」
+    としていたが、実際に apply_limb_tone を呼んでいるのは
+    `run/scene_tools/e_scene.py` の `_apply_limb_tone()` であり、この仕様の
+    「触ってよいファイル」の一覧に無い（触れない）。そのため、どちらの選択肢も
+    そのままでは実現できない。かわりに、環境が組み立てられた**あと**
+    （`run/taro_setup.py`、in-scope）でこの関数を呼び、四肢の関節の
+    jnt_stiffnessを0に戻すことで、事後的に「継続的なバネ」の効果を無効化する
+    第三の方式を選んだ（作業記録に明記）。
+
+    注意：**初期姿勢そのもの（data.qposへの強制、newborn_flexorの役割A）は
+    ここでは触らない**。stiffness=0にしても、reset時に一度設定された初期角度
+    自体は変わらない（qposはこの関数の対象外）。役割Aは維持される。
+
+    注意：dof_dampingは触らない。毎tickの速度に対する抵抗（粘性）であり、ある
+    基準角へ引き戻す偏りを持たない（速度の向きに関わらず常に動きを妨げる）ため、
+    「継続的な復元バネ」（ある1点へ引き戻す偏り）には該当しない。
+
+    Returns:
+        無効化した関節の数（int）
+    """
+    pairs = dict(limb_tone_joints_by_group(model, groups))
+    n = 0
+    for j in range(model.njnt):
+        nm = (model.joint(j).name or "").split(":")[-1]
+        if nm not in pairs:
+            continue
+        model.jnt_stiffness[j] = 0.0
+        n += 1
+    return n
+
+
 def apply_limb_tone(model, data, age=0.0, profile=None, target=None, stiffness=None,
                     hold_deg=None, groups=None, until_mo=None,
                     clamp_to_range=None, force_qpos=None, verbose=True):
