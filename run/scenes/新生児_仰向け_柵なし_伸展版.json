@@ -10,7 +10,7 @@
     "head_elongation": null,
     "flexion": false,
     "flexion_stiffness": null,
-    "limb_scale": 1.0,
+    "limb_scale": 10.0,
     "limb_fix": true,
     "distal_mass": 1.0,
     "neck_fix": true,
