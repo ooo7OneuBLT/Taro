@@ -84,7 +84,12 @@ class MinimalFusion:
                  self.proprio(to_tensor(obs["observation"])),
                  self.vestibular(to_tensor(vestibular_raw))]
         if self.touch is not None:
-            parts.append(self.touch(to_tensor(obs["touch"])))
+            # 【なぜ、2026-08-13】触覚の順応（taro_core/src/senses/touch_adaptation.py）が
+            #   有効なとき、taro_setup.py が obs["touch_percept"]（順応後の値）を追加する。
+            #   無効なとき（既定）はキー自体が無いので obs["touch"] にフォールバックする
+            #   ＝1ビットも変わらない後方互換。obs["touch"] 自体は書き換えない
+            #   （報酬・接触検出はこのキーを一切見ず、生の値を読み続ける設計判断）。
+            parts.append(self.touch(to_tensor(obs.get("touch_percept", obs["touch"]))))
         if self.vision is not None:
             parts.append(self.vision(obs["eye_left"], obs["eye_right"]))
         f = torch.cat(parts, dim=-1)

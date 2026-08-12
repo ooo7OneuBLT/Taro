@@ -33,6 +33,7 @@ import numpy as np                                              # noqa: E402
 
 from fusion import MinimalFusion                                # noqa: E402
 from somatosensory_cortex import build_touch_map_from_env       # noqa: E402
+from touch_adaptation import TouchAdaptation                    # noqa: E402
 from taro_brain_motor import TaroBrainWithMotor                 # noqa: E402
 from basal_ganglia import TaroLearner                           # noqa: E402
 from dopamine import Dopamine                                   # noqa: E402
@@ -53,6 +54,14 @@ from goal_babbling.reach_goal_head import ReachGoalHead          # noqa: E402
 from double_touch import DoubleTouchDetector, mouth_point_mask   # noqa: E402
 
 mse = torch.nn.functional.mse_loss
+
+# 【なぜ複製するか、2026-08-13】run/trainer.py の DT（=0.01秒=MuJoCoの1物理ステップ）
+#   と同じ値。taro_setup.py は trainer.py からimportされる側で、trainer.py を
+#   importすると circular import になるため、値を複製する
+#   （run/tools/record_self_touch_clip.py 等、既存の複数ファイルが同じ理由で
+#   同じ値を複製している前例に倣う。仕様
+#   作業記録（非公開） 3節）。
+_PHYS_DT = 0.01
 
 # シナジーの関節index（MIMo身体の配列。d_c5_motor_quality.py と同一）
 # 注意：【逸脱・Tier3・2026-07-30】「まとめてしか動かせない」を**配線で作っている**。
@@ -342,6 +351,42 @@ class Taro:
                 print(f"[体性感覚系] SomatosensoryCortex 有効：部位数="
                       f"{len(touch_map.group_names)} 触覚総次元={touch_dim}", flush=True)
 
+        # ---- 触覚の順応（同じ場所を押され続けると感じ方が弱まる、2026-08-13）--
+        # 設計：作業記録（非公開）
+        # 指示：作業記録（非公開）
+        #   既定OFF（cfg.touch_adaptation=False）＝self.touch_adaptationはNoneのまま
+        #   ＝apply_touch_adaptation()は何もせずobsをそのまま返す＝既存実験は不変。
+        self.touch_adaptation = None
+        if cfg.touch_adaptation:
+            if not (cfg.somatosensory and cfg.touch):
+                raise ValueError(
+                    "touch_adaptation=True には touch=true, somatosensory=true が要る。\n"
+                    "  順応は触覚の生の力ベクトル(obs['touch'])に適用し、"
+                    "SomatosensoryCortexの手前(fusion.py)へ差し込むため。")
+            self.touch_adaptation = TouchAdaptation(
+                touch_map.n_points, dt=_PHYS_DT * cfg.K,
+                fa_enabled=bool(cfg.touch_adapt_fa),
+                sa_enabled=bool(cfg.touch_adapt_sa),
+                include_cortical=bool(cfg.touch_adapt_include_cortical),
+                tau_peripheral_s=float(cfg.touch_adapt_tau_peripheral_s),
+                tau_cortical_s=float(cfg.touch_adapt_tau_cortical_s),
+                sa_floor=float(cfg.touch_adapt_sa_floor),
+                tau_recover_s=float(cfg.touch_adapt_tau_recover_s),
+                fa_gain=float(cfg.touch_adapt_fa_gain))
+            if verbose:
+                layer = "末梢+脳" if cfg.touch_adapt_include_cortical else "末梢のみ"
+                cortical_part = (f" τ脳={cfg.touch_adapt_tau_cortical_s}秒"
+                                 if cfg.touch_adapt_include_cortical else "")
+                print(f"[触覚の順応] ON：粒度=point 階層={layer}"
+                      f" τ末梢={cfg.touch_adapt_tau_peripheral_s}秒{cortical_part}"
+                      f" 残存率={cfg.touch_adapt_sa_floor} 速順応倍率={cfg.touch_adapt_fa_gain}"
+                      f" 回復τ={cfg.touch_adapt_tau_recover_s}秒 対象点数={touch_map.n_points}"
+                      f" エピソード境界でリセット={bool(cfg.touch_adapt_reset_on_episode)}",
+                      flush=True)
+        elif verbose:
+            # OFF時にも必ず表示する（静かに壊れるタイプの変更であるため。仕様8節）。
+            print("[触覚の順応] OFF", flush=True)
+
         # ---- ① 融合層（感覚をまとめる）--------------------------------------
         # target_fusion は**凍結した別インスタンス**（RND式）。予測側と正解側が
         #   同じ学習中の層だと「出力を平坦にすれば当たる」抜け道で崩壊する（目標Cで実際に踏んだ）。
@@ -624,6 +669,12 @@ class Taro:
         tm = build_touch_map_from_env(env)
         self.fusion.touch.rebuild(tm)
         self.target_fusion.touch.rebuild(tm)
+        # 【2026-08-13】触覚の順応も体が変わったら全点リセット（3-6節・設計
+        #   9節「成長時に順応の状態をリセットする」）。touch_adaptationが有効なら
+        #   必ずfusion.touchも有効（同じ条件cfg.somatosensory and cfg.touchで
+        #   ゲートされている）ので、このifは早期returnの後でも安全に届く。
+        if self.touch_adaptation is not None:
+            self.touch_adaptation.rebuild(tm.n_points)
         # ---- 手先位置の目標表現（案C）：腕の索引を引き直す ------------------
         # 【なぜ、2026-08-02】腕の関節構成は月齢で不変と実装確認済みだが、
         #   「不変のはず」を仮定にせず、体を作り直すたびに必ず引き直す
@@ -642,6 +693,36 @@ class Taro:
                     f"  いまの部位: {tm.group_names}")
         return tm
 
+    # -------------------------------------------------------- 触覚の順応
+    def apply_touch_adaptation(self, obs, is_reset=False):
+        """触覚の順応を1回だけ進め、obs["touch_percept"]を追加した新しいdictを返す。
+
+        【なぜ、2026-08-13】advance()は「新しい物理観測が生まれた瞬間」にだけ
+          呼ぶ必要がある。呼び出し元は run/trainer.py の reset_state()・step_k()
+          （K回のenv.stepループを終えた最後のoにだけ）の2箇所に厳密に限定する。
+          fusion.py・encode_target 側では読むだけで、advance()は絶対に呼ばない
+          （設計2節で確認済みの罠：同一物理観測に対しtarget_fusion.touchが
+          最大3回呼ばれるが、そこでadvance()を呼ぶと順応が最大3倍の速さで進む）。
+
+        Args:
+            obs: 環境から返された観測（dict）。obs["touch"]は書き換えない
+                （元のdictも破壊的に書き換えない。他のコードが元のobsへの
+                参照を保持している可能性があるため、新しいdictを作って返す）。
+            is_reset: env.reset()直後の呼び出しならTrue。
+                cfg.touch_adapt_reset_on_episode=True のときだけ、
+                advance()の前に順応の状態（ゲイン）を1.0へ戻す
+                （既定Falseでは何もしない＝エピソードをまたいで持続させる。
+                2026-08-13、ユーザー決定）。
+        """
+        if self.touch_adaptation is None:
+            return obs
+        if is_reset and self.cfg.touch_adapt_reset_on_episode:
+            self.touch_adaptation.reset_episode()
+        self.touch_adaptation.advance(obs["touch"])
+        new_obs = dict(obs)
+        new_obs["touch_percept"] = self.touch_adaptation.adapted()
+        return new_obs
+
     # -------------------------------------------------------- 予測の対象
     def encode_target(self, obs):
         """予測する対象を作る（元 `ln_prop`）。既定は固有感覚のみ。
@@ -656,15 +737,19 @@ class Taro:
         cfg = self.cfg
         v = to_tensor(obs["observation"])
         # 【B案】somatosensory=True のときは生の触覚を混ぜず、S1相当のembedをブロックで足す
+        # 【2026-08-13】touch_adaptationが有効なら順応後の値(obs["touch_percept"])を
+        #   使う。無効（既定）ならキー自体が無いのでobs["touch"]にフォールバック
+        #   ＝1ビットも変わらない後方互換（仕様5節、片方だけ直すと非対称になるので
+        #   下のtouch_embedブロックとも揃える）。
         if cfg.touch and cfg.touch_mode == "target" and not cfg.somatosensory:
-            v = torch.cat([v, to_tensor(obs["touch"])])
+            v = torch.cat([v, to_tensor(obs.get("touch_percept", obs["touch"]))])
         parts = [ln(v, v.shape).detach()]
         names = ["prop"]
         f = self.target_fusion
         if cfg.somatosensory and cfg.touch and cfg.touch_mode == "target":
             if getattr(f, "touch", None) is not None and "touch" in obs:
                 with torch.no_grad():
-                    e = f.touch(to_tensor(obs["touch"]))
+                    e = f.touch(to_tensor(obs.get("touch_percept", obs["touch"])))
                 parts.append(ln(e, e.shape)); names.append("touch_embed")
         if cfg.target_has_vision:
             with torch.no_grad():             # 正解側は勾配を流さない（RND式）

@@ -42,6 +42,33 @@ TARO_DEFAULTS = {
     "touch_mode":    ("target", "触覚を予測対象にするか input/target", "E_TOUCH_MODE"),
     "somatosensory": (False, "触覚を視床VPL+S1相当の経路にする", "E_SOMATOSENSORY"),
     "vision":        (True, "視覚を入力に入れる", "E_E1_VISION"),
+    # ---- 触覚の順応（同じ場所を押され続けると感じ方が弱まる、2026-08-13）------
+    # 設計：作業記録（非公開）
+    # 指示：作業記録（非公開）
+    #   末梢寄り（fusion.pyがSomatosensoryCortexへ渡す直前）に割り込む新規モジュール。
+    #   obs["touch"]は書き換えず、新キーobs["touch_percept"]を追加する。既定OFF＝
+    #   既存実験の挙動は1ビットも変わらない。有効にするには touch=true, somatosensory=true
+    #   が要る（起動時にValueErrorで止める。taro_setup.py側で確認）。
+    "touch_adaptation": (False, "触覚の順応（末梢＋脳）を有効にする。有効にするには"
+                         "touch=true, somatosensory=true が要る", None),
+    "touch_adapt_fa": (True, "速順応の個別ON/OFF（touch_adaptation=trueのときのみ意味を持つ）",
+                       None),
+    "touch_adapt_sa": (True, "遅順応の個別ON/OFF（touch_adaptation=trueのときのみ意味を持つ）",
+                       None),
+    "touch_adapt_include_cortical": (False, "遅順応に脳(体性感覚野)側の順応レイヤーを"
+                                     "含める[Tier2]。既定OFF＝まず末梢のみで段階的に"
+                                     "検証する（2026-08-13、ユーザー決定）", None),
+    "touch_adapt_tau_peripheral_s": (8.4, "遅順応・末梢の時定数[秒][Tier2・孫引き]", None),
+    "touch_adapt_tau_cortical_s": (15.0, "遅順応・脳側の時定数[秒][Tier2・孫引き、"
+                                   "範囲5.7〜21秒の中間値]", None),
+    "touch_adapt_sa_floor": (0.31, "遅順応の残存率（マウス由来）[Tier3]", None),
+    "touch_adapt_tau_recover_s": (8.4, "順応から回復する時定数[秒][Tier3・文献無し、"
+                                  "暫定で減衰と同じ時定数]", None),
+    "touch_adapt_fa_gain": (1.0, "速順応の倍率[Tier3・工学的仮置き]", None),
+    "touch_adapt_reset_on_episode": (False, "順応の状態をエピソード境界(env.reset())で"
+                                     "リセットするか。既定False＝リセットせず持続させる"
+                                     "（2026-08-13、ユーザー決定。人間の乳児にはエピソード"
+                                     "という区切りが無いため）", None),
     # 反射。シーンを組むときに渡す（run/plugins/common/scene.py が読む）。
     #   注意：ここに無いと measure では使えて train/view では弾かれる、という
     #     非対称が起きる（2026-07-30 の点検で発覚）。
@@ -298,7 +325,9 @@ _FLOATS = {"lr", "effort_cost", "caps", "beta", "syn_w", "coactivation", "lam_v"
            "progress_surprise_bonus", "progress_surprise_decay", "progress_surprise_var_tau",
            "progress_surprise_threshold",
            "mouth_touch_bonus", "mouth_touch_threshold",
-           "mouth_touch_x_frac", "mouth_touch_z_frac"}
+           "mouth_touch_x_frac", "mouth_touch_z_frac",
+           "touch_adapt_tau_peripheral_s", "touch_adapt_tau_cortical_s",
+           "touch_adapt_sa_floor", "touch_adapt_tau_recover_s", "touch_adapt_fa_gain"}
 _INTS = {"age_start", "age_ramp", "age_every", "steps", "seed", "K", "checkpoint",
          "n_eval", "goal_traj_len"}
 

@@ -199,16 +199,23 @@ class Trainer:
                 if te or tr:
                     term = True
                     break
+            # 【2026-08-13・触覚の順応】K回のenv.stepループを終えた最後のoにだけ
+            #   適用する（ループ途中の各tickには適用しない。仕様4節）。
+            o = t.apply_touch_adaptation(o, is_reset=False)
             return o, term
         for _ in range(self.cfg.K):
             o, r, te, tr, info = self.env.step(a)
             if te or tr:
                 term = True
                 break
+        o = t.apply_touch_adaptation(o, is_reset=False)
         return o, term
 
     def reset_state(self):
         self.state["obs"], _ = self.env.reset()
+        # 【2026-08-13・触覚の順応】新しい物理観測が生まれる瞬間（env.reset()直後）
+        #   にだけ適用する（仕様4節。fusion.py・encode_targetの中では絶対に呼ばない）。
+        self.state["obs"] = self.taro.apply_touch_adaptation(self.state["obs"], is_reset=True)
         self.state["hidden"] = self.taro.brain.init_motor_hidden()
         self.state["prev_a"] = torch.zeros(self.taro.n_act)
         # 【2026-08-12追記】立ち上がり検出（前tickの状態）を持つreward_contributor
