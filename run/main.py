@@ -224,6 +224,27 @@ def run(spec, *, steps_override=None, verbose=False):
         #   挙動（全実験が muscle）は変わらない。
         if t.get("actuation") is not None:
             envv["E_ACTUATION"] = str(t["actuation"])
+        # 【なぜ、2026-08-11】taro欄のキーを1つずつ列挙して環境変数へ転送する
+        #   やり方は、新しいキー（例：伸張反射＋揺らぐ振動子の共通駆動＝
+        #   spinal_drive_mode・common_drive_rho・common_drive_grouping・
+        #   common_drive_osc_params）が増えるたびに転送漏れを繰り返す
+        #   （2026-08-07 の taro.noise と同型の再発。
+        #   E/docs/figures/駆動モード比較_2026-08-07/_録画スクリプト_参考.py 冒頭）。
+        #   ⇒ taro欄（JSON化できる値だけ）を丸ごとJSON文字列にして渡す。
+        #   e_viewer.py 側はこれを taro_spec の「土台」として展開し、そのうえで
+        #   既存の個別計算（actuation・age_months・model・noise/beta/synergy/
+        #   syn_wの上書き）を今までどおり適用する＝個別計算が必ず勝つ
+        #   （2026-08-10の駆動モード食い違いチェックの前提を壊さないため）。
+        #   注意：これにより、_load_brain がこれまで受け取っていなかった
+        #   taro欄の他のキー（reward・touch等）も編集ウィンドウ側へ伝わるように
+        #   なる（副次的な挙動の広がり。仕様2026-08-11_新機構バグ2件修正.md
+        #   担当B節に明記のとおり、作業記録にも記載する）。
+        if t:
+            try:
+                envv["E_TARO_SPEC_JSON"] = json.dumps(t, ensure_ascii=False)
+            except (TypeError, ValueError) as _e:      # noqa: BLE001
+                print(f"注意 taro欄をJSON化できませんでした（編集ウィンドウには"
+                      f"個別項目のみ渡ります）: {type(_e).__name__}: {_e}", flush=True)
         script = os.path.join(_ROOT, "run", "viewer_tools", "e_viewer.py")
         print(f"  編集ウィンドウ付き Viewer を開きます\n"
               f"     シーン {envv['E_SCENE']}"

@@ -309,6 +309,45 @@ def main():
     n_act = env.action_space.shape[0]
     zero = np.zeros(n_act, dtype=np.float32)
 
+    # ---- 四肢の筋力スライダー（2026-08-12 新設）------------------------------
+    #
+    # 【なぜ】0ヶ月児の四肢の筋力が弱すぎて腕が物理的に上がらない問題が判明した
+    # （実測：肩の外転筋に最大指令を20秒入れ続けても補正係数1.0では25.9度しか
+    # 上がらない。仕様 作業記録（非公開）
+    # 2026-08-12_Viewer筋力スライダーと筋緊張バグ修正.md 依頼1）。
+    #
+    # 【実体】`MuscleModel._update_torque()`（MIMo/mimoActuation/muscle.py
+    # 306〜322行目）は毎物理stepで self.fmax を読んでトルクを計算する
+    # （self.fmaxはコンストラクタで1回だけ計算されるのではなく、
+    # _update_torqueが呼ばれるたびに現在の値を参照する。実際に読んで確認済み）。
+    # つまり set_fmax()（同ファイル403〜409行目、既存のセッター）で書き換えれば
+    # 次の物理stepから即座に反映される。actuator_gearを外から書き換える方式は
+    # `_apply_torque()`（324〜331行目）が毎stepそれを上書きするため機能しない。
+    #
+    # 【対象＝四肢のみ】既存の apply_limb_inversion_fix
+    # （taro_core/src/body/infant_limbs.py 189〜194行目）が対象を決める判定
+    # （act:head*・act:chest*で始まるアクチュエータを除外＝四肢）をそのまま
+    # 踏襲する（検証の落とし穴チェックリスト項30「同じ式が複数箇所にあったら
+    # 置き場所が間違っている」の考え方に沿い、同じ判定式を使う。関数自体は
+    # 「除外して残りを使う」という単純な形なので、ここでも同じ条件式をそのまま
+    # 書く。新しく別の基準を作っていない）。
+    am = u.actuation_model
+    _LIMB_AIDS = [i for i in range(m.nu)
+                 if not (m.actuator(i).name or "").startswith(("act:head", "act:chest"))]
+    # actuation=joint（SpringDamperModel）には fmax 属性が無いことを確認済み
+    #   （MIMo/mimoActuation/actuation.py に fmax の記述なし）。
+    # 環境変数キャリブレーションが無いと fmax がスカラー（float）のことがある
+    #   （muscle.py 259〜269行目）。この場合は関節ごとに調整できないので、
+    #   既存の scale_actuator_strength と同じ流儀で「何もしない」を選び、
+    #   スライダー側に効果が無いことを明示する（黙って無視しない）。
+    _fmax_base = None
+    if hasattr(am, "fmax"):
+        _f0 = np.asarray(am.fmax, dtype=float)
+        if _f0.ndim > 0:
+            _fmax_base = _f0.copy()          # Viewer起動直後・未操作時点の基準値
+    _fs_available = _fmax_base is not None
+    _fs_n_act = int(getattr(am, "n_actuators", len(_fmax_base) // 2)) if _fs_available else 0
+
     toy_bid = int(m.body("test_object1").id)
     toy_jid = int(m.body_jntadr[toy_bid])
     toy_qadr = int(m.jnt_qposadr[toy_jid])
@@ -1094,7 +1133,13 @@ def main():
     #   「脳」区画の外にあり、UIがそちらにしか無いと実質使えなかった。
     #   NOISE_MODES / noise_mode / noise_label_dirty は「脳」区画・もがき運動の
     #   両方から共有される状態なので、ここ1箇所にだけ置く（重複させない）。
-    NOISE_MODES = ["white", "colored", "colored+synergy"]
+    # 【なぜ、2026-08-12】4つ目の駆動モード「reflex_common」（伸張反射＋揺らぐ
+    #   振動子の共通駆動、taro_core/src/brain/spinal_cord/common_drive.py・
+    #   stretch_reflex.py）を追加した。仕様：作業記録（非公開）
+    #   2026-08-12_Viewer反射共通駆動モード追加.md。
+    #   actuation=muscle が必須（moment_1/moment_2はMuscleModel構築時にしか
+    #   計算されないため、run/config.pyのバリデーションと同じ制約）。
+    NOISE_MODES = ["white", "colored", "colored+synergy", "reflex_common"]
     noise_mode = ["white"]          # 循環の現在地。書き換えるのは _set_noise_mode() だけ
     noise_label_dirty = [True]      # 画面ラベルの更新が要るか（別スレッドから直接
                                      # tkinterを触らないためのフラグ。下記「注意」参照）
@@ -1105,15 +1150,63 @@ def main():
 
     _nf = tk.Frame(sec_run.body); _nf.pack(anchor="w", padx=14, pady=(2, 0))
     tk.Label(_nf, text="駆動モード:").pack(side="left")
+    _noise_radio_widgets = {}
     for _nv, _nlab in (("white", "白色"), ("colored", "色付き"),
-                        ("colored+synergy", "色付き+シナジー")):
-        tk.Radiobutton(_nf, text=_nlab, variable=noise_mode_var, value=_nv,
-                       command=lambda: _noise_ui_hook[0](noise_mode_var.get())
-                       ).pack(side="left")
+                        ("colored+synergy", "色付き+シナジー"),
+                        ("reflex_common", "反射+共通駆動")):
+        _rb = tk.Radiobutton(_nf, text=_nlab, variable=noise_mode_var, value=_nv,
+                             command=lambda: _noise_ui_hook[0](noise_mode_var.get()))
+        _rb.pack(side="left")
+        _noise_radio_widgets[_nv] = _rb
+    # 【やること2・actuation=muscle必須のガード】actuation=joint のとき、
+    #   ラジオボタン自体を選べなくする（黙って別モードで動くことを防ぐ第一段）。
+    #   防御的な第二段は下の _set_noise_mode() 内にある。
+    if _ACTUATION_MODE != "muscle":
+        _noise_radio_widgets["reflex_common"].config(state=tk.DISABLED)
     noise_mode_label = tk.Label(
         sec_run.body, text="駆動モード: white（Nキー、またはボタンで切替）",
         font=("Consolas", 9), justify="left", fg="#666")
     noise_mode_label.pack(anchor="w", padx=14)
+
+    # ---- 四肢の筋力調整（2026-08-12 新設）---------------------------------
+    #
+    # 【なぜ】もがき運動・脳・反射+共通駆動のどの駆動方式でも共通して効く
+    #   身体側のパラメータ（fmax）なので、特定の駆動モードの区画ではなく
+    #   「再生」区画の中に独立の折りたたみ小区画として置く（仕様やること3・
+    #   UI整理）。既定では畳んでおく（常用するものではないため、開いたままだと
+    #   区画が縦に伸びすぎる）。
+    #
+    # 【対数スケール】1.0〜200程度を対数的に振れるよう、スライダー変数自体は
+    #   log10(倍率) を持たせ（0.0〜log10(200)）、表示・適用の直前に 10**value
+    #   へ変換する（仕様の推奨どおり）。
+    import math as _fs_math
+    _FS_LOG_MAX = _fs_math.log10(200.0)
+    fs_log_var = tk.DoubleVar(value=0.0)     # log10(1.0) = 0.0 ＝既定は等倍
+
+    def _fs_current_x():
+        return 10.0 ** float(fs_log_var.get())
+
+    sec_fs = Section(sec_run.body, "四肢の筋力調整", False)
+    if not _fs_available:
+        tk.Label(sec_fs.body, fg="#a33", font=("", 8), justify="left",
+                 text="注意fmaxが定数（キャリブレーションファイル無し）、または\n"
+                      "actuation=joint のため、このスライダーは効きません"
+                 ).pack(anchor="w", padx=14, pady=(0, 4))
+    else:
+        slider(sec_fs.body, "筋力倍率(対数)", fs_log_var, 0.0, _FS_LOG_MAX, 0.01,
+               note="1.0〜200倍を対数目盛で調整（四肢のみ。首・体幹は変わりません）。"
+                    "既定1.0倍＝何もしなければ挙動は変わりません")
+        fs_value_label = tk.Label(sec_fs.body, font=("Consolas", 9), fg="#666",
+                                  justify="left", text="倍率 1.00x")
+        fs_value_label.pack(anchor="w", padx=14)
+
+        def _fs_reset_default():
+            fs_log_var.set(0.0)
+            msg.config(text="四肢の筋力倍率を既定値(1.0倍)に戻しました", fg="#0a7")
+
+        tk.Button(sec_fs.body, text="既定値に戻す(1.0倍)",
+                  command=_fs_reset_default, width=20).pack(
+            anchor="w", padx=14, pady=(2, 6))
 
     # ---- もがき運動パラメータ調整（2026-08-11 新設）----------------------
     #
@@ -1160,6 +1253,99 @@ def main():
         msg.config(text="もがき運動のパラメータを既定値に戻しました", fg="#0a7")
 
     tk.Button(sec_bab.body, text="既定値に戻す", command=_bab_reset_defaults,
+              width=16).pack(anchor="w", padx=14, pady=(2, 6))
+
+    # ---- 反射+共通駆動パラメータ調整（2026-08-12 新設）--------------------
+    #
+    # 【なぜ】仕様 作業記録（非公開）
+    #   2026-08-12_Viewer反射共通駆動モード追加.md やること3。駆動モード
+    #   「反射+共通駆動」を選んだときだけ効く（もがき運動が「①〜⑤」で
+    #   white/colored/colored+synergyだけを制御するのと同じ切り分け）。
+    #
+    # 【対象関節数】グルーピング（none/per_limb/whole_body）に関わらず対象と
+    #   なる関節の集合そのものは変わらない（グルーピングは「どうまとめるか」
+    #   だけを変える）ので、ここで1回だけ実測してラベルに出す。関節名リストを
+    #   手で数えない（検証の落とし穴チェックリスト項28「今日の事故＝28関節の
+    #   はずが6関節」の再発防止。run.taro_setup._reflex_common_joint_indices を
+    #   そのまま使う＝taro_core・run側の計算を重複させない）。
+    if _ACTUATION_MODE == "muscle":
+        from run.taro_setup import _reflex_common_joint_indices as _rc_joint_idx_fn
+        _rc_idx_by_limb = _rc_joint_idx_fn(env)
+        _rc_n_joints = sum(len(v) for v in _rc_idx_by_limb.values())
+    else:
+        _rc_n_joints = 0
+
+    # k_sの既定値は run/config.py に設定キーが無く、常に
+    #   spinal_cord/stretch_reflex.py の DEFAULT_K_S が使われる（仕様の
+    #   注意どおり）。値を手で書き写さず import して使う。
+    from spinal_cord.stretch_reflex import DEFAULT_K_S as _RC_DEFAULT_K_S
+
+    # ρの既定値0.3とグルーピングの既定値の組み合わせに注意（仕様やること3）：
+    #   grouping="none"だと各関節が1要素グループになりρが実質無効になる
+    #   （RhythmicCommonDriveGroupのdocstring参照）。既定でρが目に見える効果を
+    #   持つよう、grouping既定は"per_limb"を選んだ（実装担当の判断。作業記録に明記）。
+    _RC_DEFAULTS = dict(rho=0.3, f0=0.5, a0=1.0, k_s=float(_RC_DEFAULT_K_S),
+                        grouping="per_limb")
+    rc_rho_var = tk.DoubleVar(value=_RC_DEFAULTS["rho"])
+    rc_f0_var = tk.DoubleVar(value=_RC_DEFAULTS["f0"])
+    rc_a0_var = tk.DoubleVar(value=_RC_DEFAULTS["a0"])
+    rc_gain_var = tk.DoubleVar(value=_RC_DEFAULTS["k_s"])
+    rc_grouping_var = tk.StringVar(value=_RC_DEFAULTS["grouping"])
+
+    sec_rc = Section(sec_run.body, "反射+共通駆動パラメータ調整", True)
+    if _ACTUATION_MODE != "muscle":
+        tk.Label(sec_rc.body, fg="#a33", font=("", 8), justify="left",
+                 text="注意actuation=muscle のときだけ使えます（今の体="
+                      f"{_ACTUATION_MODE}）。ラジオボタンも選べません"
+                 ).pack(anchor="w", padx=14, pady=(0, 4))
+    slider(sec_rc.body, "ρ（共通の度合い）", rc_rho_var, 0.0, 1.0, 0.01,
+           note="0=各関節が独立に揺れる／1=グループ内が同じ揺れを共有。既定0.3")
+    slider(sec_rc.body, "振動子の周波数 f0[Hz]", rc_f0_var, 0.1, 2.0, 0.01,
+           note="揺らぎの中心周波数。既定0.5Hz")
+    slider(sec_rc.body, "振動子の振幅 A0", rc_a0_var, 0.0, 2.0, 0.01,
+           note="揺らぎの中心振幅（無次元）。既定1.0")
+    slider(sec_rc.body, "伸張反射のゲイン k_s", rc_gain_var, 0.0, 20.0, 0.1,
+           note=f"筋が伸びたときの反射の強さ。既定{float(_RC_DEFAULT_K_S):g}"
+                "（spinal_cord/stretch_reflex.pyのDEFAULT_K_S）")
+
+    def _rc_invalidate(*_a):
+        """グルーピングを変えたら、次に使うタイミングで組み立て直す。
+
+        【なぜ】グルーピング（none/per_limb/whole_body）は関節indexの
+        グループ分けそのもの（RhythmicCommonDriveGroupのトポロジー）を変える
+        ため、rho/f0/A0/k_sのような「その場で属性を書き換えるだけ」の
+        リアルタイム切替が効かない。作り直す必要があるので、いま持っている
+        オブジェクトを捨てて次回 _ensure_reflex_common() で新しく作り直させる
+        （過去に3回踏んだ「GUIの表示と物理適用が別経路」バグを避けるため、
+        黙って古いグルーピングのまま動き続ける、を避ける）。
+        """
+        _reflex_common_holder[0] = None
+
+    _rcgf = tk.Frame(sec_rc.body); _rcgf.pack(anchor="w", padx=14, pady=(2, 0))
+    tk.Label(_rcgf, text="グルーピング:").pack(side="left")
+    for _gv, _glab in (("none", "なし"), ("per_limb", "四肢ごと"),
+                       ("whole_body", "全身")):
+        tk.Radiobutton(_rcgf, text=_glab, variable=rc_grouping_var, value=_gv,
+                       command=_rc_invalidate).pack(side="left")
+    tk.Label(sec_rc.body, fg="#666", font=("", 8),
+             text="none にすると各関節が1要素グループになり、ρは実質効かなくなります"
+             ).pack(anchor="w", padx=14)
+
+    rc_joint_label = tk.Label(
+        sec_rc.body, font=("Consolas", 9), justify="left", fg="#666",
+        text=f"対象関節数: {_rc_n_joints}（両腕・両脚の合計）")
+    rc_joint_label.pack(anchor="w", padx=14, pady=(2, 0))
+
+    def _rc_reset_defaults():
+        rc_rho_var.set(_RC_DEFAULTS["rho"])
+        rc_f0_var.set(_RC_DEFAULTS["f0"])
+        rc_a0_var.set(_RC_DEFAULTS["a0"])
+        rc_gain_var.set(_RC_DEFAULTS["k_s"])
+        rc_grouping_var.set(_RC_DEFAULTS["grouping"])
+        _rc_invalidate()
+        msg.config(text="反射+共通駆動のパラメータを既定値に戻しました", fg="#0a7")
+
+    tk.Button(sec_rc.body, text="既定値に戻す", command=_rc_reset_defaults,
               width=16).pack(anchor="w", padx=14, pady=(2, 6))
 
     st_loop = tk.BooleanVar(value=False)
@@ -1469,6 +1655,124 @@ def main():
             synergy=(noise_mode[0] == "colored+synergy"),
             syn_w=float(bab_synw_var.get()))
 
+    # ================= 反射+共通駆動（2026-08-12）=========================
+    # 【なぜ run.taro_setup.Taro を素直に使わないか】仕様が示す推奨アーキテクチャ
+    #   （チェックポイント無しで Taro を直接組み立てる）をそのまま実装すると、
+    #   `Taro.__init__` は必ず `env.reset(seed=self.seed)` を呼ぶ（乱数の
+    #   再現性のための既存仕様、run/taro_setup.py 314行目）。この env は
+    #   Viewer が実際に表示している env そのもの（HybridEnvはこれを包むだけ
+    #   ＝内部で同じ物理envをreset）なので、これを呼ぶと**シーン・姿勢編集
+    #   スライダーで作った今の姿勢が、脳を読み込んだ瞬間に既定姿勢へ飛ぶ**
+    #   （実際に「脳」区画の既存の `_load_brain` にも同じ副作用があるが、
+    #   そちらは「モデルを読む」という明示的な操作に対する既知の挙動として
+    #   受け入れられている。もがき運動のパラメータをスライダーで調整している
+    #   最中に不意に姿勢が飛ぶのは体験として別物と判断し、ここでは避けた）。
+    #   そこで、taro_core側の計算式は一切重複させない（検証の落とし穴
+    #   チェックリスト項30）という方針は守りつつ、env に触れない最小限の
+    #   組み立て＝TaroBrainWithMotor（env非依存）＋
+    #   run.taro_setup._setup_reflex_common（env読み取りのみ、reset無し）
+    #   を直接使う。moment_1/moment_2・関節グループ・ρ・振動子パラメータの
+    #   計算式そのものは taro_core・run.taro_setup 側のものをそのまま呼ぶだけ。
+    _reflex_common_holder = [None]     # {"brain": TaroBrainWithMotor, ...} or None
+    # 【なぜ、2026-08-12・監査指摘のバグ修正】run/taro_setup._setup_reflex_common
+    #   （_build_reflex_common が呼ぶ）は、組み立てるたびに
+    #   infant_limbs.disable_limb_tone_spring(model, groups=("arm","leg")) を呼び、
+    #   四肢の関節の jnt_stiffness を問答無用で0にする。これを元に戻す経路が
+    #   今まで無く、駆動モードを他へ切り替えても四肢のバネが0のまま戻らなかった
+    #   （仕様 作業記録（非公開）
+    #   2026-08-12_Viewer筋力スライダーと筋緊張バグ修正.md 依頼2）。
+    #   既存の limb_tone_apply()/limb_tone_release()（_limb_saved、819〜906行目
+    #   付近）が「書き換える前に保存し、離れるときに復元する」という全く同じ型の
+    #   問題を正しく解いているので、その型をそのまま踏襲する。
+    _rc_stiffness_saved = [None]       # {関節id: 元のjnt_stiffness} or None（未保存）
+    _rc_pending_restore = [False]      # 復元が必要か（キーコールバックスレッドから
+                                        # 直接 model 配列を書かないための旗。下記参照）
+
+    def _build_reflex_common():
+        from run.config import Config
+        from run.taro_setup import _setup_reflex_common
+        from taro_brain_motor import TaroBrainWithMotor
+        from infant_limbs import limb_tone_joints_by_group
+        osc_params = {"f0": float(rc_f0_var.get()), "A0": float(rc_a0_var.get()),
+                      "tau_f": 2.0, "tau_A": 2.0, "amp": 1.0}
+        taro_spec = {
+            "actuation": _ACTUATION_MODE, "age_months": _AGE,
+            "spinal_drive_mode": "reflex_common",
+            "common_drive_rho": float(rc_rho_var.get()),
+            "common_drive_grouping": rc_grouping_var.get(),
+            "common_drive_osc_params": osc_params,
+            "noise": "white",   # spinal_drive_mode=reflex_common はnoise=coloredと
+                                 # 同時指定不可（run/config.py のバリデーション）
+        }
+        cfg = Config(taro_spec, {"seed": 0, "K": 10},
+                    scene=(_scene or {}).get("name"), name="viewer_reflex_common")
+
+        class _ReflexCommonHolder:
+            pass
+        holder = _ReflexCommonHolder()
+        # sensory_dim/proprio_dimは反射+共通駆動では一切使わない（motor_cortex・
+        #   forward_model_headは呼ばれない）ので、無駄な層を作らないよう最小値にする。
+        holder.brain = TaroBrainWithMotor(vocab_size=3, sensory_dim=1,
+                                          n_actuators=n_act, proprio_dim=1)
+        holder.seed = 0
+        # 【なぜここで保存するか】_setup_reflex_common が disable_limb_tone_spring を
+        #   呼ぶ**直前**の値を控える。_rc_stiffness_saved[0] が None のとき
+        #   （＝このセッションでまだ一度も保存していないとき）だけ保存する。
+        #   グルーピング変更（_rc_invalidate）でholderだけ作り直す2回目以降は
+        #   None のままではないのでここをスキップし、「既に0になっているものを
+        #   保存して0のまま復元する」を避ける（仕様やること2の注意点）。
+        if _rc_stiffness_saved[0] is None:
+            _pairs = dict(limb_tone_joints_by_group(m, groups=("arm", "leg")))
+            _sv = {}
+            for j in range(m.njnt):
+                nm = (m.joint(j).name or "").split(":")[-1]
+                if nm in _pairs:
+                    _sv[j] = float(m.jnt_stiffness[j])
+            _rc_stiffness_saved[0] = _sv
+        ok = _setup_reflex_common(holder, cfg, env, verbose=True)
+        if not ok:
+            return None
+        return holder
+
+    def _rc_restore_stiffness():
+        """disable_limb_tone_spring が0にした jnt_stiffness を、保存しておいた
+        値へ戻す。反射+共通駆動モードから離れるときに呼ぶ（メインループ側から
+        だけ呼ぶこと。model配列への直接書き込みを含むため）。
+        """
+        sv = _rc_stiffness_saved[0]
+        if sv:
+            for j, k in sv.items():
+                m.jnt_stiffness[j] = k
+        _rc_stiffness_saved[0] = None
+        # 次に反射+共通駆動へ戻ったとき disable_limb_tone_spring を確実に
+        #   再度掛け直させるため、組み立て済みのholderも捨てる。捨てないと
+        #   _ensure_reflex_common が古いholderを再利用し、stiffness=0が
+        #   復元されたまま（＝バネが効いた状態で反射+共通駆動が動く）になる。
+        _reflex_common_holder[0] = None
+
+    def _ensure_reflex_common():
+        """必要になった時に作る（もがき運動＋反射+共通駆動を初めて選んだ時、
+        またはグルーピングを変えて無効化された直後）。"""
+        if _ACTUATION_MODE != "muscle":
+            return None
+        if _reflex_common_holder[0] is None:
+            _reflex_common_holder[0] = _build_reflex_common()
+        return _reflex_common_holder[0]
+
+    def _apply_reflex_common_params(holder):
+        """rho/f0/A0/k_s のスライダーの現在値を、既存オブジェクトへその場で
+        書き込む（作り直さない）。グルーピングだけは _rc_invalidate() 経由で
+        作り直す（トポロジーが変わるため属性の書き換えでは対応できない）。
+        """
+        if holder is None:
+            return
+        holder.brain.reflex_common.k_s = float(rc_gain_var.get())
+        _f0, _a0, _rho = float(rc_f0_var.get()), float(rc_a0_var.get()), float(rc_rho_var.get())
+        for _idxs, _group in holder.brain._common_drive_groups.values():
+            _group.rho = _rho
+            for _osc in [_group.common] + list(_group.indep.values()):
+                _osc.f0, _osc.A0 = _f0, _a0
+
     act = [zero.copy()]
 
     # ================= 脳（学習したモデル）2026-07-31 =====================
@@ -1523,8 +1827,37 @@ def main():
             #   実際に環境を組み立てたときの駆動モード（_ACTUATION_MODE、上で
             #   E_ACTUATION から決定済み）をそのまま使う。これで少なくとも
             #   「今の環境」と「今から作る脳の設計」は必ず一致する。
-            taro_spec = {"actuation": _ACTUATION_MODE,
-                         "age_months": _AGE, "model": p}
+            # 【なぜ、2026-08-11】以前は taro_spec をここで空の辞書から個別に
+            #   組み立てていたため、run/config.py の TARO_DEFAULTS へ新しい
+            #   設定キーが追加されるたびに、ここへの転送が個別に漏れていた
+            #   （2026-08-07のtaro.noise、2026-08-11の伸張反射＋揺らぐ振動子の
+            #   共通駆動＝spinal_drive_mode等4キーで再発。仕様
+            #   作業記録（非公開）
+            #   担当B節）。run/main.py の edit分岐が実験ファイルの taro欄を
+            #   丸ごとJSON化して E_TARO_SPEC_JSON に渡すようにしたので、
+            #   まずこれを「土台」として展開する。そのうえで、実際に組み立てた
+            #   環境（_ACTUATION_MODE・_AGE・このモデルのパスp）を使う個別計算を
+            #   従来どおり上から適用する＝個別計算が必ず勝つ（下の
+            #   touch_setting_of・noise/beta/synergy/syn_w の上書きも含め、
+            #   優先順位は変えていない）。
+            #   注意：E_TARO_SPEC_JSON が無い場合（run/main.py を通さず環境変数
+            #   だけで e_viewer.py を直接起動した従来の使い方）は空辞書のままで、
+            #   挙動は変更前と同じになる。
+            taro_spec = {}
+            _spec_json = os.environ.get("E_TARO_SPEC_JSON")
+            if _spec_json:
+                try:
+                    _loaded_spec = json.loads(_spec_json)
+                    if isinstance(_loaded_spec, dict):
+                        taro_spec.update(_loaded_spec)
+                    else:
+                        print(f"注意[脳] E_TARO_SPEC_JSON が辞書ではありません"
+                              f"（{type(_loaded_spec).__name__}）。無視します", flush=True)
+                except (json.JSONDecodeError, TypeError) as _e:      # noqa: BLE001
+                    print(f"注意[脳] E_TARO_SPEC_JSON を読めません: "
+                          f"{type(_e).__name__}: {_e}。無視して続けます", flush=True)
+            taro_spec.update({"actuation": _ACTUATION_MODE,
+                              "age_months": _AGE, "model": p})
             # 【なぜ、2026-08-10・さらに確認】上記だけでは「今の環境と脳の設計」は
             #   一致しても、「このチェックポイント自身が実際にどちらの駆動モードで
             #   学習されたか」までは保証できない。学習側（run/taro_setup.py
@@ -1742,6 +2075,25 @@ def main():
         """
         if new_mode not in NOISE_MODES:
             return
+        # 【やること2・actuation=muscle必須のガードの防御的な第二段】
+        #   ラジオボタン側は既にdisabledにしているが（第一段）、Nキー循環など
+        #   別経路から呼ばれても黙って別モードで動く、を避けるためここでも弾く。
+        #   ここは key_callback スレッドから呼ばれる可能性があるため、msg.config
+        #   のような tkinter API は呼ばず、print だけにする（このファイルの
+        #   既存の方針どおり）。
+        if new_mode == "reflex_common" and _ACTUATION_MODE != "muscle":
+            print(f"注意[脳] 反射+共通駆動は actuation=muscle のときだけ選べます"
+                  f"（今の体={_ACTUATION_MODE}）。切り替えません", flush=True)
+            return
+        # 【なぜ、2026-08-12・監査指摘のバグ修正】反射+共通駆動から離れるとき、
+        #   disable_limb_tone_spring が0にした jnt_stiffness を戻す必要がある。
+        #   この関数は key_callback スレッドから呼ばれる可能性があるため、
+        #   ここでは model 配列（m.jnt_stiffness）を直接書き換えず、旗を立てる
+        #   だけにする（noise_label_dirty と同じ「旗を立ててメインループ側で
+        #   処理する」パターン）。実際の復元は _rc_restore_stiffness() が
+        #   メインループ側で行う。
+        if noise_mode[0] == "reflex_common" and new_mode != "reflex_common":
+            _rc_pending_restore[0] = True
         noise_mode[0] = new_mode
         _apply_noise_mode_all()
         noise_label_dirty[0] = True
@@ -1750,9 +2102,12 @@ def main():
     _noise_ui_hook[0] = _set_noise_mode      # ラジオボタン側の空フックを実体に差し替える
 
     def _cycle_noise_mode():
-        """N キーで white → colored → colored+synergy → white … と循環させる。"""
-        _i = NOISE_MODES.index(noise_mode[0])
-        _set_noise_mode(NOISE_MODES[(_i + 1) % len(NOISE_MODES)])
+        """N キーで white → colored → colored+synergy → (反射+共通駆動) → white
+        … と循環させる。actuation=jointのときは反射+共通駆動を飛ばす。"""
+        _avail = [m for m in NOISE_MODES
+                  if m != "reflex_common" or _ACTUATION_MODE == "muscle"]
+        _i = _avail.index(noise_mode[0]) if noise_mode[0] in _avail else -1
+        _set_noise_mode(_avail[(_i + 1) % len(_avail)])
 
     def _key_cb(keycode):
         # 注意：【2026-08-07】この関数は mujoco.viewer.launch_passive の
@@ -1897,6 +2252,13 @@ def main():
                         hands.release()
                 apply_fence(st_fence.get())
                 reflex.reset()
+                # 【やること・アーキテクチャ6節】反射+共通駆動が既に組み立て済みなら、
+                #   基準長L0をリセット後の姿勢に合わせ直す。呼び直さないと、
+                #   リセット前の姿勢を基準に反射が働き続け、不自然な動きになる。
+                if _reflex_common_holder[0] is not None:
+                    _am_reset = env.unwrapped.actuation_model
+                    _reflex_common_holder[0].brain.set_reflex_common_baseline(
+                        _am_reset.muscle_lengths)
                 t_sim, wall0, tick = 0.0, time.time(), 0
                 toy_base[0] = None
                 head_w.clear(); devs.clear(); seens.clear(); neck_hist.clear()
@@ -1939,6 +2301,33 @@ def main():
                     m.qpos_spring[int(m.jnt_qposadr[j])] = _tgt if _on else 0.0
                     m.dof_damping[int(m.jnt_dofadr[j])] = (float(nk_c.get()) if _on
                                                            else neck_damp0[nm])
+
+            # 反射+共通駆動から離れたときの jnt_stiffness 復元（2026-08-12 新設）。
+            #   _set_noise_mode() が立てた旗をここ（メインループ、物理を進める
+            #   スレッドと同じ）で消費する。key_callback スレッドから直接
+            #   model 配列を書かないための仕組み（上のコメント参照）。
+            if _rc_pending_restore[0]:
+                _rc_restore_stiffness()
+                _rc_pending_restore[0] = False
+
+            # 四肢の筋力スライダー（2026-08-12 新設）。毎tick .get() で読み、
+            #   「基準値×スライダーの現在値」を毎回計算し直して代入する
+            #   （既存の scale_actuator_strength のような累積型は使わない。
+            #   累積すると動かすたびに値が積み上がる。仕様の必須条件）。
+            #   これにより、スライダーを1.0へ戻せば _fmax_base とビット同一に戻る
+            #   （10.0**0.0 == 1.0 は浮動小数で厳密に一致するため）。
+            if _fs_available:
+                _fs_x = _fs_current_x()
+                _fnew = _fmax_base.copy()
+                for _aid in _LIMB_AIDS:
+                    _fnew[_aid] *= _fs_x
+                    _fnew[_aid + _fs_n_act] *= _fs_x
+                am.set_fmax(_fnew)
+                if tick % 15 == 0:
+                    fs_value_label.config(
+                        text=f"倍率 {_fs_x:.2f}x  "
+                             f"実効fmax(四肢の平均) {float(np.mean(_fnew[_LIMB_AIDS])):.3f}"
+                             f"（基準 {float(np.mean(_fmax_base[_LIMB_AIDS])):.3f}）")
 
             # 環境のスイッチ（柵・実験者の手）を実行中でも反映する
             if bool(st_fence.get()) != fence_on[0]:
@@ -2071,6 +2460,30 @@ def main():
                     tag = "B" if brain_which.get() else "A"
                     if brains.get(tag, {}).get("state") is not None:
                         brains[tag]["state"]["obs"] = obs
+                elif st_babble.get() and noise_mode[0] == "reflex_common":
+                    # 【なぜ、2026-08-12】反射+共通駆動は「①〜⑤」の白色/色付き
+                    #   ノイズ経路とは別物（moment_1/moment_2経由で基準長を動かし
+                    #   伸張反射を計算する）。run/trainer.py の
+                    #   reflex_common_active分岐（K tick中は毎tick計算し直す）と
+                    #   同じ考え方で、保持の長さK（bab_k_var）では**間引かない**
+                    #   （trainer.py 195行目「K tick中は毎tick」を踏襲）。
+                    #   「②共収縮の下駄」（bab_cocon_var）はベース値として流用する
+                    #   （仕様のアーキテクチャ節3・新しいスライダーを追加しない）。
+                    _rcobj = _ensure_reflex_common()
+                    if _rcobj is not None:
+                        _apply_reflex_common_params(_rcobj)
+                        _am = env.unwrapped.actuation_model
+                        _r = _rcobj.brain.step_reflex_common(
+                            dt, _am.muscle_lengths, _am.muscle_velocities)
+                        _prev_act = act[0].copy()
+                        act[0] = np.clip(
+                            float(bab_cocon_var.get()) + _r, 0.0, 1.0).astype(np.float32)
+                        babble_da2.append(float(((act[0] - _prev_act) ** 2).mean()))
+                        if len(babble_da2) > 200:
+                            babble_da2.pop(0)
+                        env.step(act[0])
+                    else:
+                        env.step(zero)
                 elif st_babble.get():
                     # 【なぜ、2026-08-11】④保持の長さK・②共収縮の下駄・①ゆらぎの大きさを
                     #   もがき運動パラメータ調整スライダーから毎tick読む（過去に3回
@@ -2338,7 +2751,28 @@ def main():
                     + (f"  B={os.path.basename(brain_b_var.get())}"
                        if brain_b_var.get() else "")
                     + ("\n          注意自発運動と脳が両方ONです。脳が優先されます"
-                       if st_brain.get() and st_babble.get() else "") + "\n"
+                       if st_brain.get() and st_babble.get() else "")
+                    # 【やること・アーキテクチャ4節】反射+共通駆動は自発運動
+                    #   （もがき運動）をONにしたときだけ効く（駆動ループの
+                    #   elif st_babble.get() 分岐の中でしか呼ばれない）。脳が
+                    #   ONの間は無関係なので、選んだのに何も起きない、を
+                    #   黙って通さずここで明示する（既存の「両方ON」警告と
+                    #   同じ流儀）。
+                    + ("\n          注意反射+共通駆動は自発運動（もがき運動）を"
+                       "ONにしたときだけ効きます。脳で動かしている間は無関係です"
+                       if st_brain.get() and noise_mode[0] == "reflex_common" else "")
+                    # 【なぜ、2026-08-12・仕様やること2の注意点】「四肢の筋緊張」
+                    #   チェックボックス（limb_tone_apply/release）と反射+共通駆動
+                    #   （disable_limb_tone_spring）は同じ jnt_stiffness を奪い合う。
+                    #   どちらが勝つかは操作の順序で決まり実装上は未定義（片方だけ
+                    #   無効化する等の作り込みまではせず、ここで食い違いを明示する
+                    #   ことで「表示と実体が食い違ったまま気づかれない」状態だけを
+                    #   避ける、という仕様の最低限を満たす）。
+                    + ("\n          注意四肢の筋緊張と反射+共通駆動が同時にONです。"
+                       "剛性(jnt_stiffness)を両方が奪い合うため、後から操作した方が"
+                       "勝ちます（表示と実体が食い違うおそれ）"
+                       if st_tone_limb.get() and noise_mode[0] == "reflex_common" else "")
+                    + "\n"
                     "\n【今の状態】\n"
                     f"経過 {t_sim:.1f}秒  サッケード {reflex.n_saccades}発\n"
                     f"反応の強さ {reflex.strength:.3f}（閾値 {thr_var.get():.2f}）\n"

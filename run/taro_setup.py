@@ -111,6 +111,19 @@ def _reflex_common_joint_indices(env):
     Returns:
         {"right_arm": [index, ...], "left_arm": [...],
          "right_leg": [...], "left_leg": [...]}
+
+    【2026-08-11・バグ修正】以前はMIMoの**アクチュエータ名**
+    （`u.model.actuator(int(aid)).name`、"shoulder_abduction"のような名前）を
+    `LIMB_TONE_GROUPS`が持つ**関節名**（"shoulder_ad_ab"のような名前）と
+    直接照合していた。MIMoではこの2つが別の名前空間で、一部（肩水平・肘・膝）を
+    除き綴りが一致せず、大半の関節が漏れていた（実装担当仕様
+    作業記録（非公開）担当A節に
+    詳細）。修正：アクチュエータをループしつつ、`am.mimo_actuated_joints`
+    （`MIMo/mimoActuation/muscle.py` 189行、`self.actuators`・`moment_1`・
+    `moment_2`と同じ並び・同じ長さn_actuatorsの「各アクチュエータ番目に対応する
+    関節id」の配列）から関節idを引き、その関節idの**関節名**で照合するように変えた。
+    enumerateする対象・返すindexの意味（moment_1/moment_2配列でのposition）は
+    変えていない。
     """
     from infant_limbs import LIMB_TONE_ALIASES, LIMB_TONE_GROUPS
     u = env.unwrapped
@@ -122,8 +135,9 @@ def _reflex_common_joint_indices(env):
             s.update(LIMB_TONE_GROUPS.get(g, ()))
         base_names[limb] = s
     out = {"right_arm": [], "left_arm": [], "right_leg": [], "left_leg": []}
-    for i, aid in enumerate(am.actuators):
-        nm = (u.model.actuator(int(aid)).name or "").split(":")[-1]
+    joint_ids = am.mimo_actuated_joints   # 長さ n_actuators。moment_1/2と同じ並び
+    for i, jid in enumerate(joint_ids):
+        nm = (u.model.joint(int(jid)).name or "").split(":")[-1]
         for side in ("right_", "left_"):
             if not nm.startswith(side):
                 continue
