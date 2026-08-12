@@ -48,7 +48,9 @@ from proprioceptive_map import build_arm_proprio_map_from_env, _opposite_side  #
 from goal_babbling.reach_goal_head import ReachGoalHead          # noqa: E402
 # 頭へのダブルタッチを報酬に直結する（2026-08-03）。既定（reach_space無効）では
 #   一度も使われない（Taro.__init__ 内で条件付きに構築する。決定1と同じパターン）。
-from double_touch import DoubleTouchDetector                     # noqa: E402
+# 【2026-08-12追記】口元への自己接触報酬。mouth_point_mask は
+#   cfg.mouth_touch_bonus != 0.0 のときだけ呼ばれる（仕様3節）。
+from double_touch import DoubleTouchDetector, mouth_point_mask   # noqa: E402
 
 mse = torch.nn.functional.mse_loss
 
@@ -245,6 +247,57 @@ class _DoubleTouchBonusContributor:
         return 0.0
 
 
+class _MouthTouchBonusContributor:
+    """taro.reward_contributors の1要素（2026-08-12・口元自己接触報酬の実装仕様3節）。
+
+    設計：作業記録（非公開） 5-1節・5-2節（決定日2026-08-12）。
+    「手のひらが口元に触れた瞬間」に報酬を1回だけ与える（立ち上がり検出＝前tickで
+    口元に触れておらず今tickで触れている、という遷移。押し付け続けても加点しない）。
+
+    立ち上がり検出の状態（`_prev_hit`）はこのオブジェクトが持つ。エピソードが
+    リセットされたら、`reset()`（trainer.py の `reset_state()` の汎用ループから
+    呼ばれる）で必ず初期化する必要がある（そうしないと、エピソード境界をまたいで
+    「前回の最後のtick」を引きずり、次のエピソード最初のtickで誤って立ち上がりを
+    見逃す/誤検出する恐れがある）。
+    """
+
+    def __init__(self, double_touch_detector, bonus, mouth_threshold=0.5,
+                 mouth_gain=1.0, toucher_threshold=0.5):
+        # double_touch_detector＝t.double_touch（口元マスクを保持するインスタンス）
+        #   への参照。構築順序上、Taro.__init__ 内で t.double_touch を先に作ってから
+        #   このコンストラクタへ渡す（仕様3節「実装時に確認すること」への回答。
+        #   ctx.taro.double_touch 経由でも到達できるが、コンストラクタで直接参照を
+        #   持たせる方が、この報酬寄与クラスが「何に依存しているか」が読んで分かる）。
+        self._dt = double_touch_detector
+        self.bonus = float(bonus)
+        self.mouth_threshold = float(mouth_threshold)
+        self.mouth_gain = float(mouth_gain)
+        # toucher_threshold＝t.double_touch.threshold（cfg.double_touch_threshold）を
+        #   そのまま使い回す（仕様3節。新しい設定キーを増やさない）。
+        self.toucher_threshold = float(toucher_threshold)
+        self._prev_hit = False
+
+    def reset(self):
+        """エピソード境界で呼ぶ。前回tickの状態を引き継がない。"""
+        self._prev_hit = False
+
+    def compute(self, ctx):
+        ld = getattr(ctx, "last_double_touch", None)
+        last = getattr(ctx, "last", None)
+        if ld is None or last is None:
+            return 0.0
+        toucher_presence = float(ld.get("toucher_presence", 0.0))
+        # touch_flat は ctx.last["obs_out"]["touch"]（trainer.py が
+        #   double_touch.detect() に渡しているのと同じ値）。
+        touch_flat = to_tensor(last["obs_out"]["touch"])
+        mouth_presence = self._dt.mouth_presence(touch_flat, gain=self.mouth_gain)
+        hit_now = (mouth_presence > self.mouth_threshold) and \
+                  (toucher_presence > self.toucher_threshold)
+        rising = hit_now and not self._prev_hit
+        self._prev_hit = hit_now
+        return self.bonus if rising else 0.0
+
+
 class Taro:
     """太郎そのもの。脳・学習器・神経調節・小脳・海馬を持つ。
 
@@ -434,17 +487,46 @@ class Taro:
         #   build_touch_map_from_env を使い、taro自身の target_fusion.touch には
         #   一切依存しない＝touch=false のシーンでも動く。double_touch.py
         #   冒頭docstring(2)参照）。
-        if reach_space or cfg.double_touch_bonus != 0.0:
+        # 【2026-08-12追記：口元への自己接触報酬】構築条件を
+        #   「reach_space（既存）または double_touch_bonus!=0.0（既存）または
+        #   mouth_touch_bonus!=0.0（新規）」のORへ拡張した（仕様3節）。
+        #   既存2条件がFalseかつmouth_touch_bonusも0.0なら、このブロックは
+        #   今まで通り一度も実行されない＝既存実験の挙動は1ビットも変わらない。
+        if reach_space or cfg.double_touch_bonus != 0.0 or cfg.mouth_touch_bonus != 0.0:
             touch_map = build_touch_map_from_env(env)
+            # mouth_touch_bonus!=0.0 のときだけ口元マスクを計算する（仕様3節。
+            #   double_touch_bonus単体の既存挙動を1ビットも変えないため、
+            #   mouth_touch_bonus=0.0（既定）ならこの計算を一切行わない）。
+            mouth_mask = None
+            if cfg.mouth_touch_bonus != 0.0:
+                mouth_mask = mouth_point_mask(
+                    touch_map, env.unwrapped.model, env.unwrapped.touch,
+                    x_frac=cfg.mouth_touch_x_frac, z_frac=cfg.mouth_touch_z_frac)
             self.double_touch = DoubleTouchDetector(
                 touch_map=touch_map, threshold=cfg.double_touch_threshold,
-                touched_names=cfg.double_touch_touched_groups)
+                touched_names=cfg.double_touch_touched_groups,
+                mouth_mask=mouth_mask, mouth_x_frac=cfg.mouth_touch_x_frac,
+                mouth_z_frac=cfg.mouth_touch_z_frac)
             self.reward_contributors.append(
                 _DoubleTouchBonusContributor(cfg.double_touch_bonus))
+            if cfg.mouth_touch_bonus != 0.0:
+                # 既存の努力コスト・CAPS減算の"後"に足される、という既存の順序が
+                #   そのまま適用される（reward_contributorsの同じリストに積むため）。
+                self.reward_contributors.append(
+                    _MouthTouchBonusContributor(
+                        self.double_touch, cfg.mouth_touch_bonus,
+                        mouth_threshold=cfg.mouth_touch_threshold,
+                        toucher_threshold=cfg.double_touch_threshold))
             if verbose:
+                mouth_info = (f" 口元presenceしきい値={cfg.mouth_touch_threshold}"
+                              f" 口元ボーナス={cfg.mouth_touch_bonus}"
+                              f" (x_frac={cfg.mouth_touch_x_frac} z_frac={cfg.mouth_touch_z_frac}"
+                              f" 口元点数={int(mouth_mask.sum())}/{touch_map.n_points})"
+                              if cfg.mouth_touch_bonus != 0.0 else "")
                 print(f"[double_touch] 有効：対象部位={cfg.double_touch_touched_groups}"
                       f" しきい値={cfg.double_touch_threshold} ボーナス={cfg.double_touch_bonus}"
-                      f"（2026-08-05・全身一般化。既定headのみでは既存実験の挙動は不変）",
+                      f"（2026-08-05・全身一般化。既定headのみでは既存実験の挙動は不変）"
+                      f"{mouth_info}",
                       flush=True)
 
     # ------------------------------------------------------------ 読み込み
@@ -524,7 +606,13 @@ class Taro:
         #   ノウハウ2026-08-05項の必須要件）。
         if self.double_touch is not None:
             tm_dt = build_touch_map_from_env(env)
-            self.double_touch.rebuild(tm_dt)
+            # 【2026-08-12追記】model/touch を常に渡す。口元マスクを使っていない
+            #   （mouth_touch_bonus=0.0）場合はDoubleTouchDetector.rebuild内部で
+            #   使われず無害。口元マスクを使っている場合はこれが無いと
+            #   古い点数・古い並びのマスクを参照し続け、例外を出さずに別の点を読む
+            #   （落とし穴チェックリスト項86）。
+            self.double_touch.rebuild(
+                tm_dt, model=env.unwrapped.model, touch=env.unwrapped.touch)
         # 【2026-08-11・新しい駆動モジュール】体を作り直す実験（cfg.grows）では
         #   moment_1/moment_2・関節indexがenvごとに変わりうるため、体が変わるたびに
         #   組み立て直す（_setup_reflex_common のdocstring参照。既定"cpg"では

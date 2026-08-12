@@ -96,10 +96,95 @@ taro_coreへ本能として作り直す（`run/plugins/common/double_touch.py` �
   定義への忠実化にあたるが、対象部位を広げることとは別の軸であり、今回の
   スコープには含めない（`doc/人間模倣からの逸脱リスト.md`⑦・やることリストへ
   申し送り済み）。
+
+【2026-08-12追記：口元への自己接触報酬】
+仕様：作業記録（非公開）
+設計（人間模倣・値そのもの）：作業記録（非公開）5-1節
+
+「口元」は"head"グループの**一部（48点/308点）**であり、既存の
+touch_map（グループ単位）では表現できない。既存の`DoubleTouchDetector`を拡張し、
+口元presenceを扱えるようにする（新しい検出器クラスは作らない、仕様1〜2節）。
+
+  - `mouth_point_mask()`（下記モジュール関数）：頭の触覚308点のうち、頭の
+    ローカル座標で前後方向(x)・上下方向(z)の割合しきい値を満たす点を
+    「口元」として選び、touch_map.n_points 長のbool配列を返す。
+    しきい値は絶対座標でなく割合で持つ（体が成長して頭のサイズが変わっても
+    追従するため）。
+  - `DoubleTouchDetector.__init__`に`mouth_mask=None`（任意引数）を追加。
+    渡さなければ既存の挙動は1ビットも変わらない（口元機能は使われない）。
+  - `mouth_presence()`：口元マスクで選んだ点の力の最大値をtanhで正規化して返す。
+    `gain`は`SomatosensoryCortex.presence_gain`と同じ流儀で固定値1.0
+    （学習しない。一貫性のため）。
+  - `rebuild()`：成長で触覚の点数・並びが変わるたびに、口元マスクも
+    `mouth_point_mask()`で再計算する（`model`・`touch`を新たに渡せるよう拡張）。
+
+[Tier3・工学的判断]口元の切り出しは、人間の唇の感覚受容器の実際の分布を
+再現したものではなく、頭の一部を座標で人為的に区切っただけの近似である。
+`doc/人間模倣からの逸脱リスト.md`に追記済み。
 """
+import numpy as np
 import torch
 
 from somatosensory_cortex import SomatosensoryCortex
+
+
+def mouth_point_mask(touch_map, model, touch, x_frac=0.60, z_frac=0.40,
+                      head_group="head"):
+    """touch_map の "head" グループの点のうち、頭のローカル座標で
+    前後方向(x)が x_min+x_frac*(x_max-x_min) より前、
+    上下方向(z)が z_min+z_frac*(z_max-z_min) より下、
+    の両方を満たす点を「口元」として選び、touch_map.n_points と同じ長さの
+    bool配列（口元ならTrue）を返す。
+
+    しきい値は絶対座標でなく割合で決める（体が成長して頭のサイズが変わっても
+    追従するため。`E/docs/figures/口元領域の候補_2026-08-12.png`、
+    作業記録（非公開） 5-1節）。
+
+    注意：`touch.sensor_positions[head_body_id]` は「頭のローカル座標」
+    （`build_touch_map_from_env`の元になっている`touch.sensor_positions`そのもの、
+    TrimeshTouchではキーがbody_id）。`touch_map.positions` はグループごとに
+    中心を引いて正規化した座標なので、ここでは使わない（絶対的な前後・上下の
+    意味を失っているため）。
+
+    Args:
+        touch_map: `build_touch_map`（または`build_touch_map_from_env`）の戻り値
+        model: mujoco model
+        touch: env.unwrapped.touch（mimoTouch.Touch。生のtouchオブジェクト）
+        x_frac: 前後方向のしきい値の割合（既定0.60）
+        z_frac: 上下方向のしきい値の割合（既定0.40）
+        head_group: 頭のグループ名（既定"head"）
+
+    Returns:
+        numpy.ndarray[bool]  長さ touch_map.n_points
+    """
+    if head_group not in touch_map.group_names:
+        raise AssertionError(
+            f"mouth_point_mask: touch_map に '{head_group}' グループが無い。\n"
+            f"  いまの部位: {touch_map.group_names}")
+    head_bid = int(model.body(head_group).id)
+    sp = np.asarray(touch.sensor_positions[head_bid], dtype=np.float64)
+    x_min, x_max = float(sp[:, 0].min()), float(sp[:, 0].max())
+    z_min, z_max = float(sp[:, 2].min()), float(sp[:, 2].max())
+    local_mouth = (sp[:, 0] > x_min + x_frac * (x_max - x_min)) & \
+                  (sp[:, 2] < z_min + z_frac * (z_max - z_min))
+
+    head_gid = touch_map.group_names.index(head_group)
+    head_idx = np.where(touch_map.part_of_point == head_gid)[0]
+    # 【なぜ、仕様2節】head_idx の各要素は sp（touch.sensor_positions[head_bid]）の
+    #   行と**同じ順序で1対1対応する**（build_touch_mapが各bodyキーの点を
+    #   sorted(meshes)順のまま連結してpart_of_pointを作っているため）。
+    #   対応が崩れていないかを点数の一致で検算してから使う
+    #   （落とし穴チェックリスト項86「エラーが出ずに動いた、を動いたと読まない」）。
+    if head_idx.shape[0] != sp.shape[0]:
+        raise AssertionError(
+            f"mouth_point_mask: head_idx({head_idx.shape[0]}点) と "
+            f"touch.sensor_positions[head]({sp.shape[0]}点) の点数が合わない。\n"
+            "  build_touch_map の並びの前提（bodyごとの点をsorted(meshes)順のまま"
+            "連結）が崩れている可能性がある。")
+
+    mask = np.zeros(touch_map.n_points, dtype=bool)
+    mask[head_idx[local_mouth]] = True
+    return mask
 
 
 class DoubleTouchDetector:
@@ -119,7 +204,9 @@ class DoubleTouchDetector:
     触覚観測を自前で処理する。
     """
 
-    def __init__(self, touch_map, threshold=0.5, touched_names=("head",)):
+    def __init__(self, touch_map, threshold=0.5, touched_names=("head",),
+                 mouth_mask=None, mouth_x_frac=0.60, mouth_z_frac=0.40,
+                 mouth_head_group="head"):
         # しきい値。[Tier3・工学的判断]既存プラグイン(double_touch.py)と同じ値・
         #   同じ考え方（presence = tanh(peak) なので 0.5 は peak≈0.55 に相当する
         #   適当な中間値。文献的な根拠は無い）。
@@ -132,6 +219,18 @@ class DoubleTouchDetector:
         #   依存を断つ。上記docstring(2)参照）。
         self._touch_cortex = SomatosensoryCortex(touch_map, embedding_dim=64)
         self._check_groups()
+        # 【2026-08-12・口元自己接触報酬】mouth_mask=None（既定）のままなら、
+        #   以下の属性は一切参照されない＝既存の呼び出し元（reach_self・
+        #   double_touch_bonus単体）の挙動は1ビットも変わらない。
+        #   mouth_x_frac/mouth_z_frac/mouth_head_groupは値そのものではなく
+        #   「rebuild()で口元マスクを再計算するためのレシピ」として保持する
+        #   （実装担当の判断。仕様3節「実装時に確認すること」）。
+        self._mouth_mask = None
+        if mouth_mask is not None:
+            self._mouth_mask = torch.as_tensor(mouth_mask, dtype=torch.bool)
+        self._mouth_x_frac = float(mouth_x_frac)
+        self._mouth_z_frac = float(mouth_z_frac)
+        self._mouth_head_group = str(mouth_head_group)
 
     def _check_groups(self):
         """touched_names が触覚の地図に存在するかを確認する
@@ -146,15 +245,60 @@ class DoubleTouchDetector:
                 f"DoubleTouchDetector の touched_names に触覚の地図に無い部位がある: "
                 f"{missing}\n  いまの部位: {names}")
 
-    def rebuild(self, touch_map):
+    def rebuild(self, touch_map, model=None, touch=None):
         """体を作り直したときに地図を差し替える（成長対応、2026-08-05追加）。
 
         `taro_setup.py`の`on_body_change`から、既存の`fusion.touch`専用の早期return
         より**前**に呼ばれる必要がある（そうしないと`cfg.touch=False`のシーンでは
         この呼び出しが一度も実行されない。設計1-7節・実装ノウハウ2026-08-05項）。
+
+        【2026-08-12追記】口元マスクを使っている場合（`self._mouth_mask is not None`）、
+        成長で触覚の点数・並びが変わるため`mouth_point_mask()`を再計算する。
+        再計算には`model`・`touch`（生のtouchオブジェクト）が要るので、
+        引数で受け取れるよう拡張した。口元マスクを使っていなければ
+        （既存の呼び出し元）、`model`・`touch`が渡されなくても今まで通り動く
+        （挙動不変）。
         """
         self._touch_cortex.rebuild(touch_map)
         self._check_groups()
+        if self._mouth_mask is not None:
+            if model is None or touch is None:
+                raise AssertionError(
+                    "DoubleTouchDetector.rebuild: 口元マスクを使っているのに"
+                    " model/touch が渡されなかった。\n"
+                    "  成長後も古い口元マスク（古い点数・古い並び）を参照し続けてしまう"
+                    "（落とし穴チェックリスト項86「エラーが出ずに動いた、を動いたと"
+                    "読まない」）。呼び出し元（taro_setup.pyのon_body_change）で"
+                    "model=env.unwrapped.model, touch=env.unwrapped.touch を渡すこと。")
+            new_mask = mouth_point_mask(
+                touch_map, model, touch,
+                x_frac=self._mouth_x_frac, z_frac=self._mouth_z_frac,
+                head_group=self._mouth_head_group)
+            self._mouth_mask = torch.as_tensor(new_mask, dtype=torch.bool)
+
+    def mouth_presence(self, touch_flat, gain=1.0):
+        """口元の presence（0〜1）を返す。仕様3節。
+
+        touch_flat を (n_points,3) に変形 → 各点の力の大きさ(ノルム) →
+        self._mouth_mask で選んだ点の最大値(peak) → tanh(peak*gain)。
+
+        gain は学習しない固定値（既定1.0）。`SomatosensoryCortex.presence_gain`の
+        初期値と同じ流儀（そちらも一度もoptimizerに渡らず永遠に初期値のままである
+        ことがdocstringに明記されているので、口元側も同じ扱いにして一貫性を保つ）。
+
+        口元にセンサ点が1つも無い場合（マスク未設定、mouth_mask=Noneのまま構築した
+        場合）は0.0を返す。
+        """
+        if self._mouth_mask is None:
+            return 0.0
+        with torch.no_grad():
+            f = touch_flat.reshape(-1, 3)
+            mag = torch.linalg.vector_norm(f, dim=-1)
+            mask = self._mouth_mask.to(mag.device)
+            if not bool(mask.any()):
+                return 0.0
+            peak = mag[mask].max()
+            return float(torch.tanh(peak * gain))
 
     def detect(self, touch_flat, toucher_name, touched_names=None):
         """toucher_name: 触れている側の部位名（例 "right_palm"）

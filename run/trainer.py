@@ -211,6 +211,13 @@ class Trainer:
         self.state["obs"], _ = self.env.reset()
         self.state["hidden"] = self.taro.brain.init_motor_hidden()
         self.state["prev_a"] = torch.zeros(self.taro.n_act)
+        # 【2026-08-12追記】立ち上がり検出（前tickの状態）を持つreward_contributor
+        #   （例：_MouthTouchBonusContributor）を、エピソード境界でリセットする。
+        #   hasattr で判定する緩い規約＝reset() を持たない既存の
+        #   _DoubleTouchBonusContributor はスキップされる（既存挙動は不変）。
+        for c in self.taro.reward_contributors:
+            if hasattr(c, "reset"):
+                c.reset()
 
     # -------------------------------------------------- 測定器へ渡す入れ物
     def _build_probe_ctx(self):

@@ -148,6 +148,26 @@ TARO_DEFAULTS = {
                                   "（触覚チャンネルだけの局所学習進度の絶対値に比例）"
                                   "[Tier3・工学的近似。SAGG-RIAC(Baranes & Oudeyer 2013)の"
                                   "興味度の式を借りた。既定0.0＝OFF]", "E_SELFTOUCH_INTEREST"),
+    # ---- 口元への自己接触報酬（2026-08-12）--------------------------------
+    # 仕様：作業記録（非公開）
+    # 設計・値の根拠：作業記録（非公開） 5-1節（決定日2026-08-12）
+    #   「手のひらが口元に触れた瞬間」に報酬を1回だけ与える（立ち上がり検出。
+    #   押し付け続けても加点しない）。口元＝頭の触覚308点のうち、頭のローカル座標で
+    #   前後方向0.60・上下方向0.40の割合しきい値を満たす48点（頭全体の16%）。
+    "mouth_touch_bonus": (0.0, "口元への接触が立ち上がった瞬間に足す報酬"
+                          "（実験ファイルで明示的に+0.2等を指定したときだけ有効。"
+                          "[Tier3・工学的判断。既存のprogress報酬の実測分布"
+                          "（平均+0.031、範囲-0.23〜+0.30）とオーダーを揃えた値。"
+                          "人間の実測に基づく値ではない]）。既定0.0＝OFF", "E_MOUTH_TOUCH_BONUS"),
+    "mouth_touch_threshold": (0.5, "口元presenceのしきい値[Tier3・工学的判断、"
+                              "double_touch_thresholdと同じ値・同じ考え方]",
+                              "E_MOUTH_TOUCH_THRESH"),
+    "mouth_touch_x_frac": (0.60, "頭のローカルx（前後）のうち、これより前を口元とする割合"
+                           "[Tier3・工学的判断。作業記録（非公開）"
+                           "自己接触の報酬設計.md 5-1節、2026-08-12決定]", "E_MOUTH_X_FRAC"),
+    "mouth_touch_z_frac": (0.40, "頭のローカルz（上下）のうち、これより下を口元とする割合"
+                           "[Tier3・工学的判断。作業記録（非公開）"
+                           "自己接触の報酬設計.md 5-1節、2026-08-12決定]", "E_MOUTH_Z_FRAC"),
     # ---- progress報酬のsurpriseボーナス（機構1、2026-08-04）------------------
     # 設計：作業記録（非公開）
     #   （案C・機構1のみ。設計は"novelty"と呼んでいるが、この量は理論分類上
@@ -276,7 +296,9 @@ _FLOATS = {"lr", "effort_cost", "caps", "beta", "syn_w", "coactivation", "lam_v"
            "sensory_delay_ms", "motor_delay_ms", "muscle_tau",
            "double_touch_threshold", "double_touch_bonus", "self_touch_interest_bonus",
            "progress_surprise_bonus", "progress_surprise_decay", "progress_surprise_var_tau",
-           "progress_surprise_threshold"}
+           "progress_surprise_threshold",
+           "mouth_touch_bonus", "mouth_touch_threshold",
+           "mouth_touch_x_frac", "mouth_touch_z_frac"}
 _INTS = {"age_start", "age_ramp", "age_every", "steps", "seed", "K", "checkpoint",
          "n_eval", "goal_traj_len"}
 
@@ -541,6 +563,19 @@ class Config:
             raise ValueError(
                 f"double_touch_touched_groups は空でない文字列のリストである必要がある: "
                 f"{self.double_touch_touched_groups!r}")
+        # 口元への自己接触報酬（2026-08-12）のバリデーション。仕様5節「必要なら追加」。
+        #   範囲外の値を指定すると分かりにくいバグ（空マスク・全点マスク等）になる
+        #   恐れがあるため、型ではなく値の範囲をここで確認する。
+        if not (0.0 <= float(self.mouth_touch_x_frac) <= 1.0):
+            raise ValueError(
+                f"mouth_touch_x_frac={self.mouth_touch_x_frac} は0〜1の範囲外です。")
+        if not (0.0 <= float(self.mouth_touch_z_frac) <= 1.0):
+            raise ValueError(
+                f"mouth_touch_z_frac={self.mouth_touch_z_frac} は0〜1の範囲外です。")
+        if self.mouth_touch_bonus < 0:
+            raise ValueError(
+                f"mouth_touch_bonus={self.mouth_touch_bonus} は負の値です。\n"
+                "  加点専用として設計されています。0以上の値にしてください。")
         if self.K >= 100:
             print(f"[!] K={self.K}（{100/self.K:.0f}Hz）＝人間の最遅神経発火7Hzより遅い。"
                   f"比較・再現目的でなければ K=10 を使うこと", flush=True)
