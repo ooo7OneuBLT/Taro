@@ -79,8 +79,11 @@ TARO_DEFAULTS = {
     "lam_v":         (1.0, "視覚ブロックの重み[Tier3]", "E_LAM_V"),
     # ---- 本能（脳の中の機構）------------------------------------------------
     "lr":            (0.005, "学習率", "E_LR"),
-    # progress＝学習進度（Oudeyer の好奇心）。predict は大行動バイアスの既知欠陥あり
-    "reward":        ("progress", "内発的動機 progress/predict", "E_REWARD"),
+    # progress＝学習進度（Oudeyer の好奇心）。predict は大行動バイアスの既知欠陥あり。
+    # none＝内発的報酬を一切与えない（rew_task=0.0固定）対照条件。口元ボーナス
+    #   （mouth_touch_bonus）等の外発的な項はrew_task確定後に独立して加算されるため、
+    #   noneでも引き続き機能する（2026-08-13、内発的報酬完全OFFの実装）。
+    "reward":        ("progress", "内発的動機 progress/predict/none", "E_REWARD"),
     "ne_relative":   (True, "ノルアドレナリンを相対基準で出す", "E_NE_RELATIVE"),
     "replay":        (True, "睡眠中の経験リプレイ（記憶定着）", "E_REPLAY"),
     # 遠心性コピー＝直前の行動を次tickの入力(prev_a)として渡す仕組み。
@@ -575,9 +578,19 @@ class Config:
                   "2026-07-30 の実測で**有害**（おもちゃへの接触−32%、"
                   "margin +30.7%→+17.2%、persist 1000%）。"
                   "原典と目標空間が違う（原典＝手先位置の低次元）", flush=True)
+        # reward の列挙チェック（2026-08-13追加）。従来はここで綴りミスを
+        #   検知できず、trainer.py側のelse節で黙って predict 扱いになっていた
+        #   （落とし穴チェックリスト項86「黙って壊れる」と同型）。
+        if str(self.reward) not in ("progress", "predict", "none"):
+            raise ValueError(
+                f"reward が不明: {self.reward}（progress / predict / none）")
         if self.reward == "predict":
             print("注意[config] reward=predict は【既知の欠陥】（大行動バイアス＝"
                   "大きく動くほど得なので暴れる。実測でうつ伏せ57.5%・jerk2501）", flush=True)
+        if self.reward == "none":
+            print("注意[config] reward=none：内発的報酬(progress/predict)を一切与えない"
+                  "対照条件。rew_taskは常に0.0（口元ボーナス等の外発的な項は独立に"
+                  "機能する）", flush=True)
         if not self.is_muscle:
             print("注意[config] 関節モード（90関節を独立に駆動）＝逸脱リスト 逸脱5 の逸脱を"
                   "選んでいます。人間の新生児は拮抗筋を同時に力ませる[Tier1]", flush=True)

@@ -784,9 +784,17 @@ class Trainer:
             pe = t.block_pe(pred, nlp)
             progress = t.lp.update(pe.item())
             pe_fast, pe_slow = t.lp.pe_fast, t.lp.pe_slow
-            # 内発的動機。progress＝学習進度（誤差が減っていれば正）
-            rew_task = (progress if cfg.reward == "progress"
-                        else t.brain.sensorimotor_reward(pe.item()))
+            # 内発的動機。progress＝学習進度（誤差が減っていれば正）。
+            #   none＝内発的報酬を一切与えない対照条件（2026-08-13、内発的報酬完全OFFの
+            #   実装）。rew_task=0.0固定。progress自体（上のt.lp.update呼び出し）は
+            #   cfg.rewardの値に関わらず毎tick計算し続ける（ctx.last_rewardのログに
+            #   progress/pe_fast/pe_slowを出すため。仕様「やること」節の判断根拠）。
+            if cfg.reward == "progress":
+                rew_task = progress
+            elif cfg.reward == "none":
+                rew_task = 0.0
+            else:
+                rew_task = t.brain.sensorimotor_reward(pe.item())
             rew = rew_task
             if cfg.effort_cost:
                 # 【taro-C5】努力コスト：活性化²の筋力重み付き平均を報酬から引く

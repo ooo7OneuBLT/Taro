@@ -131,8 +131,19 @@ class CollapsibleSection(QtWidgets.QWidget):
         outer.setSpacing(0)
 
         self.toggle_btn = QtWidgets.QPushButton()
+        # 【なぜ、2026-08-13】以前はここに固定の青系背景色（#dde3ee）を
+        # 直書きしていたが、e_viewer_qt_theme.py がQSSの丸ごと上書きを
+        # やめてQPalette中心へ切り替えたことで、この固定色だけが周囲の
+        # ネイティブWindows11風の見た目から浮いて見えるようになった
+        # （作業記録：作業記録（非公開）
+        # 2026-08-13_ViewerをWindows11風に本気で作り込む.md）。
+        # 枠線・背景を消して「太字の見出し文字」だけにすることで、
+        # 周囲のQGroupBox・QLabelと同じ地の色（QPaletteのWindow色）に
+        # 自然に馴染ませる。
+        self.toggle_btn.setFlat(True)
         self.toggle_btn.setStyleSheet(
-            "text-align: left; background: #dde3ee; font-weight: bold;")
+            "QPushButton { text-align: left; font-weight: bold; "
+            "border: none; background: transparent; padding: 4px 2px; }")
         self.toggle_btn.clicked.connect(self._on_toggle)
         outer.addWidget(self.toggle_btn)
 

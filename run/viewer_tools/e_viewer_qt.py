@@ -644,9 +644,9 @@ def main():
         from e_viewer_qt_theme import apply_theme
         apply_theme(app)
     except Exception as e:
-        # 【なぜ、仕様2-4節】もう1人の実装担当が並行編集しているファイル。
-        #   まだ存在しない／読み込みに失敗しても、テーマ無しで起動を続ける
-        #   （テーマはあくまで見た目の装飾で、機能には影響しないため）。
+        # 【なぜ】テーマ適用（QPalette＋最小限QSS）に失敗しても、
+        #   テーマ無しで起動を続ける（テーマはあくまで見た目の装飾で、
+        #   機能には影響しないため）。
         print(f"[theme] 注意テーマの適用に失敗しました（続行します）: {e}", flush=True)
 
     win = MainWindow(scene_names, scene["name"], joints)
@@ -863,6 +863,19 @@ def main():
     restart = [True]
     win.restart_btn.clicked.connect(lambda: restart.__setitem__(0, True))
     win.show()
+
+    # 【なぜ、2026-08-13】Mica（半透明の背景）を試す。仕様3節・4節。
+    #   pywinstylesが入っていない環境・Windows以外でも例外を投げず、
+    #   単に適用されないだけで起動を継続する（try_apply_mica内部でtry/except
+    #   済み。ここでは戻り値をログに出すだけ）。win.show()の**あとに**
+    #   呼ぶ必要がある（winId()がOS側のウィンドウハンドルを持つのは表示後）。
+    try:
+        from e_viewer_qt_theme import try_apply_mica
+        if try_apply_mica(win):
+            print("[theme] Micaを適用しました（実機での見え方は環境依存）", flush=True)
+    except Exception as e:
+        print(f"[theme] 注意Mica適用の呼び出し自体に失敗しました（続行します）: {e}",
+              flush=True)
 
     with mujoco.viewer.launch_passive(m, d) as viewer:
         t_sim, wall0, tick = 0.0, time.time(), 0
