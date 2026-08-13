@@ -30,7 +30,7 @@
     E_TOY_MODE    hold（親が持つ・既定）／tether（吊る）／free（落ちる）
     E_TOY_DELAY   おもちゃが登場するまでの秒数（既定 1.0）
 """
-import os, sys, json, time, warnings
+import os, sys, json, time, types, warnings
 warnings.filterwarnings("ignore")
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.abspath(os.path.join(_HERE, os.pardir, os.pardir))
@@ -308,6 +308,73 @@ def main():
     dt = float(m.opt.timestep) * int(u.frame_skip)
     n_act = env.action_space.shape[0]
     zero = np.zeros(n_act, dtype=np.float32)
+
+    # ---- 触覚順応・口元報酬の監視用インスタンス（2026-08-13 新設）------------
+    #
+    # 【なぜここで作るか】e_viewer.py の駆動ループ（もがき運動／反射+共通駆動／脳）は
+    #   いずれも run/trainer.py（報酬計算・reward_contributorsの呼び出し元）を
+    #   経由しない（grep確認済み：reward_contributors・compute(ctx)・rew_totalの
+    #   参照は0件）。つまり cfg.mouth_touch_bonus / cfg.touch_adaptation を
+    #   Config経由でTaro構築時に渡しても、今のViewerでは一切表示できない
+    #   （Taroのreward_contributorsは一度も呼ばれないため）。
+    #   そこで「反射+共通駆動」区画がTaroを経由せずTaroBrainWithMotorを直接
+    #   組み立てているのと同じ考え方で、Taro/脳の読み込みとは独立に、監視専用の
+    #   インスタンスをここで一度だけ構築する（仕様
+    #   作業記録（非公開）
+    #   スライダー追加.md 2-2節）。用途は「報酬・順応がちゃんと発生しているかの
+    #   確認」であり、行動そのものはこれで変わらない。
+    #
+    # 【触覚センサが無い/構築に失敗するケース】_fs_available（四肢の筋力スライダー）
+    #   と同じパターンでtry/exceptし、失敗時はスライダーの代わりに「利用できません」
+    #   の注意ラベルを出す（黙って無視しない）。成長は無いのでrebuild不要。
+    from somatosensory_cortex import build_touch_map_from_env
+    from double_touch import DoubleTouchDetector, mouth_point_mask
+    from touch_adaptation import TouchAdaptation
+    from run.taro_setup import _MouthTouchBonusContributor, to_tensor
+    from run.config import TARO_DEFAULTS
+
+    _ta_touch_map = None
+    _ta_mouth_mask = None       # numpy bool配列（ラベル表示の計算に使う）
+    _ta_dt_detector = None
+    _ta_mouth_contributor = None
+    _ta_touch_adapt = None
+    _ta_toucher_name = f"{TARO_DEFAULTS['reach_arm_side'][0]}_palm"
+    _ta_available = True
+    _ta_error = ""
+    _ta_last = {}                # 直近tickの測定値（ラベル更新はtick%5==0で読む）
+    mouth_bonus_count = [0]      # 「最初からやり直す」で0に戻す
+    mouth_bonus_last_t = [-1.0]
+    try:
+        _ta_touch_map = build_touch_map_from_env(env)
+        _ta_mouth_mask = mouth_point_mask(
+            _ta_touch_map, m, u.touch,
+            x_frac=TARO_DEFAULTS["mouth_touch_x_frac"][0],
+            z_frac=TARO_DEFAULTS["mouth_touch_z_frac"][0])
+        _ta_dt_detector = DoubleTouchDetector(
+            _ta_touch_map, threshold=TARO_DEFAULTS["double_touch_threshold"][0],
+            touched_names=TARO_DEFAULTS["double_touch_touched_groups"][0],
+            mouth_mask=_ta_mouth_mask,
+            mouth_x_frac=TARO_DEFAULTS["mouth_touch_x_frac"][0],
+            mouth_z_frac=TARO_DEFAULTS["mouth_touch_z_frac"][0])
+        _ta_mouth_contributor = _MouthTouchBonusContributor(
+            _ta_dt_detector, bonus=float(TARO_DEFAULTS["mouth_touch_bonus"][0]),
+            mouth_threshold=TARO_DEFAULTS["mouth_touch_threshold"][0],
+            toucher_threshold=TARO_DEFAULTS["double_touch_threshold"][0])
+        _ta_touch_adapt = TouchAdaptation(
+            _ta_touch_map.n_points, dt=dt,
+            fa_enabled=TARO_DEFAULTS["touch_adapt_fa"][0],
+            sa_enabled=TARO_DEFAULTS["touch_adapt_sa"][0],
+            include_cortical=TARO_DEFAULTS["touch_adapt_include_cortical"][0],
+            tau_peripheral_s=TARO_DEFAULTS["touch_adapt_tau_peripheral_s"][0],
+            tau_cortical_s=TARO_DEFAULTS["touch_adapt_tau_cortical_s"][0],
+            sa_floor=TARO_DEFAULTS["touch_adapt_sa_floor"][0],
+            tau_recover_s=TARO_DEFAULTS["touch_adapt_tau_recover_s"][0],
+            fa_gain=TARO_DEFAULTS["touch_adapt_fa_gain"][0])
+    except Exception as _ta_e:
+        _ta_available = False
+        _ta_error = str(_ta_e)
+        print(f"[touch_adapt/mouth] 注意監視用インスタンスの構築に失敗: {_ta_error}",
+              flush=True)
 
     # ---- 四肢の筋力スライダー（2026-08-12 新設）------------------------------
     #
@@ -1115,6 +1182,103 @@ def main():
     head_label = tk.Label(sec_mes.body, text="", font=("Consolas", 9),
                           justify="left", fg="#a30")
     head_label.pack(anchor="w", padx=14)
+
+    # ---- 区画4b：口元の報酬（2026-08-13 新設）------------------------------
+    #
+    # 【なぜ既定で畳むか】常用する機能ではない（既定OFF・文献根拠の弱い数値を
+    #   含む調整用の区画）。fmaxスライダーの区画（2026-08-12）と同じ扱い。
+    sec_mouth = Section(colR, "口元の報酬", False)
+    if not _ta_available:
+        tk.Label(sec_mouth.body, fg="#a33", font=("", 8), justify="left",
+                 text=f"注意監視用インスタンスの構築に失敗したため使えません\n{_ta_error}"
+                 ).pack(anchor="w", padx=14, pady=(0, 4))
+    mouth_bonus_var = tk.DoubleVar(value=float(TARO_DEFAULTS["mouth_touch_bonus"][0]))
+    if _ta_available:
+        slider(sec_mouth.body, "口元ボーナス", mouth_bonus_var, 0.0, 1.0, 0.01,
+               note="口元presence立ち上がり検出で1回だけ加点。既定0.0=OFF。\n"
+                    "[Tier3・工学的判断。progress報酬の実測分布(平均+0.031)と"
+                    "オーダーを揃えた値]\n"
+                    "注意：このViewerは報酬を学習に使わないため、動きは変わりません。"
+                    "下の表示で『報酬が発生しているか』だけを確認できます")
+
+        def _mouth_reset_default():
+            mouth_bonus_var.set(float(TARO_DEFAULTS["mouth_touch_bonus"][0]))
+            msg.config(text="口元ボーナスを既定値(0.0)に戻しました", fg="#0a7")
+
+        tk.Button(sec_mouth.body, text="既定値に戻す(0.0)", command=_mouth_reset_default,
+                  width=20).pack(anchor="w", padx=14, pady=(2, 6))
+    mouth_label = tk.Label(sec_mouth.body, text="", font=("Consolas", 9), justify="left")
+    mouth_label.pack(anchor="w", padx=14)
+
+    # ---- 区画4c：触覚の順応（2026-08-13 新設）------------------------------
+    sec_ta = Section(colR, "触覚の順応", False)
+    if not _ta_available:
+        tk.Label(sec_ta.body, fg="#a33", font=("", 8), justify="left",
+                 text=f"注意監視用インスタンスの構築に失敗したため使えません\n{_ta_error}"
+                 ).pack(anchor="w", padx=14, pady=(0, 4))
+    ta_master_var = tk.BooleanVar(value=bool(TARO_DEFAULTS["touch_adaptation"][0]))
+    ta_fa_var = tk.BooleanVar(value=bool(TARO_DEFAULTS["touch_adapt_fa"][0]))
+    ta_sa_var = tk.BooleanVar(value=bool(TARO_DEFAULTS["touch_adapt_sa"][0]))
+    ta_cortical_var = tk.BooleanVar(
+        value=bool(TARO_DEFAULTS["touch_adapt_include_cortical"][0]))
+    ta_sa_floor_var = tk.DoubleVar(value=float(TARO_DEFAULTS["touch_adapt_sa_floor"][0]))
+    ta_tau_recover_var = tk.DoubleVar(
+        value=float(TARO_DEFAULTS["touch_adapt_tau_recover_s"][0]))
+    ta_fa_gain_var = tk.DoubleVar(value=float(TARO_DEFAULTS["touch_adapt_fa_gain"][0]))
+    ta_tau_peripheral_var = tk.DoubleVar(
+        value=float(TARO_DEFAULTS["touch_adapt_tau_peripheral_s"][0]))
+    ta_tau_cortical_var = tk.DoubleVar(
+        value=float(TARO_DEFAULTS["touch_adapt_tau_cortical_s"][0]))
+
+    if _ta_available:
+        tk.Checkbutton(sec_ta.body, text="触覚の順応（マスター）",
+                       variable=ta_master_var).pack(anchor="w", padx=14)
+        tk.Checkbutton(sec_ta.body, text="速順応（既定ON）",
+                       variable=ta_fa_var).pack(anchor="w", padx=14)
+        tk.Checkbutton(sec_ta.body, text="遅順応（既定ON）",
+                       variable=ta_sa_var).pack(anchor="w", padx=14)
+        tk.Checkbutton(sec_ta.body, text="脳側レイヤーを含める（既定OFF）",
+                       variable=ta_cortical_var).pack(anchor="w", padx=14)
+        slider(sec_ta.body, "遅順応の残存率", ta_sa_floor_var, 0.0, 1.0, 0.01,
+               note="[Tier3・マウスのひげ受容器由来、種も部位も違う]")
+        slider(sec_ta.body, "回復の時定数[秒]", ta_tau_recover_var, 0.1, 30.0, 0.1,
+               note="順応から回復する時定数[秒] [Tier3・文献が存在せず暫定]")
+        slider(sec_ta.body, "速順応の倍率", ta_fa_gain_var, 0.0, 5.0, 0.01,
+               note="[Tier3・工学的な仮置き]")
+        slider(sec_ta.body, "遅順応・末梢の時定数[秒]", ta_tau_peripheral_var, 0.1, 30.0, 0.1,
+               note="[Tier2・孫引き、原文未確認]")
+        slider(sec_ta.body, "遅順応・脳側の時定数[秒]", ta_tau_cortical_var, 0.1, 30.0, 0.1,
+               note="脳側レイヤー（上のチェック）がOFFのときは効きません")
+
+        def _ta_reset_default():
+            # 【なぜ状態もクリアするか、仕様4節】このボタンは「一度もスライダーを
+            #   触っていない、まっさらな新しいインスタンス」と同じ状態に戻すことを
+            #   期待される（検証7節の必須要件そのもの）。順応の蓄積状態
+            #   （g_peripheral・g_cortical・prev_m）を残したままだと、係数だけ
+            #   既定値へ戻しても出力は新品インスタンスと一致しない。
+            #   一方スライダー1本だけを動かした場合（このボタンを押さない場合）は
+            #   下のコメント（_ta_touch_adapt の毎tick同期処理）の通り状態を
+            #   持ち越す。「明示的に既定へ戻す操作」と「値を微調整する操作」を
+            #   区別して扱う。
+            ta_master_var.set(bool(TARO_DEFAULTS["touch_adaptation"][0]))
+            ta_fa_var.set(bool(TARO_DEFAULTS["touch_adapt_fa"][0]))
+            ta_sa_var.set(bool(TARO_DEFAULTS["touch_adapt_sa"][0]))
+            ta_cortical_var.set(bool(TARO_DEFAULTS["touch_adapt_include_cortical"][0]))
+            ta_sa_floor_var.set(float(TARO_DEFAULTS["touch_adapt_sa_floor"][0]))
+            ta_tau_recover_var.set(float(TARO_DEFAULTS["touch_adapt_tau_recover_s"][0]))
+            ta_fa_gain_var.set(float(TARO_DEFAULTS["touch_adapt_fa_gain"][0]))
+            ta_tau_peripheral_var.set(
+                float(TARO_DEFAULTS["touch_adapt_tau_peripheral_s"][0]))
+            ta_tau_cortical_var.set(float(TARO_DEFAULTS["touch_adapt_tau_cortical_s"][0]))
+            if _ta_touch_adapt is not None:
+                _ta_touch_adapt.rebuild(_ta_touch_map.n_points)
+            msg.config(text="触覚の順応を既定値に戻しました"
+                            "（順応の蓄積状態もリセットしました）", fg="#0a7")
+
+        tk.Button(sec_ta.body, text="既定値に戻す", command=_ta_reset_default,
+                  width=20).pack(anchor="w", padx=14, pady=(2, 6))
+    ta_label = tk.Label(sec_ta.body, text="", font=("Consolas", 9), justify="left")
+    ta_label.pack(anchor="w", padx=14)
 
     # ---- 区画5：再生 ----------------------------------------------------
     sec_run = Section(colR, "再生", op.get("run", True))
@@ -2263,6 +2427,23 @@ def main():
                 toy_base[0] = None
                 head_w.clear(); devs.clear(); seens.clear(); neck_hist.clear()
                 parent_log.clear(); _parent[0] = None
+                # 【なぜ、仕様5節】口元ボーナスの立ち上がり検出は
+                #   _MouthTouchBonusContributor._prev_hit にエピソードをまたいで
+                #   引き継がれる状態を持つ。エピソードの区切り（「最初からやり直す」）と
+                #   連動させてここでリセットする。触覚の順応そのものの状態
+                #   （g_peripheral等）は意図的にリセットしない＝設計上「エピソード
+                #   境界でリセットしない」という本番の方針（touch_adapt_reset_on_episode
+                #   既定False）と、この点だけは非対称になる。理由：口元ボーナスの
+                #   立ち上がり検出は「1回だけ加点する」という報酬機構の一部で、
+                #   エピソードという単位に紐づく設計（run/trainer.pyのTrainer.
+                #   reset_state()が同じreset()呼び出しを行う）だが、順応は
+                #   「触覚の感じ方そのもの」であり、人間の乳児にエピソードという
+                #   区切りが無いのと同様、Viewerでも持続させるのが一貫している
+                #   （作業記録（非公開） 2-7節と同じ判断）。
+                if _ta_mouth_contributor is not None:
+                    mouth_bonus_count[0] = 0
+                    mouth_bonus_last_t[0] = -1.0
+                    _ta_mouth_contributor._prev_hit = False
                 # おもちゃも初期状態に戻す。戻さないと「顔の前へ持っていく」で
                 #   記録された位置（首が横を向いていれば体の横＝柵の外）が残り、
                 #   やり直しても変な所にあるままになる（ユーザーの報告 2026-07-27）。
@@ -2508,6 +2689,67 @@ def main():
                     env.step(act[0])
                 else:
                     env.step(zero)
+
+                # ---- 触覚順応・口元報酬の監視（2026-08-13 新設）---------------
+                #
+                # 【なぜここか、仕様2-3節】物理が実際に1tick進んだ直後
+                #   （このif/elifブロックを通った直後、t_sim += dt の手前）に
+                #   だけ1回呼ぶ。freeze中（このelseブロック自体に入らない）は
+                #   呼ばない・advance()もしない＝「新しい物理観測が生まれた瞬間に
+                #   だけ呼ぶこと」というtouch_adaptation.pyのdocstringの前提を守る。
+                # env.step()の戻り値ではなく u.get_touch_obs() を使う（いつでも
+                #   今の物理状態から取り直せる。既存の駆動モード分岐・env.step()
+                #   呼び出し自体は一切変更していない）。
+                if _ta_available:
+                    # 毎tick .get() で読み、GUIの現在値をそのままインスタンスへ
+                    #   代入する（fmaxスライダーと同じ配線パターン。累積させない）。
+                    # マスターOFFのときは個別チェックボックスとのANDを取る
+                    #   （仕様3-2節。本番のtouch_adaptation=False時の見え方＝
+                    #   touch_percept無し＝生のtouchと同じ、と等価にするため）。
+                    _ta_touch_adapt.fa_enabled = (bool(ta_fa_var.get())
+                                                  and bool(ta_master_var.get()))
+                    _ta_touch_adapt.sa_enabled = (bool(ta_sa_var.get())
+                                                  and bool(ta_master_var.get()))
+                    _ta_touch_adapt.include_cortical = bool(ta_cortical_var.get())
+                    _ta_touch_adapt.tau_peripheral_s = float(ta_tau_peripheral_var.get())
+                    _ta_touch_adapt.tau_cortical_s = float(ta_tau_cortical_var.get())
+                    _ta_touch_adapt.sa_floor = float(ta_sa_floor_var.get())
+                    _ta_touch_adapt.tau_recover_s = float(ta_tau_recover_var.get())
+                    _ta_touch_adapt.fa_gain = float(ta_fa_gain_var.get())
+                    _ta_mouth_contributor.bonus = float(mouth_bonus_var.get())
+
+                    _ta_touch_flat = u.get_touch_obs().ravel()
+                    _ta_touch_adapt.advance(_ta_touch_flat)
+                    _ta_touch_tensor = to_tensor(_ta_touch_flat)
+                    _ta_hit, _ta_toucher_pres, _ta_touched_pres, _ta_hit_names = \
+                        _ta_dt_detector.detect(_ta_touch_tensor, _ta_toucher_name)
+                    _ta_mouth_pres = _ta_dt_detector.mouth_presence(_ta_touch_tensor)
+                    # 【なぜSimpleNamespaceで十分か、仕様5節】
+                    #   _MouthTouchBonusContributor.compute(ctx) が読むのは
+                    #   ctx.last_double_touch（dict）と ctx.last["obs_out"]["touch"]
+                    #   の2つだけ。フルの run/context.py の Ctx を作る必要はない。
+                    _ta_ctx_stub = types.SimpleNamespace(
+                        last_double_touch={"toucher_presence": _ta_toucher_pres},
+                        last={"obs_out": {"touch": _ta_touch_flat}})
+                    _ta_bonus = _ta_mouth_contributor.compute(_ta_ctx_stub)
+                    if _ta_bonus > 0:
+                        mouth_bonus_count[0] += 1
+                        mouth_bonus_last_t[0] = t_sim
+
+                    _ta_raw_f = _ta_touch_flat.reshape(-1, 3)
+                    _ta_adapted_f = np.asarray(_ta_touch_adapt.adapted()).reshape(-1, 3)
+                    if _ta_mouth_mask.any():
+                        _ta_raw_mouth = float(
+                            np.max(np.linalg.norm(_ta_raw_f[_ta_mouth_mask], axis=-1)))
+                        _ta_adapted_mouth = float(
+                            np.max(np.linalg.norm(_ta_adapted_f[_ta_mouth_mask], axis=-1)))
+                    else:
+                        _ta_raw_mouth = _ta_adapted_mouth = 0.0
+                    _ta_last.update(
+                        raw_mouth=_ta_raw_mouth, adapted_mouth=_ta_adapted_mouth,
+                        toucher_presence=_ta_toucher_pres, mouth_presence=_ta_mouth_pres,
+                        g_peripheral_mean=float(np.mean(_ta_touch_adapt.g_peripheral)),
+                        g_cortical_mean=float(np.mean(_ta_touch_adapt.g_cortical)))
             t_sim += dt
             tick += 1
             head_w.append(float(np.linalg.norm(d.cvel[head_bid][:3])))
@@ -2643,6 +2885,29 @@ def main():
                          f"見えていた割合 {seen_pct:5.1f}%  "
                          f"ずれ平均 {np.mean(devs) if devs else float('nan'):5.2f}"
                          f"（反射OFFで0.48）")
+
+                # --- 触覚順応・口元報酬の表示（2026-08-13 新設、仕様5節）------
+                #   測定器区画の既存ラベルと同じ頻度（tick%5==0）で更新する。
+                if _ta_available:
+                    _ta_mth = float(_ta_dt_detector.threshold)
+                    _ta_mmt = float(_ta_mouth_contributor.mouth_threshold)
+                    mouth_label.config(
+                        text=f"口元の接触の強さ：生 {_ta_last.get('raw_mouth', 0.0):.3f}"
+                             f" / 順応後 {_ta_last.get('adapted_mouth', 0.0):.3f}\n"
+                             f"手のひらpresence: {_ta_last.get('toucher_presence', 0.0):.2f}"
+                             f"（しきい値{_ta_mth:.2f}）　"
+                             f"口元presence: {_ta_last.get('mouth_presence', 0.0):.2f}"
+                             f"（しきい値{_ta_mmt:.2f}）\n"
+                             f"口元ボーナス発生回数：{mouth_bonus_count[0]}回"
+                             + (f"（直近 t={mouth_bonus_last_t[0]:.1f}秒）"
+                                if mouth_bonus_last_t[0] >= 0 else "（まだ発生していません）"))
+                    _ta_txt = (f"順応の状態：末梢g平均 "
+                              f"{_ta_last.get('g_peripheral_mean', 1.0):.3f}"
+                              f"（1.0=順応なし、floor={ta_sa_floor_var.get():.2f}=完全順応）")
+                    if ta_cortical_var.get():
+                        _ta_txt += (f"\n脳g平均 "
+                                    f"{_ta_last.get('g_cortical_mean', 1.0):.3f}")
+                    ta_label.config(text=_ta_txt)
 
                 # 距離と輻輳（寄り目）の必要角を出す（2026-07-28）。
                 #   実際の目からおもちゃまでの距離も測って、設定値と比べられるようにする。
