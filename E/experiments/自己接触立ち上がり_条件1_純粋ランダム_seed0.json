@@ -1,0 +1,37 @@
+{
+  "name": "自己接触立ち上がり_条件1_純粋ランダム_seed0",
+  "note": "2026-08-13 測定。「口元への報酬で2回目以降の自己接触が増えるか」の本実験（4条件×2シード、事前パイロット済み・E/experiments/自己接触立ち上がり_条件4_進度あり_口元ON_pilot_seed0.jsonでtick数を10000に決定）。条件: 条件1 / 純粋ランダム。reward=noneのときcerebellum=falseを併せて指定し、小脳の模倣学習(imitation_loss)による行動の変化も止めた純粋な無学習条件にしている（2026-08-13の実装で、reward=noneだけでは小脳が報酬と無関係に行動を模倣し続けると判明したため）。vision=falseは2026-08-13に配線されたstrip_textures経路を使う（1プロセスのメモリを大きく削減）。測定はscratchpadのselftouch_paceプラグイン（実行時登録、taro_core/runは無改変）で口元・頭への接触の立ち上がりエッジをtick単位で記録する。依頼：ユーザー（ユーザーの指示、重要度：高）。",
+  "scene": "新生児_仰向け_柵なし",
+  "taro": {
+    "spinal_drive_mode": "reflex_common",
+    "common_drive_rho": 0.3,
+    "common_drive_grouping": "per_limb",
+    "touch": true,
+    "somatosensory": true,
+    "vision": false,
+    "touch_adaptation": true,
+    "reward": "none",
+    "cerebellum": false,
+    "mouth_touch_bonus": 0.0
+  },
+  "run": {
+    "type": "train",
+    "steps": 10000,
+    "checkpoint": 200,
+    "seed": 0,
+    "csv": "E/logs/自己接触立ち上がり_2026-08-13/条件1_純粋ランダム_seed0/run.csv"
+  },
+  "plugins": {
+    "contact_reward": {
+      "toucher": "right_palm",
+      "touched_groups": [
+        "head"
+      ],
+      "self_trace_out": "E/logs/自己接触立ち上がり_2026-08-13/条件1_純粋ランダム_seed0/self_trace.csv"
+    },
+    "selftouch_pace": {
+      "trace_out": "E/logs/自己接触立ち上がり_2026-08-13/条件1_純粋ランダム_seed0/selftouch_pace_trace.csv"
+    },
+    "dashboard": true
+  }
+}

@@ -78,6 +78,10 @@ from run.config import TARO_DEFAULTS
 
 from e_viewer_qt_widgets import FloatSlider, CollapsibleSection
 from e_viewer_qt_status import compute_status, format_status_text
+from e_viewer_qt_touch import (build_touch_monitor, advance_touch_monitor,
+                                format_touch_status)
+from e_viewer_qt_drive import build_drive_tab, drive_tick_action
+from e_viewer_qt_measure import build_measure_tab, update_measure_tab
 
 # 【2026-08-13】シーンが全部を決めるので、体を作り直すときは古い個別指定を
 #   消しておく。run/viewer_tools/e_viewer.py 2348〜2352行目と同じ一覧
@@ -207,11 +211,24 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.tab_body_env = QtWidgets.QWidget()
         tabs.addTab(self.tab_body_env, "体・環境")
-        for title in ("駆動", "感覚と報酬", "実行", "測定器"):
+
+        self.tab_sense = QtWidgets.QWidget()
+        tabs.addTab(self.tab_sense, "感覚と報酬")
+        self._build_sense_tab()
+
+        self.tab_drive = QtWidgets.QWidget()
+        tabs.addTab(self.tab_drive, "駆動")
+        build_drive_tab(self, self.tab_drive)
+
+        self.tab_measure = QtWidgets.QWidget()
+        tabs.addTab(self.tab_measure, "測定器")
+        build_measure_tab(self, self.tab_measure)
+
+        for title in ("実行",):
             placeholder = QtWidgets.QWidget()
             lay = QtWidgets.QVBoxLayout(placeholder)
             lay.addWidget(QtWidgets.QLabel(
-                f"「{title}」タブは第2段階では未実装です（次段階以降で移植予定）"))
+                f"「{title}」タブは第4段階では未実装です（次段階以降で移植予定）"))
             lay.addStretch(1)
             tabs.addTab(placeholder, title)
 
@@ -455,6 +472,109 @@ class MainWindow(QtWidgets.QMainWindow):
 
         form_outer.addStretch(1)
 
+    def _build_sense_tab(self):
+        """「感覚と報酬」タブ（第3段階・仕様2節）。
+
+        移植元：run/viewer_tools/e_viewer.py 1186〜1282行目
+        （区画4b「口元の報酬」・区画4c「触覚の順応」）。
+        値の初期化・毎tickの配線は main() 側（run/viewer_tools/e_viewer_qt_touch.py
+        経由）で行う。ここでは骨組み（ウィジェット）だけを作る。
+        """
+        scroll = QtWidgets.QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll_body = QtWidgets.QWidget()
+        scroll.setWidget(scroll_body)
+        outer = QtWidgets.QVBoxLayout(self.tab_sense)
+        outer.addWidget(scroll)
+        form_outer = QtWidgets.QVBoxLayout(scroll_body)
+
+        # ---- 口元の報酬（移植元：e_viewer.py 1186〜1211行目）--------------------
+        box_mouth = QtWidgets.QGroupBox("口元の報酬")
+        form_outer.addWidget(box_mouth)
+        mouth_form = QtWidgets.QVBoxLayout(box_mouth)
+
+        self.mouth_unavailable_label = QtWidgets.QLabel("")
+        self.mouth_unavailable_label.setStyleSheet("color: #a33;")
+        self.mouth_unavailable_label.setWordWrap(True)
+        self.mouth_unavailable_label.setVisible(False)
+        mouth_form.addWidget(self.mouth_unavailable_label)
+
+        self.mouth_bonus_slider = FloatSlider(
+            "口元ボーナス", 0.0, 1.0, 0.01, init=0.0, decimals=2,
+            note="口元presence立ち上がり検出で1回だけ加点。既定0.0=OFF。\n"
+                 "[Tier3・工学的判断。progress報酬の実測分布(平均+0.031)と"
+                 "オーダーを揃えた値]\n"
+                 "注意：このViewerは報酬を学習に使わないため、動きは変わりません。"
+                 "下の表示で『報酬が発生しているか』だけを確認できます")
+        mouth_form.addWidget(self.mouth_bonus_slider)
+
+        self.mouth_reset_btn = QtWidgets.QPushButton("既定値に戻す(0.0)")
+        mouth_form.addWidget(self.mouth_reset_btn)
+
+        self.mouth_label = QtWidgets.QLabel("")
+        self.mouth_label.setStyleSheet("font-family: Consolas;")
+        self.mouth_label.setWordWrap(True)
+        mouth_form.addWidget(self.mouth_label)
+
+        # ---- 触覚の順応（移植元：e_viewer.py 1213〜1281行目）--------------------
+        box_ta = QtWidgets.QGroupBox("触覚の順応")
+        form_outer.addWidget(box_ta)
+        ta_form = QtWidgets.QVBoxLayout(box_ta)
+
+        self.ta_unavailable_label = QtWidgets.QLabel("")
+        self.ta_unavailable_label.setStyleSheet("color: #a33;")
+        self.ta_unavailable_label.setWordWrap(True)
+        self.ta_unavailable_label.setVisible(False)
+        ta_form.addWidget(self.ta_unavailable_label)
+
+        self.chk_ta_master = QtWidgets.QCheckBox("触覚の順応（マスター）")
+        ta_form.addWidget(self.chk_ta_master)
+        self.chk_ta_fa = QtWidgets.QCheckBox("速順応（既定ON）")
+        ta_form.addWidget(self.chk_ta_fa)
+        self.chk_ta_sa = QtWidgets.QCheckBox("遅順応（既定ON）")
+        ta_form.addWidget(self.chk_ta_sa)
+        self.chk_ta_cortical = QtWidgets.QCheckBox("脳側レイヤーを含める（既定OFF）")
+        ta_form.addWidget(self.chk_ta_cortical)
+
+        self.ta_sa_floor_slider = FloatSlider(
+            "遅順応の残存率", 0.0, 1.0, 0.01, init=0.31, decimals=2,
+            note="[Tier3・マウスのひげ受容器由来、種も部位も違う]")
+        ta_form.addWidget(self.ta_sa_floor_slider)
+        self.ta_tau_recover_slider = FloatSlider(
+            "回復の時定数[秒]", 0.1, 30.0, 0.1, init=8.4,
+            note="順応から回復する時定数[秒] [Tier3・文献が存在せず暫定]")
+        ta_form.addWidget(self.ta_tau_recover_slider)
+        self.ta_fa_gain_slider = FloatSlider(
+            "速順応の倍率", 0.0, 5.0, 0.01, init=1.0, decimals=2,
+            note="[Tier3・工学的な仮置き]")
+        ta_form.addWidget(self.ta_fa_gain_slider)
+        self.ta_tau_peripheral_slider = FloatSlider(
+            "遅順応・末梢の時定数[秒]", 0.1, 30.0, 0.1, init=8.4,
+            note="[Tier2・孫引き、原文未確認]")
+        ta_form.addWidget(self.ta_tau_peripheral_slider)
+        self.ta_tau_cortical_slider = FloatSlider(
+            "遅順応・脳側の時定数[秒]", 0.1, 30.0, 0.1, init=15.0,
+            note="脳側レイヤー（上のチェック）がOFFのときは効きません")
+        ta_form.addWidget(self.ta_tau_cortical_slider)
+
+        self.ta_reset_btn = QtWidgets.QPushButton("既定値に戻す")
+        ta_form.addWidget(self.ta_reset_btn)
+
+        self.ta_label = QtWidgets.QLabel("")
+        self.ta_label.setStyleSheet("font-family: Consolas;")
+        self.ta_label.setWordWrap(True)
+        ta_form.addWidget(self.ta_label)
+
+        note = QtWidgets.QLabel(
+            "このタブは駆動（もがき運動・脳・反射+共通駆動）とは独立です。\n"
+            "報酬を学習には使わないため、この値を変えても太郎の動きは"
+            "変わりません。")
+        note.setStyleSheet("color: #666;")
+        note.setWordWrap(True)
+        form_outer.addWidget(note)
+
+        form_outer.addStretch(1)
+
 
 def _describe_scene(sc):
     """選んだシーンが成立しているかを説明文にする。
@@ -541,6 +661,12 @@ def main():
     dt = float(m.opt.timestep) * int(u.frame_skip)
     n_act = env.action_space.shape[0]
     zero = np.zeros(n_act, dtype=np.float32)
+
+    # ---- 触覚順応・口元報酬の監視用インスタンス（第3段階・仕様2節）------------
+    #   構築ロジック本体は e_viewer_qt_touch.py（try/exceptで失敗を吸収済み）。
+    #   ここでは呼ぶだけ。失敗しても例外は投げない
+    #   （touch_monitor.available=False になり、UI側が注意表示に切り替える）。
+    touch_monitor = build_touch_monitor(env, m, u, dt)
 
     _AGE = float(scene["body"]["age_months"])
     _RECLINE = float(scene["world"]["recline_deg"])
@@ -860,6 +986,91 @@ def main():
 
     win.drop_head_btn.clicked.connect(drop_head)
 
+    # ---- 感覚と報酬タブの初期値・配線（第3段階・仕様2節）----------------------
+    # 【なぜ available で分岐するか】旧版と同じフェイルセーフ（e_viewer.py
+    #   1190〜1211行目・1213〜1281行目）。構築に失敗したときはスライダー類を
+    #   隠して注意文だけを見せる（黙って落ちない）。
+    win.mouth_bonus_slider.setValue(
+        float(TARO_DEFAULTS["mouth_touch_bonus"][0]), block_signal=True)
+    win.chk_ta_master.setChecked(bool(TARO_DEFAULTS["touch_adaptation"][0]))
+    win.chk_ta_fa.setChecked(bool(TARO_DEFAULTS["touch_adapt_fa"][0]))
+    win.chk_ta_sa.setChecked(bool(TARO_DEFAULTS["touch_adapt_sa"][0]))
+    win.chk_ta_cortical.setChecked(bool(TARO_DEFAULTS["touch_adapt_include_cortical"][0]))
+    win.ta_sa_floor_slider.setValue(
+        float(TARO_DEFAULTS["touch_adapt_sa_floor"][0]), block_signal=True)
+    win.ta_tau_recover_slider.setValue(
+        float(TARO_DEFAULTS["touch_adapt_tau_recover_s"][0]), block_signal=True)
+    win.ta_fa_gain_slider.setValue(
+        float(TARO_DEFAULTS["touch_adapt_fa_gain"][0]), block_signal=True)
+    win.ta_tau_peripheral_slider.setValue(
+        float(TARO_DEFAULTS["touch_adapt_tau_peripheral_s"][0]), block_signal=True)
+    win.ta_tau_cortical_slider.setValue(
+        float(TARO_DEFAULTS["touch_adapt_tau_cortical_s"][0]), block_signal=True)
+
+    if not touch_monitor.available:
+        win.mouth_unavailable_label.setText(
+            f"注意監視用インスタンスの構築に失敗したため使えません\n{touch_monitor.error}")
+        win.mouth_unavailable_label.setVisible(True)
+        win.mouth_bonus_slider.setEnabled(False)
+        win.mouth_reset_btn.setEnabled(False)
+        win.ta_unavailable_label.setText(
+            f"注意監視用インスタンスの構築に失敗したため使えません\n{touch_monitor.error}")
+        win.ta_unavailable_label.setVisible(True)
+        for _w in (win.chk_ta_master, win.chk_ta_fa, win.chk_ta_sa, win.chk_ta_cortical,
+                   win.ta_sa_floor_slider, win.ta_tau_recover_slider, win.ta_fa_gain_slider,
+                   win.ta_tau_peripheral_slider, win.ta_tau_cortical_slider,
+                   win.ta_reset_btn):
+            _w.setEnabled(False)
+
+    def mouth_reset_default():
+        win.mouth_bonus_slider.setValue(float(TARO_DEFAULTS["mouth_touch_bonus"][0]))
+        win.msg_label.setText("口元ボーナスを既定値(0.0)に戻しました")
+
+    win.mouth_reset_btn.clicked.connect(mouth_reset_default)
+
+    def ta_reset_default():
+        # 【なぜ状態もクリアするか、仕様4節・旧版1253〜1276行目と同じ】
+        #   スライダーの係数だけでなく、順応の蓄積状態（g_peripheral・
+        #   g_cortical・prev_m）もリセットする。そうしないと「新品の
+        #   インスタンス」と同じ状態には戻らない。
+        win.chk_ta_master.setChecked(bool(TARO_DEFAULTS["touch_adaptation"][0]))
+        win.chk_ta_fa.setChecked(bool(TARO_DEFAULTS["touch_adapt_fa"][0]))
+        win.chk_ta_sa.setChecked(bool(TARO_DEFAULTS["touch_adapt_sa"][0]))
+        win.chk_ta_cortical.setChecked(
+            bool(TARO_DEFAULTS["touch_adapt_include_cortical"][0]))
+        win.ta_sa_floor_slider.setValue(float(TARO_DEFAULTS["touch_adapt_sa_floor"][0]))
+        win.ta_tau_recover_slider.setValue(
+            float(TARO_DEFAULTS["touch_adapt_tau_recover_s"][0]))
+        win.ta_fa_gain_slider.setValue(float(TARO_DEFAULTS["touch_adapt_fa_gain"][0]))
+        win.ta_tau_peripheral_slider.setValue(
+            float(TARO_DEFAULTS["touch_adapt_tau_peripheral_s"][0]))
+        win.ta_tau_cortical_slider.setValue(
+            float(TARO_DEFAULTS["touch_adapt_tau_cortical_s"][0]))
+        if touch_monitor.available:
+            touch_monitor.touch_adapt.rebuild(touch_monitor.touch_map.n_points)
+        win.msg_label.setText(
+            "触覚の順応を既定値に戻しました（順応の蓄積状態もリセットしました）")
+
+    win.ta_reset_btn.clicked.connect(ta_reset_default)
+
+    def touch_params():
+        """今のスライダー・チェックボックスの値を1つのdictにまとめる。
+
+        毎tick呼ぶ（値を保持しない。表示は必ず実体＝ウィジェットの現在値から
+        読む、という約束を守るため。e_viewer_qt_status.pyと同じ考え方）。
+        """
+        return dict(
+            fa_enabled=win.chk_ta_fa.isChecked(),
+            sa_enabled=win.chk_ta_sa.isChecked(),
+            include_cortical=win.chk_ta_cortical.isChecked(),
+            master_enabled=win.chk_ta_master.isChecked(),
+            tau_peripheral_s=win.ta_tau_peripheral_slider.value(),
+            tau_cortical_s=win.ta_tau_cortical_slider.value(),
+            sa_floor=win.ta_sa_floor_slider.value(),
+            tau_recover_s=win.ta_tau_recover_slider.value(),
+            fa_gain=win.ta_fa_gain_slider.value(),
+            mouth_bonus=win.mouth_bonus_slider.value())
+
     restart = [True]
     win.restart_btn.clicked.connect(lambda: restart.__setitem__(0, True))
     win.show()
@@ -925,6 +1136,7 @@ def main():
                 _syncing[0] = False
                 win.chk_toy_follow.setChecked(False)
                 t_sim, wall0, tick = 0.0, time.time(), 0
+                touch_monitor.reset_mouth_bonus_counts()
                 win.msg_label.setText(f"シーン「{scene['name']}」で始めました")
                 restart[0] = False
 
@@ -1037,7 +1249,18 @@ def main():
                 d.qacc[:] = 0.0
                 mujoco.mj_forward(m, d)
             else:
-                env.step(zero)
+                _drive_act = drive_tick_action(
+                    win, env=env, m=m, d=d, u=u, zero=zero,
+                    tick=tick, dt=dt, t_sim=t_sim, freeze=freeze)
+                env.step(_drive_act if _drive_act is not None else zero)
+
+                # ---- 触覚順応・口元報酬の監視（第3段階・仕様2-3節）------------
+                #   物理が実際に1tick進んだ直後にだけ呼ぶ。freeze中は呼ばない
+                #   （touch_adaptation.pyのdocstringの前提「新しい物理観測が
+                #   生まれた瞬間にだけ呼ぶこと」を守るため。旧版2693〜2699行目と
+                #   同じ位置づけ）。
+                if touch_monitor.available:
+                    advance_touch_monitor(touch_monitor, touch_params(), u, t_sim)
             t_sim += dt
             tick += 1
 
@@ -1060,8 +1283,23 @@ def main():
                 st_lines = compute_status(
                     env=env, actuation_model=am, actuation_mode=_ACTUATION_MODE,
                     scene=scene, taro_defaults=TARO_DEFAULTS,
-                    fmax_base=_fmax_base, age=_AGE, hands=hands)
+                    fmax_base=_fmax_base, age=_AGE, hands=hands,
+                    touch_state=(touch_monitor if touch_monitor.available else None),
+                    # 【なぜgetattrか、仕様3節】freeze中はdrive_tick_actionが
+                    #   一度も呼ばれず win._drive_state がまだ存在しないことがある。
+                    drive_state=getattr(win, "_drive_state", None))
                 win.status_label.setText(format_status_text(st_lines))
+
+                # ---- 感覚と報酬タブの表示（第3段階・仕様2節・移植元：
+                #   e_viewer.py 2889〜2910行目）。測定器区画の既存ラベルと
+                #   同じ頻度（tick%5==0）で更新する。
+                if touch_monitor.available:
+                    mouth_text, ta_text = format_touch_status(
+                        touch_monitor.last, touch_monitor, touch_params(),
+                        touch_monitor.mouth_bonus_count,
+                        touch_monitor.mouth_bonus_last_t)
+                    win.mouth_label.setText(mouth_text)
+                    win.ta_label.setText(ta_text)
 
                 # ---- 輻輳（寄り目）の表示（移植元：e_viewer.py 2912〜2924行目）--
                 try:
@@ -1119,6 +1357,9 @@ def main():
                               if _drop[0]["settled"] else f"{el:.1f}秒経過")
                         txt += f"\n持ち上げテスト：{st}  行き過ぎ {-_drop[0]['peak']:.1f}度"
                     win.neck_label.setText(txt)
+
+                update_measure_tab(win, m=m, d=d, u=u, env=env,
+                                   toy_bid=toy_bid, tick=tick, t_sim=t_sim)
 
             app.processEvents()
             viewer.sync()
