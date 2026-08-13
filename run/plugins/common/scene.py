@@ -65,9 +65,37 @@ def build(scene_name, *, taro=None, seed=0, verbose=False, hybrid=False):
     elif mode not in ("muscle", "muscles", ""):
         raise ValueError(f"taro.actuation が不明: {mode}（muscle か joint）")
 
-    env, hands = e_scene.build(sc, orient=bool(taro.get("orienting_reflex", False)),
+    orient = bool(taro.get("orienting_reflex", False))
+    vision_on = bool(taro.get("vision", True))
+
+    # ---- 視覚（2026-08-13、目標EでLeanMimoEnv.strip_texturesを発動させる修正）------
+    #   【なぜ】taro.vision=False でも、これまでは環境が常にフルテクスチャ(約977MB)を
+    #   持ったままだった。既存の仕組み(strip_textures)を発動させるため、
+    #   taro.vision をそのまま e_scene.build() の vision= へ渡す。
+    #
+    #   【注意・視線誘導反射との相性】OrientingReflex（視線誘導反射）は環境側の
+    #   カメラ描画(get_vision_obs)で毎ステップ更新される。vision=False では
+    #   self.vision が None になり get_vision_obs が一度も呼ばれないため、
+    #   orienting_reflex=True と vision=False を同時に指定すると反射が
+    #   静かに動かなくなる（エラーは出ない）。「エラーが出ずに動いた」を
+    #   信じない、という方針（doc/検証の落とし穴チェックリスト.md 項17）に
+    #   従い、この組み合わせは明示的に止める。
+    if orient and not vision_on:
+        raise ValueError(
+            "taro.orienting_reflex=True には taro.vision=True が要る。\n"
+            "  視線誘導反射(OrientingReflex)は環境側のカメラ描画(get_vision_obs)に\n"
+            "  依存しており、vision=False は環境の視覚センサ自体を無効化する\n"
+            "  アブレーションになるため（strip_textures適用時、self.visionがNoneになり\n"
+            "  get_vision_obsが一度も呼ばれない）。")
+    if not vision_on:
+        print("注意[vision] OFF: 環境のテクスチャ(顔・服)を単色化しメモリを節約します"
+              "（LeanMimoEnv.strip_textures）。run.type=view/edit でこの設定のまま"
+              "開くと、絵が単色になります（物理・学習には影響しません）。", flush=True)
+
+    env, hands = e_scene.build(sc, orient=orient,
                                vor=bool(taro.get("vor", True)),
-                               seed=seed, verbose=verbose, actuation_model=act)
+                               seed=seed, verbose=verbose, actuation_model=act,
+                               vision=vision_on)
 
     # ---- 感覚運動の伝達遅延（候補5、2026-08-02）----------------------------
     #   【なぜここで配線するか】TE.ToySupineEnv(...) を実際に呼んでいるのは

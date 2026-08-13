@@ -298,7 +298,8 @@ def save(scene, name=None, env=None, hands=None, settle_seconds=3.0,
 # ============================================================================
 # 組み立て（ここでしか環境を作らない）
 # ============================================================================
-def build(scene, orient=None, vor=True, seed=0, verbose=False, actuation_model=None):
+def build(scene, orient=None, vor=True, seed=0, verbose=False, actuation_model=None,
+          vision=True):
     """シーンから環境を作る。**組み立てはここだけ**。
 
     Args:
@@ -306,6 +307,9 @@ def build(scene, orient=None, vor=True, seed=0, verbose=False, actuation_model=N
         orient: 視線誘導反射のON/OFF（実験の条件なのでシーンには入れない）
         vor: 前庭動眼反射のON/OFF（同上）
         seed: リセットの乱数の種（同上）
+        vision: 環境に視覚センサを持たせるか。False なら vision_params に
+            None を渡し、LeanMimoEnv.strip_textures（D/scripts/mimo_lean.py）を
+            発動させてテクスチャ（顔・服 約977MB）を単色化する（2026-08-13）。
         actuation_model: 筋の駆動モデル。None なら MuscleModel（従来どおり）。
             【なぜ渡せるようにしたか、2026-07-30】学習ループ
             （`e_growth_train.py`）は既定で SpringDamperModel を使うのに、
@@ -403,7 +407,14 @@ def build(scene, orient=None, vor=True, seed=0, verbose=False, actuation_model=N
     with ctx:
         env = TE.ToySupineEnv(
             actuation_model=actuation_model,
-            vision_params=TE.infant_vision_params(acuity_age=b["age_months"]),
+            # 【なぜ、2026-08-13】vision=False のとき None を渡すと、LeanMimoEnv
+            #   （taro_core/src/senses/mimo_lean.py。実体はD/scripts/mimo_lean.pyにあり
+            #   目標B/C/Dと共有）のstrip_texturesが自動発動し、顔・服テクスチャ
+            #   （約977MB）を単色化する。目標B/C/Dは既にこの経路に乗っていたが、
+            #   目標Eだけ常に非Noneを渡していたため発動していなかった
+            #   （測定の実測：作業記録（非公開） 24節）。
+            vision_params=(TE.infant_vision_params(acuity_age=b["age_months"])
+                           if vision else None),
             age=float(b["age_months"]),
             toy=bool(toy["enabled"]),
             vor=bool(vor),

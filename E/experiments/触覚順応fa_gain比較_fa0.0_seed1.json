@@ -1,0 +1,33 @@
+{
+  "name": "触覚順応fa_gain比較_fa0.0_seed1",
+  "note": "2026-08-13 測定。触覚の順応(touch_adaptation=true)の速順応倍率touch_adapt_fa_gainの感度分析（fa_gain=0.0）。土台は2026-08-13の口元報酬_順応_条件4（口元ON・順応ON）と完全に同じ設定（mouth_touch_bonus=0.2, spinal_drive_mode=reflex_common, common_drive_rho=0.3, common_drive_grouping=per_limb, シーン新生児_仰向け_柵なし, 2000tick, 学習あり）で、taro.touch_adapt_fa_gainだけを既定1.0からこの値へ変更した。fa_gain=1.0（既定）は新規実行せず、既存の口元報酬_順応_条件4_口元ON_順応ON_seed1.json の結果（E/logs/口元報酬_順応比較_2026-08-13/条件4_seed1.csv）をそのまま流用する。測定専用プラグイン selftouch_probe（測定がscratchpadに作成、taro_core/runのファイルは変更していない）を run.main.PLUGINS へ実行時登録して使用。依頼：作業記録（非公開）、重要度：中）。",
+  "scene": "新生児_仰向け_柵なし",
+  "taro": {
+    "spinal_drive_mode": "reflex_common",
+    "common_drive_rho": 0.3,
+    "common_drive_grouping": "per_limb",
+    "touch": true,
+    "somatosensory": true,
+    "mouth_touch_bonus": 0.2,
+    "touch_adaptation": true,
+    "touch_adapt_fa_gain": 0.0
+  },
+  "run": {
+    "type": "train",
+    "steps": 2000,
+    "checkpoint": 100,
+    "seed": 1,
+    "csv": "E/logs/触覚順応fa_gain比較_2026-08-13/fa0.0_seed1.csv"
+  },
+  "plugins": {
+    "contact_reward": {
+      "toucher": "right_palm",
+      "touched_groups": [
+        "head"
+      ],
+      "self_trace_out": "E/logs/触覚順応fa_gain比較_2026-08-13/fa0.0_seed1_selftrace.csv"
+    },
+    "selftouch_probe": true,
+    "dashboard": true
+  }
+}

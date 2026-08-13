@@ -1,0 +1,32 @@
+{
+  "name": "口元報酬_順応_条件2_口元ON_順応OFF_seed2",
+  "note": "2026-08-13 測定。口元自己接触報酬(mouth_touch_bonus)と触覚の順応(touch_adaptation)の2x2比較、条件2（口元ON_順応OFF）。シード追加(seed2)。依頼：作業記録（非公開）、重要度：高）。既存のseed0/seed1実験ファイルをそのまま複製し、seedとcsv/self_trace_out欄のみ変更（対称性検証済み、実装は流用）。測定専用プラグイン selftouch_probe（測定が scratchpad に作成、taro_core/run のファイルは変更していない）を run.main.PLUGINS へ実行時登録して使用。詳細は測定作業記録参照。",
+  "scene": "新生児_仰向け_柵なし",
+  "taro": {
+    "spinal_drive_mode": "reflex_common",
+    "common_drive_rho": 0.3,
+    "common_drive_grouping": "per_limb",
+    "touch": true,
+    "somatosensory": true,
+    "mouth_touch_bonus": 0.2,
+    "touch_adaptation": false
+  },
+  "run": {
+    "type": "train",
+    "steps": 2000,
+    "checkpoint": 100,
+    "seed": 2,
+    "csv": "E/logs/口元報酬_順応比較_2026-08-13/条件2_seed2.csv"
+  },
+  "plugins": {
+    "contact_reward": {
+      "toucher": "right_palm",
+      "touched_groups": [
+        "head"
+      ],
+      "self_trace_out": "E/logs/口元報酬_順応比較_2026-08-13/条件2_seed2_selftrace.csv"
+    },
+    "selftouch_probe": true,
+    "dashboard": true
+  }
+}

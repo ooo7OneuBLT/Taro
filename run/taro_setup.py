@@ -334,8 +334,11 @@ class Taro:
         prop_dim_space = int(env.observation_space["observation"].shape[0])
 
         # ---- 視覚の解像度（fusion に渡す）------------------------------------
-        # 注意：シーンを使う場合、環境は**常に**視覚を持つ（e_scene が vision_params を渡す）。
-        #   vision=False は「脳が視覚を無視する」アブレーションになる（環境は変わらない）。
+        # 注意：2026-08-13より、taro.vision は「脳が視覚を使うか」（ここでのvres）と、
+        #   「環境が視覚センサ自体を持つか」（e_scene.build()へ渡るvision_params。
+        #   run/plugins/common/scene.py参照）の**両方**を連動して切り替える。
+        #   vision=False は環境の視覚センサごと無効化するアブレーションになり、
+        #   LeanMimoEnv.strip_texturesによりメモリも節約される。
         vres = 0
         if cfg.vision:
             from e_toy_env import VISION_RES
