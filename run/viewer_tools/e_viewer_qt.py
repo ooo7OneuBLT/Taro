@@ -314,6 +314,18 @@ class MainWindow(QtWidgets.QMainWindow):
         save_row = QtWidgets.QHBoxLayout()
         save_row.addWidget(QtWidgets.QLabel("シーン名"))
         self.scene_save_name_edit = QtWidgets.QLineEdit()
+        # 【なぜ、2026-08-17】シーン選択のたびに保存名欄が選択中シーン名で
+        #   上書きされ、別名保存のつもりが既存シーンへの上書きになる事故が
+        #   あった（2026-08-16、6ヶ月姿勢の保存失敗）。ユーザーが名前欄を
+        #   手で編集した後は自動上書きしない、というフラグをここで持つ。
+        #   textEditedはプログラムからのsetText()では発火せず、ユーザーの
+        #   キー入力でのみ発火するため、この区別に使える。
+        self._scene_name_user_edited = False
+
+        def _on_scene_name_edited(text):
+            self._scene_name_user_edited = bool(text)
+
+        self.scene_save_name_edit.textEdited.connect(_on_scene_name_edited)
         save_row.addWidget(self.scene_save_name_edit, 1)
         save_row.addWidget(QtWidgets.QLabel("説明"))
         self.scene_save_note_edit = QtWidgets.QLineEdit()
@@ -697,6 +709,22 @@ def _describe_scene(sc):
     return "\n".join(t for t in lines if t), warn
 
 
+def _confirm_overwrite(parent, name):
+    """保存先に同名のシーンファイルが既にあるとき、上書きしてよいか確認する。
+
+    【なぜ、2026-08-17】シーン名欄の自動上書きバグ（on_scene_pick）と合わせて、
+    最後の砦として上書き前に確認を挟む。既定はNo（QMessageBox.question の
+    defaultButton）。テストからモンキーパッチしやすいよう、独立した関数に
+    切り出している。
+    """
+    reply = QtWidgets.QMessageBox.question(
+        parent, "シーンの上書き確認",
+        f"「{name}」という名前のシーンは既にあります。上書きして保存しますか？",
+        QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+        QtWidgets.QMessageBox.No)
+    return reply == QtWidgets.QMessageBox.Yes
+
+
 def main():
     scene_names = e_scene.list_scenes()
     if not scene_names:
@@ -957,7 +985,11 @@ def main():
         # 移植元：e_viewer.py 803〜804行目 on_scene_switches。シーンを選び
         #   直したら、保存欄の名前・説明も選んだシーンのものに合わせる
         #   （そのまま「保存」を押すと同名で上書きになる＝旧版と同じ挙動）。
-        win.scene_save_name_edit.setText(sc["name"])
+        # 【なぜ、2026-08-17】ただし、ユーザーが名前欄を手で編集済みの場合は
+        #   上書きしない（別名保存のつもりが既存シーンへの上書きになる事故の
+        #   修正。setText()はtextEditedを発火させないのでフラグはそのまま）。
+        if not win._scene_name_user_edited:
+            win.scene_save_name_edit.setText(sc["name"])
         win.scene_save_note_edit.setText(sc.get("note", ""))
 
     win.scene_combo.currentTextChanged.connect(on_scene_pick)
@@ -1378,6 +1410,13 @@ def main():
             msg = "シーンの名前を入れてください（未入力のため保存していません）"
             win.msg_label.setText(msg)
             QtWidgets.QMessageBox.warning(win, "シーンの保存", msg)
+            return
+        # 【なぜ、2026-08-17】名前欄が既存シーン名のまま（自動補完バグの
+        #   残り火や、単なる同名入力）で保存されると気付かず上書きになる。
+        #   保存先に同名ファイルがあれば、ここで確認を挟む（既定No）。
+        _existing_path = os.path.join(_ROOT, "run", "scenes", f"{name}.json")
+        if os.path.exists(_existing_path) and not _confirm_overwrite(win, name):
+            win.msg_label.setText("上書きを取りやめました（保存していません）")
             return
         try:
             sc = _current_scene()
