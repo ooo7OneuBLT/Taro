@@ -1,0 +1,20 @@
+{
+  "name": "座位6ヶ月・視界確認：支え＋反射＋親＋眼球バネ（measure）",
+  "note": "2026-08-17。ユーザー作り直しの6ヶ月座位で、0ヶ月版プローブ3（100%）と同構成の視界確認。",
+  "scene": "座位_6ヶ月_支えあり_2026-08-17",
+  "taro": {
+    "actuation": "muscle",
+    "vision": true,
+    "orienting_reflex": true
+  },
+  "run": {
+    "type": "measure",
+    "steps": 600,
+    "seed": 0,
+    "checkpoint": 100,
+    "csv": "E/logs/座位_6ヶ月_検証/視界確認_seed0.csv"
+  },
+  "plugins": {
+    "toy_in_view": true
+  }
+}
