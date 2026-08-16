@@ -58,9 +58,7 @@ MUJOCO_LOG.TXT
 # 既定で全て無視し、公開してよいファイルのみ明示的に許可する（allowlist）。
 C/docs/*
 !C/docs/README.md
-!C/docs/研究日誌.md
 !C/docs/開発計画.md
-!C/docs/検証の落とし穴チェックリスト.md
 !C/docs/C
 C/docs/C/*
 !C/docs/C/検証指標の一覧と変遷.md
@@ -88,5 +86,18 @@ run/scenes/_前回開いたシーン.txt
 # 配線図（run/tools/wiring.py が実験ファイルごとに生成する）→ 生成物なので追跡しない
 E/experiments/配線図.html
 
+# TaroMap（wiring_viewer）の実測キャッシュ（生成物・依存ファイルの指紋で自動失効する）
+run/viewer_tools/wiring_viewer/_cache/
+
 # 作業台帳（Claude自身の作業ログ。太郎の研究記録とは別レイヤーなので非公開）
 doc/作業台帳.md
+
+# 非公開（2026-08-16決定：対話記録・作業ログ・AI向け指示はローカルのみ）
+**/*研究日誌*.md
+doc/作業台帳.md
+doc/やることリスト*.md
+doc/ユーザーメモ.txt
+doc/検証の落とし穴チェックリスト*.md
+doc/_private/
+CLAUDE.md
+現在地.md
