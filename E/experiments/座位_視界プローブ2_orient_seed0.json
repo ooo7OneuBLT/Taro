@@ -1,0 +1,20 @@
+{
+  "name": "座位・視界プローブ2：親の介入＋視線誘導反射（measure）",
+  "note": "2026-08-17。プローブ1で眼球が無制御だと外・下の壁へ落ちて視界1.7%と判明。本プローブは視線誘導反射(orienting_reflex)と親の介入(parent_intervene)をONにし、反射が眼球ドリフトに打ち勝っておもちゃを見続けられるかを測る。中央復帰バネ(実装中)はまだ無い条件。",
+  "scene": "座位_視界プローブ2_親介入_2026-08-17",
+  "taro": {
+    "actuation": "muscle",
+    "vision": true,
+    "orienting_reflex": true
+  },
+  "run": {
+    "type": "measure",
+    "steps": 600,
+    "seed": 0,
+    "checkpoint": 100,
+    "csv": "E/logs/座位_視界プローブ/probe2_orient_seed0.csv"
+  },
+  "plugins": {
+    "toy_in_view": true
+  }
+}

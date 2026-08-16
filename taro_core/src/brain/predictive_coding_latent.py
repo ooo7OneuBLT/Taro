@@ -24,12 +24,22 @@ import torch.nn.functional as F
 
 class PredictiveCodingLatent(nn.Module):
     def __init__(self, hidden_dim, sensory_dim, latent_dim=32,
-                 n_regression_steps=3, regression_lr=0.1, kl_weight=0.1):
+                 n_regression_steps=3, regression_lr=0.1, kl_weight=0.1,
+                 latent_deterministic=False):
         super().__init__()
         self.latent_dim = latent_dim
         self.n_regression_steps = n_regression_steps
         self.regression_lr = regression_lr
         self.kl_weight = kl_weight
+        # 【なぜ、2026-08-16】既定False＝今までどおり毎ステップ潜在変数z(=mean+
+        #   randn*std)を引き直す。実測（E/logs/座位保持_6ヶ月/model_seed0.pt、
+        #   シーン「座位_6ヶ月_土台_2026-08-16」）で同じ観測10回のばらつきが
+        #   0.8429・行動の変化量1.6052あり、姿勢制御が成立しない原因だった。
+        #   True にすると z=mean（サンプリングなし）で行動を決める。学習の損失
+        #   （kl_loss/recon_loss、下のz_sampleを使う"その場の誤差回帰"の式自体）は
+        #   変えない。標準的なやり方（学習中はサンプリング、実行時は平均を使う）
+        #   に合わせ、"行動を決めるためのz"だけを決定的にする。
+        self.latent_deterministic = latent_deterministic
 
         # 事前の予想：GRUの状態(今回の感覚を見る"前")から作る
         self.prior_net = nn.Linear(hidden_dim, latent_dim * 2)
@@ -68,7 +78,14 @@ class PredictiveCodingLatent(nn.Module):
 
         for _ in range(self.n_regression_steps):
             std = torch.exp(0.5 * logvar)
-            z_sample = mean + torch.randn_like(std) * std
+            # 【なぜ、2026-08-16】latent_deterministic=Trueのときはこの"その場の
+            #   誤差回帰"の内部でもサンプリングを使わずmeanで代表させる。片方
+            #   （下の最終zのみ）だけ止めても、この内側のノイズがmean/logvarの
+            #   値自体を揺らすため決定的にならない（ユーザーの実測は両方止めた値）。
+            if self.latent_deterministic:
+                z_sample = mean
+            else:
+                z_sample = mean + torch.randn_like(std) * std
             recon = F.mse_loss(self.decoder(z_sample), current_sensory)
             kl = self._kl(mean, logvar, prior_mean_d, prior_logvar_d)
             free_energy = recon + self.kl_weight * kl
@@ -81,7 +98,10 @@ class PredictiveCodingLatent(nn.Module):
         logvar_out = post_logvar + (logvar.detach() - post_logvar.detach())
 
         std_out = torch.exp(0.5 * logvar_out)
-        z = mean_out + torch.randn_like(std_out) * std_out
+        if self.latent_deterministic:
+            z = mean_out
+        else:
+            z = mean_out + torch.randn_like(std_out) * std_out
 
         # 以前はprior_mean/prior_logvarもdetachしており、prior_netが一度も
         # 学習されずランダム初期化のまま固定され続けていた（レビューで発覚した

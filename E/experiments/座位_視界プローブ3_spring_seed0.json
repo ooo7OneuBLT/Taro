@@ -1,0 +1,20 @@
+{
+  "name": "座位・視界プローブ3：親の介入＋視線誘導反射＋眼球中央復帰バネ（measure）",
+  "note": "2026-08-17。プローブ2（65.0%）との単一変数比較。追加はbody.eye_centering=trueのみ。",
+  "scene": "座位_視界プローブ3_バネあり_2026-08-17",
+  "taro": {
+    "actuation": "muscle",
+    "vision": true,
+    "orienting_reflex": true
+  },
+  "run": {
+    "type": "measure",
+    "steps": 600,
+    "seed": 0,
+    "checkpoint": 100,
+    "csv": "E/logs/座位_視界プローブ/probe3_spring_seed0.csv"
+  },
+  "plugins": {
+    "toy_in_view": true
+  }
+}

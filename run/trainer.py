@@ -793,6 +793,13 @@ class Trainer:
                 rew_task = progress
             elif cfg.reward == "none":
                 rew_task = 0.0
+            elif cfg.reward == "posture_height":
+                # 【2026-08-15・座位保持の学習】頭の高さ報酬（MIMo公式standup.py流用、
+                #   人間模倣からの逸脱として登録済み）。double_touchガード（後述の
+                #   t.double_touch is not None ブロック内のforループ）は経由しない
+                #   （double_touch無効の実験では一度も呼ばれず報酬が不発火になる、
+                #   という設計段階で判明した重大な制約。設計1-2節(c)参照）。
+                rew_task = self.env.unwrapped.posture_height_reward()
             else:
                 rew_task = t.brain.sensorimotor_reward(pe.item())
             rew = rew_task

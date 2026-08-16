@@ -66,6 +66,12 @@ import mujoco
 import mujoco.viewer
 import tkinter as tk
 import e_visibility as VIS
+# 【なぜ、2026-08-16】体ぜんたいの向き（オイラー角）↔クオータニオンの変換に使う。
+#   mujoco.mju_euler2Quat 単体だと往復（表示への逆変換）で値が一致しない
+#   （scipyの'xyz'外因性回転とは合成順が異なる）ことを実測で確認したため、
+#   往復とも scipy に統一した（root_quat_from_sliders/sliders_from_root_quat 参照）。
+#   引用.md 未登録（scipyは既に retina.py 等で使用済みの共通依存）。
+from scipy.spatial.transform import Rotation as _Rotation
 
 # 【なぜ、2026-08-07】以前は _HERE（E/scripts）の1つ上を"E"と仮定して
 #   os.path.join(_HERE, os.pardir, "docs", ...) と書いていた。run/viewer_tools/ へ
@@ -450,16 +456,70 @@ def main():
     #   ＝「仰向けに戻す」はずっと**体ではなく予備の物体**を動かしていた。
     #   落とし穴 項67「体を動かす自由関節は、思っている body に無い」の再発。
     root_qadr = None
+    root_dofadr = None
     for j in range(m.njnt):
         if (m.jnt_type[j] == mujoco.mjtJoint.mjJNT_FREE
                 and (m.body(int(m.jnt_bodyid[j])).name or "") == TE.ROOT_BODY):
             root_qadr = int(m.jnt_qposadr[j])
+            root_dofadr = int(m.jnt_dofadr[j])
             break
     if root_qadr is None:
         print(f"[viewer] 注意体（body='{TE.ROOT_BODY}'）の自由関節が見つからない。"
               "「仰向けに戻す」は姿勢だけ戻します", flush=True)
     root_qpos0 = (d.qpos[root_qadr:root_qadr + 7].copy()
                   if root_qadr is not None else None)
+    root_quat0 = root_qpos0[3:7].copy() if root_qpos0 is not None else None
+    root_pos0 = root_qpos0[0:3].copy() if root_qpos0 is not None else None
+
+    # ---- 体ぜんたいの向き・位置（2026-08-16 新設）--------------------------
+    # 【なぜ要るか】姿勢タブの43関節は「関節の曲げ角」しか動かせず、体全体が
+    #   仰向けか起きているかは動かせなかった。座位のシーンを作ろうとして
+    #   「関節は座位、でも体は仰向け」（仰向けで脚を抱えた形）にしかならず失敗した
+    #   （依頼書の背景）。qposのアドレスは決め打ちにしない
+    #   （落とし穴 項67・コメント446行と同じ罠。実測：id順の free joint に決め打ちで
+    #   書いても体は1度も動かなかった）。既存の root_qadr（body名から引いた
+    #   正しいアドレス）をそのまま使う。
+    #
+    # 【向きの表現】3本のスライダー（前後にたおす＝pitch／左右にたおす＝roll／
+    #   ひねる＝yaw、度）を、読み込み時の姿勢（root_quat0。多くのシーンは仰向け）
+    #   からの**world座標系での追加回転**として持つ。0度＝読み込み時のまま。
+    #   実測（scratchpadのprobe、座位_床_柵なしシーンで実施）：
+    #     pitch=+30度 → 体幹の傾き 39.7度→69.3度（起きる方向）
+    #     pitch=-30度 → 体幹の傾き 39.7度→9.8度（倒れる方向）
+    #     roll=+20度  → 体幹の傾き 39.7度→38.9度（弱い連成。想定内）
+    #     yaw=+30度   → 体幹の傾き 39.7度→39.7度（変化なし＝ひねりだけ）
+    #   pitch の符号は「起こす」がプラスになるよう反転して euler[1] に渡している。
+    #
+    # 【なぜ mujoco.mju_euler2Quat を使わないか】試したところ、往復
+    #   （オイラー→クオータニオン→オイラーの逆変換）で値が一致しなかった
+    #   （'xyz' の合成順がscipyの'xyz'外因性回転と異なるため）。「いまの姿勢を
+    #   取り込む」ボタンで逆変換が要るので、往復とも scipy に統一した。
+    def _root_quat_from_sliders(roll_deg, pitch_deg, yaw_deg):
+        """スライダー3本（度）→ root の四元数（mujoco wxyz 順）。"""
+        if root_quat0 is None:
+            return None
+        r = _Rotation.from_euler("xyz", [roll_deg, -pitch_deg, yaw_deg], degrees=True)
+        qx, qy, qz, qw = r.as_quat()
+        delta = np.array([qw, qx, qy, qz])
+        newq = np.zeros(4)
+        mujoco.mju_mulQuat(newq, delta, root_quat0)
+        return newq
+
+    def _sliders_from_root_quat(cur_quat_wxyz):
+        """root の現在の四元数 → スライダー3本（度）。取り込みボタン用の逆変換。"""
+        if root_quat0 is None:
+            return 0.0, 0.0, 0.0
+        inv_base = np.zeros(4)
+        mujoco.mju_negQuat(inv_base, root_quat0)   # 単位四元数の逆＝共役
+        delta = np.zeros(4)
+        mujoco.mju_mulQuat(delta, cur_quat_wxyz, inv_base)
+        r = _Rotation.from_quat([delta[1], delta[2], delta[3], delta[0]])
+        e = r.as_euler("xyz", degrees=True)
+        return float(e[0]), float(-e[1]), float(e[2])
+
+    # 注意：body_roll 等の tk.DoubleVar は tk.Tk()（win）の生成後でないと
+    #   作れない（"Too early to create variable: no default root window"）。
+    #   このすぐ下（win = tk.Tk() の直後）で作る。
 
     # ---- 前回の保存を読む（旧ファイルからも引き継ぐ）--------------------
     # 注意：シーンから始めたときは旧保存を読まない（2026-07-29）。
@@ -556,6 +616,16 @@ def main():
     # 注意：最前面に固定しない（2026-07-28、ユーザーの要望）。他の窓を見るたびに
     #   ビューアが邪魔になるため。MuJoCoの3D窓とパネルは別窓なので、必要なら
     #   タスクバーから前面に出せる。
+
+    # 体ぜんたい（向き・位置）のスライダー変数（2026-08-16 新設）。
+    #   win（tk.Tk()）の生成直後に置く。tk.Variable系はデフォルトの root
+    #   ウィンドウが無いと作れない。
+    body_roll = tk.DoubleVar(value=0.0)
+    body_pitch = tk.DoubleVar(value=0.0)
+    body_yaw = tk.DoubleVar(value=0.0)
+    body_dx = tk.DoubleVar(value=0.0)   # 前後[cm]（世界+X方向。太郎は常に+Xを向く）
+    body_dy = tk.DoubleVar(value=0.0)   # 左右[cm]
+    body_dz = tk.DoubleVar(value=0.0)   # 高さ[cm]
 
     outer = tk.Frame(win); outer.pack(fill="both", expand=True)
     cv = tk.Canvas(outer, highlightthickness=0)
@@ -907,6 +977,22 @@ def main():
     tk.Checkbutton(sec_pose.body, text="左右を対称に動かす（片方を動かすともう片方も同じ角度）",
                    variable=st_sym, fg="#06a").pack(anchor="w", padx=14)
 
+    # ---- 体ぜんたい（2026-08-16 新設）------------------------------------
+    # 【なぜ要るか】依頼書の背景：関節43個は動かせるが、体全体の向き
+    #   （仰向け／起きている）は動かせず、座位のシーンが作れなかった。
+    sec_body = Section(sec_pose.body, "　体ぜんたい（向き・位置）", True)
+    tk.Label(sec_body.body, fg="#666", font=("", 8), justify="left",
+             text="0度＝読み込み時の姿勢のまま。「前後にたおす」を+にすると起き上がる方向\n"
+                  "（座位_床_柵なしシーンで実測：+30度で体幹の傾き39.7→69.3度）。").pack(
+        anchor="w", padx=14)
+    slider(sec_body.body, "前後にたおす[度]", body_pitch, -90, 90, 1, width=16, length=200,
+           note="＋＝起こす（座位に近づく）／－＝倒す（仰向けに近づく）")
+    slider(sec_body.body, "左右にたおす[度]", body_roll, -90, 90, 1, width=16, length=200)
+    slider(sec_body.body, "ひねる[度]", body_yaw, -180, 180, 1, width=16, length=200)
+    slider(sec_body.body, "高さ[cm]", body_dz, -50, 50, 1, width=16, length=200)
+    slider(sec_body.body, "前後の位置[cm]", body_dx, -100, 100, 1, width=16, length=200)
+    slider(sec_body.body, "左右の位置[cm]", body_dy, -100, 100, 1, width=16, length=200)
+
     joint_vars = []
     _by_key = {}          # 関節名 → スライダー（左右連動に使う）
     _sym_busy = [False]   # 連動の再帰を防ぐ
@@ -1051,6 +1137,19 @@ def main():
         try:
             for jd in joints:
                 jd["var"].set(round(float(np.degrees(d.qpos[jd["pair"][0][1]])), 1))
+            # 体ぜんたい（向き・位置）も取り込む（2026-08-16 新設）。
+            #   取り込まないと、直前に手で倒した体の向きがスライダー表示に
+            #   反映されないまま残り、「固定」を押した瞬間に古い向きへ飛ぶ
+            #   （このdocstring上のバグと同じ形）。
+            if root_qadr is not None:
+                r, p, y = _sliders_from_root_quat(d.qpos[root_qadr + 3:root_qadr + 7])
+                body_roll.set(round(r, 1))
+                body_pitch.set(round(p, 1))
+                body_yaw.set(round(y, 1))
+                offset_m = d.qpos[root_qadr:root_qadr + 3] - root_pos0
+                body_dx.set(round(float(offset_m[0]) * 100.0, 1))
+                body_dy.set(round(float(offset_m[1]) * 100.0, 1))
+                body_dz.set(round(float(offset_m[2]) * 100.0, 1))
         finally:
             _sym_busy[0] = False
         msg.config(text="いまの姿勢をスライダーに取り込みました", fg="#0a7")
@@ -1739,6 +1838,13 @@ def main():
     def restore_supine():
         if root_qpos0 is not None:
             d.qpos[root_qadr:root_qadr + 7] = root_qpos0
+        # 体ぜんたいのスライダー（向き・位置）も0へ戻す（2026-08-16 新設）。
+        #   このスライダーは読み込み時の姿勢からの**差分**として持っているので、
+        #   qposだけ戻してスライダー表示を残すと、次に「固定」が効いた瞬間に
+        #   毎tickの上書き（下のstep内）で元の傾きへ引き戻されてしまう。
+        #   依頼書「6本のスライダー表示もそれに追従させる」に対応。
+        for v in (body_roll, body_pitch, body_yaw, body_dx, body_dy, body_dz):
+            v.set(0.0)
         for jd in joints:
             ang = np.radians(jd["var"].get())
             for jid, qadr in jd["pair"]:
@@ -2589,6 +2695,17 @@ def main():
                 if _neck_tgt and st_hold_head.get() and hands.holding:
                     hands.hold(target=_neck_tgt)
                     _hold_tgt = dict(_neck_tgt)
+                # 体ぜんたいの向き・位置（2026-08-16 新設）。関節と同じく
+                #   「固定」がONのときだけ、毎tickスライダーの値で上書きする。
+                if root_qadr is not None:
+                    newq = _root_quat_from_sliders(
+                        body_roll.get(), body_pitch.get(), body_yaw.get())
+                    if newq is not None:
+                        d.qpos[root_qadr + 3:root_qadr + 7] = newq
+                    d.qpos[root_qadr:root_qadr + 3] = root_pos0 + np.array(
+                        [body_dx.get(), body_dy.get(), body_dz.get()]) / 100.0
+                    if root_dofadr is not None:
+                        d.qvel[root_dofadr:root_dofadr + 6] = 0.0
 
             # 物理を止めているあいだは step() が呼ばれず、おもちゃを運ぶ処理も
             #   動かない。待たずに定位置へ置く（2026-07-27）。

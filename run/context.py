@@ -37,6 +37,14 @@ class Ctx:
         self.n_steps = n_steps
         self.dt = dt
         self._log = log or (lambda row: None)
+        # 【なぜ、2026-08-15】プラグインが「学習を打ち切りたい」と伝える手段が
+        #   無かった（学習ループには早期終了の仕組みが無かった）。
+        #   停止シグナルの土台として2つの属性を追加する（run/trainer.py が
+        #   on_checkpointの直後にstop_requestedを見てbreakする）。
+        #   注意：既存のどのプラグインもこの属性を読み書きしていないので、
+        #   既存挙動は変わらない（仕様「作るもの」1節）。
+        self.stop_requested = False
+        self.stop_reason = None
 
     def log(self, row):
         self._log(row)

@@ -98,11 +98,24 @@ def default_scene(name="無題"):
             "head_elongation": None,     # None なら core の既定値
             "flexion": False,            # 四肢の屈曲姿勢
             "flexion_stiffness": None,
+            # 【2026-08-13新設】関節可動域の限界へ近づく抵抗を滑らかにする（既定OFF）。
+            #   実体は taro_core の joint_compliance.apply_joint_compliance。
+            #   有効化には groups か joints のどちらかを明示指定する必要がある
+            #   （両方 None のままONにするとValueError）。
+            "joint_compliance": False,
+            "joint_compliance_groups": None,     # 例: ["shoulder"]
+            "joint_compliance_joints": None,     # 例: ["right_shoulder_ad_ab"]
+            "joint_compliance_params": None,     # 例: {"d0": 0.3}（個別上書き）
             "limb_scale": 1.0,
             "limb_fix": True,
             "distal_mass": 1.0,
             "neck_fix": True,            # 首の筋力補正
             "eye_rest_vertical_deg": 0.0,
+            # 【2026-08-17新設】眼球6関節に受動的な中央復帰バネを入れる（既定OFF）。
+            #   実体は taro_core の infant_body.apply_eye_centering_spring。
+            #   既定OFF＝眼球は筋入力ゼロのとき可動域の壁まで転がり落ちる、従来通りの挙動
+            #   （実測・根拠は infant_body.py の EYE_CENTERING 直前のコメント参照）。
+            "eye_centering": False,
             # 視線誘導反射の実装バージョン（2026-07-29 追加）。
             #   注意：`e_toy_env` の既定は "1"（旧版）で、16個の測定スクリプトが
             #     それぞれ `E_ORIENT_V=2` を指定していた＝設定の散らばりそのもの。
@@ -369,6 +382,7 @@ def build(scene, orient=None, vor=True, seed=0, verbose=False, actuation_model=N
     if w["floor_condim"] is not None:
         os.environ["E_FLOOR_CONDIM"] = str(w["floor_condim"])
     os.environ["E_EYE_REST_V"] = str(b["eye_rest_vertical_deg"])
+    os.environ["E_EYE_CENTERING"] = "1" if b.get("eye_centering") else "0"
     os.environ["E_ORIENT_V"] = str(b["orienting_version"])
     os.environ["E_NECK"] = "1" if b["neck_fix"] else "0"
     os.environ["E_LIMBS"] = "1" if b["limb_fix"] else "0"
@@ -392,8 +406,9 @@ def build(scene, orient=None, vor=True, seed=0, verbose=False, actuation_model=N
     TE.PARENT_LOST_DEG = float(w["parent_lost_deg"])
     TE.TOY_APPROACH_SEC = float(toy["approach_sec"])
     TE.TOY_APPROACH_FROM = str(toy["approach_from"])
-    # 眼球の基準角はモジュール定数として読まれるので直接入れる
+    # 眼球の基準角・中央復帰バネのON/OFFはモジュール定数として読まれるので直接入れる
     IB.EYE_REST_VERTICAL_DEG = float(b["eye_rest_vertical_deg"])
+    IB.EYE_CENTERING = bool(b.get("eye_centering", False))
 
     # --- 2. 身体の設定を**シーンから直接**作る -------------------------------
     #   注意：`body_kwargs_from_env` は使わない。環境変数を見る関数を通すと、
@@ -459,6 +474,13 @@ def build(scene, orient=None, vor=True, seed=0, verbose=False, actuation_model=N
         if hasattr(u, "init_position"):
             u.init_position = u.data.qpos.copy()
     summary = constraint_summary(scene)
+    # 【2026-08-15・座位保持の学習】立ち直り反射（層2、righting_damper.py）の
+    #   support_fraction（体幹がどれだけ外部で支えられているか）は、
+    #   pinned_groupsから作る（righting_damper.pyのdocstring【support_fractionの
+    #   取得方法】参照）。taro_coreはrun配下に依存しない設計なので、e_scene.pyが
+    #   計算済みの値をenv属性として渡す（taro_core側からe_scene.pyをimportしない、
+    #   実装ノウハウ2026-08-15項の必須要件）。
+    env.unwrapped._pinned_groups = summary["pinned_groups"]
     print(f"[scene] 「{scene['name']}」 固定={summary['pinned_groups']} "
           f"自由={summary['free_groups']} root_pinned={summary['root_pinned']} "
           f"おもちゃ={'あり' if summary['toy_enabled'] else 'なし'}")
@@ -585,6 +607,10 @@ def _body_kwargs(b, verbose=False):
         "flexion": bool(b["flexion"]),
         "flexion_stiffness": (None if b["flexion_stiffness"] is None
                               else float(b["flexion_stiffness"])),
+        "joint_compliance": bool(b.get("joint_compliance", False)),
+        "joint_compliance_groups": b.get("joint_compliance_groups"),
+        "joint_compliance_joints": b.get("joint_compliance_joints"),
+        "joint_compliance_params": b.get("joint_compliance_params"),
     }
     if b["shape"]:
         scales = dict(NEWBORN_SHAPE_DEFAULTS)
@@ -623,8 +649,13 @@ def _apply_setup(env, s, age, verbose=False):
             free = free + ("head",)
         names = joints_to_support(u.model, free=free)
         if names:
+            # 注意：age は頭(HOLD_JOINTS)専用の重力モーメント基準でスケーリングする
+            #   仕組みなので、体幹・脚など別の関節集合を支えるこの chair には
+            #   実質的に効かない（CaregiverHands._stiffness_for_age のガード）。
+            #   それでも配線しておくのは、将来 head を含む構成で呼ばれても
+            #   自動的に一貫した挙動になるようにするため。
             chair = CaregiverHands(u.model, u.data, joints=tuple(names),
-                                   stiffness=sup.get("stiffness"))
+                                   stiffness=sup.get("stiffness"), age=age)
             chair.hold(target=sup.get("target_deg"), verbose=False)
             u._chair_support = chair          # 後から緩められるように持っておく
             if verbose:
@@ -640,7 +671,10 @@ def _apply_setup(env, s, age, verbose=False):
     # 注意：四肢の筋緊張は `apply_state` の**あと**に効かせる（`_apply_limb_tone`）。
     #   目標角を「今の姿勢」にするので、シーンの姿勢を入れる前だと
     #   リセット直後の伸びきった姿勢が落ち着き先になってしまう。
-    hands = CaregiverHands(u.model, u.data, stiffness=hold.get("stiffness"))
+    # 月齢が上がると頭の重力モーメントが増える分、支える強さも自動的に
+    # 大きくする（4ヶ月は無指定なら従来どおり200のまま変わらない。
+    # 実験ファイルで stiffness を明示していればそちらが優先される）。
+    hands = CaregiverHands(u.model, u.data, stiffness=hold.get("stiffness"), age=age)
     hands.hold(target=hold.get("target_deg"), verbose=verbose)
     return hands
 

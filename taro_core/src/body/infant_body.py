@@ -806,7 +806,9 @@ def apply_runtime_corrections(model, data, age, neck=True, limbs=True, head_mass
                               flexion_stiffness=None, actuation_model=None,
                               tone=True, tone_stiffness=None,
                               neck_tone=True, neck_tone_stiffness=None,
-                              neck_tone_target=None):
+                              neck_tone_target=None,
+                              joint_compliance=False, joint_compliance_groups=None,
+                              joint_compliance_joints=None, joint_compliance_params=None):
     """モデル構築後に上書きする補正（筋力＝アクチュエータのgear）。
 
     - **首の筋力**（`infant_neck`）：MIMoは gear を geom の体積から計算するため、
@@ -827,6 +829,14 @@ def apply_runtime_corrections(model, data, age, neck=True, limbs=True, head_mass
     `run/scene_tools/e_scene.py` の `build()` 側で行っている（`setup.limb_tone` が
     未設定のまま `flexion=True` のときに警告を出す）。詳細は監査
     作業記録（非公開）「中1」。
+
+    注意（2026-08-13・関節可動域の壁を滑らかにする機構）：`joint_compliance=True` のとき、
+    `joint_compliance.apply_joint_compliance(...)` を呼び、対象関節の `model.jnt_solimp`
+    を書き換える（既定OFF）。呼ぶ順序は必ず `apply_physiological_flexion`（flexion）の
+    **後**にする——flexion が `model.jnt_range` を狭めることがあり、joint_compliance は
+    「今のjnt_range」から軟化ゾーンの幅を計算するため、範囲が確定した後でないと幅がずれる。
+    詳細は `taro_core/src/body/joint_compliance.py` のモジュールdocstringと
+    `doc/人間模倣からの逸脱リスト.md` 項㉑。
     """
     # 頭の質量は首・四肢より先。首の補正が頭の質量を前提に計算するため。
     if head_mass:
@@ -863,6 +873,15 @@ def apply_runtime_corrections(model, data, age, neck=True, limbs=True, head_mass
     if neck_tone:
         apply_neck_tone(model, float(age), stiffness=neck_tone_stiffness,
                         target=neck_tone_target, data=data)
+    # 【2026-08-13新設】関節可動域の限界へ近づく抵抗を滑らかにする（既定OFF）。
+    #   必ず flexion（jnt_rangeを狭めうる）の後に呼ぶ。上のdocstring参照。
+    #   中立姿勢への復元力（tone・neck_tone、上のブロック）とは別の仕組みのまま
+    #   実装した（判断3。将来統合されうるが今回は分離。joint_compliance.py参照）。
+    if joint_compliance:
+        from joint_compliance import apply_joint_compliance
+        apply_joint_compliance(model, groups=joint_compliance_groups,
+                               joints=joint_compliance_joints,
+                               params=joint_compliance_params)
 
 
 # 眼球を正中位に戻す ----------------------------------------------------------
@@ -931,6 +950,103 @@ def center_eyes(model, data, verbose=False, vertical_deg=None):
         txt = " ".join(f"{nm.split(':')[-1]}{v:+.1f}" for nm, v in before)
         print(f"[eyes] 正中位に戻した {n}関節（戻す前: {txt}）"
               f" [Tier2: 覚醒時の眼位の基準は正中位]")
+    return n
+
+
+# ---- 眼球の受動的な中央復帰バネ（既定OFF）・2026-08-17 -----------------------
+#
+# 【なぜ要るか】`center_eyes` はリセットの瞬間に眼球を正中位へ**qposで**戻すだけで、
+#   以降を保持する力は無い（jnt_stiffness=0が既定）。実測（座位_視界プローブ_2026-08-17、
+#   行動ゼロ200step、`E/scripts/e_toy_env.py` 経由の筋アクチュエータ込み）：
+#     t=  0  水平±0.0度 垂直-0.0度
+#     t= 50  水平±9.0度 垂直-1.8度
+#     t=100  水平±32.6度 垂直-13.5度
+#     t=199  水平±44.5度 垂直-47.0度（＝可動域の壁 ±45度／-47度 まで転がり落ちて静止）
+#   左右対称に外向きへ倒れる＝重力ではなく筋の受動力(fp)の非対称な釣り合い点が原因と
+#   推測される（torsional軸はアクチュエータが無く±1度以内に留まり、水平・垂直だけが
+#   壁まで落ちる）。
+#
+# 【人間模倣】眼球プラント（外眼筋＋眼窩結合組織）の受動弾性。
+#   Robinson 1964 (J Physiol) が粘弾性バネ（約1.5g/度・機械的時定数 T2=285ms、
+#   基準位置＝第一眼位）として定式化【原文確認済 2026-08-17】。
+#   留保：①「神経支配ゼロで厳密に正面へ収束する」とまでは原文は明言していない
+#   （第一眼位はバネ基準長として定義上置かれている）②麻酔下のヒトの眼位は深度により
+#   外・上や下へ偏り、下方偏位を神経性で説明する報告(2023)もある＝休止位置の厳密な
+#   値には議論がある。詳細: E/docs/座位保持/文献調査/2026-08-17_眼球の受動的中央復帰.md
+#   [Tier2：受動弾性の存在は確実、休止位置=正面は単純化]。
+#
+# 【機構】`apply_neck_tone` と同じ jnt_stiffness + qpos_spring（受動のバネ）。
+#   ★アクチュエータ（能動の筋入力）には一切触れない。MuJoCoの受動力
+#   （jnt_stiffness由来）とアクチュエータ力は同じdofに単純加算されるだけなので、
+#   反射・学習による能動的な眼球運動と衝突せず共存する。
+#
+# 【剛性の較正、2026-08-17】目安「解放から0.2〜0.5秒（sim時間）で中央±5度以内」
+#   （人間の眼球プラントの時定数 約200ms に対応）。
+#   眼球関節の実効慣性は armature（.0002、MIMo_model.xml定義）がほぼ全て
+#   （mj_fullMで実測: M[dof,dof]=0.00020007 ≈ armature 0.0002 が99.97%を占める。
+#   `calibrate.py` 2026-08-17）。臨界減衰 c=2√(k・I) を使い、env.step（実際の
+#   筋アクチュエータ込み、dt=10ms）で左眼水平関節を+40度に変位→解放して実測：
+#     k=0.005  0.62秒（目安の外・遅い）
+#     k=0.01   0.47秒
+#     k=0.02   0.35秒
+#     k=0.03   0.29秒  ← 採用（目安の中央寄り）
+#     k=0.05   0.23秒
+#     k=0.08   0.18秒（目安の外・速い）
+#   → k=0.03 N・m/rad を採用。
+EYE_CENTERING = _os_eye.environ.get("E_EYE_CENTERING", "0") == "1"
+EYE_CENTERING_STIFFNESS = 0.03
+# 眼球関節の実効慣性 [kg・m²]（フォールバック）。armature が支配的なので、
+# もし armature が読めない/0の場合の保険としてのみ使う（通常は model.dof_armature を使う）。
+EYE_CENTERING_INERTIA_FALLBACK = 0.0002
+
+
+def apply_eye_centering_spring(model, data=None, vertical_deg=None, stiffness=None,
+                               verbose=False):
+    """眼球6関節に、受動的な中央復帰バネを入れる。既定OFF（`EYE_CENTERING`）。
+
+    【なぜ要るか】docstring直前のコメント参照。center_eyesはリセット時に一度だけ
+    qposを戻すが、以降を留める力が無いため、筋の受動力で可動域の壁まで転がり落ちる
+    （実測はコメント参照）。
+
+    ★アクチュエータ（能動の筋入力）には触らない。受動のjnt_stiffness+qpos_springだけを
+    使うので、反射・学習による能動的な眼球運動と共存できる。
+
+    Args:
+        model, data: MuJoCoのモデルとデータ（dataは damping計算の保険にのみ使う可能性を
+            残すが、現状は未使用。center_eyesと引数の形を合わせるために受け取る）
+        vertical_deg: バネの目標角（上下、度）。None なら EYE_REST_VERTICAL_DEG。
+            水平・ねじりの目標は常に0度（正中位）。
+        stiffness: バネの強さ[N・m/rad]。None なら EYE_CENTERING_STIFFNESS(=0.03)。
+        verbose: 設定内容を表示するか
+
+    Returns:
+        int: バネを入れた関節の数（EYE_CENTERING=Falseなら0で何もしない）
+    """
+    import numpy as np
+    if not EYE_CENTERING:
+        return 0
+    k = float(EYE_CENTERING_STIFFNESS if stiffness is None else stiffness)
+    v = np.radians(float(EYE_REST_VERTICAL_DEG if vertical_deg is None else vertical_deg))
+    n = 0
+    for j in range(model.njnt):
+        name = model.joint(j).name
+        if "eye" not in name:
+            continue
+        adr = int(model.jnt_qposadr[j])
+        dof = int(model.jnt_dofadr[j])
+        model.jnt_stiffness[j] = k
+        model.qpos_spring[adr] = v if "vertical" in name else 0.0
+        I = float(model.dof_armature[dof])
+        if I <= 0.0:
+            I = EYE_CENTERING_INERTIA_FALLBACK
+        c_crit = 2.0 * np.sqrt(max(k, 1e-12) * I)
+        # 減衰は元の値と臨界減衰の大きい方（元より弱くはしない。apply_neck_toneと同じ方針）
+        model.dof_damping[dof] = max(float(model.dof_damping[dof]), c_crit)
+        n += 1
+    if verbose and n:
+        print(f"[eye-centering] {n}関節に受動バネ stiffness={k}N・m/rad "
+              f"目標: 水平/ねじり=0度 垂直={np.degrees(v):+.1f}度 "
+              f"[人間模倣: 眼球プラントの受動弾性(Robinson 1964系・一次文献は調査中)]")
     return n
 
 

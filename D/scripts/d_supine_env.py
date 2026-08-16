@@ -59,7 +59,10 @@ class SupineMimoEnv(LeanMimoEnv):
 
     def __init__(self, settle_steps=100, jitter=0.01, head_elongation=1.0,
                  body_corrections=True, limb_scale=1.0, limb_fix=True,
-                 distal_mass=1.0, flexion=False, flexion_stiffness=None, **kwargs):
+                 distal_mass=1.0, flexion=False, flexion_stiffness=None,
+                 joint_compliance=False, joint_compliance_groups=None,
+                 joint_compliance_joints=None, joint_compliance_params=None,
+                 **kwargs):
         self._settle_steps = settle_steps
         self._jitter = jitter
         # 【2026-07-25】頭の楕円化。MIMoの頭は球で、頭囲は正しいが真上から見た長さが
@@ -85,6 +88,13 @@ class SupineMimoEnv(LeanMimoEnv):
         # 既定OFF＝Viewerでの目視を通してから既定ONにする。
         self._flexion = bool(flexion)
         self._flexion_stiffness = flexion_stiffness
+        # 【関節可動域の壁を滑らかにする・2026-08-13】既定OFF。実体は
+        # taro_core の infant_body.apply_joint_compliance（身体は太郎そのもの）。
+        # 中立姿勢への復元力（limb_tone）とは別の仕組み（判断3、joint_compliance.py参照）。
+        self._joint_compliance = bool(joint_compliance)
+        self._joint_compliance_groups = joint_compliance_groups
+        self._joint_compliance_joints = joint_compliance_joints
+        self._joint_compliance_params = joint_compliance_params
         super().__init__(**kwargs)
 
         # --- 仰向けにする（roll_over.py の supine と同じ式）---
@@ -112,7 +122,11 @@ class SupineMimoEnv(LeanMimoEnv):
                                       flexion_stiffness=self._flexion_stiffness,
                                       # 筋肉モデルでは筋力が fmax にあり、gear は毎ステップ
                                       #   上書きされる。補正が実効を持つよう渡す（2026-07-25）。
-                                      actuation_model=getattr(self, "actuation_model", None))
+                                      actuation_model=getattr(self, "actuation_model", None),
+                                      joint_compliance=self._joint_compliance,
+                                      joint_compliance_groups=self._joint_compliance_groups,
+                                      joint_compliance_joints=self._joint_compliance_joints,
+                                      joint_compliance_params=self._joint_compliance_params)
 
         # 【2026-07-25】床のころがり摩擦（感度分析用）。既定は触らない。
         # MIMoの床は friction=[1.0, 0.005, 0.0001]・condim=3 ＝「すべり摩擦しか

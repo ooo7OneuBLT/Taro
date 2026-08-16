@@ -236,6 +236,81 @@ def _setup_reflex_common(taro, cfg, env, *, verbose=True):
     return True
 
 
+def _setup_postural_gate(taro, cfg, env, *, verbose=True):
+    """姿勢制御反射（層1）の配線。Taro.__init__・on_body_change の両方から呼ぶ。
+
+    【なぜ両方から呼ぶ必要があるか】_setup_reflex_common と同じ理由：
+    アクチュエータ・関節のindexはenv（MuJoCoモデル）ごとに固定される値。
+    体を作り直す実験（cfg.grows）ではenvが作り直されるたびにこれらが変わりうるため、
+    初回構築（__init__）だけでなく、体が変わるたび（on_body_change）にも
+    組み立て直す必要がある。
+
+    仕様：作業記録（非公開）
+    設計：作業記録（非公開）
+    """
+    if not cfg.posture_reflex:
+        # 既定OFF。属性は必ず持たせておく（e_toy_env.py側がNoneかどうかで
+        #   ON/OFFを判定できるように、仕様の必須要件）。
+        taro.postural_gate = None
+        return
+    if not cfg.is_muscle:
+        raise ValueError(
+            "posture_reflex=True には actuation=muscle が要る。\n"
+            "  postural_gate.py はMuscleModel前提（行動配列が2*n_actuator次元、"
+            "neg側/pos側の拮抗筋構造）でゲートを組み立てる。")
+    from spinal_cord.postural_gate import PosturalGate
+    taro.postural_gate = PosturalGate(env.unwrapped.model)
+    # 【なぜ、2026-08-15・想定外】E/scripts/e_toy_env.py の step() は
+    #   VOR・orienting_reflexと同じ並びでreflexを適用する設計（仕様C節）だが、
+    #   VOR/orienting_reflexはenvが自前で構築するのに対し、postural_gate/
+    #   righting_damperはTaro側（taro_setup.py）で構築される。envがstep()内で
+    #   これへ到達するには env.taro の参照が要る。trainer.pyの変更はreward switch
+    #   文への追加のみに制限されているため（触ってよいファイルの一覧）、
+    #   ここ（_setup_postural_gate/_setup_righting_damper、どちらも新設が
+    #   許可されている関数）でenv.unwrapped.taroを設定する。この配線が
+    #   仕様の想定と一致しているかは作業記録「想定外」に明記する。
+    env.unwrapped.taro = taro
+    if verbose:
+        print(f"[姿勢制御反射] postural_gate ON: 対象アクチュエータ数="
+              f"{len(taro.postural_gate.actuator_idx)}"
+              f" tilt_deadzone_deg={taro.postural_gate.tilt_deadzone_deg}", flush=True)
+
+
+def _setup_righting_damper(taro, cfg, env, *, verbose=True):
+    """立ち直り反射（層2）の配線。Taro.__init__・on_body_change の両方から呼ぶ。
+
+    頭・首を動かす筋（act:head_tilt、前後・Y軸）のneg/pos indexを、
+    体が変わるたびに引き直す（_setup_postural_gateと同じ理由）。
+    """
+    if not cfg.righting_reflex:
+        taro.righting_damper = None
+        taro.righting_neg_indices = None
+        taro.righting_pos_indices = None
+        return
+    if not cfg.is_muscle:
+        raise ValueError(
+            "righting_reflex=True には actuation=muscle が要る。\n"
+            "  righting_damper.py はMuscleModel前提（neg_indices/pos_indicesの"
+            "拮抗筋構造）でバイアスを配る。")
+    from spinal_cord.righting_damper import RightingDamper
+    taro.righting_damper = RightingDamper(
+        k_d0=float(cfg.righting_reflex_gain),
+        deadzone_dps=float(cfg.righting_reflex_deadzone_dps))
+    model = env.unwrapped.model
+    n = int(model.nu)
+    # 頭の前後(pitch)を動かす筋は act:head_tilt の1本のみ（infant_neck.py 参照。
+    #   act:head_tilt_side は左右(roll)用でここでは対象外）。
+    aid = int(model.actuator("act:head_tilt").id)
+    taro.righting_neg_indices = [aid]
+    taro.righting_pos_indices = [aid + n]
+    # env.taroの配線理由は_setup_postural_gate冒頭のコメント参照。
+    env.unwrapped.taro = taro
+    if verbose:
+        print(f"[立ち直り反射] righting_damper ON: k_d0={cfg.righting_reflex_gain} "
+              f"deadzone_dps={cfg.righting_reflex_deadzone_dps} "
+              f"対象アクチュエータ=act:head_tilt(neg={aid}, pos={aid + n})", flush=True)
+
+
 class _DoubleTouchBonusContributor:
     """taro.reward_contributors の1要素（2026-08-05・全身一般化の設計1-4節）。
 
@@ -426,7 +501,8 @@ class Taro:
 
         # ---- ⑤ 脳 -----------------------------------------------------------
         self.brain = TaroBrainWithMotor(vocab_size=3, sensory_dim=self.sdim,
-                                        n_actuators=self.n_act, proprio_dim=self.out_dim)
+                                        n_actuators=self.n_act, proprio_dim=self.out_dim,
+                                        latent_deterministic=bool(cfg.latent_deterministic))
         # 【運動性喃語（脊髄CPG）】noise=colored のとき太郎の中で色付き探索を有効化する。
         # 既定 white では呼ばれない＝spinal_cpg=None＝白色ガウス＝従来と数値完全一致。
         if str(cfg.noise) == "colored":
@@ -450,6 +526,11 @@ class Taro:
         # spinal_cpg）は1バイトも変わらない。cfg._check() で actuation=muscle・
         # noise!=colored であることは既に保証済み（config.pyのバリデーション）。
         self.reflex_common_active = _setup_reflex_common(self, cfg, env, verbose=verbose)
+        # 【2026-08-15・座位保持の学習】層1（姿勢制御反射・ゲート）・層2（立ち直り反射・
+        #   角速度ダンパー）。既定OFF＝taro.postural_gate/taro.righting_damperはNoneの
+        #   まま＝E/scripts/e_toy_env.py側のstep()は何も呼ばず、既存実験の挙動は不変。
+        _setup_postural_gate(self, cfg, env, verbose=verbose)
+        _setup_righting_damper(self, cfg, env, verbose=verbose)
 
         # 【2026-07-25】D-a/D-b の層は**太郎の中（core）のもの**を使う。
         # 旧実装はここで別に作っており、core の層は作られるだけで使われていなかった
@@ -667,6 +748,10 @@ class Taro:
         #   self.cfg.spinal_drive_mode!="reflex_common" のため即Falseで戻り、
         #   何も実行しない＝既存の成長実験の挙動は1ビットも変わらない）。
         self.reflex_common_active = _setup_reflex_common(self, self.cfg, env, verbose=False)
+        # 【2026-08-15・座位保持の学習】既定OFF（cfg.posture_reflex/righting_reflex=False）
+        #   では即returnして何もしない＝既存の成長実験の挙動は1ビットも変わらない。
+        _setup_postural_gate(self, self.cfg, env, verbose=False)
+        _setup_righting_damper(self, self.cfg, env, verbose=False)
         if self.fusion.touch is None or not hasattr(self.fusion.touch, "rebuild"):
             return None
         tm = build_touch_map_from_env(env)

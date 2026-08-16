@@ -1,0 +1,24 @@
+{
+  "name": "頭を持ち上げる：仰向け・自己モデル引き継ぎ・posture_height報酬・seed0",
+  "note": "2026-08-15。座位保持の学習の代替として設計変更した1本目。【なぜ座らせないか】当初はリクライニング座位のシーンで座位保持を学習させる計画だったが、2026-08-15にscratchpadで実測したところ、体を起こす角度(recline_deg)と股関節の角度を7条件振っても、settle 3秒後の体幹の傾きが+4.0〜+47.9度にしかならず（座位＝+90度付近）、頭の高さも14.1〜68.4cmとばらついた。原因は構造的で、MIMoに座位姿勢を作る機能が無く、e_toy_env._apply_recline が仰向けの体を丸ごとy軸回転させているだけのため、起こすと四肢が干渉して崩れる。加えて既存のリクライニングシーンは root_pinned=True（体を空間に固定）で倒れない状態であり、姿勢制御の学習には使えない。⇒『座らせてから保つ』のではなく『仰向けから頭を上げる』に変更した。報酬(posture_height=頭の高さの相対差)は変更していないので、太郎がどこまで起こせるか（首だけか体幹まで届くか）がそのまま結果になる。人間の順序でも頭部挙上(腹臥位1〜2ヶ月)が座位(5〜6ヶ月)より先。【なぜこのシーンか】新生児_仰向け_柵なし は引き継ぎ元モデル(E/logs/selfmodel_age4_fence_free/model_seed0.pt、自己モデル_月齢4固定_柵なし_15000_seed0.json)を学習したシーンそのものなので、taro.model の読み込みで層の形が食い違わない（Taro._load は strict=False で、形の合わない層は例外を出さず白紙のまま学習し直しになる＝2026-07-30の触覚・2026-08-05のprogress内部状態で実際に踏んだ）。【引き継ぎの意図】人間は自分の体をある程度分かってから姿勢を獲得するので、自己モデル(margin +43 / 自他の区別98.7%)を学習済みの脳から始める。【反射】層1(posture_reflex)・層2(righting_reflex)は2026-08-15の実装をONにする。既定値のまま(gain=0.02 / fall_deg=30.0)。【注意】reward=posture_height にすると trainer.py:796 で rew_task が置き換わり、内発的報酬(progress)が学習に効かなくなる（progress自体はログ用に計算は続く）。目標Eは道具的な位置づけ（メモリ project-taro-e-instrumental-status）なので許容するが、太郎の『本能だけ与えて答えは教えない』方針からの逸脱として認識した上での選択。ステップ数は引き継ぎ元と同じ15000。",
+  "scene": "新生児_仰向け_柵なし",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 4.0,
+    "posture_reflex": true,
+    "righting_reflex": true,
+    "righting_reflex_gain": 0.02,
+    "posture_fall_deg": 30.0,
+    "reward": "posture_height",
+    "model": "E/logs/selfmodel_age4_fence_free/model_seed0.pt",
+    "save": "E/logs/head_lift_supine/model_seed0.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 15000,
+    "seed": 0,
+    "checkpoint": 500,
+    "csv": "E/logs/head_lift_supine/seed0.csv"
+  },
+  "plugins": {}
+}

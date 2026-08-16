@@ -74,6 +74,26 @@ TARO_DEFAULTS = {
     #     非対称が起きる（2026-07-30 の点検で発覚）。
     "vor":           (True, "前庭動眼反射（頭が動いても視線を保つ）", None),
     "orienting_reflex": (False, "視線誘導反射（動くものへ目を向ける）", None),
+    # 座位保持の学習（2026-08-15）。層1＝姿勢制御反射（ゲート方式）、
+    # 層2＝立ち直り反射（角速度ダンパー、Tier3）。
+    # 設計：作業記録（非公開）
+    # 指示：作業記録（非公開）
+    "posture_reflex": (False, "姿勢制御反射（骨盤触覚+固有感覚で傾きと逆側の筋だけ通すゲート）", None),
+    "righting_reflex": (False, "立ち直り反射（前庭覚由来の角速度ダンパー、Tier3）", None),
+    "righting_reflex_gain": (0.02, "立ち直り反射のゲインk_d0（Tier3・恣意的）", None),
+    "righting_reflex_deadzone_dps": (5.0, "立ち直り反射の不感帯[deg/s]（Tier3・恣意的）", None),
+    # 【なぜこの値か、2026-08-15】可動域[-17,30.5]度に対し、postural_gate.pyの
+    # tilt_deadzone_deg(5.0度)より明確に大きい値として、postural_gate/righting_damper
+    # だけでは支えきれないほど崩れた状態を指すよう30度を暫定既定値にした[Tier3・恣意的、
+    # 文献に定量値なし]。設計3節(4)の推奨振り幅(20/30/40/50度)の中央に近い値。
+    "posture_fall_deg": (30.0, "座位が崩れたと判定するtrunk_tilt_degの閾値（Tier3）", None),
+    # 【なぜ、2026-08-16】posture_fall_degを割った"瞬間"にqposを書き戻していたため、
+    #   実測（15秒間・posture_fall_deg=20.0）で0.19秒に1回も発動し、映像が
+    #   「ゆっくり倒れて起こされる」ではなく痙攣のように見えた。太郎が
+    #   「倒れる」という経験そのものをできていなかった。閾値を割ってから
+    #   指定秒だけ待ち、待っている間に閾値より上へ戻ればカウントを取り消す。
+    #   0なら従来どおり即座に戻す（後方互換）。
+    "posture_fall_delay_sec": (1.0, "座り直しが発動するまでの遅延[秒]（0で即座、Tier3）", None),
     # 予測対象。"0"=固有感覚のみ／"vision"=+視覚／"all"=+前庭+触覚+視覚
     "target":        ("0", "予測対象 0/vision/all", "E_E1_TARGET"),
     "lam_v":         (1.0, "視覚ブロックの重み[Tier3]", "E_LAM_V"),
@@ -83,7 +103,7 @@ TARO_DEFAULTS = {
     # none＝内発的報酬を一切与えない（rew_task=0.0固定）対照条件。口元ボーナス
     #   （mouth_touch_bonus）等の外発的な項はrew_task確定後に独立して加算されるため、
     #   noneでも引き続き機能する（2026-08-13、内発的報酬完全OFFの実装）。
-    "reward":        ("progress", "内発的動機 progress/predict/none", "E_REWARD"),
+    "reward":        ("progress", "内発的動機 progress/predict/none/posture_height", "E_REWARD"),
     "ne_relative":   (True, "ノルアドレナリンを相対基準で出す", "E_NE_RELATIVE"),
     "replay":        (True, "睡眠中の経験リプレイ（記憶定着）", "E_REPLAY"),
     # 遠心性コピー＝直前の行動を次tickの入力(prev_a)として渡す仕組み。
@@ -288,6 +308,17 @@ TARO_DEFAULTS = {
         {"f0": 0.5, "A0": 1.0, "tau_f": 2.0, "tau_A": 2.0, "amp": 1.0},
         "振動子の周波数・振幅・揺らぎの大きさ・基準長への変換スケール"
         "[Tier3・感度分析対象、統合版7-2節の推奨値]", None),
+    # ---- 潜在変数のサンプリング（揺らぎ）（2026-08-16）------------------------
+    # 依頼：作業記録（非公開）、潜在変数z決定的モードの実装）
+    #   PredictiveCodingLatent.infer()は毎ステップz=mean+randn*stdでzを引き直す
+    #   （taro_core\src\brain\predictive_coding_latent.py）。実測（学習済みモデル
+    #   E/logs/座位保持_6ヶ月/model_seed0.pt、シーン「座位_6ヶ月_土台_2026-08-16」）で、
+    #   同じ観測10回のばらつきが0.8429・行動の変化量1.6052あり、これが姿勢制御が
+    #   成立しない一因だった（randn_likeをゼロにすると0.0000・0.0067＝240分の1）。
+    #   既定False＝現状不変（1ビットも挙動が変わらないことを実測で確認済み）。
+    "latent_deterministic": (False, "潜在変数zのサンプリング(揺らぎ)を切り、"
+                             "z=mean（決定的）にする。既定False＝今までどおり"
+                             "z=mean+randn*stdで毎ステップ引き直す", None),
     # ---- モデルの読み書き ---------------------------------------------------
     "model":         (None, "続きから学習するモデルのパス", "E_LOADMODEL"),
     "save":          (None, "学習後にモデルを保存するパス", "E_SAVEMODEL"),
@@ -581,9 +612,15 @@ class Config:
         # reward の列挙チェック（2026-08-13追加）。従来はここで綴りミスを
         #   検知できず、trainer.py側のelse節で黙って predict 扱いになっていた
         #   （落とし穴チェックリスト項86「黙って壊れる」と同型）。
-        if str(self.reward) not in ("progress", "predict", "none"):
+        # 【想定外・2026-08-15】触ってよいファイルの一覧は「reward の説明文への
+        #   posture_height 追記」としか書いていなかったが、この列挙チェック
+        #   （2026-08-13追加）を直さないと reward="posture_height" が
+        #   Config構築時に必ずValueErrorで落ち、実装した機能が一度も使えない。
+        #   「既存キーは触らない」の趣旨（既存キーの挙動を変えない）は保ちつつ、
+        #   新しい列挙値を通す最小限の追加として直した。作業記録に明記する。
+        if str(self.reward) not in ("progress", "predict", "none", "posture_height"):
             raise ValueError(
-                f"reward が不明: {self.reward}（progress / predict / none）")
+                f"reward が不明: {self.reward}（progress / predict / none / posture_height）")
         if self.reward == "predict":
             print("注意[config] reward=predict は【既知の欠陥】（大行動バイアス＝"
                   "大きく動くほど得なので暴れる。実測でうつ伏せ57.5%・jerk2501）", flush=True)

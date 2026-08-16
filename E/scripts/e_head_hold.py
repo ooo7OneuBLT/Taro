@@ -73,6 +73,43 @@ HOLD_JOINTS = ("head_swivel", "head_tilt", "head_tilt_side")
 
 
 # ============================================================================
+# 月齢に応じて支える強さを大きくする（2026-08-15 追加）
+# ----------------------------------------------------------------------------
+# 【なぜ要るか】月齢が上がると頭の質量・重力モーメントが増える。バネの復元力
+# k・ずれ角θの釣り合いは k・θ ≈ τ（頭の重力モーメント）なので、同じ k=200 の
+# ままだと θ=τ/k が月齢とともに拡大し、「支えているのに頭が前傾する」状態に
+# なりうる。MIMoの筋肉モデルは筋力(FMAX)を月齢で変えない
+# （2026-07-28に判明・2026-08-15に`mimoActuation/muscle.py`を再確認し今も
+# 同じと確認した）ので、月齢別の「支える力の発達」は身体側では作れない。
+# 実験条件（このファイル）側でスケーリングする。
+#
+# 【想定外（2026-08-15、実装）】この機能を作る指示の根拠になった実測値
+# 「支えたまま3秒静止での傾きが4ヶ月0.01度／6ヶ月7.71度／7ヶ月13.87度」は、
+# 現在のコードでは**再現できなかった**（実測：k=200のままで4ヶ月0.14度・
+# 6ヶ月0.16度・7ヶ月0.18度。月齢差はごくわずか）。原因と見られるのは
+# `CaregiverHands._critical_damping`（2026-07-29、コミットc43b9c9で追加）
+# ＝支えのバネに臨界減衰を入れたことで、支えの見た目のずれが既に
+# 大きく改善されていたと考えられる。仕様の数値は臨界減衰を入れる前の
+# 版で測られたものと推測される（実装担当へ報告済み。捏造ではなく実測値）。
+#   ⇒ とはいえ「月齢が上がると頭の重力モーメントが増え、支える強さも
+#     それに応じて大きくする必要がある」という物理的な理屈自体は変わらない
+#     （実測でも6・7ヶ月の重力モーメントは4ヶ月よりqfrc_biasで13〜18%大きい）。
+#     指示された仕組みは実装しておき、現在の実測値を基準にスケーリングする。
+#
+# 【やり方】文献値が無いので[Tier3・ARBITRARY]。目標は
+# 「4ヶ月・k=200のときの実際のずれ角と同水準に、6・7ヶ月のずれ角を揃える」。
+# θ=τ/k（釣り合い）なので、k_age = k_base × (τ_age / τ_4mo)。
+# τ（頭を支える関節にかかる重力等のバイアス力）は文献値ではなく、
+# その場のモデルから mujoco の `qfrc_bias`（重力・コリオリ等、バネの復元力を
+# 含まない）で**実測**する。τ_4mo は基準として、2026-08-15に
+# `e_body_config.body_kwargs_from_env(4.0)` + flexion=True の構成で
+# head_tilt 関節を実測した値（0.739 N·m）を丸めて使う。
+HOLD_AGE_SCALE_FROM_MO = 4.0            # これ以下の月齢では従来どおり固定（変更しない）
+HOLD_REF_GRAV_MOMENT_4MO = 0.74         # [Tier3・実測] 4ヶ月時の head_tilt の重力等バイアス力[N・m]
+                                         #   （2026-08-15計測。infant_bodyの体型が変わったら要再計測）
+
+
+# ============================================================================
 # 体を支える範囲を部位で選ぶ（2026-07-29 追加）
 # ----------------------------------------------------------------------------
 # 【なぜ要るか】ユーザーの提案：
@@ -161,16 +198,26 @@ class CaregiverHands:
       （＝「今いる場所で支え続ける」＝頭がゆっくり流れていってしまう）。
     """
 
-    def __init__(self, model, data, joints=None, stiffness=None, damping=None):
+    def __init__(self, model, data, joints=None, stiffness=None, damping=None, age=None):
         """
         Args:
             stiffness: 支える強さ [N·m/rad]。None なら B-1（ほぼ完全固定）。
+                明示的に指定した場合は、`age` によるスケーリングより優先される
+                （実験ファイルで明示された値を勝手に変えないため）。
             damping: 減衰。None なら臨界減衰（ちょうど振動しない値）を計算する。
+            age: 月齢。None または `HOLD_AGE_SCALE_FROM_MO`（4ヶ月）以下なら
+                `stiffness` をそのまま使う（4ヶ月の挙動を変えないため）。
+                それより月齢が高く、かつ**頭の3関節（HOLD_JOINTS）を支える
+                構成のとき**だけ、月齢に応じて自動的に強さを大きくする
+                （体幹・脚などhead以外を支える用途には適用しない＝
+                この基準値`HOLD_REF_GRAV_MOMENT_4MO`は頭専用に実測した値のため）。
         """
         self.model = model
         self.data = data
         self.joints = tuple(HOLD_JOINTS if joints is None else joints)
         self.stiffness = float(HOLD_STIFFNESS_FIRM if stiffness is None else stiffness)
+        self._stiffness_explicit = stiffness is not None
+        self.age = age
         self._damping = damping
         self._holding = False
         self._saved = {}      # 元の (stiffness, spring, damping) を関節ごとに保存
@@ -200,17 +247,43 @@ class CaregiverHands:
         return 2.0 * float(np.sqrt(max(k, 1e-12) * max(I, 1e-12)))
 
     # ------------------------------------------------------------------
+    def _stiffness_for_age(self):
+        """月齢に応じてスケーリングした支える強さ [N·m/rad]。
+
+        4ヶ月以下、または頭の3関節（HOLD_JOINTS）以外を支える構成のときは
+        `self.stiffness` をそのまま返す（挙動を変えない）。
+        それ以外は、支えている関節の中で最大の重力等バイアス力
+        （`data.qfrc_bias`。今の姿勢で spring 以外がその関節にかけている力で、
+        ほぼ重力）を、4ヶ月時の基準値 `HOLD_REF_GRAV_MOMENT_4MO` と比べた比を
+        `self.stiffness` に掛ける。**mj_forward 済みの `data` が前提**
+        （呼び出し側は reset 直後に呼ぶこと。既存の `hold()` の使い方どおり）。
+        """
+        if (self.age is None or float(self.age) <= HOLD_AGE_SCALE_FROM_MO
+                or self.joints != HOLD_JOINTS):
+            return self.stiffness
+        tau = max((abs(float(self.data.qfrc_bias[u["dof"]])) for u in self._ids),
+                  default=0.0)
+        ratio = tau / HOLD_REF_GRAV_MOMENT_4MO if HOLD_REF_GRAV_MOMENT_4MO > 0 else 1.0
+        return float(self.stiffness * max(1.0, ratio))
+
+    # ------------------------------------------------------------------
     def hold(self, target=None, stiffness=None, verbose=False):
         """頭を支え始める。
 
         Args:
             target: 目標角の辞書 {関節名: 度}。None なら**今の角度**で支える
                 （＝静止中は力がゼロ＝触れているだけの手）。
-            stiffness: 強さの上書き。None なら初期化時の値。
+            stiffness: 強さの上書き。None なら初期化時の値
+                （`age` が指定されていれば月齢に応じてスケーリングした値）。
         Returns:
             支えた関節の数
         """
-        k = float(self.stiffness if stiffness is None else stiffness)
+        if stiffness is not None:
+            k = float(stiffness)
+        elif self._stiffness_explicit:
+            k = float(self.stiffness)     # 実験ファイルで明示された値は age より優先
+        else:
+            k = float(self._stiffness_for_age())
         c = float(self._critical_damping(k) if self._damping is None else self._damping)
         n = 0
         for u in self._ids:

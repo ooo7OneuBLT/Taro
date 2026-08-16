@@ -1,0 +1,21 @@
+{
+  "name": "自己モデル：月齢4ヶ月固定・柵なし・15000ステップ・seed0",
+  "note": "2026-08-15。plateau_stop検証実験（自己モデル_月齢4固定_学習打ち切り検出_seed0.json）を受けた研究側の判断で、打ち切り検出そのものは使わないことにした（誤発火の原因が特定でき、既存ログから収束時期が確定したため）。既存の柵あり2本（E/logs/selfmodel_v2/A_ずっと4ヶ月_seed0.csv・seed1.csv、月齢4固定・18000step）を直接読んだところ、marginは9000〜13500stepで+45〜+50に達し以降18000まで横ばい＝約1万stepで学びきることが確定した。ただし既存2本は柵あり（新生児_仰向け_柵あり）で、2026-07-31に柵に当たる度合いが条件間で交絡するという理由で柵を外した経緯があり、リーチング実験の出発点としては使えない。柵なし（新生児_仰向け_柵なし）で同じ月齢4固定を取り直すのが本実験の目的。run.steps=15000は既存の収束時期13500に約1割の余裕を足した値。判定・打ち切りの仕掛けは一切入れず、15000stepを回しきって終える。",
+  "scene": "新生児_仰向け_柵なし",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 4.0,
+    "save": "E/logs/selfmodel_age4_fence_free/model_seed0.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 15000,
+    "seed": 0,
+    "checkpoint": 500,
+    "csv": "E/logs/selfmodel_age4_fence_free/seed0.csv"
+  },
+  "plugins": {
+    "self_model": true,
+    "hand_in_view": true
+  }
+}

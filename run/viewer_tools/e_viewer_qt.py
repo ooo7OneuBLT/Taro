@@ -68,6 +68,12 @@ except Exception:
 import numpy as np
 import mujoco
 import mujoco.viewer
+# 【なぜ、2026-08-16】体ぜんたい（向き・位置）スライダーの移植で使う。
+#   mujoco.mju_euler2Quat ではなく scipy を使う理由は移植元
+#   run/viewer_tools/e_viewer.py 71〜74行目・493〜496行目のコメントを参照
+#   （往復変換で値が一致しなかったため）。scipyは既にretina.py等で使用済みの
+#   共通依存（引用.md未登録・e_viewer.py側と同じ扱い）。
+from scipy.spatial.transform import Rotation as _Rotation
 from PySide6 import QtCore, QtWidgets
 
 import e_scene
@@ -80,7 +86,7 @@ from e_viewer_qt_widgets import FloatSlider, CollapsibleSection
 from e_viewer_qt_status import compute_status, format_status_text
 from e_viewer_qt_touch import (build_touch_monitor, advance_touch_monitor,
                                 format_touch_status)
-from e_viewer_qt_drive import build_drive_tab, drive_tick_action
+from e_viewer_qt_drive import build_drive_tab, drive_tick_action, brain_or_env_step
 from e_viewer_qt_measure import build_measure_tab, update_measure_tab
 
 # 【2026-08-13】シーンが全部を決めるので、体を作り直すときは古い個別指定を
@@ -186,7 +192,7 @@ class MainWindow(QtWidgets.QMainWindow):
     プレースホルダのまま。タブの上に、タブを切り替えても消えない状態表示欄を置く。
     """
 
-    def __init__(self, scene_names, current_scene_name, joints):
+    def __init__(self, scene_names, current_scene_name, joints, age_months=0.0):
         super().__init__()
         self.setWindowTitle("太郎ビューア（新版UI試作・第2段階）")
         self.resize(900, 760)
@@ -274,6 +280,20 @@ class MainWindow(QtWidgets.QMainWindow):
             "実験者が頭を抑える（人間の乳児実験と同じ）")
         form.addWidget(self.chk_head_hold)
 
+        # ---- 月齢（移植元：e_viewer.py の環境変数 E_AGE を、見える形のUIにした）----
+        # 【なぜ、2026-08-16】新版には月齢を変える手段が無く、環境変数 E_AGE を
+        #   直接書き換える旧版の作り（run系の操作は編集ウィンドウで完結させる、
+        #   という2026-08-07の方針に反する）しか無かった（依頼書）。
+        #   月齢は体の寸法・質量を決めるモデル構築時定数なので（e_viewer.py
+        #   672〜674行目のコメントと同じ理由）、スライダーを動かしただけでは
+        #   反映されない。「最初からやり直す」を押した時点でだけ、プロセスを
+        #   作り直して反映する（下のmain()のrestartハンドラを参照）。
+        self.age_slider = FloatSlider(
+            "月齢[ヶ月]", 0.0, 24.0, 1.0, init=float(age_months), decimals=1,
+            note="体の寸法・質量が変わるため、変更は「最初からやり直す」を"
+                 "押すまで反映されません（体を作り直します）")
+        form.addWidget(self.age_slider)
+
         self.env_label = QtWidgets.QLabel("")
         self.env_label.setStyleSheet("font-family: Consolas; color: #444;")
         form.addWidget(self.env_label)
@@ -284,6 +304,24 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.restart_btn = QtWidgets.QPushButton("最初からやり直す")
         form.addWidget(self.restart_btn)
+
+        # ---- シーンとして保存する欄（移植元：e_viewer.py 1714〜1722行目）--------
+        # 【なぜ、2026-08-16】新版にはシーン保存が無く、ユーザーが手で作った
+        #   座位の姿勢を保存できずに困っていた（依頼書①・最優先）。
+        #   保存する中身・ファイル形式・保存先は旧版と完全に同じにする
+        #   （e_scene.save() をそのまま呼ぶので保証される。移植元は
+        #   _current_scene()／save_scene()、main()側で配線する）。
+        save_row = QtWidgets.QHBoxLayout()
+        save_row.addWidget(QtWidgets.QLabel("シーン名"))
+        self.scene_save_name_edit = QtWidgets.QLineEdit()
+        save_row.addWidget(self.scene_save_name_edit, 1)
+        save_row.addWidget(QtWidgets.QLabel("説明"))
+        self.scene_save_note_edit = QtWidgets.QLineEdit()
+        save_row.addWidget(self.scene_save_note_edit, 2)
+        form.addLayout(save_row)
+
+        self.scene_save_btn = QtWidgets.QPushButton("この状態をシーンとして保存")
+        form.addWidget(self.scene_save_btn)
 
         # ================================================================
         # 区画1：おもちゃ（移植元：e_viewer.py 764〜886行目）
@@ -365,6 +403,48 @@ class MainWindow(QtWidgets.QMainWindow):
         self.chk_symmetric.setStyleSheet("color: #06a;")
         pose_form.addWidget(self.chk_symmetric)
 
+        # ---- 体ぜんたい（向き・位置）（移植元：e_viewer.py 980〜994行目）--------
+        # 【なぜ要るか】43関節は「関節の曲げ角」しか動かせず、体全体が仰向けか
+        #   起きているかは動かせなかった。座位のシーンを作ろうとして「関節は
+        #   座位、でも体は仰向け」にしかならず失敗した（依頼書の背景）。
+        box_body = QtWidgets.QGroupBox("体ぜんたい（向き・位置）")
+        pose_form.addWidget(box_body)
+        body_lay = QtWidgets.QVBoxLayout(box_body)
+        body_hint = QtWidgets.QLabel(
+            "0度＝読み込み時の姿勢のまま。「前後にたおす」を+にすると起き上がる方向\n"
+            "（座位_床_柵なしシーンで実測：+30度で体幹の傾き39.7→69.3度）。")
+        body_hint.setStyleSheet("color: #666; font-size: 8pt;")
+        body_hint.setWordWrap(True)
+        body_lay.addWidget(body_hint)
+        self.body_pitch_slider = FloatSlider(
+            "前後にたおす[度]", -90, 90, 1, init=0.0,
+            note="＋＝起こす（座位に近づく）／－＝倒す（仰向けに近づく）")
+        body_lay.addWidget(self.body_pitch_slider)
+        self.body_roll_slider = FloatSlider("左右にたおす[度]", -90, 90, 1, init=0.0)
+        body_lay.addWidget(self.body_roll_slider)
+        self.body_yaw_slider = FloatSlider("ひねる[度]", -180, 180, 1, init=0.0)
+        body_lay.addWidget(self.body_yaw_slider)
+        # 【なぜ0.1cm刻みか、2026-08-16】1cm刻みだと「床にめり込んでいるかも
+        #   しれないが小数点以下を調整できない」との申告（依頼書②）。
+        #   向き3本（度）は従来どおり1度刻みのまま（申告は位置3本だけの話）。
+        self.body_dz_slider = FloatSlider("高さ[cm]", -50, 50, 0.1, init=0.0)
+        body_lay.addWidget(self.body_dz_slider)
+        self.body_dx_slider = FloatSlider("前後の位置[cm]", -100, 100, 0.1, init=0.0)
+        body_lay.addWidget(self.body_dx_slider)
+        self.body_dy_slider = FloatSlider("左右の位置[cm]", -100, 100, 0.1, init=0.0)
+        body_lay.addWidget(self.body_dy_slider)
+
+        # ---- 仰向けに戻す（旧版 e_viewer.py 1876行目のボタンの移植）------------
+        # 【なぜ、2026-08-16】旧版削除にあたっての差分洗い出しで判明した欠落。
+        #   体ぜんたいスライダーを0へ戻すだけでは、「この角度で固定する」が
+        #   OFFのときは物理へ反映されない（毎tickの上書きはchk_pose_hold ON時
+        #   だけ、というmain()側の設計のため）。旧版と同じく、押した瞬間に
+        #   qpos/qvelへ直接書き込み、固定チェックのON/OFFに関わらず即座に
+        #   仰向けへ戻す（配線はmain()側のrestore_supine()、仕様なし・
+        #   実装担当の判断＝欠落一覧に載せた上での復元）。
+        self.restore_supine_btn = QtWidgets.QPushButton("仰向けに戻す")
+        body_lay.addWidget(self.restore_supine_btn)
+
         btn_row = QtWidgets.QHBoxLayout()
         self.pose_capture_btn = QtWidgets.QPushButton("いまの姿勢を取り込む")
         self.pose_mirror_btn = QtWidgets.QPushButton("右→左に写す")
@@ -372,6 +452,15 @@ class MainWindow(QtWidgets.QMainWindow):
         btn_row.addWidget(self.pose_mirror_btn)
         btn_row.addStretch(1)
         pose_form.addLayout(btn_row)
+
+        # ---- いまの値をコピー（2026-08-16 緊急追加）------------------------
+        # 【なぜ】シーン保存ボタンの不具合報告（原因未特定・再現もできなかった）
+        #   を受けて、保存が失敗しても手作業（体ぜんたい6本＋関節43個の
+        #   スライダー調整）が消えないための保険。JSON形式でクリップボードへ
+        #   コピーする（人が読める・スクリプトでも json.loads() できる）。
+        self.copy_values_btn = QtWidgets.QPushButton(
+            "いまの値をコピー（体ぜんたい＋関節。保存できないときの保険）")
+        pose_form.addWidget(self.copy_values_btn)
 
         pose_hint = QtWidgets.QLabel(
             "首を動かすと、実験者の手が支える目標角も一緒に動きます\n"
@@ -622,6 +711,18 @@ def main():
         scene_name = scene_names[0]
 
     scene = e_scene.load(scene_name)
+    # ---- 月齢の上書き（移植元：e_viewer.py 236〜249行目）------------------
+    #   月齢UIの「最初からやり直す」がプロセスを作り直すときに使う。
+    #   E_AGE を直接触るのはユーザーではなく、下のrestartハンドラだけ
+    #   （UI側は入力欄・スライダーで完結させる、という方針は保つ）。
+    if os.environ.get("E_AGE"):
+        _ov = float(os.environ["E_AGE"])
+        if abs(_ov - float(scene["body"]["age_months"])) > 1e-9:
+            print(f"[scene] 月齢を上書き: "
+                  f"{scene['body']['age_months']} → {_ov} ヶ月"
+                  f"（E_AGE の指定。指紋の照合は外します）", flush=True)
+            scene["body"]["age_months"] = _ov
+            scene["fingerprint"] = None
     print(f"[scene] 「{scene['name']}」から始めます", flush=True)
     if scene.get("note"):
         print(f"        {scene['note']}", flush=True)
@@ -754,6 +855,60 @@ def main():
     joints = _collect_pose_joints(m, d)
     print(f"[pose] 姿勢を作れる関節 {len(joints)} 個", flush=True)
 
+    # ---- 体ぜんたいの向き・位置（移植元：e_viewer.py 452〜472, 474〜518行目）------
+    # 【なぜ】qposのアドレスは決め打ちにしない（落とし穴 項67・e_viewer.py
+    #   446〜457行目のコメントと同じ罠）。このモデルには使っていない予備の
+    #   物体の自由関節があり、決め打ちすると体ではなくそちらを動かしてしまう。
+    #   body名 TE.ROOT_BODY から自由関節を引いた root_qadr を使う。
+    root_qadr = None
+    root_dofadr = None
+    for j in range(m.njnt):
+        if (m.jnt_type[j] == mujoco.mjtJoint.mjJNT_FREE
+                and (m.body(int(m.jnt_bodyid[j])).name or "") == TE.ROOT_BODY):
+            root_qadr = int(m.jnt_qposadr[j])
+            root_dofadr = int(m.jnt_dofadr[j])
+            break
+    if root_qadr is None:
+        print(f"[viewer] 注意体（body='{TE.ROOT_BODY}'）の自由関節が見つからない。"
+              "体ぜんたいの向き・位置は動かせません", flush=True)
+    root_qpos0 = (d.qpos[root_qadr:root_qadr + 7].copy()
+                  if root_qadr is not None else None)
+    root_quat0 = root_qpos0[3:7].copy() if root_qpos0 is not None else None
+    root_pos0 = root_qpos0[0:3].copy() if root_qpos0 is not None else None
+
+    def _root_quat_from_sliders(roll_deg, pitch_deg, yaw_deg):
+        """スライダー3本（度）→ root の四元数（mujoco wxyz順）。
+
+        移植元：e_viewer.py 497〜506行目。mujoco.mju_euler2Quat ではなく
+        scipy.spatial.transform.Rotation を使う（往復（オイラー→クオータニオン
+        →オイラーの逆変換）で値が一致しなかったため。移植元コメント493〜496行目
+        参照。'xyz'の合成順がscipyの'xyz'外因性回転と異なる）。
+        """
+        if root_quat0 is None:
+            return None
+        r = _Rotation.from_euler("xyz", [roll_deg, -pitch_deg, yaw_deg], degrees=True)
+        qx, qy, qz, qw = r.as_quat()
+        delta = np.array([qw, qx, qy, qz])
+        newq = np.zeros(4)
+        mujoco.mju_mulQuat(newq, delta, root_quat0)
+        return newq
+
+    def _sliders_from_root_quat(cur_quat_wxyz):
+        """root の現在の四元数 → スライダー3本（度）。取り込みボタン用の逆変換。
+
+        移植元：e_viewer.py 508〜518行目。往復とも scipy に統一している
+        （上の _root_quat_from_sliders と同じ理由）。
+        """
+        if root_quat0 is None:
+            return 0.0, 0.0, 0.0
+        inv_base = np.zeros(4)
+        mujoco.mju_negQuat(inv_base, root_quat0)   # 単位四元数の逆＝共役
+        delta = np.zeros(4)
+        mujoco.mju_mulQuat(delta, cur_quat_wxyz, inv_base)
+        r = _Rotation.from_quat([delta[1], delta[2], delta[3], delta[0]])
+        e = r.as_euler("xyz", degrees=True)
+        return float(e[0]), float(-e[1]), float(e[2])
+
     # ---- 四肢の筋力倍率の基準値（状態表示欄で使う。仕様2-3節2）--------------
     am = u.actuation_model
     _fmax_base = None
@@ -767,15 +922,23 @@ def main():
     # ==================================================================
     app = QtWidgets.QApplication(sys.argv)
     try:
-        from e_viewer_qt_theme import apply_theme
-        apply_theme(app)
+        # 【なぜ、2026-08-14】apply_theme()の1回適用から、OSのライト/ダーク
+        # 切り替えに起動したまま追従するenable_auto_theme()に置き換えた
+        # （作業記録（非公開）
+        # 詳細設計_統合版.md 9節Q1。別リポジトリのビューアと共有するテーマ機構の
+        # 太郎本体側への反映）。戻り値のコントローラはQApplication自身の
+        # 属性として保持する（ローカル変数のままだとGCでシグナル接続・
+        # QTimerが無効になりうるため。enable_auto_theme()のdocstring参照）。
+        from e_viewer_qt_theme import enable_auto_theme
+        app._theme_controller = enable_auto_theme(app)
     except Exception as e:
         # 【なぜ】テーマ適用（QPalette＋最小限QSS）に失敗しても、
         #   テーマ無しで起動を続ける（テーマはあくまで見た目の装飾で、
         #   機能には影響しないため）。
         print(f"[theme] 注意テーマの適用に失敗しました（続行します）: {e}", flush=True)
 
-    win = MainWindow(scene_names, scene["name"], joints)
+    win = MainWindow(scene_names, scene["name"], joints,
+                      age_months=float(scene["body"]["age_months"]))
 
     def on_scene_pick(name):
         try:
@@ -788,6 +951,14 @@ def main():
         win.scene_note.setStyleSheet(f"color: {'#a30' if warn else '#666'};")
         win.chk_fence.setChecked(bool(sc["world"]["fence"]))
         win.chk_head_hold.setChecked(bool(sc["setup"].get("head_hold")))
+        # 月齢はプレビューとして表示するだけ（実際に反映されるのは
+        #   「最初からやり直す」を押した時点。上のFloatSliderのnote参照）。
+        win.age_slider.setValue(float(sc["body"]["age_months"]), block_signal=True)
+        # 移植元：e_viewer.py 803〜804行目 on_scene_switches。シーンを選び
+        #   直したら、保存欄の名前・説明も選んだシーンのものに合わせる
+        #   （そのまま「保存」を押すと同名で上書きになる＝旧版と同じ挙動）。
+        win.scene_save_name_edit.setText(sc["name"])
+        win.scene_save_note_edit.setText(sc.get("note", ""))
 
     win.scene_combo.currentTextChanged.connect(on_scene_pick)
     on_scene_pick(scene["name"])
@@ -872,6 +1043,18 @@ def main():
             for jd in joints:
                 win.joint_sliders[jd["key"]].setValue(
                     round(float(np.degrees(d.qpos[jd["qadr"]])), 1))
+            # 体ぜんたい（向き・位置）も取り込む（移植元：e_viewer.py 1140〜1152行目）。
+            #   取り込まないと、直前に手で倒した体の向きがスライダー表示に
+            #   反映されないまま残り、「固定」を押した瞬間に古い向きへ飛ぶ。
+            if root_qadr is not None:
+                r, p, y = _sliders_from_root_quat(d.qpos[root_qadr + 3:root_qadr + 7])
+                win.body_roll_slider.setValue(round(r, 1))
+                win.body_pitch_slider.setValue(round(p, 1))
+                win.body_yaw_slider.setValue(round(y, 1))
+                offset_m = d.qpos[root_qadr:root_qadr + 3] - root_pos0
+                win.body_dx_slider.setValue(round(float(offset_m[0]) * 100.0, 1))
+                win.body_dy_slider.setValue(round(float(offset_m[1]) * 100.0, 1))
+                win.body_dz_slider.setValue(round(float(offset_m[2]) * 100.0, 1))
         finally:
             _sym_busy[0] = False
         win.msg_label.setText("いまの姿勢をスライダーに取り込みました")
@@ -886,8 +1069,66 @@ def main():
             _sym_busy[0] = False
         win.msg_label.setText("右の角度を左へ写しました")
 
+    def restore_supine():
+        """体ぜんたいの向き・位置を読み込み時の姿勢へ即座に戻す。
+
+        移植元：run/viewer_tools/e_viewer.py 1841〜1876行目「仰向けに戻す」ボタン
+        （同ファイル452〜472行目のroot_qadr探索・root_qpos0保存とセット）。
+        「この角度で固定する」がOFFでも効くよう、スライダーを0に戻すだけでなく
+        d.qpos/d.qvelへ直接書く（1508〜1519行目の毎tick上書きはchk_pose_hold
+        ONのときしか走らないため、スライダーを0にするだけでは物理へ反映されない）。
+        """
+        if root_qadr is None or root_qpos0 is None:
+            win.msg_label.setText("注意体の自由関節が見つからないため戻せません")
+            return
+        d.qpos[root_qadr:root_qadr + 7] = root_qpos0
+        if root_dofadr is not None:
+            d.qvel[root_dofadr:root_dofadr + 6] = 0.0
+        mujoco.mj_forward(m, d)
+        for sld in (win.body_roll_slider, win.body_pitch_slider, win.body_yaw_slider,
+                    win.body_dx_slider, win.body_dy_slider, win.body_dz_slider):
+            sld.setValue(0.0, block_signal=True)
+        win.msg_label.setText("体を読み込み時の姿勢（仰向け）に戻しました")
+
+    def copy_values_to_clipboard():
+        """今のスライダー値（体ぜんたい6本＋関節43個）をJSONでクリップボードへ。
+
+        【なぜ、2026-08-16・緊急】シーン保存が効かなかった（原因未特定）
+        報告を受けての保険機能。保存に失敗しても、この値さえ残っていれば
+        手で復元できる（キーは日本語ラベル＝POSE_GROUPSのjpをそのまま使うので
+        E/docs/座位姿勢_6ヶ月_手作り_2026-08-16.jsonと同じ形式になる）。
+        """
+        payload = {
+            "_出力元": "e_viewer_qt.py「いまの値をコピー」ボタン",
+            "_シーン": scene.get("name"),
+            "_月齢": float(win.age_slider.value()),
+            "体ぜんたい": {
+                "前後にたおす[度]": win.body_pitch_slider.value(),
+                "左右にたおす[度]": win.body_roll_slider.value(),
+                "ひねる[度]": win.body_yaw_slider.value(),
+                "高さ[cm]": win.body_dz_slider.value(),
+                "前後の位置[cm]": win.body_dx_slider.value(),
+                "左右の位置[cm]": win.body_dy_slider.value(),
+            },
+        }
+        for gname, _paired, items, _opened in POSE_GROUPS:
+            group_vals = {}
+            for jd in joints:
+                if jd["group"] != gname:
+                    continue
+                group_vals[jd["jp"]] = round(float(win.joint_sliders[jd["key"]].value()), 2)
+            if group_vals:
+                payload[gname] = group_vals
+        import json as _json
+        text = _json.dumps(payload, ensure_ascii=False, indent=2)
+        QtWidgets.QApplication.clipboard().setText(text)
+        win.msg_label.setText(
+            f"いまの値（体ぜんたい6本＋関節{len(joints)}個）をJSONでコピーしました")
+
     win.pose_capture_btn.clicked.connect(pose_from_body)
     win.pose_mirror_btn.clicked.connect(pose_mirror_rl)
+    win.restore_supine_btn.clicked.connect(restore_supine)
+    win.copy_values_btn.clicked.connect(copy_values_to_clipboard)
 
     # ---- 四肢の筋緊張（移植元：e_viewer.py 925〜1012行目）---------------------
     _lt0 = ((scene or {}).get("setup") or {}).get("limb_tone") or {}
@@ -1073,6 +1314,126 @@ def main():
 
     restart = [True]
     win.restart_btn.clicked.connect(lambda: restart.__setitem__(0, True))
+
+    # ========================================================================
+    # シーンとして保存する（移植元：e_viewer.py 1727〜1804行目 _current_scene/
+    # save_scene。保存する中身・ファイル形式・保存先・e_scene.save()呼び出し
+    # そのものは一切変えていない。読み取り専用の参考として写した。
+    # ========================================================================
+    def _current_drive_mode():
+        for val, rb in win.drive_mode_radios.items():
+            if rb.isChecked():
+                return val
+        return "white"
+
+    def _current_scene():
+        """いまの Viewer の状態からシーンを組み立てる（移植元：e_viewer.py
+        1736〜1772行目 _current_scene()。ロジックは変えていない）。
+        """
+        sc = copy.deepcopy(scene)
+        sc.pop("_path", None)
+        sc["body"]["age_months"] = float(_AGE)
+        sc["body"]["eye_rest_vertical_deg"] = float(_EYE_REST_V)
+        sc["world"]["recline_deg"] = float(_RECLINE)
+        sc["world"]["fence"] = bool(win.chk_fence.isChecked())
+        sc["world"]["toy"]["radius"] = float(win.toy_size_slider.value())
+        sc["world"]["toy"]["dist"] = float(win.toy_dist_slider.value())
+        # 注意：首のバネと実験者の手は同じ jnt_stiffness を使うので排他
+        #   （移植元と同じ落とし穴チェックリスト項62）。
+        if win.chk_head_hold.isChecked():
+            sc["setup"]["head_hold"] = {
+                "stiffness": float(hands.stiffness),
+                "target_deg": (dict(_hold_tgt) if _hold_tgt else None)}
+            sc["setup"]["neck_tone"] = None
+        else:
+            sc["setup"]["head_hold"] = None
+            sc["setup"]["neck_tone"] = (
+                {"target_deg": float(win.neck_t.value()),
+                 "stiffness": float(win.neck_k.value())}
+                if win.chk_neck.isChecked() else None)
+        # 四肢の筋緊張。目標角は書かない＝保存した姿勢が戻る先になる
+        #   （移植元コメントと同じ理由）。
+        sc["setup"]["limb_tone"] = (
+            {"hold_deg": float(win.tone_hold_slider.value()),
+             "groups": ["arm", "leg"]}
+            if win.chk_limb_tone.isChecked() else None)
+        sc["noise_mode"] = _current_drive_mode()
+        return sc
+
+    def save_scene():
+        # 【なぜ、2026-08-16・緊急】ユーザーが姿勢を作って保存を押したのに
+        #   run/scenes/ に新しいファイルが1件も作られていなかった（作業2回分が
+        #   消えた）。原因の特定はできなかった（自動化した実クリックテスト
+        #   （QTest.mouseClick、実際のシーン・実際の姿勢値で再現を試みた）では
+        #   2回とも成功しファイルが作られたため、この環境では再現しなかった。
+        #   想定外の事実としてそのまま報告する）。再現できない以上、原因を
+        #   決めつけず、**失敗時にも成功時にも、見落としようのない形で
+        #   結果を出す**方向で強化した：
+        #     1. 例外はmsg_labelだけでなくQMessageBoxでも出す（モーダルなので
+        #        見落とせない）。tracebackも全文コンソールに出す。
+        #     2. 成功時もQMessageBoxで確定的に知らせる（「この姿勢は保てません」
+        #        という安定性の警告と、保存の成否を混同しないようにするため）。
+        name = (win.scene_save_name_edit.text() or "").strip()
+        if not name:
+            msg = "シーンの名前を入れてください（未入力のため保存していません）"
+            win.msg_label.setText(msg)
+            QtWidgets.QMessageBox.warning(win, "シーンの保存", msg)
+            return
+        try:
+            sc = _current_scene()
+            sc["note"] = (win.scene_save_note_edit.text() or "").strip()
+            saved, drift = e_scene.save(
+                sc, name=name, env=env,
+                hands=(hands if win.chk_head_hold.isChecked() else None),
+                settle_seconds=3.0, verbose=True)
+        except Exception as e:
+            import traceback
+            tb = traceback.format_exc()
+            print(f"[scene] 保存に失敗しました:\n{tb}", flush=True)
+            err_text = f"保存に失敗しました: {e}\n\n{tb}"
+            win.msg_label.setText(f"保存に失敗: {e}（詳細はコンソールとダイアログ参照）")
+            QtWidgets.QMessageBox.critical(win, "シーンの保存に失敗しました", err_text)
+            return
+        # 【なぜ、保存後にファイルの実在を確かめるか】e_scene.save()が例外を
+        #   投げずに戻ってきても、パスの解決が想定とずれていれば「戻り値は
+        #   あるのにファイルは無い」事態がありうる（想定外の事実の再発防止）。
+        _saved_path = os.path.join(_ROOT, "run", "scenes", f"{name}.json")
+        _exists = os.path.exists(_saved_path)
+        fp = saved.get("fingerprint") or {}
+        seen = fp.get("toy_visible_left")
+        parts = [(f"保存しました → run/scenes/{name}.json" if _exists else
+                  f"注意保存処理は完了しましたが、ファイルが見当たりません: {_saved_path}")]
+        if drift:
+            parts.append(drift["summary"].replace("　", " "))
+        if seen is not None:
+            parts.append("おもちゃは見えています" if seen
+                         else "注意おもちゃが体に隠れて見えません")
+        text = "\n".join(parts)
+        win.msg_label.setText(text)
+        if _exists:
+            QtWidgets.QMessageBox.information(win, "シーンの保存", text)
+        else:
+            QtWidgets.QMessageBox.critical(win, "シーンの保存（ファイル未確認）", text)
+        # 保存し直したときにシーン一覧を最新にする（移植元 _refresh_scene_menu 相当）。
+        try:
+            names = e_scene.list_scenes()
+            cur = win.scene_combo.currentText()
+            win.scene_combo.blockSignals(True)
+            win.scene_combo.clear()
+            win.scene_combo.addItems(names or ["（シーンがまだ無い）"])
+            if name in names:
+                win.scene_combo.setCurrentText(name)
+            elif cur in names:
+                win.scene_combo.setCurrentText(cur)
+            win.scene_combo.blockSignals(False)
+        except Exception as e:
+            print(f"[scene] 注意一覧の更新に失敗しました（保存自体は成立している）: {e}",
+                  flush=True)
+
+    win.scene_save_btn.clicked.connect(save_scene)
+    win.scene_save_name_edit.setText(scene["name"])
+    win.scene_save_note_edit.setText(scene.get("note", ""))
+
     win.show()
 
     # 【なぜ、2026-08-13】Mica（半透明の背景）を試す。仕様3節・4節。
@@ -1093,16 +1454,26 @@ def main():
         while viewer.is_running() and win.isVisible():
             if restart[0]:
                 pick = win.scene_combo.currentText()
-                need_rebuild = bool(pick) and pick != scene.get("name")
+                # 【なぜ、2026-08-16】月齢はモデル構築時に決まる定数なので、
+                #   スライダーだけ動かしても体は変わらない（上のFloatSlider
+                #   のnote参照）。ここで初めて「今のシーンに書いてある月齢」と
+                #   比べ、違っていれば別プロセスとして作り直す
+                #   （シーン切替と同じ、e_viewer.py 672〜674行目と同じ設計）。
+                _age_pick = float(win.age_slider.value())
+                _age_changed = abs(_age_pick - float(scene["body"]["age_months"])) > 1e-9
+                need_rebuild = (bool(pick) and pick != scene.get("name")) or _age_changed
                 if need_rebuild:
                     win.msg_label.setText(
-                        f"シーン「{pick}」で体を作り直します。"
-                        "新しい窓が開いたら、この窓は閉じます")
+                        (f"シーン「{pick}」" if pick != scene.get("name") else "同じシーン")
+                        + (f"・月齢{_age_pick:g}ヶ月" if _age_changed else "")
+                        + "で体を作り直します。新しい窓が開いたら、この窓は閉じます")
                     app.processEvents()
                     envv = dict(os.environ)
-                    envv["E_SCENE"] = pick
+                    envv["E_SCENE"] = pick if pick else scene.get("name")
                     for k in _STALE_ENV_KEYS:
                         envv.pop(k, None)
+                    if _age_changed:
+                        envv["E_AGE"] = str(_age_pick)
                     import subprocess
                     flags = 0
                     if os.name == "nt":
@@ -1135,6 +1506,16 @@ def main():
                     win.toy_sliders[i].setValue(float(toy_pos0[i]), block_signal=True)
                 _syncing[0] = False
                 win.chk_toy_follow.setChecked(False)
+                # 体ぜんたいの向き・位置のスライダーも0へ戻す（移植元：
+                #   e_viewer.py 1841〜1847行目「仰向けに戻す」と同じ考え方）。
+                #   このスライダーは読み込み時の姿勢からの差分として持っているので、
+                #   qposだけ戻してスライダー表示を残すと、次に「固定」が効いた瞬間に
+                #   毎tickの上書きで元の傾きへ引き戻されてしまう。
+                if root_qadr is not None:
+                    for sld in (win.body_roll_slider, win.body_pitch_slider,
+                                win.body_yaw_slider, win.body_dx_slider,
+                                win.body_dy_slider, win.body_dz_slider):
+                        sld.setValue(0.0, block_signal=True)
                 t_sim, wall0, tick = 0.0, time.time(), 0
                 touch_monitor.reset_mouth_bonus_counts()
                 win.msg_label.setText(f"シーン「{scene['name']}」で始めました")
@@ -1232,6 +1613,19 @@ def main():
                 if _neck_tgt and win.chk_head_hold.isChecked() and hands.holding:
                     hands.hold(target=_neck_tgt)
                     _hold_tgt = dict(_neck_tgt)
+                # 体ぜんたいの向き・位置（移植元：e_viewer.py 2698〜2708行目）。
+                #   関節と同じく「固定」がONのときだけ、毎tickスライダーの値で上書きする。
+                if root_qadr is not None:
+                    newq = _root_quat_from_sliders(
+                        win.body_roll_slider.value(), win.body_pitch_slider.value(),
+                        win.body_yaw_slider.value())
+                    if newq is not None:
+                        d.qpos[root_qadr + 3:root_qadr + 7] = newq
+                    d.qpos[root_qadr:root_qadr + 3] = root_pos0 + np.array(
+                        [win.body_dx_slider.value(), win.body_dy_slider.value(),
+                         win.body_dz_slider.value()]) / 100.0
+                    if root_dofadr is not None:
+                        d.qvel[root_dofadr:root_dofadr + 6] = 0.0
 
             if freeze and getattr(u, "_toy_pending", False):
                 try:
@@ -1252,7 +1646,15 @@ def main():
                 _drive_act = drive_tick_action(
                     win, env=env, m=m, d=d, u=u, zero=zero,
                     tick=tick, dt=dt, t_sim=t_sim, freeze=freeze)
-                env.step(_drive_act if _drive_act is not None else zero)
+                # ---- 脳（学習したモデル）2026-08-16新設 ----------------------
+                #   ONで読み込めていれば、その脳の行動でHybridEnv（内受容感覚
+                #   つき）を進める。それ以外は今までどおり駆動タブの結果で
+                #   生のenvを進める（白紙の脳）。移植元：e_viewer.py
+                #   2732〜2760行目「学習した脳が優先」。
+                brain_or_env_step(
+                    win, env=env, m=m, u=u, tick=tick, freeze=freeze,
+                    age_months=_AGE, scene_name=scene["name"],
+                    fallback_act=(_drive_act if _drive_act is not None else zero))
 
                 # ---- 触覚順応・口元報酬の監視（第3段階・仕様2-3節）------------
                 #   物理が実際に1tick進んだ直後にだけ呼ぶ。freeze中は呼ばない
@@ -1363,9 +1765,15 @@ def main():
 
             app.processEvents()
             viewer.sync()
-            lag = wall0 + t_sim - time.time()
-            if lag > 0:
-                time.sleep(min(lag, 0.05))
+            # ---- 再生速度（移植元：e_viewer.py 3200〜3204行目）----------------
+            #   freeze中はsleepさせない（旧版と同じ。物理を止めているときは
+            #   速度スライダーが意味を持たないため）。
+            _speed = max(0.05, float(win.speed_slider.value())) \
+                if hasattr(win, "speed_slider") else 1.0
+            if not freeze:
+                lag = wall0 + t_sim / _speed - time.time()
+                if lag > 0:
+                    time.sleep(min(lag, 0.05))
 
     env.close()
     return 0

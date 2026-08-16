@@ -36,7 +36,8 @@ class TaroBrainWithMotor(TaroBrain):
     """
 
     def __init__(self, vocab_size, sensory_dim=320, n_actuators=90,
-                 embedding_dim=64, hidden_dim=128, proprio_dim=621, **kwargs):
+                 embedding_dim=64, hidden_dim=128, proprio_dim=621,
+                 latent_deterministic=False, **kwargs):
         super().__init__(vocab_size=vocab_size, embedding_dim=embedding_dim,
                           hidden_dim=hidden_dim, body_state_dim=0, **kwargs)
         self.sensory_dim = sensory_dim
@@ -52,8 +53,11 @@ class TaroBrainWithMotor(TaroBrain):
         # state_dictキーだけ "motor_cortex.motor_head.weight" のように変わる＝
         # 旧チェックポイントは load_matching 側でキー読み替えが必要、C/scripts/参照）。
         self.latent_dim = 32
+        # 【なぜ、2026-08-16】latent_deterministic：潜在変数zのサンプリング(揺らぎ)を
+        #   切るかどうか。既定False＝現状不変。詳細はpredictive_coding_latent.pyへ。
         self.motor_cortex = MotorCortex(embedding_dim, hidden_dim, self.num_layers,
-                                         self.latent_dim, sensory_dim, n_actuators)
+                                         self.latent_dim, sensory_dim, n_actuators,
+                                         latent_deterministic=latent_deterministic)
 
         # 感覚運動予測ループ：次に来る感覚を予測する。
         # 【人間模倣】予測は「今の状態z」だけでなく「これからする運動命令の写し

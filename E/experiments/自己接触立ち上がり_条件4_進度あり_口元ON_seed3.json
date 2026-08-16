@@ -1,0 +1,36 @@
+{
+  "name": "自己接触立ち上がり_条件4_進度あり_口元ON_seed3",
+  "note": "2026-08-13 測定。「口元への報酬で2回目以降の自己接触が増えるか」の本実験にseed3を追加（既存のseed0〜2と完全に同一設定。7シード化、「腕の姿勢を保てるかで点火が決まるか」の検証用）。条件: 条件4 / 進度あり / 口元ON。reward=progressで小脳は既定(有効)のまま。vision=falseはstrip_textures経路。測定はscratchpadのselftouch_pace v2プラグイン（実行時登録、taro_core/runは無改変。元のv1に胸(chest)の立ち上がり検出を追加しただけ、口元・頭の定義は不変）で口元・頭・胸への接触の立ち上がりエッジをtick単位で記録する。依頼：ユーザー（ユーザーの指示、重要度：高）。",
+  "scene": "新生児_仰向け_柵なし",
+  "taro": {
+    "spinal_drive_mode": "reflex_common",
+    "common_drive_rho": 0.3,
+    "common_drive_grouping": "per_limb",
+    "touch": true,
+    "somatosensory": true,
+    "vision": false,
+    "touch_adaptation": true,
+    "reward": "progress",
+    "mouth_touch_bonus": 0.2
+  },
+  "run": {
+    "type": "train",
+    "steps": 10000,
+    "checkpoint": 200,
+    "seed": 3,
+    "csv": "E/logs/自己接触立ち上がり_2026-08-13/条件4_進度あり_口元ON_seed3/run.csv"
+  },
+  "plugins": {
+    "contact_reward": {
+      "toucher": "right_palm",
+      "touched_groups": [
+        "head"
+      ],
+      "self_trace_out": "E/logs/自己接触立ち上がり_2026-08-13/条件4_進度あり_口元ON_seed3/self_trace.csv"
+    },
+    "selftouch_pace": {
+      "trace_out": "E/logs/自己接触立ち上がり_2026-08-13/条件4_進度あり_口元ON_seed3/selftouch_pace_trace.csv"
+    },
+    "dashboard": true
+  }
+}

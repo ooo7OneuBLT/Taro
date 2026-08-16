@@ -63,7 +63,11 @@ def _register():
     from run.plugins.common.double_touch import DoubleTouch
     from run.plugins.common.contact_reward import ContactReward
     from run.plugins.common.block_progress_probe import BlockProgressProbe
+    from run.plugins.common.plateau_stop import PlateauStop
+    from run.plugins.common.posture_probe import PostureProbe
+    from run.plugins.common.toy_in_view import ToyInView
     PLUGINS["toy_touch"] = ToyTouch
+    PLUGINS["toy_in_view"] = ToyInView   # おもちゃが視界に入っている割合（幾何・脳不要＝measure可）
     PLUGINS["hand_in_view"] = HandInView
     PLUGINS["self_model"] = SelfModel
     PLUGINS["movement_units"] = MovementUnits   # 動きが滑らかか（リーチングの指標）
@@ -71,6 +75,8 @@ def _register():
     PLUGINS["double_touch"] = DoubleTouch       # ダブルタッチ（自己接触の一致）検出（報酬には未接続）
     PLUGINS["contact_reward"] = ContactReward   # 自己接触あり/なしで報酬・RPEを直接比較する
     PLUGINS["block_progress_probe"] = BlockProgressProbe   # ブロックごとのprogressを見るだけ（読むだけ）
+    PLUGINS["plateau_stop"] = PlateauStop       # cereb_errの頭打ちを検出し学習を打ち切る（唯一ctx.stop_requestedを書く）
+    PLUGINS["posture_probe"] = PostureProbe   # 頭の高さと報酬をCSVに残す（姿勢の学習の結果そのもの）
     PLUGINS["trace"] = Trace           # 内部の値の指紋を残す（原因追跡用）
     PLUGINS["dashboard"] = Dashboard   # 学習の様子の絵を自動で作り直す
     # 注意：self_model / trace / reach_success / double_touch は太郎の脳が要る

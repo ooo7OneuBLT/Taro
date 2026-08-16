@@ -1,7 +1,7 @@
 @echo off
 chcp 65001 >nul
 cd /d "%~dp0"
-title Taro Viewer (Qt prototype, stage1)
+title Taro LiveViewer
 set "PY=.venv\Scripts\python.exe"
 if not exist "%PY%" (
   echo [error] %PY% not found.

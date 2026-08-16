@@ -1,0 +1,29 @@
+{
+  "name": "自己モデル：月齢4ヶ月固定・学習打ち切り検出（plateau_stop）・seed0",
+  "note": "2026-08-15。既存ログ13本（いずれも18000ステップ）でcereb_err（小脳の予測誤差、run/trainer.py:587）が最後まで下がり続けており頭打ちに達していない。次のリーチング実験に進む前に『自分の体を学びきったか』を確かめるため、頭打ちになるまで回して停止シグナルを捉える道具(plugins.plateau_stop)を検証する実験ファイル。土台は`自己モデル_月齢4固定_最小訓練_tau既定_seed0.json`（同じシーン・actuation・age_months=4.0固定の書き方）。run.steps=max_steps=60000とし、plateau_stopが頭打ちを検出できればそこで打ち切られてrun.stepsまで到達しない。もし60000まで届いてしまえば『上限到達（頭打ち未到達）』として区別してreport()に出る。window/min_improve_frac/min_checkpointsの具体的な数値は未較正[Tier3]で、実測して必要なら調整することを前提にした初期値（研究部の仕様2節）。",
+  "scene": "新生児_仰向け_柵なし",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 4.0,
+    "save": "E/logs/plateau_stop/model_plateau_stop_seed0.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 60000,
+    "seed": 0,
+    "checkpoint": 500,
+    "csv": "E/logs/plateau_stop/plateau_stop_seed0.csv"
+  },
+  "plugins": {
+    "self_model": true,
+    "hand_in_view": true,
+    "movement_units": true,
+    "plateau_stop": {
+      "window": 5,
+      "min_improve_frac": 0.02,
+      "min_checkpoints": 10,
+      "max_steps": 60000,
+      "out_path": "E/logs/plateau_stop/plateau_stop_detail_seed0.json"
+    }
+  }
+}

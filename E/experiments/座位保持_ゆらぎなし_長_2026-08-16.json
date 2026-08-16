@@ -1,0 +1,20 @@
+{
+  "name": "座位保持：自己モデルを確立してから、ゆらぎを切って姿勢制御（6ヶ月）",
+  "note": "2026-08-16。ユーザーの提案。人間の発達順序に対応させる：自発運動が盛んな時期（〜5ヶ月）にゆらいで自分の体を知り、自発運動が消えたあと（5〜8ヶ月）に座位を獲得する。太郎でも、ゆらぎONで自己モデルを立ててから、ゆらぎを切って姿勢制御に移る。\n\n【引き継ぐモデル】E/logs/自己モデル_ゆらぎあり/model_seed0.pt。同日、同じシーン・同じ設定で latent_deterministic=false（ゆらぎあり）のまま15000step学習したもの。到達点：classify 92.2% / margin 38.27 / corr 0.396。\n\n【なぜこの順序か】同日の実測で、最初からゆらぎを切ると自己モデルが立たないことが分かった（classify 49.9%＝偶然と同じ、margin 0.0001）。ゆらぎは探索そのものであり、行動が変化しないと「自分が力を入れると体がどう動くか」を学べない。一方、ゆらぎがあると姿勢制御が成立しない（行動の変化量1.33＝毎ステップまったく違う力を出す）。この2つを両立させるのが本実験の狙い。\n\n【文献】座位を獲得する時期（生後5〜8ヶ月）には自発運動（fidgety movements、生後11〜16週が最盛で5ヶ月ごろ消失）はすでに終わっている（E/docs/座位保持/文献調査/2026-08-16_座位獲得期の運動探索.md、Hadders-Algra 2018 原文確認済み）。\n\n【見るもの】head_z_mean と rew_mean が上がるか。d_action2 が小さいまま保たれるか。あわせて margin/classify が維持されるか（ゆらぎを切ったあとに自己モデルが劣化しないか）。",
+  "scene": "座位_6ヶ月_土台_2026-08-16",
+  "taro": {
+    "actuation": "muscle",
+    "reward": "posture_height",
+    "posture_reflex": false,
+    "righting_reflex": true,
+    "righting_reflex_gain": 0.02,
+    "posture_fall_deg": 20.0,
+    "posture_fall_delay_sec": 1.0,
+    "latent_deterministic": true,
+    "model": "E/logs/自己モデル_ゆらぎあり/model_seed0.pt",
+    "save": "E/logs/座位保持_ゆらぎなし_長/model_seed0.pt"
+  },
+  "run": {"type": "train", "steps": 15000, "checkpoint": 100, "seed": 0,
+          "csv": "E/logs/座位保持_ゆらぎなし_長/seed0.csv"},
+  "plugins": {"self_model": true, "posture_probe": true}
+}

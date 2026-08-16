@@ -199,7 +199,7 @@ def build_svg(cfg, counters=None):
 
     # ---- 箱 ----------------------------------------------------------------
     for n in NODES:
-        nid, jp, eng, col, tier, desc, _fn = n
+        nid, jp, eng, col, tier, desc, _fn, _axis, _dev = n
         if nid not in pos:
             continue
         x, y = pos[nid]

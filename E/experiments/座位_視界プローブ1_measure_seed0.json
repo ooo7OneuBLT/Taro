@@ -1,0 +1,18 @@
+{
+  "name": "座位・視界プローブ1：完全固定＋おもちゃ正面20cm・目は動かさない（measure）",
+  "note": "2026-08-17。目的：座位でおもちゃが視界に映る割合を測る（仰向けの実測7%との比較）。run.type=measure（脳なし）なので目も体も動かない＝幾何学的な上限値。悪ければおもちゃの置き方の問題。プラグインtoy_in_viewを新設して測る。",
+  "scene": "座位_視界プローブ_2026-08-17",
+  "taro": {
+    "actuation": "muscle"
+  },
+  "run": {
+    "type": "measure",
+    "steps": 600,
+    "seed": 0,
+    "checkpoint": 100,
+    "csv": "E/logs/座位_視界プローブ/probe1_measure_seed0.csv"
+  },
+  "plugins": {
+    "toy_in_view": true
+  }
+}

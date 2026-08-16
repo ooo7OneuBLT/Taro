@@ -1,0 +1,19 @@
+{
+  "name": "自己モデルの確立：ゆらぎなし（座位・6ヶ月・1800step）",
+  "note": "2026-08-16。太郎の脳は predictive_coding_latent.py で毎ステップ潜在変数を確率的に引き直しており、まったく同じ観測でも行動が変わる（実測：同じ観測10回のばらつき0.84、行動の変化量1.61）。これが自己モデルの確立を妨げているかを確かめる。\n\nこの実験は latent_deterministic=true（ゆらぎなし）。対になる「自己モデル_ゆらぎあり_2026-08-16.json」と比べる。\n\n【見る指標】margin（正解と不正解の予測誤差の差。大きいほど自分の体を分かっている）と classify（自分の行動と他人の行動を言い当てられるか）。agency は再現性が無い指標なので根拠には使わない（run/plugins/common/self_model.py:15）。\n\n【過去の参考値】目標Cで margin 約48・classify 96% に1800step付近で頭打ちした記録がある（C/docs/研究日誌.md:415）。ただし別条件（目標Cの環境）なので直接は比較できない。比較はこの2本の間で行う。\n\n【1800stepの根拠】過去に自己モデルが頭打ちになった地点。ユーザーの指定。",
+  "scene": "座位_6ヶ月_土台_2026-08-16",
+  "taro": {
+    "actuation": "muscle",
+    "reward": "posture_height",
+    "posture_reflex": false,
+    "righting_reflex": true,
+    "righting_reflex_gain": 0.02,
+    "posture_fall_deg": 20.0,
+    "posture_fall_delay_sec": 1.0,
+    "latent_deterministic": true,
+    "save": "E/logs/自己モデル_ゆらぎなし/model_seed0.pt"
+  },
+  "run": {"type": "train", "steps": 1800, "checkpoint": 100, "seed": 0,
+          "csv": "E/logs/自己モデル_ゆらぎなし/seed0.csv"},
+  "plugins": {"self_model": true, "posture_probe": true}
+}

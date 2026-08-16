@@ -16,8 +16,12 @@ from predictive_coding_latent import PredictiveCodingLatent
 
 
 class MotorCortex(nn.Module):
-    def __init__(self, embedding_dim, hidden_dim, num_layers, latent_dim, sensory_dim, n_actuators):
+    def __init__(self, embedding_dim, hidden_dim, num_layers, latent_dim, sensory_dim, n_actuators,
+                 latent_deterministic=False):
         super().__init__()
         self.motor_gru = nn.GRU(embedding_dim, hidden_dim, num_layers, batch_first=True)
-        self.pc_latent = PredictiveCodingLatent(hidden_dim, sensory_dim, latent_dim=latent_dim)
+        # latent_deterministic: 【なぜ、2026-08-16】既定False＝現状不変。詳細は
+        #   predictive_coding_latent.py の PredictiveCodingLatent.__init__ を参照。
+        self.pc_latent = PredictiveCodingLatent(hidden_dim, sensory_dim, latent_dim=latent_dim,
+                                                 latent_deterministic=latent_deterministic)
         self.motor_head = nn.Linear(latent_dim, n_actuators)

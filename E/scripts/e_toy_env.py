@@ -1175,8 +1175,13 @@ class ToySupineEnv(SupineMimoEnv):
         # 眼球を正中位に戻してからおもちゃを置く。順序が重要：
         #   おもちゃは「視線の正面」に置くので、眼球がずれたままだと
         #   あさっての方向（柵の外）に置かれる（研究日誌 2026-07-26 続き7）。
-        from infant_body import center_eyes
+        from infant_body import center_eyes, apply_eye_centering_spring
         center_eyes(self.model, self.data)
+        # 【2026-08-17新設】眼球の受動的な中央復帰バネ（既定OFF＝EYE_CENTERING）。
+        #   center_eyesはqposを戻すだけで以降を留める力が無いため、既定では従来通り
+        #   筋の受動力で可動域の壁まで転がり落ちる。ONのときだけjnt_stiffness等を
+        #   入れる（詳細はinfant_body.pyのEYE_CENTERING直前のコメント参照）。
+        apply_eye_centering_spring(self.model, self.data)
         mujoco.mj_forward(self.model, self.data)   # 眼のカメラ姿勢を更新してから配置
         self._spawn_toy()                  # 落ち着いた後の肩位置を見て配置
         self._glow_until = -1e9            # 点灯の余韻を持ち越さない
@@ -1187,9 +1192,57 @@ class ToySupineEnv(SupineMimoEnv):
             self.model.geom_rgba[self._toy_gadr] = TOY_RGBA_OFF
             self.toy_lit = False
         mujoco.mj_forward(self.model, self.data)
+        # 【2026-08-15・座位保持の学習】層2（立ち直り反射）の三半規管フィルタが
+        #   前エピソードの「最近の角速度の平均」(baseline)を持ち越さないようにする。
+        #   既定OFF（righting_reflex=False）では self._righting_canals 自体が
+        #   一度も作られない＝この行は何もしない（既存実験の挙動は不変）。
+        if getattr(self, "_righting_canals", None) is not None:
+            self._righting_canals.reset()
+        # 座らせ直し（ユーザーの確定事項：env.reset()を呼ばずエピソード継続で座位に
+        #   戻す）の基準姿勢。scene復元直後＝「座位開始時」のqposを記録する。
+        #   常に記録する（cfg.posture_reflex等がFalseでも計算だけは行うが、
+        #   _check_posture_fallはself.taroが無ければ一度も呼ばれないので無害）。
+        #
+        # 【2026-08-16 復帰先の修正】ここ（reset_model内）で記録した値は、まだ
+        #   「仰向け＋jitter＋settle」の既定姿勢でしかない。シーンの本当の姿勢は
+        #   run/scene_tools/e_scene.py の reset_to_scene()/build() が
+        #   **env.reset()の呼び出しのあとに** apply_state() で qpos を書き込む
+        #   ため、ここで記録した値は座位ではなく仰向けになる（2026-08-16に実際に
+        #   再現・実測済み。別の実装担当が録画作成時に発見し実行時の属性上書きで
+        #   回避した。触ってよいファイルに e_scene.py が含まれないためここでは
+        #   直接直せない）。
+        #   → ここでは**暫定値**として記録しつつ、_posture_baseline_pending を立てる。
+        #   step() の先頭（このstepでまだ何も物理を進めていない時点）で、
+        #   pending中なら qpos を取り直して確定させる。reset_to_scene()は
+        #   env.reset()の後、step()が呼ばれる前に apply_state()等で最終姿勢まで
+        #   仕上げるので、最初のstep()の時点では qpos は既にシーンの最終姿勢に
+        #   なっている。シーンを使わない既存実験（env.reset()の直後すぐstep()を
+        #   呼ぶだけ）は、reset()〜最初のstep()の間にqposを動かす者がいないので
+        #   この値は変わらず、挙動は今までと1ビットも変わらない。
+        self._posture_seated_qpos = self.data.qpos.copy()
+        # 頭の高さ報酬（reward="posture_height"）の基準値。座位開始時からの
+        #   相対差を使う（絶対値ではなく相対値。設計3節(5)：月齢で体格が
+        #   変わるため）。常に記録する（reward!="posture_height"のときは
+        #   posture_height_reward()自体が呼ばれないだけで、記録自体は無害・軽量）。
+        #   上と同じ理由で暫定値。_posture_baseline_pending で最初のstep()時に確定させる。
+        self._posture_head_height_ref = float(self.data.body("head").xpos[2])
+        self._posture_baseline_pending = True
+        # 座り直しの遅延（posture_fall_delay_sec）用タイマー。前エピソードの
+        #   カウントを持ち越さない。
+        self._posture_fall_since = None
         return self._get_obs()
 
     def step(self, action):
+        # 【2026-08-16】座り直しの復帰先(_posture_seated_qpos)を、このstep()が
+        #   物理を1歩も進める前・qposを誰も書き換えていない時点で確定させる。
+        #   reset_model()の直後にreset_to_scene()/build()がapply_state()等で
+        #   qposを座位へ書き換えるのは「env.reset()の呼び出しが終わったあと・
+        #   最初のstep()が呼ばれる前」なので、ここが「シーンの最終姿勢」を
+        #   確実に捉えられる最初のタイミングになる（reset_model()のdocstring参照）。
+        if getattr(self, "_posture_baseline_pending", False):
+            self._posture_seated_qpos = self.data.qpos.copy()
+            self._posture_head_height_ref = float(self.data.body("head").xpos[2])
+            self._posture_baseline_pending = False
         # 吊り力は物理を進める前に設定する（xfrc_appliedはframe_skip回ぶん効く）。
         # 旧実装の「離れたら瞬間移動で置き直す(respawn)」は**廃止**。目視でワープが
         # 見えたうえ、随伴性（自分の行為→結果）を壊すため。代わりに吊り紐で留める。
@@ -1204,9 +1257,131 @@ class ToySupineEnv(SupineMimoEnv):
         if self._orienting is not None:
             # 前回描画された画像から計算済みの方向を、首・（VOR後の）目に加算する
             action = self._orienting.apply(action)
+        # 【2026-08-15・座位保持の学習】層1（姿勢制御反射）・層2（立ち直り反射）。
+        #   env.taro は run/taro_setup.py の _setup_postural_gate/_setup_righting_damper
+        #   がposture_reflex/righting_reflexのどちらかTrueのときだけ配線する
+        #   （仕様C節・taro_setup.py側の設計判断、作業記録「想定外」参照）。
+        #   既定（両方False）ではself.taro自体が存在せず、getattrがNoneを返して
+        #   このブロックは1行も実行されない＝既存実験の挙動は1ビットも変わらない。
+        taro = getattr(self, "taro", None)
+        if taro is not None and getattr(taro, "postural_gate", None) is not None:
+            action = taro.postural_gate.apply(action, self.data.qpos, touch=self.touch)
+        if taro is not None and getattr(taro, "righting_damper", None) is not None:
+            action = self._apply_righting_damper(action, taro)
         out = super().step(action)
         self._pin_root()           # 椅子とベルトが体を留める（実験の測定条件）
+        # 倒れ判定と座り直し（ユーザーの確定事項：エピソード継続。env.reset()も
+        #   reset_model()も呼ばない。terminated/truncatedもいじらない）。
+        if taro is not None:
+            self._check_posture_fall(taro)
         return out
+
+    # -------------------------------------------------- 座位保持の学習（2026-08-15）
+    def _posture_trunk_tilt_deg(self):
+        """体幹の傾き[度]。run/scene_tools/e_scene.py の fingerprint() と
+        まったく同じ式（骨盤→胸のベクトルが水平から何度上がっているか）。
+        """
+        axis = (np.array(self.data.body("upper_body").xpos, dtype=float)
+                - np.array(self.data.body("hip").xpos, dtype=float))
+        n = float(np.linalg.norm(axis))
+        if n < 1e-9:
+            return 0.0
+        return float(np.degrees(np.arcsin(np.clip(axis[2] / n, -1.0, 1.0))))
+
+    def _apply_righting_damper(self, action, taro):
+        """立ち直り反射（層2）を適用する。
+
+        頭角速度は三半規管（高域通過フィルタ）を経由させる
+        （taro_core/src/brain/spinal_cord/righting_damper.py の
+        【前庭覚由来の頭角速度の取得方法】docstring参照。三半規管を通さないと
+        「ゆっくりした傾きに反応する」というその10の問題を再現してしまう）。
+        support_fraction は run/scene_tools/e_scene.py の build() が
+        env.unwrapped._pinned_groups として配線した pinned_groups から作る。
+        """
+        if getattr(self, "_righting_canals", None) is None:
+            from semicircular_canals import SemicircularCanals
+            self._righting_canals = SemicircularCanals(
+                age_months=float(getattr(self, "age", 0.0)))
+        head_bid = int(self.model.body("head").id)
+        w_world = np.array(self.data.cvel[head_bid][:3], dtype=float)
+        sensed = self._righting_canals.update(w_world, float(self.dt))
+        # head_tilt（前後・Y軸）に対応する成分を取り出す。太郎は常に world +X を
+        #   向く姿勢を基準にする（postural_gate.pyの docstring【関節構造の実測】と
+        #   同じ前提）ため、ワールドY軸まわりの角速度がほぼそのまま前後(pitch)に
+        #   対応する、という近似[Tier3・簡略化。head bodyのローカル軸への厳密な
+        #   投影はしていない。e_vor.pyのVORは眼球ごとにローカル軸へ投影しているが、
+        #   本モジュールの対象(act:head_tilt)は1本のみで軸もモデル全体で一貫して
+        #   Y軸のため、簡略化の影響は小さいと判断した]。
+        head_angular_velocity_dps = float(np.degrees(sensed[1]))
+        from spinal_cord.righting_damper import support_fraction_from_pinned_groups
+        pinned_groups = getattr(self, "_pinned_groups", None) or ()
+        support_fraction = support_fraction_from_pinned_groups(pinned_groups)
+        return taro.righting_damper.apply(
+            action, taro.righting_neg_indices, taro.righting_pos_indices,
+            head_angular_velocity_dps, support_fraction)
+
+    def _check_posture_fall(self, taro):
+        """倒れたら座らせ直す（ユーザーの確定事項：エピソード継続。env.reset()を
+        呼ばない。座位開始時に記録したqposへ書き戻すだけの軽量な処理）。
+
+        cfg.posture_fall_deg を trunk_tilt_deg が**下回ったら**「倒れた」と
+        判定する（仕様C節3の指示どおり）。posture_fall_deg<=0なら判定自体を
+        無効化できる（仕様の必須要件「既定でこの判定が有効になって既存実験に
+        影響してはいけない」）。既定値は run/config.py 参照（Tier3、作業記録に理由）。
+
+        【2026-08-16 遅延を追加】以前は閾値を割った**瞬間に**qposを書き戻していた。
+        実測（15秒間・posture_fall_deg=20.0）で0.19秒に1回も発動し、映像が
+        「ゆっくり倒れて起こされる」ではなく痙攣のように見えた（倒れきる前に
+        戻すので、太郎は「倒れる」という経験そのものができていなかった）。
+        cfg.posture_fall_delay_sec だけ待ってから書き戻す。待っている間に
+        閾値より上へ戻ったらカウントを取り消す（`_posture_fall_since = None`）。
+        0なら従来どおり即座に戻す（後方互換）。
+        """
+        fall_deg = float(getattr(taro.cfg, "posture_fall_deg", 0.0) or 0.0)
+        if fall_deg <= 0.0:
+            self._posture_fall_since = None
+            return
+        tilt = self._posture_trunk_tilt_deg()
+        if tilt >= fall_deg:
+            self._posture_fall_since = None    # 途中で持ち直したのでカウント取り消し
+            return
+        delay = float(getattr(taro.cfg, "posture_fall_delay_sec", 0.0) or 0.0)
+        if delay > 0.0:
+            if self._posture_fall_since is None:
+                self._posture_fall_since = float(self.data.time)   # 割った時刻を記録
+            if (float(self.data.time) - self._posture_fall_since) < delay:
+                return    # まだ待っている（戻さない＝倒れる経験をさせる）
+        q = getattr(self, "_posture_seated_qpos", None)
+        if q is None:
+            return
+        self.data.qpos[:] = q
+        self.data.qvel[:] = 0.0
+        self.data.qacc[:] = 0.0
+        mujoco.mj_forward(self.model, self.data)
+        self._posture_fall_since = None    # 戻したのでカウントをリセット
+
+    def posture_height_reward(self):
+        """頭の高さ報酬（reward="posture_height"）。座位開始時（reset_model直後、
+        scene復元後）の頭の高さからの相対差。絶対値ではなく相対値を使う
+        （設計3節(5)：月齢で体格が変わるため、絶対値だと月齢間で比較できない）。
+
+        【なぜ座らせ直しの直後に基準を更新しないか】実装しやすい方（更新しない）を
+        選んだ。座り直すたびに基準をリセットすると、エピソード内で何度倒れても
+        「毎回ゼロから採点し直す」ことになり、繰り返し倒れることへの罰が薄まる
+        （倒れて座り直した直後は差がほぼ0＝高評価に見えてしまう）。座位開始時の
+        高さを固定基準にしておけば、エピソード全体を通じて「どれだけ崩れずに
+        座り続けられたか」を一貫して評価できる。
+
+        筋肉ペナルティ（体幹の対象筋のみ）は依頼書の指示どおり今回のスコープに
+        含めていない（将来リーチングと同時学習させる拡張を見越し、体幹以外の
+        筋を罰さないという要件があるため、対象筋の絞り込みが必要になる。
+        頭高さの相対差そのものの計算を優先した）。
+        """
+        ref = getattr(self, "_posture_head_height_ref", None)
+        if ref is None:
+            return 0.0
+        cur = float(self.data.body("head").xpos[2])
+        return cur - ref
 
     # ------------------------------------------------------------------
     # 体そのものを空間に留める（2026-07-29 追加）

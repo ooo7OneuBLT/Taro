@@ -1,0 +1,23 @@
+{
+  "name": "座位保持：リクライニング70度・層1(姿勢制御反射)+層2(立ち直り反射)・posture_height報酬",
+  "note": "2026-08-15。座位保持の学習の設計（作業記録（非公開））を受けた本番実験ファイル。scene=座位保持_リクライニング70度・posture_reflex=true（層1・姿勢制御反射・postural_gate.py）・righting_reflex=true（層2・立ち直り反射・righting_damper.py）・reward=posture_height（頭の高さの座位開始時からの相対差）。righting_reflex_gain/posture_fall_degは既定値のまま（0.02 / 30.0度）。学習ステップ数は目安：自己モデル実験（自己モデル_月齢4固定_柵なし_15000_seed0.json）が約1万stepで収束した実績を踏まえ、座位保持は反射ゲートで加減のみ学習させる軽いタスクという設計方針（決定事項）のため、まずは同規模の15000stepとした（打ち切り検出は入れず回しきる）。taro.saveを指定（記録の更新チェックリスト・2026-08-13以降の慣例）。",
+  "scene": "座位保持_リクライニング70度",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 4.0,
+    "posture_reflex": true,
+    "righting_reflex": true,
+    "righting_reflex_gain": 0.02,
+    "posture_fall_deg": 30.0,
+    "reward": "posture_height",
+    "save": "E/logs/seiza_hoji_recline70/model_seed0.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 15000,
+    "seed": 0,
+    "checkpoint": 500,
+    "csv": "E/logs/seiza_hoji_recline70/seed0.csv"
+  },
+  "plugins": {}
+}
