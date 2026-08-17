@@ -418,12 +418,12 @@ class ToySupineEnv(SupineMimoEnv):
             Noneで無効。既定はREACH_MAX（届かなくなったら戻す）。
     """
 
-    def __init__(self, toy=True, toy_side="right", toy_offset=None,
+    def __init__(self, toy=None, toy_side="right", toy_offset=None,
                  toy_dist=TOY_DISTANCE,
                  toy_radius=TOY_RADIUS, toy_mass=TOY_MASS,
                  tether_length=TETHER_LENGTH, tether_k=TETHER_K_TAUT,
                  tether_c=TETHER_C,
-                 fence=True, fence_half_x=FENCE_HALF_X, fence_half_y=FENCE_HALF_Y,
+                 fence=None, fence_half_x=FENCE_HALF_X, fence_half_y=FENCE_HALF_Y,
                  fence_post_w=FENCE_POST_W, fence_post_t=FENCE_POST_T,
                  fence_n_long=FENCE_N_LONG, fence_n_short=FENCE_N_SHORT,
                  fence_height=FENCE_HEIGHT, newborn_neck=None, newborn_limbs=None,
@@ -462,10 +462,22 @@ class ToySupineEnv(SupineMimoEnv):
         #   おもちゃや模様のある柵があると progress報酬がそちらへ向かい hand regard が出ない。
         # → 「貧しい環境で出る／豊かな環境で遅れる」の**二条件比較**が最強の実験デザインなので、
         #   両方を独立に切れる必要がある。（[参考文献リスト §目標E-15](../../doc/参考文献リスト.md)）
-        if os.environ.get("E_TOY_OBJ", "1") != "1":
-            toy = False
-        if os.environ.get("E_FENCE", "1") != "1":
-            fence = False
+        # 【2026-08-17・ステージB2】以前は toy/fence の既定値が True で、環境変数が
+        #   設定されていれば**明示引数より常に環境変数が勝つ**構造だった（他の設定は
+        #   逆に「引数が渡されたら必ずそれが勝つ」構造なので、ここだけ食い違っていた）。
+        #   全数調査：`E/scripts/e_smoke_all.py` が全診断スクリプトへ E_TOY_OBJ=0 を
+        #   一律注入しており、その中の `e_toy_check.py`（おもちゃとの接触・随伴性を
+        #   確認する専用スクリプト）が `toy=True` を明示していたのに、旧ロジックでは
+        #   環境変数がそれを踏みつぶし、**おもちゃ無しで「おもちゃの検査」を空振り
+        #   していた**（実際に確認した。toyがFAR_AWAYへ退避され、接触・随伴性の
+        #   チェックが常に「対象なし」で終わる）。他の入口（run/scene_tools/e_scene.py
+        #   のbuild()など）と同じ「Noneのときだけ環境変数を見る」形に統一する。
+        #   toy/fence を明示しない既存の呼び出し元は、既定値がTrueからNoneに変わっても
+        #   最終的に同じ式（環境変数が"1"ならON）に帰着するため1ビットも変わらない。
+        if toy is None:
+            toy = os.environ.get("E_TOY_OBJ", "1") == "1"
+        if fence is None:
+            fence = os.environ.get("E_FENCE", "1") == "1"
         # E_PLAIN=1（既定）＝視覚的に貧しくする。E_PLAIN=0 で従来の見た目（市松床・青い柵）。
         # 注意：_edit_spec は super().__init__() の中で呼ばれるので super() より前に代入する。
         # 【2026-08-17】plain引数を新設。None なら従来どおり環境変数（既定は貧しい＝1）。

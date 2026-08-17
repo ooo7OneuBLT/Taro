@@ -373,10 +373,13 @@ def build(scene, orient=None, vor=True, seed=0, verbose=False, actuation_model=N
     #       (a) refactor_harness.py compare が「組み立て直後のE_環境変数
     #           スナップショット」も一致条件に含めており（配線そのものの
     #           裏取り）、書き込みを間引くとその時点で不一致として検出される、
-    #       (b) 全数調査（下記）で E_TOY_OBJ/E_FENCE は e_toy_env.py 内の
-    #           既存ロジックが「環境変数が明示引数より常に優先」で書かれており
-    #           （e_smoke_all.py 経由の e_toy_check.py が toy=True 明示 +
-    #           E_TOY_OBJ=0 で実際に依存している）、
+    #       (b) 【2026-08-17・ステージB2で解消】E_TOY_OBJ/E_FENCE はかつて
+    #           e_toy_env.py 内の既存ロジックが「環境変数が明示引数より常に優先」
+    #           で書かれており、e_smoke_all.py 経由の e_toy_check.py（toy=True明示）
+    #           が E_TOY_OBJ=0 の注入で空振りしていた。toy/fence も他の設定と同じ
+    #           「Noneのときだけ環境変数を見る」形に統一済み（e_toy_env.pyの
+    #           ToySupineEnv.__init__参照）なので、この理由はもう成り立たない。
+    #           それでも書き込みを残すのは(a)のハーネス整合のためだけ、
     #       (c) E_TOY_MODE/E_TOY_DELAY/E_TOY_APPROACH/E_TOY_FROM は
     #           run/viewer_tools/e_viewer.py・e_viewer_qt.py がステータス表示で
     #           対応するTE.*モジュール属性を直接読む、
@@ -574,6 +577,21 @@ def _rehold(env, scene, hands=None):
         chair.hold(stiffness=sup.get("stiffness"))
 
 
+def _resolve_free(sup):
+    """`body_support.free` を字義どおりに解決する（2026-08-17・ステージB1）。
+
+    【なぜ要るか】以前は3か所（本関数の旧実装・_repin・_apply_setup）が
+    `sup.get("free") or ("arm", "finger")` と書いていた。Python の `or` は
+    **空リスト `[]` も偽と判定する**ため、"free: [] を明示指定した＝腕も指も
+    含めて全部固定したい" というシーンが、"free を指定していない＝既定の
+    腕・指だけ自由" と同じ扱いに化けていた（意図と正反対）。
+    `sup.get("free")` が **None のときだけ**既定値を使う（`is None` 判定）よう
+    直し、空リストは「指定どおり空＝全部固定」として尊重する。
+    """
+    free = sup.get("free")
+    return tuple(("arm", "finger") if free is None else free)
+
+
 def constraint_summary(scene):
     """setup/body/world の辞書だけから「何が固定され、何が自由か」を計算する。
     副作用なし。env が無くても呼べる（load() 直後でも catalog.py でも使える）。
@@ -600,7 +618,7 @@ def constraint_summary(scene):
             "flexion": bool(scene["body"]["flexion"]),
             "recline_deg": w["recline_deg"],
         }
-    free = set(sup.get("free") or ("arm", "finger"))
+    free = set(_resolve_free(sup))
     pinned = sorted(all_groups - free) if sup.get("pin_joints", True) else []
     return {
         "root_pinned": bool(sup.get("pin_root", True)),
@@ -631,7 +649,7 @@ def _repin(env, scene, verbose=False):
     #   **眼球が可動域の上限に張り付いた**。視線の実験が成立しないため。
     if sup.get("pin_joints", True):
         from e_head_hold import joints_to_support
-        free = tuple(sup.get("free") or ("arm", "finger"))
+        free = _resolve_free(sup)
         if (scene.get("setup") or {}).get("head_hold") and "head" not in free:
             free = free + ("head",)      # 首は実験者の手が担当
         n = u.pin_joints(joints_to_support(u.model, free=free), on=True)
@@ -686,7 +704,7 @@ def _apply_setup(env, s, age, verbose=False):
     sup = s.get("body_support")
     if sup:
         from e_head_hold import joints_to_support, GROUP_JP
-        free = tuple(sup.get("free") or ("arm", "finger"))
+        free = _resolve_free(sup)
         # 注意：首は「実験者の手」が担当するので、二重に支えない（役割を分ける）。
         #   両方が同じ `jnt_stiffness` を書くので、混ざると
         #   「どちらの設定が効いているのか」が分からなくなる（落とし穴 項62 の型）。

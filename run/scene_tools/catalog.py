@@ -15,7 +15,18 @@
     ① 単体実行   python run/scene_tools/catalog.py
     ② e_scene.save() の末尾から自動で呼ばれる（保存のたびに一覧を作り直す）
 
-出力先は変更せず、従来どおり `E/docs/シーン一覧.md`。
+出力先は通常どおり `E/docs/シーン一覧.md`。
+
+【2026-08-17・ステージB4】以前は出力先を `_ROOT`（このファイルの位置から
+計算した固定パス）から直接組み立てていたため、`e_scene.SCENE_DIR` を
+一時フォルダへ差し替えて `save()` をテストすると、シーンJSON自体は
+一時フォルダに書かれるのに、`save()` の末尾が呼ぶ `write_catalog()` だけは
+**本物の `E/docs/シーン一覧.md` を上書きしてしまう**事故があった
+（run/viewer_tools/test_pose_slider_roundtrip.py がこれを踏んで、
+`catalog.write_catalog` そのものを丸ごと無効化する対症療法で回避していた）。
+出力先を呼び出し時点の `e_scene.SCENE_DIR` から導出するように直し、
+標準の `<プロジェクト根>/run/scenes` という構造のときだけ実物の
+`E/docs/シーン一覧.md` を書く（`_out_path_for_scene_dir()` 参照）。
 """
 import os
 import sys
@@ -31,9 +42,23 @@ if _HERE not in sys.path:
 
 import e_scene  # noqa: E402
 
-SCENE_DIR = e_scene.SCENE_DIR
 EXPERIMENTS_DIR = os.path.join(_ROOT, "E", "experiments")
-OUT_PATH = os.path.join(_ROOT, "E", "docs", "シーン一覧.md")
+
+
+def _out_path_for_scene_dir(scene_dir):
+    """`scene_dir`（＝呼び出し時点の `e_scene.SCENE_DIR`）から出力先を導く。
+
+    標準の `<root>/run/scenes` という構造のときだけ `<root>/E/docs/シーン一覧.md`
+    を返す。それ以外（テストで `e_scene.SCENE_DIR` を一時フォルダへ差し替えた
+    場合など）は None を返し、呼び出し側で書き込み自体をスキップさせる
+    （＝本物のプロジェクトファイルには一切触れない）。
+    """
+    scene_dir = os.path.abspath(scene_dir)
+    parent = os.path.dirname(scene_dir)
+    if os.path.basename(scene_dir) != "scenes" or os.path.basename(parent) != "run":
+        return None
+    root = os.path.dirname(parent)
+    return os.path.join(root, "E", "docs", "シーン一覧.md")
 
 GROUP_JP = {"arm": "腕", "finger": "指", "leg": "脚", "trunk": "体幹", "head": "頭"}
 
@@ -144,15 +169,25 @@ def render_markdown(rows):
 
 
 def write_catalog():
-    """`E/docs/シーン一覧.md` を実際に作り直す。呼び出し側から見た唯一の入口。"""
+    """`E/docs/シーン一覧.md` を実際に作り直す。呼び出し側から見た唯一の入口。
+
+    出力先は呼び出し時点の `e_scene.SCENE_DIR` から導出する（モジュール読み込み時に
+    固定しない）。`e_scene.SCENE_DIR` が標準の `<root>/run/scenes` でなければ
+    （テストでの一時フォルダ差し替えなど）、本物のファイルを守るため何も書かず None を返す。
+    """
+    out_path = _out_path_for_scene_dir(e_scene.SCENE_DIR)
+    if out_path is None:
+        print(f"[catalog] 注意 e_scene.SCENE_DIR が標準の run/scenes 構造ではないため、"
+              f"シーン一覧の書き込みをスキップしました（SCENE_DIR={e_scene.SCENE_DIR}）。")
+        return None
     rows = build_rows()
     text = render_markdown(rows)
-    os.makedirs(os.path.dirname(OUT_PATH), exist_ok=True)
-    with open(OUT_PATH, "w", encoding="utf-8") as fp:
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    with open(out_path, "w", encoding="utf-8") as fp:
         fp.write(text)
     print(f"[catalog] シーン一覧を書き直しました → "
-          f"{os.path.relpath(OUT_PATH, _ROOT)}（{len(rows)}件）")
-    return OUT_PATH
+          f"{os.path.relpath(out_path, _ROOT)}（{len(rows)}件）")
+    return out_path
 
 
 if __name__ == "__main__":
