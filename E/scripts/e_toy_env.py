@@ -456,7 +456,8 @@ class ToySupineEnv(SupineMimoEnv):
                  toy_appear_delay=None, toy_approach_sec=None, toy_approach_from=None,
                  parent_intervene=None, parent_wait_sec=None, parent_lost_deg=None,
                  plain=None, static_tex=None, orient_v=None,
-                 eye_rest_vertical_deg=None, eye_centering=None, **kwargs):
+                 eye_rest_vertical_deg=None, eye_centering=None,
+                 eye_muscle_scale=None, **kwargs):
         # VOR（前庭動眼反射）。眼球を方策から切り離し、頭の動きを打ち消して視線を安定させる。
         # E_VOR=0 でOFF（アブレーション）。根拠と簡略化は e_vor.py 参照。
         if vor is None:
@@ -555,6 +556,11 @@ class ToySupineEnv(SupineMimoEnv):
         self._eye_rest_vertical_deg = (None if eye_rest_vertical_deg is None
                                        else float(eye_rest_vertical_deg))
         self._eye_centering = eye_centering    # None ならinfant_body側の既定に従う
+        # 【2026-08-18新設・F1-3a】眼球の筋力補正（既定1.0＝無補正）。
+        #   実体は infant_body.apply_eye_muscle_scale。四肢のlimb_scaleと同じ
+        #   流儀（kwargs直渡し、環境変数は新設しない）。詳細はinfant_body.py参照。
+        self._eye_muscle_scale = (1.0 if eye_muscle_scale is None
+                                  else float(eye_muscle_scale))
         # 視線誘導反射の実装バージョン。None なら従来どおり環境変数（既定"1"）。
         self._orient_v = (os.environ.get("E_ORIENT_V", "1") if orient_v is None
                           else str(orient_v))
@@ -618,6 +624,17 @@ class ToySupineEnv(SupineMimoEnv):
             if _custom:
                 kwargs["custom_measurements"] = _custom
         super().__init__(**kwargs)
+
+        # 【2026-08-18新設・F1-3a】眼球の筋力補正。super().__init__()の後＝
+        #   self.model / self.actuation_model が構築済みになってから適用する
+        #   （親クラスSupineMimoEnvがapply_runtime_correctionsで首・四肢の筋力を
+        #   補正するのと同じ位置関係。眼球はrun_time_correctionsの対象外なので
+        #   ここで別途適用する）。scale=1.0（既定）なら何もしない＝1ビットも
+        #   従来と変わらない。
+        if abs(self._eye_muscle_scale - 1.0) > 1e-9:
+            from infant_body import apply_eye_muscle_scale
+            apply_eye_muscle_scale(self.model, scale=self._eye_muscle_scale,
+                                   actuation_model=getattr(self, "actuation_model", None))
 
         # リクライニング：体の向きを背もたれの角度に合わせる（2026-07-28）。
         #   親クラス（SupineMimoEnv）が仰向け（水平）に置いたあと、y軸まわりに起こす。

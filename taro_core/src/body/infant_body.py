@@ -1054,6 +1054,58 @@ def apply_eye_centering_spring(model, data=None, vertical_deg=None, stiffness=No
     return n
 
 
+# ---- 眼球の筋力補正（既定OFF＝倍率1.0）・2026-08-18（F1-3a） ----------------
+#
+# 【なぜ要るか】上の apply_eye_centering_spring（k=0.03N・m/rad）をONにすると、
+#   目の筋アクチュエータへ全力指令を出しても眼球が**0.52度しか動かない**
+#   （2026-08-17の較正記録。バネに筋力が負けている）。このため視線誘導反射
+#   （E/scripts/e_toy_env.py の OrientingReflex）が行動の目成分を書き換えても
+#   物理的に目が動かせない。
+#
+# 【人間模倣】外眼筋は受動弾性に楽に打ち勝つ（サッケードのピーク角速度は
+#   秒速200〜500度、偏心位置の保持も可能）。目標値の一次文献確認は別途進行中
+#   [Tier3:目標値は暫定]。
+#
+# 【機構】四肢の limb_scale（apply_limb_inversion_fix の scale 引数）と同じ流儀：
+#   筋力の実体（筋肉モデルなら actuation_model.fmax、それ以外は actuator_gear）を
+#   scale_actuator_strength 経由で直接 scale 倍する。★アクチュエータの出力を
+#   強めるだけで、apply_eye_centering_spring の受動バネ（jnt_stiffness）には
+#   一切触れない＝バネの挙動は不変のまま、筋力だけを勝てる強さにする。
+#
+# 【既定は1.0（無補正）】較正した値をここのモジュール既定にはしない。
+#   シーン/実験ファイル側（body.eye_muscle_scale）で明示指定して使う。
+def apply_eye_muscle_scale(model, scale=1.0, actuation_model=None, verbose=True):
+    """眼球6関節の筋アクチュエータの出力を scale 倍する。既定1.0＝無補正。
+
+    Args:
+        model: MuJoCoのモデル
+        scale: fmax（筋肉モデル）/ gear（それ以外）に掛ける倍率。1.0で何もしない。
+        actuation_model: 筋肉モデルのインスタンス（None なら gear を直接書き換え）
+        verbose: ログを出すか
+
+    Returns:
+        int: 変更したアクチュエータの数
+    """
+    n = 0
+    unapplied = 0
+    for i in range(model.nu):
+        jid = int(model.actuator_trnid[i, 0])
+        if jid < 0:
+            continue
+        if "eye" not in model.joint(jid).name:
+            continue
+        if not scale_actuator_strength(model, i, scale, actuation_model):
+            unapplied += 1
+            continue
+        n += 1
+    if verbose and n:
+        _tag = "" if abs(float(scale) - 1.0) < 1e-9 else f" [眼球筋力をx{scale:g}倍（1.0が無補正）]"
+        if unapplied:
+            _tag += f" 注意[{unapplied}件未適用＝fmaxがスカラーで関節ごとに変えられない]"
+        print(f"[eyes] muscle scale x{scale:g}: {n}アクチュエータ{_tag}")
+    return n
+
+
 def apply_neck_tone(model, age=0.0, stiffness=None, target=None, joints=None,
                     verbose=True, data=None):
     """首の筋緊張＝頭が重力で倒れきらないように支える弱いバネ。

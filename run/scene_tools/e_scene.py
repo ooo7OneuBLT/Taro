@@ -116,6 +116,13 @@ def default_scene(name="無題"):
             #   既定OFF＝眼球は筋入力ゼロのとき可動域の壁まで転がり落ちる、従来通りの挙動
             #   （実測・根拠は infant_body.py の EYE_CENTERING 直前のコメント参照）。
             "eye_centering": False,
+            # 【2026-08-18新設・F1-3a】眼球6関節の筋アクチュエータ出力の倍率（既定1.0＝無補正）。
+            #   実体は taro_core の infant_body.apply_eye_muscle_scale。
+            #   eye_centering=True の中央復帰バネ(k=0.03)に、素の筋力（scale=1.0）では
+            #   全力指令でも眼球が0.52度しか動かず勝てない（実測・2026-08-17）ため新設。
+            #   四肢のlimb_scaleと同じ流儀（fmax/gearを直接倍する）。較正値はここの既定には
+            #   しない＝シーン/実験ファイル側で明示指定する。
+            "eye_muscle_scale": 1.0,
             # 視線誘導反射の実装バージョン（2026-07-29 追加）。
             #   注意：`e_toy_env` の既定は "1"（旧版）で、16個の測定スクリプトが
             #     それぞれ `E_ORIENT_V=2` を指定していた＝設定の散らばりそのもの。
@@ -694,6 +701,7 @@ def _body_kwargs(b, verbose=False):
     kw = {
         "limb_scale": float(b["limb_scale"]),
         "limb_fix": bool(b["limb_fix"]),
+        "eye_muscle_scale": float(b.get("eye_muscle_scale", 1.0)),
         "distal_mass": float(b["distal_mass"]),
         "flexion": bool(b["flexion"]),
         "flexion_stiffness": (None if b["flexion_stiffness"] is None
