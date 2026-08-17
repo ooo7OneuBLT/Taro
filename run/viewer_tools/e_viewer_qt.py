@@ -184,6 +184,44 @@ def _collect_pose_joints(m, d):
     return joints
 
 
+# ---- 体ぜんたい（向き・位置）スライダー ⇄ root四元数 ------------------------
+# 【なぜ、2026-08-17・絶対値化】旧版はここに root_quat0（シーンを開いた瞬間の
+#   root四元数）を合成していた＝スライダーは「読み込み時からの差分」だった。
+#   これが原因で、あるセッションで記録したスライダー値を別のシーン・別の
+#   セッションへそのまま適用すると、基準（読み込み時の姿勢）が違うために
+#   別物の姿勢になる事故が起きた（2026-08-16のメモ→6ヶ月シーン機械変換で
+#   頭部が床下-21cmに埋まった。診断結果：E/docs/研究日誌_2026-08.md
+#   2026-08-17追記、および本関数の診断実験ログ）。
+#   ⇒ root_quat0との合成をやめ、**世界座標系そのものを基準にした絶対値**に
+#   変更する。関数はもう「そのシーンの読み込み時の姿勢」という状態を必要と
+#   しないため、main()内のクロージャからモジュール直下の純粋関数へ出した
+#   （テスト run/viewer_tools/test_pose_slider_roundtrip.py から直接importして
+#   往復を検証できるようにする狙いも兼ねる）。
+def _root_quat_from_sliders(roll_deg, pitch_deg, yaw_deg):
+    """体ぜんたいスライダー3本（度）→ root の四元数（mujoco wxyz順・世界座標の絶対値）。
+
+    移植元：e_viewer.py 497〜506行目。mujoco.mju_euler2Quat ではなく
+    scipy.spatial.transform.Rotation を使う（往復（オイラー→クオータニオン
+    →オイラーの逆変換）で値が一致しなかったため。移植元コメント493〜496行目
+    参照。'xyz'の合成順がscipyの'xyz'外因性回転と異なる）。
+    """
+    r = _Rotation.from_euler("xyz", [roll_deg, -pitch_deg, yaw_deg], degrees=True)
+    qx, qy, qz, qw = r.as_quat()
+    return np.array([qw, qx, qy, qz])
+
+
+def _sliders_from_root_quat(cur_quat_wxyz):
+    """root の四元数（世界座標の絶対値）→ スライダー3本（度）。取り込みボタン用の逆変換。
+
+    移植元：e_viewer.py 508〜518行目。往復とも scipy に統一している
+    （上の _root_quat_from_sliders と同じ理由）。
+    """
+    r = _Rotation.from_quat([cur_quat_wxyz[1], cur_quat_wxyz[2],
+                             cur_quat_wxyz[3], cur_quat_wxyz[0]])
+    e = r.as_euler("xyz", degrees=True)
+    return float(e[0]), float(-e[1]), float(e[2])
+
+
 class MainWindow(QtWidgets.QMainWindow):
     """太郎ビューア（新版・第2段階）。
 
@@ -422,23 +460,36 @@ class MainWindow(QtWidgets.QMainWindow):
         box_body = QtWidgets.QGroupBox("体ぜんたい（向き・位置）")
         pose_form.addWidget(box_body)
         body_lay = QtWidgets.QVBoxLayout(box_body)
+        # 【2026-08-17・絶対値化】以前は「0度＝読み込み時の姿勢のまま」という
+        #   差分方式だったが、これが原因でメモした値を別シーン・別セッションへ
+        #   適用すると別物の姿勢になる事故が起きた（診断結果：
+        #   E/docs/研究日誌_2026-08.md 2026-08-17追記）。今は世界座標系そのものを
+        #   基準にした絶対値。シーンを読み込むと、そのシーンの実際の角度・位置が
+        #   そのままスライダーに表示される（0度がその値になるとは限らない）。
         body_hint = QtWidgets.QLabel(
-            "0度＝読み込み時の姿勢のまま。「前後にたおす」を+にすると起き上がる方向\n"
-            "（座位_床_柵なしシーンで実測：+30度で体幹の傾き39.7→69.3度）。")
+            "世界座標を基準にした絶対値（0度＝MuJoCoモデル素の向き。読み込んだ\n"
+            "シーンの実際の値がそのまま表示される）。「前後にたおす」は＋で起き上がる方向。")
         body_hint.setStyleSheet("color: #666; font-size: 8pt;")
         body_hint.setWordWrap(True)
         body_lay.addWidget(body_hint)
         self.body_pitch_slider = FloatSlider(
             "前後にたおす[度]", -90, 90, 1, init=0.0,
-            note="＋＝起こす（座位に近づく）／－＝倒す（仰向けに近づく）")
+            note="＋＝起こす（座位に近づく）／－＝倒す（仰向けに近づく）。世界座標の絶対角")
         body_lay.addWidget(self.body_pitch_slider)
-        self.body_roll_slider = FloatSlider("左右にたおす[度]", -90, 90, 1, init=0.0)
+        # 【なぜ±180度か、2026-08-17】絶対値化に伴い実在シーンを機械走査したところ
+        #   （scratchpad診断スクリプト）、「座位保持_リクライニング70度」の実測絶対roll
+        #   が152.8度あった（±90度では収まらない）。pitchはEuler xyz分解の性質上
+        #   数式的に±90度に収まる（asinの値域）ためそのまま、roll/yawだけ±180度に。
+        self.body_roll_slider = FloatSlider("左右にたおす[度]", -180, 180, 1, init=0.0)
         body_lay.addWidget(self.body_roll_slider)
         self.body_yaw_slider = FloatSlider("ひねる[度]", -180, 180, 1, init=0.0)
         body_lay.addWidget(self.body_yaw_slider)
         # 【なぜ0.1cm刻みか、2026-08-16】1cm刻みだと「床にめり込んでいるかも
         #   しれないが小数点以下を調整できない」との申告（依頼書②）。
         #   向き3本（度）は従来どおり1度刻みのまま（申告は位置3本だけの話）。
+        # 【2026-08-17】位置3本も絶対値化。実在シーンの機械走査では
+        #   dz -16.6〜+39.4cm・dx -12.7〜+11.0cm・dy -21.7〜+0.6cm で、
+        #   いずれも現行レンジ内に収まっていたためレンジ自体は変更していない。
         self.body_dz_slider = FloatSlider("高さ[cm]", -50, 50, 0.1, init=0.0)
         body_lay.addWidget(self.body_dz_slider)
         self.body_dx_slider = FloatSlider("前後の位置[cm]", -100, 100, 0.1, init=0.0)
@@ -446,15 +497,18 @@ class MainWindow(QtWidgets.QMainWindow):
         self.body_dy_slider = FloatSlider("左右の位置[cm]", -100, 100, 0.1, init=0.0)
         body_lay.addWidget(self.body_dy_slider)
 
-        # ---- 仰向けに戻す（旧版 e_viewer.py 1876行目のボタンの移植）------------
+        # ---- 読み込み時の姿勢に戻す（旧版 e_viewer.py 1876行目のボタンの移植）--------
         # 【なぜ、2026-08-16】旧版削除にあたっての差分洗い出しで判明した欠落。
         #   体ぜんたいスライダーを0へ戻すだけでは、「この角度で固定する」が
         #   OFFのときは物理へ反映されない（毎tickの上書きはchk_pose_hold ON時
         #   だけ、というmain()側の設計のため）。旧版と同じく、押した瞬間に
         #   qpos/qvelへ直接書き込み、固定チェックのON/OFFに関わらず即座に
-        #   仰向けへ戻す（配線はmain()側のrestore_supine()、仕様なし・
+        #   読み込み時の姿勢へ戻す（配線はmain()側のrestore_supine()、仕様なし・
         #   実装担当の判断＝欠落一覧に載せた上での復元）。
-        self.restore_supine_btn = QtWidgets.QPushButton("仰向けに戻す")
+        # 【2026-08-17・改称】ボタン名を「仰向けに戻す」→「読み込み時の姿勢に戻す」へ。
+        #   座位シーン等、読み込み時が仰向けとは限らないため名前が実態と合っていなかった
+        #   （関数名・変数名 restore_supine は変更コストが大きいため据え置き）。
+        self.restore_supine_btn = QtWidgets.QPushButton("読み込み時の姿勢に戻す")
         body_lay.addWidget(self.restore_supine_btn)
 
         btn_row = QtWidgets.QHBoxLayout()
@@ -899,43 +953,15 @@ def main():
     if root_qadr is None:
         print(f"[viewer] 注意体（body='{TE.ROOT_BODY}'）の自由関節が見つからない。"
               "体ぜんたいの向き・位置は動かせません", flush=True)
+    # root_qpos0/root_quat0/root_pos0：読み込み時点の実際の絶対姿勢。
+    #   スライダーの合成基準としてはもう使わない（絶対値化。関数本体は
+    #   モジュール直下の _root_quat_from_sliders/_sliders_from_root_quat を参照）。
+    #   ここでは「読み込み時の姿勢へ戻す」（restore_supine）と、起動直後に
+    #   スライダーへ実際の絶対値を表示する初期化のためだけに保持する。
     root_qpos0 = (d.qpos[root_qadr:root_qadr + 7].copy()
                   if root_qadr is not None else None)
     root_quat0 = root_qpos0[3:7].copy() if root_qpos0 is not None else None
     root_pos0 = root_qpos0[0:3].copy() if root_qpos0 is not None else None
-
-    def _root_quat_from_sliders(roll_deg, pitch_deg, yaw_deg):
-        """スライダー3本（度）→ root の四元数（mujoco wxyz順）。
-
-        移植元：e_viewer.py 497〜506行目。mujoco.mju_euler2Quat ではなく
-        scipy.spatial.transform.Rotation を使う（往復（オイラー→クオータニオン
-        →オイラーの逆変換）で値が一致しなかったため。移植元コメント493〜496行目
-        参照。'xyz'の合成順がscipyの'xyz'外因性回転と異なる）。
-        """
-        if root_quat0 is None:
-            return None
-        r = _Rotation.from_euler("xyz", [roll_deg, -pitch_deg, yaw_deg], degrees=True)
-        qx, qy, qz, qw = r.as_quat()
-        delta = np.array([qw, qx, qy, qz])
-        newq = np.zeros(4)
-        mujoco.mju_mulQuat(newq, delta, root_quat0)
-        return newq
-
-    def _sliders_from_root_quat(cur_quat_wxyz):
-        """root の現在の四元数 → スライダー3本（度）。取り込みボタン用の逆変換。
-
-        移植元：e_viewer.py 508〜518行目。往復とも scipy に統一している
-        （上の _root_quat_from_sliders と同じ理由）。
-        """
-        if root_quat0 is None:
-            return 0.0, 0.0, 0.0
-        inv_base = np.zeros(4)
-        mujoco.mju_negQuat(inv_base, root_quat0)   # 単位四元数の逆＝共役
-        delta = np.zeros(4)
-        mujoco.mju_mulQuat(delta, cur_quat_wxyz, inv_base)
-        r = _Rotation.from_quat([delta[1], delta[2], delta[3], delta[0]])
-        e = r.as_euler("xyz", degrees=True)
-        return float(e[0]), float(-e[1]), float(e[2])
 
     # ---- 四肢の筋力倍率の基準値（状態表示欄で使う。仕様2-3節2）--------------
     am = u.actuation_model
@@ -950,15 +976,19 @@ def main():
     # ==================================================================
     app = QtWidgets.QApplication(sys.argv)
     try:
-        # 【なぜ、2026-08-14】apply_theme()の1回適用から、OSのライト/ダーク
-        # 切り替えに起動したまま追従するenable_auto_theme()に置き換えた
+        # 【なぜ、2026-08-14】Windows 11風のQPalette＋最小限QSSを当てる
         # （作業記録（非公開）
         # 詳細設計_統合版.md 9節Q1。別リポジトリのビューアと共有するテーマ機構の
-        # 太郎本体側への反映）。戻り値のコントローラはQApplication自身の
-        # 属性として保持する（ローカル変数のままだとGCでシグナル接続・
-        # QTimerが無効になりうるため。enable_auto_theme()のdocstring参照）。
-        from e_viewer_qt_theme import enable_auto_theme
-        app._theme_controller = enable_auto_theme(app)
+        # 太郎本体側への反映）。
+        # 【2026-08-17・修正】ここは長らく `enable_auto_theme`（OSのライト/ダーク
+        #   切り替えに起動したまま追従する関数）を呼んでいたが、
+        #   e_viewer_qt_theme.py にはその名前の関数が実在せず、常に
+        #   ImportError→下のexceptで握りつぶされてテーマが一度も当たっていなかった
+        #   （実害は小さいが「テーマ適用に失敗しました」の注意も出ない静かなバグ。
+        #   起動ログを見て初めて気づける状態だった）。同モジュールに実在する
+        #   `apply_theme()`（起動時に1回だけ適用。OS追従はしない）を正しく呼ぶ。
+        from e_viewer_qt_theme import apply_theme
+        apply_theme(app)
     except Exception as e:
         # 【なぜ】テーマ適用（QPalette＋最小限QSS）に失敗しても、
         #   テーマ無しで起動を続ける（テーマはあくまで見た目の装飾で、
@@ -1004,6 +1034,20 @@ def main():
         f"持たせ方 {TE.TOY_MODE} ／ 登場 {TE.TOY_APPEAR_DELAY:.1f}秒後に"
         f"{TE.TOY_APPROACH_SEC:.1f}秒かけて{TE.TOY_APPROACH_FROM}から")
     win.parent_label.setText("まだ介入していません（おもちゃが見えなくなったら押す）")
+
+    # ---- 体ぜんたいスライダーの初期値（絶対値化。2026-08-17）-------------------
+    # 【なぜ】旧版は起動直後は常に0（差分の基準点だったため）。絶対値化した
+    #   現在は「このシーンの実際の姿勢が世界座標で何度・どこにあるか」を
+    #   そのまま表示する。root_qpos0はこの関数群の外（902〜912行目付近）で
+    #   読み込み直後に捕捉した値。
+    if root_qadr is not None:
+        _r0, _p0, _y0 = _sliders_from_root_quat(root_quat0)
+        win.body_roll_slider.setValue(round(_r0, 1), block_signal=True)
+        win.body_pitch_slider.setValue(round(_p0, 1), block_signal=True)
+        win.body_yaw_slider.setValue(round(_y0, 1), block_signal=True)
+        win.body_dx_slider.setValue(round(float(root_pos0[0]) * 100.0, 1), block_signal=True)
+        win.body_dy_slider.setValue(round(float(root_pos0[1]) * 100.0, 1), block_signal=True)
+        win.body_dz_slider.setValue(round(float(root_pos0[2]) * 100.0, 1), block_signal=True)
 
     # スライダーを動かしたら自動で「固定する」に切り替える
     #   （移植元：e_viewer.py 772〜774行目 on_toy_slider）。
@@ -1078,15 +1122,18 @@ def main():
             # 体ぜんたい（向き・位置）も取り込む（移植元：e_viewer.py 1140〜1152行目）。
             #   取り込まないと、直前に手で倒した体の向きがスライダー表示に
             #   反映されないまま残り、「固定」を押した瞬間に古い向きへ飛ぶ。
+            #   【2026-08-17・絶対値化】root_pos0との差分ではなく、世界座標での
+            #   絶対値をそのまま表示する（_sliders_from_root_quatが絶対値を返す
+            #   関数になったため、offset計算は不要になった）。
             if root_qadr is not None:
                 r, p, y = _sliders_from_root_quat(d.qpos[root_qadr + 3:root_qadr + 7])
                 win.body_roll_slider.setValue(round(r, 1))
                 win.body_pitch_slider.setValue(round(p, 1))
                 win.body_yaw_slider.setValue(round(y, 1))
-                offset_m = d.qpos[root_qadr:root_qadr + 3] - root_pos0
-                win.body_dx_slider.setValue(round(float(offset_m[0]) * 100.0, 1))
-                win.body_dy_slider.setValue(round(float(offset_m[1]) * 100.0, 1))
-                win.body_dz_slider.setValue(round(float(offset_m[2]) * 100.0, 1))
+                pos_abs = d.qpos[root_qadr:root_qadr + 3]
+                win.body_dx_slider.setValue(round(float(pos_abs[0]) * 100.0, 1))
+                win.body_dy_slider.setValue(round(float(pos_abs[1]) * 100.0, 1))
+                win.body_dz_slider.setValue(round(float(pos_abs[2]) * 100.0, 1))
         finally:
             _sym_busy[0] = False
         win.msg_label.setText("いまの姿勢をスライダーに取り込みました")
@@ -1109,6 +1156,12 @@ def main():
         「この角度で固定する」がOFFでも効くよう、スライダーを0に戻すだけでなく
         d.qpos/d.qvelへ直接書く（1508〜1519行目の毎tick上書きはchk_pose_hold
         ONのときしか走らないため、スライダーを0にするだけでは物理へ反映されない）。
+
+        【2026-08-17・絶対値化】スライダーは絶対値になったので「戻す＝0にする」
+        ではなくなった。qpos/qvelをroot_qpos0（読み込み時に捕捉した実際の姿勢）へ
+        書き戻すのは変わらないが、スライダー表示はその**絶対値**（root_qpos0を
+        _sliders_from_root_quatで変換した値）にする。座位シーン等では0度・0cmには
+        ならない（そのシーンの読み込み時の実際の角度・位置が表示される）。
         """
         if root_qadr is None or root_qpos0 is None:
             win.msg_label.setText("注意体の自由関節が見つからないため戻せません")
@@ -1117,10 +1170,14 @@ def main():
         if root_dofadr is not None:
             d.qvel[root_dofadr:root_dofadr + 6] = 0.0
         mujoco.mj_forward(m, d)
-        for sld in (win.body_roll_slider, win.body_pitch_slider, win.body_yaw_slider,
-                    win.body_dx_slider, win.body_dy_slider, win.body_dz_slider):
-            sld.setValue(0.0, block_signal=True)
-        win.msg_label.setText("体を読み込み時の姿勢（仰向け）に戻しました")
+        r0, p0, y0 = _sliders_from_root_quat(root_quat0)
+        win.body_roll_slider.setValue(round(r0, 1), block_signal=True)
+        win.body_pitch_slider.setValue(round(p0, 1), block_signal=True)
+        win.body_yaw_slider.setValue(round(y0, 1), block_signal=True)
+        win.body_dx_slider.setValue(round(float(root_pos0[0]) * 100.0, 1), block_signal=True)
+        win.body_dy_slider.setValue(round(float(root_pos0[1]) * 100.0, 1), block_signal=True)
+        win.body_dz_slider.setValue(round(float(root_pos0[2]) * 100.0, 1), block_signal=True)
+        win.msg_label.setText("体を読み込み時の姿勢に戻しました")
 
     def copy_values_to_clipboard():
         """今のスライダー値（体ぜんたい6本＋関節43個）をJSONでクリップボードへ。
@@ -1129,6 +1186,14 @@ def main():
         報告を受けての保険機能。保存に失敗しても、この値さえ残っていれば
         手で復元できる（キーは日本語ラベル＝POSE_GROUPSのjpをそのまま使うので
         E/docs/座位姿勢_6ヶ月_手作り_2026-08-16.jsonと同じ形式になる）。
+
+        【2026-08-17・重要】体ぜんたい6本は絶対値化された（世界座標基準）。
+        このボタンでコピーした値は、どのシーンを読み込んだ状態でも
+        同じ意味を持つ（以前は「読み込み時の姿勢からの差分」だったため、
+        別シーン・別セッションに適用すると別物の姿勢になった。2026-08-16の
+        メモがまさにこの事故で使えなくなった。詳細：
+        E/docs/研究日誌_2026-08.md 2026-08-17追記）。関節43個側は元々
+        絶対角（qposそのもの）なので、この変更の影響を受けない。
         """
         payload = {
             "_出力元": "e_viewer_qt.py「いまの値をコピー」ボタン",
@@ -1545,16 +1610,25 @@ def main():
                     win.toy_sliders[i].setValue(float(toy_pos0[i]), block_signal=True)
                 _syncing[0] = False
                 win.chk_toy_follow.setChecked(False)
-                # 体ぜんたいの向き・位置のスライダーも0へ戻す（移植元：
+                # 体ぜんたいの向き・位置のスライダーも読み直す（移植元：
                 #   e_viewer.py 1841〜1847行目「仰向けに戻す」と同じ考え方）。
-                #   このスライダーは読み込み時の姿勢からの差分として持っているので、
-                #   qposだけ戻してスライダー表示を残すと、次に「固定」が効いた瞬間に
-                #   毎tickの上書きで元の傾きへ引き戻されてしまう。
+                #   【2026-08-17・絶対値化】スライダーは絶対値なので「0に戻す」の
+                #   ではなく、reset_to_scene()後の実際のroot qposを読み直して
+                #   表示する（qposだけ戻してスライダー表示を古い値のまま残すと、
+                #   次に「固定」が効いた瞬間に毎tickの上書きで違う姿勢へ飛ぶ）。
                 if root_qadr is not None:
-                    for sld in (win.body_roll_slider, win.body_pitch_slider,
-                                win.body_yaw_slider, win.body_dx_slider,
-                                win.body_dy_slider, win.body_dz_slider):
-                        sld.setValue(0.0, block_signal=True)
+                    _r2, _p2, _y2 = _sliders_from_root_quat(
+                        d.qpos[root_qadr + 3:root_qadr + 7])
+                    _pos2 = d.qpos[root_qadr:root_qadr + 3]
+                    win.body_roll_slider.setValue(round(_r2, 1), block_signal=True)
+                    win.body_pitch_slider.setValue(round(_p2, 1), block_signal=True)
+                    win.body_yaw_slider.setValue(round(_y2, 1), block_signal=True)
+                    win.body_dx_slider.setValue(
+                        round(float(_pos2[0]) * 100.0, 1), block_signal=True)
+                    win.body_dy_slider.setValue(
+                        round(float(_pos2[1]) * 100.0, 1), block_signal=True)
+                    win.body_dz_slider.setValue(
+                        round(float(_pos2[2]) * 100.0, 1), block_signal=True)
                 t_sim, wall0, tick = 0.0, time.time(), 0
                 touch_monitor.reset_mouth_bonus_counts()
                 win.msg_label.setText(f"シーン「{scene['name']}」で始めました")
@@ -1654,13 +1728,16 @@ def main():
                     _hold_tgt = dict(_neck_tgt)
                 # 体ぜんたいの向き・位置（移植元：e_viewer.py 2698〜2708行目）。
                 #   関節と同じく「固定」がONのときだけ、毎tickスライダーの値で上書きする。
+                #   【2026-08-17・絶対値化】root_pos0/root_quat0との合成をやめ、
+                #   スライダー値をそのまま世界座標の絶対値として書き込む
+                #   （_root_quat_from_slidersはもうNoneを返さない＝root_qadrが
+                #   見つかっている今のガード内では常に有効な四元数が返る）。
                 if root_qadr is not None:
                     newq = _root_quat_from_sliders(
                         win.body_roll_slider.value(), win.body_pitch_slider.value(),
                         win.body_yaw_slider.value())
-                    if newq is not None:
-                        d.qpos[root_qadr + 3:root_qadr + 7] = newq
-                    d.qpos[root_qadr:root_qadr + 3] = root_pos0 + np.array(
+                    d.qpos[root_qadr + 3:root_qadr + 7] = newq
+                    d.qpos[root_qadr:root_qadr + 3] = np.array(
                         [win.body_dx_slider.value(), win.body_dy_slider.value(),
                          win.body_dz_slider.value()]) / 100.0
                     if root_dofadr is not None:

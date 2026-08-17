@@ -286,9 +286,13 @@ def save(scene, name=None, env=None, hands=None, settle_seconds=3.0,
 
     if env is not None and image:
         try:
-            capture_eye(env, scene_path(nm, ".png"))
+            # 【2026-08-17】以前はcam既定の"eye_left"（太郎の一人称視点）で撮って
+            #   いたため、体そのものが写らなかった（研究日誌2026-08-17）。
+            #   姿勢を後から見返すプレビューなので、体を写す"body"（hip中心の
+            #   三人称視点）に変更。
+            capture_eye(env, scene_path(nm, ".png"), cam="body")
         except Exception as e:      # 絵が撮れなくても保存自体は成立させる
-            print(f"[scene] 左目の絵が撮れなかった: {e}")
+            print(f"[scene] 体の絵が撮れなかった: {e}")
 
     if verbose:
         print(f"[scene] 保存しました → {os.path.relpath(path, _ROOT)}")
@@ -1178,7 +1182,7 @@ def settle_check(env, seconds=3.0, restore=True):
 # 左目の絵（見ていた景色を残す）
 # ============================================================================
 def capture_eye(env, path, cam="eye_left", size=None):
-    """左目に映っている景色を1枚保存する。
+    """カメラ1台に映っている景色を1枚保存する。
 
     注意：落とし穴チェックリスト 項70「位置・姿勢の問題は数値より先に絵を撮る」を
       仕組みにしたもの。2026-07-28 は数値だけで1時間・7回失敗し、
@@ -1190,6 +1194,19 @@ def capture_eye(env, path, cam="eye_left", size=None):
       OpenGL のコンテキストと食い違ってプロセスごと落ちうる
       （Viewer が Segmentation fault で終了。2026-07-29）。
       ⇒ 実行中はバッファを広げず、収まる大きさで撮る。
+
+    Args:
+        cam: モデルに定義済みの固定カメラ名（既定"eye_left"＝太郎から見た一人称視点）。
+            特別に "body" を渡すと、固定カメラではなく hip を注視点にした自由
+            カメラ（三人称・体ぜんたいを見る視点）になる（下の【2026-08-17】参照）。
+
+    【2026-08-17・追加】save()が自動生成するプレビューPNGが"eye_left"（太郎の
+      一人称視点）のままだと、太郎自身の体が写らず、Viewerで作った姿勢を後から
+      画像だけで見返せない不具合があった（研究日誌2026-08-17「副産物の発見」）。
+      cam="body" を新設し、E/scripts/e_body_shot.py 82〜87行目と同じやり方
+      （mjv_defaultFreeCamera＋lookat/distance/elevation/azimuth）でhipを中心に
+      三人称視点を作れるようにした。既存の呼び出し（cam省略＝"eye_left"）の
+      挙動は変えていない。
     """
     from PIL import Image
     u = env.unwrapped
@@ -1201,11 +1218,46 @@ def capture_eye(env, path, cam="eye_left", size=None):
     mujoco.mj_forward(m, d)
     ren = mujoco.Renderer(m, size, size)
     c = mujoco.MjvCamera()
-    c.type = mujoco.mjtCamera.mjCAMERA_FIXED
-    c.fixedcamid = int(m.camera(cam).id)
-    ren.update_scene(d, c)
-    img = ren.render().copy()
-    ren.close()
+    fence_saved = None
+    if cam == "body":
+        # 【なぜ距離1.05mか】m.stat.extentは部屋・柵まで含めた全体の外形寸法
+        # （実測2.17m）で体だけを写す距離としては大きすぎるため使わない。
+        # 代わりにE/scripts/e_body_shot.py（体型確認用の三人称カメラ）と
+        # 同じ発想で、体の実寸（新生児〜6ヶ月で頭-hip間 約0.17〜0.27m実測）を
+        # 基準に決めた。0.7m→0.95mでも6ヶ月シーンで頭頂が画角ぎりぎりで
+        # 切れかけたため1.05mへ（実機で複数シーンを描画して目視確認済み）。
+        # elevation=-8（ほぼ真横）・azimuth=90（真横）で全身の輪郭がわかる角度。
+        mujoco.mjv_defaultFreeCamera(m, c)
+        c.lookat[:] = d.body("hip").xpos
+        c.distance = 1.05
+        c.elevation = -8.0
+        c.azimuth = 90.0
+        # 【なぜ柵を透明にするか、2026-08-17】柵ありシーン（例：新生児_仰向け_
+        #   柵あり）だと、真横からのカメラと体のあいだに柵の支柱が何本も入り、
+        #   体がほとんど見えない絵になることを実機確認した。E/scripts/
+        #   e_body_shot.py 69〜74行目と同じやり方（geom_rgbaのalphaを0にする）
+        #   で、このプレビュー撮影のときだけ柵を透明にする。物理（contype/
+        #   conaffinity）には触れない＝当たり判定は変えない、見た目だけの一時
+        #   変更。撮影後は必ず元の値へ戻す（保存後もenvを使い続ける呼び出し側が
+        #   あるかもしれないため、副作用を残さない）。
+        fence_gids = [g for g in range(m.ngeom) if "fence" in (m.geom(g).name or "")]
+        if fence_gids:
+            fence_saved = {g: m.geom_rgba[g].copy() for g in fence_gids}
+            for g in fence_gids:
+                c2 = m.geom_rgba[g].copy()
+                c2[3] = 0.0
+                m.geom_rgba[g] = c2
+    else:
+        c.type = mujoco.mjtCamera.mjCAMERA_FIXED
+        c.fixedcamid = int(m.camera(cam).id)
+    try:
+        ren.update_scene(d, c)
+        img = ren.render().copy()
+    finally:
+        ren.close()
+        if fence_saved is not None:
+            for g, rgba0 in fence_saved.items():
+                m.geom_rgba[g] = rgba0
     os.makedirs(os.path.dirname(path), exist_ok=True)
     Image.fromarray(img).save(path)
     return path
