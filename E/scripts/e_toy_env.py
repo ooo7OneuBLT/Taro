@@ -427,7 +427,17 @@ class ToySupineEnv(SupineMimoEnv):
                  fence_post_w=FENCE_POST_W, fence_post_t=FENCE_POST_T,
                  fence_n_long=FENCE_N_LONG, fence_n_short=FENCE_N_SHORT,
                  fence_height=FENCE_HEIGHT, newborn_neck=None, newborn_limbs=None,
-                 vor=None, orient=None, recline_deg=None, **kwargs):
+                 vor=None, orient=None, recline_deg=None,
+                 # 【2026-08-17・配線改修ステージA】以前はここに引数が無く、
+                 #   モジュール定数（SEAT_FRICTION等）をimport後に直接上書きするしか
+                 #   設定を伝える方法が無かった（run/scene_tools/e_scene.py 参照）。
+                 #   None なら従来どおりモジュール定数（＝環境変数の既定値）にフォールバック
+                 #   するので、これらを渡さない既存の呼び出し元は1ビットも挙動が変わらない。
+                 seat_friction=None, floor_dim=None, toy_shape=None, toy_mode=None,
+                 toy_appear_delay=None, toy_approach_sec=None, toy_approach_from=None,
+                 parent_intervene=None, parent_wait_sec=None, parent_lost_deg=None,
+                 plain=None, static_tex=None, orient_v=None,
+                 eye_rest_vertical_deg=None, eye_centering=None, **kwargs):
         # VOR（前庭動眼反射）。眼球を方策から切り離し、頭の動きを打ち消して視線を安定させる。
         # E_VOR=0 でOFF（アブレーション）。根拠と簡略化は e_vor.py 参照。
         if vor is None:
@@ -458,13 +468,19 @@ class ToySupineEnv(SupineMimoEnv):
             fence = False
         # E_PLAIN=1（既定）＝視覚的に貧しくする。E_PLAIN=0 で従来の見た目（市松床・青い柵）。
         # 注意：_edit_spec は super().__init__() の中で呼ばれるので super() より前に代入する。
-        self._plain = os.environ.get("E_PLAIN", "1") == "1"
+        # 【2026-08-17】plain引数を新設。None なら従来どおり環境変数（既定は貧しい＝1）。
+        if plain is None:
+            plain = os.environ.get("E_PLAIN", "1") == "1"
+        self._plain = bool(plain)
         # 【目標E フェーズ1】E_STATIC_TEX=1 で「動かない模様のあるもの」を視界に足す：
         #   ①模様(市松)付きの天井を太郎の真上に追加、②柵にも同じ市松テクスチャを貼る。
         # 狙い＝「自分の首を動かす→見え方が変わる」の学習教材を作る（おもちゃ=動くもの と違い、
         # これは動かないので"自分の動きだけで視覚が変わる"という条件を壊さない）。既定OFF。
         # 2026-07-21：フェーズ1で視界がのっぺりしすぎ(58%が変化なし・空か柵のみ)と目視で判明した対処。
-        self._static_tex = os.environ.get("E_STATIC_TEX", "0") == "1"
+        # 【2026-08-17】static_tex引数を新設。None なら従来どおり環境変数（既定OFF）。
+        if static_tex is None:
+            static_tex = os.environ.get("E_STATIC_TEX", "0") == "1"
+        self._static_tex = bool(static_tex)
         # 身体の補正。**必ずON/OFFできるようにする**＝E1で「dampingが創発したのか、
         # 身体を弱めただけか」を切り分けるアブレーションに使う（これが無いと結果を解釈できない）。
         #   newborn_neck  : 首がすわっていない（head lag）の再現。注意恣意的（e_infant_neck.py）
@@ -478,6 +494,39 @@ class ToySupineEnv(SupineMimoEnv):
         self._fence = fence
         # リクライニングの角度[度]。0なら従来どおり仰向け（背もたれも作らない）
         self._recline_deg = float(RECLINE_DEG if recline_deg is None else recline_deg)
+        # 【2026-08-17・配線改修ステージA】以前はモジュール定数（SEAT_FRICTION等）を
+        #   メソッド内で直接参照していた（run/scene_tools/e_scene.py がimport後に
+        #   TE.SEAT_FRICTION=... と直接上書きする以外に伝える手段が無かった）。
+        #   ここでインスタンス属性へ写し、以降のメソッドは self._xxx を見る形にする。
+        #   None ならモジュール定数（＝環境変数の既定値）にフォールバックするので、
+        #   これらを渡さない既存の呼び出し元は1ビットも挙動が変わらない。
+        self._seat_friction = float(SEAT_FRICTION if seat_friction is None
+                                    else seat_friction)
+        self._floor_dim = float(FLOOR_DIM if floor_dim is None else floor_dim)
+        self._toy_shape = str(TOY_SHAPE if toy_shape is None else toy_shape)
+        self._toy_mode = str(TOY_MODE if toy_mode is None else toy_mode)
+        self._toy_appear_delay = float(TOY_APPEAR_DELAY if toy_appear_delay is None
+                                       else toy_appear_delay)
+        self._toy_approach_sec = float(TOY_APPROACH_SEC if toy_approach_sec is None
+                                       else toy_approach_sec)
+        self._toy_approach_from = str(TOY_APPROACH_FROM if toy_approach_from is None
+                                      else toy_approach_from)
+        self._parent_intervene_flag = (PARENT_INTERVENE if parent_intervene is None
+                                       else bool(parent_intervene))
+        self._parent_wait_sec = float(PARENT_WAIT_SEC if parent_wait_sec is None
+                                      else parent_wait_sec)
+        self._parent_lost_deg = float(PARENT_LOST_DEG if parent_lost_deg is None
+                                      else parent_lost_deg)
+        # 眼球の基準角・中央復帰バネ（2026-08-17新設）。reset_model() から
+        #   infant_body.center_eyes / apply_eye_centering_spring へ明示的に渡す
+        #   （infant_bodyのモジュール定数EYE_REST_VERTICAL_DEG/EYE_CENTERINGは
+        #   Noneのときのフォールバック既定値に降格）。
+        self._eye_rest_vertical_deg = (None if eye_rest_vertical_deg is None
+                                       else float(eye_rest_vertical_deg))
+        self._eye_centering = eye_centering    # None ならinfant_body側の既定に従う
+        # 視線誘導反射の実装バージョン。None なら従来どおり環境変数（既定"1"）。
+        self._orient_v = (os.environ.get("E_ORIENT_V", "1") if orient_v is None
+                          else str(orient_v))
         self._fence_half_x = float(fence_half_x)
         self._fence_half_y = float(fence_half_y)
         self._fence_post_w = float(fence_post_w)
@@ -537,7 +586,7 @@ class ToySupineEnv(SupineMimoEnv):
         # --- おもちゃ(箱)の大きさ・質量・慣性を新生児向けに作り替える ---
         self._toy_bid = self.model.body("test_object1").id
         gadr = self.model.body("test_object1").geomadr[0]
-        if TOY_SHAPE == "sphere":
+        if self._toy_shape == "sphere":
             # 球（定位の測定用）。どの向きから見ても見え方が同じなので、
             #   立方体で起きる「中心側の側面だけが強く光る」非対称が生じない。
             import mujoco as _mj
@@ -591,7 +640,7 @@ class ToySupineEnv(SupineMimoEnv):
             #   v2       : e_orienting_v2.py。設計図（E/docs/視線誘導反射_設計図.md）に基づく
             #              複数フレーム動き検出＋中心バイアス＋側方抑制＋階段状サッケード
             # 注意：v1 は比較・アブレーション用に残す（撤回した実装を消さない方針）。
-            ver = os.environ.get("E_ORIENT_V", "1")
+            ver = self._orient_v
             if ver == "2":
                 from e_orienting_v2 import OrientingReflexV2
                 # data も渡す：サッケードは「力を一定時間かける」のではなく
@@ -630,7 +679,7 @@ class ToySupineEnv(SupineMimoEnv):
             if g.name == "floor":
                 g.material = ""                   # 市松テクスチャを外す
                 _fr = PLAIN_RGBA.copy()
-                _fr[:3] *= FLOOR_DIM              # 照明で明るくなるぶんを相殺する
+                _fr[:3] *= self._floor_dim        # 照明で明るくなるぶんを相殺する
                 g.rgba = list(_fr)
                 break
         # 空（skybox）も同じ色の単色に。仰向けの太郎が最も長く見ているのは空なので、
@@ -774,7 +823,7 @@ class ToySupineEnv(SupineMimoEnv):
         back.rgba = list(SEAT_RGBA)
         back.condim = 3
         # 滑り摩擦を上げてずり落ちを防ぐ（横回転・転がりの摩擦もわずかに上げる）
-        back.friction = [SEAT_FRICTION, 0.02, 0.001]
+        back.friction = [self._seat_friction, 0.02, 0.001]
 
         # 座面：水平な板。骨盤を受けてずり落ちを止める
         seat = spec.worldbody.add_geom()
@@ -785,7 +834,7 @@ class ToySupineEnv(SupineMimoEnv):
         seat.material = ""
         seat.rgba = list(SEAT_RGBA)
         seat.condim = 3
-        seat.friction = [SEAT_FRICTION, 0.02, 0.001]
+        seat.friction = [self._seat_friction, 0.02, 0.001]
 
     def _elongate_head(self, spec):
         """頭のgeomを球→楕円体にして、**体軸方向にだけ**伸ばす。
@@ -991,13 +1040,13 @@ class ToySupineEnv(SupineMimoEnv):
         if not self._toy or not getattr(self, "_toy_pending", False):
             return
         self._t_since_reset += self.dt
-        if self._t_since_reset < TOY_APPEAR_DELAY:
+        if self._t_since_reset < self._toy_appear_delay:
             return                                  # まだ遠くで待っている
 
         if not self._toy_arriving:
             # 運び始め：今の視線の正面を行き先に決め、その手前から動かし始める
             self._set_anchor()                      # _rest_pos と _anchor が決まる
-            if TOY_APPROACH_FROM == "above":
+            if self._toy_approach_from == "above":
                 # 真上から降ろす＝柵（側面にある）に引っかからない
                 away = np.array([0.0, 0.0, 1.0])
             else:
@@ -1011,7 +1060,7 @@ class ToySupineEnv(SupineMimoEnv):
             self._anchor = None                     # 運んでいる間は吊らない
 
         self._toy_carry_t += self.dt
-        frac = min(1.0, self._toy_carry_t / max(TOY_APPROACH_SEC, 1e-9))
+        frac = min(1.0, self._toy_carry_t / max(self._toy_approach_sec, 1e-9))
         pos = self._carry_from + (self._rest_pos - self._carry_from) * frac
         self._place(self._toy_qadr, pos)
         self.data.qvel[self._toy_dadr:self._toy_dadr + 6] = 0.0
@@ -1056,7 +1105,7 @@ class ToySupineEnv(SupineMimoEnv):
           何度外れたら「見えていない」とするか（PARENT_LOST_DEG）は文献値が無い。
           前者は「親が気づいて動かすまでの間」、後者は視野の半角より内側に置いた。
         """
-        if not (PARENT_INTERVENE and self._toy):
+        if not (self._parent_intervene_flag and self._toy):
             return
         if getattr(self, "_toy_pending", False):
             return                       # いま運んでいる最中
@@ -1069,13 +1118,13 @@ class ToySupineEnv(SupineMimoEnv):
         n = float(np.linalg.norm(toy))
         ang = 180.0 if n < 1e-9 else float(np.degrees(np.arccos(
             np.clip(np.dot(fwd, toy / n), -1.0, 1.0))))
-        if ang > PARENT_LOST_DEG:
+        if ang > self._parent_lost_deg:
             self._toy_lost_t = getattr(self, "_toy_lost_t", 0.0) + self.dt
-            if self._toy_lost_t >= PARENT_WAIT_SEC:
+            if self._toy_lost_t >= self._parent_wait_sec:
                 # 親がもう一度運んでくる（登場のときと同じ仕組みを再利用する）
                 self._toy_pending = True
                 self._toy_arriving = False
-                self._t_since_reset = TOY_APPEAR_DELAY
+                self._t_since_reset = self._toy_appear_delay
                 self._toy_lost_t = 0.0
                 self.n_parent_help = getattr(self, "n_parent_help", 0) + 1
         else:
@@ -1090,8 +1139,8 @@ class ToySupineEnv(SupineMimoEnv):
         """
         if not self._toy:
             return
-        # 持たせ方の切り替え（TOY_MODE 参照）
-        if TOY_MODE == "hold":
+        # 持たせ方の切り替え（self._toy_mode 参照）
+        if self._toy_mode == "hold":
             # 親が手に持っている＝位置を固定する。力を加えるのでなく位置を書き込む。
             if getattr(self, "_toy_pending", False):
                 return                      # まだ運んでいる最中は _carry_toy が動かす
@@ -1101,7 +1150,7 @@ class ToySupineEnv(SupineMimoEnv):
             self.data.qvel[self._toy_dadr:self._toy_dadr + 6] = 0.0
             self.data.xfrc_applied[self._toy_bid, :3] = 0.0
             return
-        if TOY_MODE == "free":
+        if self._toy_mode == "free":
             self.data.xfrc_applied[self._toy_bid, :3] = 0.0
             return
         if self._anchor is None:
@@ -1126,7 +1175,7 @@ class ToySupineEnv(SupineMimoEnv):
         self._toy_carry_t = 0.0
         self._t_since_reset = 0.0
         self._rest_pos = None          # 到着するまで置き場所は決まっていない
-        if self._toy and TOY_APPEAR_DELAY > 0.0:
+        if self._toy and self._toy_appear_delay > 0.0:
             self._place(self._toy_qadr, FAR_AWAY)
             self._anchor = None            # 到着するまで吊らない
             self._toy_pending = True
@@ -1176,12 +1225,19 @@ class ToySupineEnv(SupineMimoEnv):
         #   おもちゃは「視線の正面」に置くので、眼球がずれたままだと
         #   あさっての方向（柵の外）に置かれる（研究日誌 2026-07-26 続き7）。
         from infant_body import center_eyes, apply_eye_centering_spring
-        center_eyes(self.model, self.data)
+        # 【2026-08-17・配線改修ステージA】self._eye_rest_vertical_deg/self._eye_centering は
+        #   コンストラクタ引数（未指定ならNone）。Noneを渡すとcenter_eyes/
+        #   apply_eye_centering_spring側がinfant_body.EYE_REST_VERTICAL_DEG/EYE_CENTERING
+        #   （後方互換の既定値＝環境変数E_EYE_REST_V/E_EYE_CENTERING）にフォールバックするので、
+        #   これらを渡さない既存の呼び出し元は1ビットも挙動が変わらない。
+        center_eyes(self.model, self.data, vertical_deg=self._eye_rest_vertical_deg)
         # 【2026-08-17新設】眼球の受動的な中央復帰バネ（既定OFF＝EYE_CENTERING）。
         #   center_eyesはqposを戻すだけで以降を留める力が無いため、既定では従来通り
         #   筋の受動力で可動域の壁まで転がり落ちる。ONのときだけjnt_stiffness等を
         #   入れる（詳細はinfant_body.pyのEYE_CENTERING直前のコメント参照）。
-        apply_eye_centering_spring(self.model, self.data)
+        apply_eye_centering_spring(self.model, self.data,
+                                   vertical_deg=self._eye_rest_vertical_deg,
+                                   enabled=self._eye_centering)
         mujoco.mj_forward(self.model, self.data)   # 眼のカメラ姿勢を更新してから配置
         self._spawn_toy()                  # 落ち着いた後の肩位置を見て配置
         self._glow_until = -1e9            # 点灯の余韻を持ち越さない

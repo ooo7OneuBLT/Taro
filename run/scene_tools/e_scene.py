@@ -364,6 +364,28 @@ def build(scene, orient=None, vor=True, seed=0, verbose=False, actuation_model=N
     #   注意：`e_toy_env` は import した瞬間に環境変数を読んで定数を固める作りなので、
     #     import より前に環境変数を置き、import 後にも定数を直接上書きする
     #     （既に import 済みでも効くようにするため）。
+    #
+    #   【2026-08-17・配線改修ステージA】ToySupineEnv自体への伝達は、下の
+    #     ToySupineEnv(...) 呼び出しで**kwargsとして直接渡す**方式に変えた
+    #     （e_toy_env.py側もコンストラクタ引数が最優先になるよう改修済み）。
+    #     このため下の環境変数24個の書き込みは、e_toy_envの構築そのものには
+    #     もう必要ない。それでも全部残しているのは、
+    #       (a) refactor_harness.py compare が「組み立て直後のE_環境変数
+    #           スナップショット」も一致条件に含めており（配線そのものの
+    #           裏取り）、書き込みを間引くとその時点で不一致として検出される、
+    #       (b) 全数調査（下記）で E_TOY_OBJ/E_FENCE は e_toy_env.py 内の
+    #           既存ロジックが「環境変数が明示引数より常に優先」で書かれており
+    #           （e_smoke_all.py 経由の e_toy_check.py が toy=True 明示 +
+    #           E_TOY_OBJ=0 で実際に依存している）、
+    #       (c) E_TOY_MODE/E_TOY_DELAY/E_TOY_APPROACH/E_TOY_FROM は
+    #           run/viewer_tools/e_viewer.py・e_viewer_qt.py がステータス表示で
+    #           対応するTE.*モジュール属性を直接読む、
+    #       (d) E_FLOOR_ROLL/E_FLOOR_CONDIM は D/scripts/d_supine_env.py
+    #           （変更禁止）が直接 os.environ.get(...) しており、kwargs化の
+    #           手段が無い、
+    #     という理由。(b)〜(d) 以外は本当は不要（kwargsで足りる）が、(a)の
+    #     ハーネスとの整合を優先し、ステージAでは間引かずに残した。
+    #     間引く場合はハーネス側の対応も合わせて必要＝ステージB以降で判断する。
     os.environ["E_RECLINE"] = str(w["recline_deg"])
     os.environ["E_SEAT_FRICTION"] = str(w["seat_friction"])
     os.environ["E_FLOOR_DIM"] = str(w["floor_dim"])
@@ -392,27 +414,27 @@ def build(scene, orient=None, vor=True, seed=0, verbose=False, actuation_model=N
     os.environ["E_LIMBS"] = "1" if b["limb_fix"] else "0"
 
     import e_toy_env as TE
-    import infant_body as IB
     if actuation_model is None:      # 既定は従来どおり MuscleModel
         from mimoActuation.muscle import MuscleModel
         actuation_model = MuscleModel
 
-    TE.RECLINE_DEG = float(w["recline_deg"])
-    TE.SEAT_FRICTION = float(w["seat_friction"])
-    TE.FLOOR_DIM = float(w["floor_dim"])
-    TE.TOY_SHAPE = str(toy["shape"])
-    TE.TOY_RADIUS = float(toy["radius"])
+    # 【2026-08-17・配線改修ステージA】モジュール定数の直接上書き（旧15個）は、
+    #   下のToySupineEnv(...)へのkwargs直接渡しで大部分が不要になった。
+    #   TE.TOY_MODE / TOY_APPEAR_DELAY / TOY_APPROACH_SEC / TOY_APPROACH_FROM の
+    #   4つだけ残す：run/viewer_tools/e_viewer.py・e_viewer_qt.py がシーン読み込み
+    #   直後のステータス表示（toy_info_label等）でこれらをモジュール属性として
+    #   直接参照するため（ToySupineEnvのインスタンス属性ではなくTE.*を見ている。
+    #   全数調査で確認）。RECLINE_DEG・SEAT_FRICTION・FLOOR_DIM・TOY_SHAPE・
+    #   TOY_RADIUS・TOY_DISTANCE・PARENT_INTERVENE・PARENT_WAIT_SEC・
+    #   PARENT_LOST_DEG・EYE_REST_VERTICAL_DEG(IB)・EYE_CENTERING(IB) は
+    #   e_toy_env以外の読者が見つからなかったため上書きを廃止した
+    #   （TE.ToySupineEnv自身はkwargsを見るので影響なし。IBの2つは
+    #   infant_body.center_eyes/apply_eye_centering_springへの明示引数渡しに
+    #   置き換えたので、モジュール属性経由の伝達自体が不要になった）。
     TE.TOY_MODE = str(toy["mode"])
-    TE.TOY_DISTANCE = float(toy["dist"])
     TE.TOY_APPEAR_DELAY = float(toy["delay_sec"])
-    TE.PARENT_INTERVENE = bool(w["parent_intervene"])
-    TE.PARENT_WAIT_SEC = float(w["parent_wait_sec"])
-    TE.PARENT_LOST_DEG = float(w["parent_lost_deg"])
     TE.TOY_APPROACH_SEC = float(toy["approach_sec"])
     TE.TOY_APPROACH_FROM = str(toy["approach_from"])
-    # 眼球の基準角・中央復帰バネのON/OFFはモジュール定数として読まれるので直接入れる
-    IB.EYE_REST_VERTICAL_DEG = float(b["eye_rest_vertical_deg"])
-    IB.EYE_CENTERING = bool(b.get("eye_centering", False))
 
     # --- 2. 身体の設定を**シーンから直接**作る -------------------------------
     #   注意：`body_kwargs_from_env` は使わない。環境変数を見る関数を通すと、
@@ -444,6 +466,25 @@ def build(scene, orient=None, vor=True, seed=0, verbose=False, actuation_model=N
             toy_dist=float(toy["dist"]),
             newborn_neck=bool(b["neck_fix"]),
             newborn_limbs=bool(b["limb_fix"]),
+            # 【2026-08-17・配線改修ステージA】以前はモジュール定数の直接上書き
+            #   （TE.SEAT_FRICTION=...等）でしか伝えられなかった値。
+            #   e_toy_env.ToySupineEnv側にコンストラクタ引数を新設したので、
+            #   ここから直接渡す（kwargsが常に勝つ）。
+            seat_friction=float(w["seat_friction"]),
+            floor_dim=float(w["floor_dim"]),
+            toy_shape=str(toy["shape"]),
+            toy_mode=str(toy["mode"]),
+            toy_appear_delay=float(toy["delay_sec"]),
+            toy_approach_sec=float(toy["approach_sec"]),
+            toy_approach_from=str(toy["approach_from"]),
+            parent_intervene=bool(w["parent_intervene"]),
+            parent_wait_sec=float(w["parent_wait_sec"]),
+            parent_lost_deg=float(w["parent_lost_deg"]),
+            plain=bool(w["plain"]),
+            static_tex=bool(w["static_tex"]),
+            orient_v=str(b["orienting_version"]),
+            eye_rest_vertical_deg=float(b["eye_rest_vertical_deg"]),
+            eye_centering=bool(b.get("eye_centering", False)),
             **kw)
         env.reset(seed=seed)
 

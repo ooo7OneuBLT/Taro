@@ -1001,7 +1001,7 @@ EYE_CENTERING_INERTIA_FALLBACK = 0.0002
 
 
 def apply_eye_centering_spring(model, data=None, vertical_deg=None, stiffness=None,
-                               verbose=False):
+                               enabled=None, verbose=False):
     """眼球6関節に、受動的な中央復帰バネを入れる。既定OFF（`EYE_CENTERING`）。
 
     【なぜ要るか】docstring直前のコメント参照。center_eyesはリセット時に一度だけ
@@ -1017,13 +1017,17 @@ def apply_eye_centering_spring(model, data=None, vertical_deg=None, stiffness=No
         vertical_deg: バネの目標角（上下、度）。None なら EYE_REST_VERTICAL_DEG。
             水平・ねじりの目標は常に0度（正中位）。
         stiffness: バネの強さ[N・m/rad]。None なら EYE_CENTERING_STIFFNESS(=0.03)。
+        enabled: ON/OFF。None なら EYE_CENTERING（既定OFF）。
+            【2026-08-17・配線改修ステージA】呼び出し元（e_toy_env.ToySupineEnv）が
+            設定オブジェクトから明示的に渡せるようにする引数。モジュール定数
+            EYE_CENTERING は「後方互換の既定値」に降格（Noneのときだけ使われる）。
         verbose: 設定内容を表示するか
 
     Returns:
-        int: バネを入れた関節の数（EYE_CENTERING=Falseなら0で何もしない）
+        int: バネを入れた関節の数（無効なら0で何もしない）
     """
     import numpy as np
-    if not EYE_CENTERING:
+    if not (EYE_CENTERING if enabled is None else enabled):
         return 0
     k = float(EYE_CENTERING_STIFFNESS if stiffness is None else stiffness)
     v = np.radians(float(EYE_REST_VERTICAL_DEG if vertical_deg is None else vertical_deg))
