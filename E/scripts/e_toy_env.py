@@ -268,6 +268,20 @@ TOY_RGBA_OFF = np.array([0.9, 0.2, 0.15, 1.0])   # 通常＝赤
 TOY_RGBA_ON = np.array([1.0, 1.0, 0.45, 1.0])    # 点灯中＝明るい黄（視界で目立つ）
 GLOW_HOLD_S = 2.0                                 # 点灯の持続[sim秒]（注意恣意的）
 
+# --- 2個目のおもちゃ（目標F・F1：語↔物の対応づけ判定）------------------------
+# 【なぜ】前に左右2個（例：赤い箱・白い球）を同時に置き、語を聞いてどちらを見るかを
+#   測る実験に使う。既存の test_object1（箱）はそのまま toy1 として使い、これまで
+#   ずっと遠方(3.5,3.0,0.05)へ退避するだけだった test_object2（球）を toy2 に転用する
+#   （MIMo共有XMLは一切汚さない、既存方針の踏襲）。
+# 【新しい環境変数は作らない】2026-08-18の依頼どおり、配線はステージA方式
+#   （ToySupineEnvのkwargsで直接渡す）に統一する。toy2=None（既定）なら
+#   test_object2は従来どおり退避されるだけ＝1ビットも挙動が変わらない。
+TOY2_RGBA_DEFAULT = np.array([0.9, 0.9, 0.9, 1.0])   # toy2の既定色＝白系（rgba未指定時）
+# 視線の正面から toy1/toy2 を振り分ける角度[度]（片側あたり）。
+# 【なぜ12度か】視野の半角30度に対し余裕を持って両方を収める値として選んだ
+# （±12度なら視野中心から12度、半角30度の40%）。文献値ではない[Tier3・ARBITRARY]。
+TOY_ANGLE_DEG_DEFAULT = 12.0
+
 # --- 視覚 ---
 # 【重要・MIMoのバグ回避】MIMoの mimoVision は `env.camera_name` を設定して `env.render()`
 # を呼ぶ方式だが、gymnasium 1.2.3 の MujocoEnv.render() は camera_name を無視するため、
@@ -434,6 +448,11 @@ class ToySupineEnv(SupineMimoEnv):
                  #   None なら従来どおりモジュール定数（＝環境変数の既定値）にフォールバック
                  #   するので、これらを渡さない既存の呼び出し元は1ビットも挙動が変わらない。
                  seat_friction=None, floor_dim=None, toy_shape=None, toy_mode=None,
+                 toy_rgba=None,
+                 # 【2026-08-18・目標F・F1】2個目のおもちゃ。toy2=None（既定）なら
+                 #   test_object2は従来どおり遠方退避のみ＝1ビットも挙動が変わらない。
+                 toy2=None, toy2_shape=None, toy2_radius=None, toy2_rgba=None,
+                 toy2_dist=None, toy_angle_deg=None,
                  toy_appear_delay=None, toy_approach_sec=None, toy_approach_from=None,
                  parent_intervene=None, parent_wait_sec=None, parent_lost_deg=None,
                  plain=None, static_tex=None, orient_v=None,
@@ -557,6 +576,19 @@ class ToySupineEnv(SupineMimoEnv):
         self._tether_len = float(tether_length)
         self._tether_k = float(tether_k)
         self._tether_c = float(tether_c)
+        # おもちゃ(toy1)の色。未指定(None)なら従来どおりTOY_RGBA_OFF（赤）。
+        self._toy_rgba_off = (TOY_RGBA_OFF.copy() if toy_rgba is None
+                              else np.array(toy_rgba, dtype=float))
+        # 【2026-08-18・目標F・F1】2個目のおもちゃ(toy2)。既定は無効(toy2=None→False)。
+        self._toy2 = bool(toy2)
+        self._toy2_shape = str("sphere" if toy2_shape is None else toy2_shape)
+        self._toy2_radius = float(TOY_RADIUS if toy2_radius is None else toy2_radius)
+        self._toy2_rgba = (TOY2_RGBA_DEFAULT.copy() if toy2_rgba is None
+                           else np.array(toy2_rgba, dtype=float))
+        self._toy2_dist = float(TOY_DISTANCE if toy2_dist is None else toy2_dist)
+        # 視線正面からの振り分け角度[度]（片側あたり）。toy2=Falseなら使われない。
+        self._toy_angle_deg = float(TOY_ANGLE_DEG_DEFAULT if toy_angle_deg is None
+                                    else toy_angle_deg)
         self._anchor = None        # 吊り下げの基準点（リセット時に頭の位置から決める）
         # 置き直し(親が渡す)の回数と、そのstepで置き直したかのフラグ。
         # ＝「おもちゃが動いた」を随伴性の証拠として数えるとき、瞬間移動を除くために要る
@@ -620,17 +652,26 @@ class ToySupineEnv(SupineMimoEnv):
         # 目視用に目立つ色（赤）。太郎の体・床と区別がつかないと動画で確認できないため。
         # 接触中は TOY_RGBA_ON（明るい黄）に切り替わる＝「触れている間だけ光る」。
         self._toy_gadr = gadr
-        self.model.geom_rgba[gadr] = TOY_RGBA_OFF
+        self.model.geom_rgba[gadr] = self._toy_rgba_off
         self.toy_lit = False          # 今光っているか（測定・記録用）
         # freejoint の qpos 先頭アドレス（位置3＋姿勢4）
         jadr = self.model.body("test_object1").jntadr[0]
         self._toy_qadr = self.model.jnt_qposadr[jadr]
         self._toy_dadr = self.model.jnt_dofadr[jadr]
 
-        # 使わない球は遠方へ退避（見えても届かない所に置くと視覚の交絡になるため）
+        # 【2026-08-18・目標F・F1】test_object2（使っていない予備の物体＝球）。
+        #   toy2=False（既定）ならこれまでどおり遠方へ退避するだけ＝1ビットも変わらない。
+        #   toy2=True なら2個目のおもちゃとして形状・質量・慣性・色を作り替える
+        #   （test_object1と同じやり方。_configure_toy_geom参照）。
         self._obj2_bid = self.model.body("test_object2").id
         jadr2 = self.model.body("test_object2").jntadr[0]
         self._obj2_qadr = self.model.jnt_qposadr[jadr2]
+        self._obj2_dadr = self.model.jnt_dofadr[jadr2]
+        if self._toy2:
+            obj2_gadr = self.model.body("test_object2").geomadr[0]
+            self._configure_toy_geom(self._obj2_bid, obj2_gadr,
+                                     self._toy2_shape, self._toy2_radius,
+                                     self._toy2_rgba)
 
         # 首の補正は「落ち着いた初期姿勢」で重力モーメントを測ってから適用する
         # （姿勢で腕の長さが変わるため）。SupineMimoEnvのsettle後＝ここが適切な位置。
@@ -935,6 +976,33 @@ class ToySupineEnv(SupineMimoEnv):
         self.data.qpos[qadr:qadr + 3] = pos
         self.data.qpos[qadr + 3:qadr + 7] = [1.0, 0.0, 0.0, 0.0]
 
+    def _configure_toy_geom(self, bid, gadr, shape, radius, rgba):
+        """おもちゃ用bodyの形状・質量・慣性・摩擦・色を設定する。
+
+        【2026-08-18・目標F・F1】test_object1の初期化（__init__、このクラスの上の方）
+        と同じ計算をtoy2向けに切り出したもの。密度(TOY_DENSITY)を保って質量を
+        体積から出し直す点も同じ。toy1と違い、質量を個別指定する引数(toy_mass相当)は
+        持たない＝「並べて見せる」用途で今のところ重さを効かせる実験が無いため。
+        """
+        if shape == "sphere":
+            self.model.geom_type[gadr] = int(mujoco.mjtGeom.mjGEOM_SPHERE)
+            self.model.geom_size[gadr] = [radius, 0.0, 0.0]
+            mass = TOY_DENSITY * (4.0 / 3.0) * np.pi * radius ** 3
+            self.model.body_inertia[bid] = _sphere_inertia(mass, radius)
+        else:
+            self.model.geom_type[gadr] = int(mujoco.mjtGeom.mjGEOM_BOX)
+            self.model.geom_size[gadr] = [radius] * 3
+            mass = TOY_DENSITY * (2 * radius) ** 3
+            self.model.body_inertia[bid] = _box_inertia(mass, radius)
+        self.model.body_mass[bid] = mass
+        self.model.geom_friction[gadr] = TOY_FRICTION
+        # 【2026-08-18】test_object2はXML側でmaterialが設定済みのため、rgbaを
+        #   書くだけでは反映されない（materialが優先される・923行の罠と同じ型）。
+        #   material参照を外してからrgbaを書く必要がある（実測で発覚：色が
+        #   指定した白ではなくXML既定の茶系のまま描画されていた）。
+        self.model.geom_matid[gadr] = -1
+        self.model.geom_rgba[gadr] = rgba
+
     def _gaze_dir(self, cam="eye_left"):
         """今の視線方向（ワールド）。MuJoCoのカメラは**-z方向**を見るので符号を反転する。"""
         cid = int(self.model.camera(cam).id)
@@ -971,12 +1039,33 @@ class ToySupineEnv(SupineMimoEnv):
                   else self.data.body("head").xpos.copy())
         # おもちゃがぶら下がる位置。支点はその**真上に紐の長さぶん**取る＝
         # 重力で自然に垂れると、ちょうどこの位置に来る（振り子の静止点）。
+        #
+        # 【2026-08-18・目標F・F1】toy2があるときは、視線の正面から左右に
+        #   toy_angle_deg 度ずつ振り分ける。片目カメラのローカルx軸（画像でいう
+        #   「右」方向、cam_xmatの列0）を「右」として使う＝体の向き（仰向け／座位）
+        #   によらず視野の中で正しく左右になる。toy2=False（既定）のときは角度0
+        #   ＝従来のgとまったく同じ値になるので1ビットも変わらない。
+        self._rest_pos2 = None
         if self._toy_offset is None:
             g = self._gaze_dir()
-            self._rest_pos = origin + g * self._toy_dist   # 視線の正面・距離 _toy_dist
+            if self._toy2:
+                cid = int(self.model.camera("eye_left").id)
+                right = np.array(self.data.cam_xmat[cid],
+                                 dtype=float).reshape(3, 3)[:, 0]
+                ang = np.radians(self._toy_angle_deg)
+                g1 = g * np.cos(ang) - right * np.sin(ang)     # 左（toy1）
+                g2 = g * np.cos(ang) + right * np.sin(ang)     # 右（toy2）
+                self._rest_pos2 = origin + g2 * self._toy2_dist
+            else:
+                g1 = g
+            self._rest_pos = origin + g1 * self._toy_dist   # 視線の正面・距離 _toy_dist
         else:
             # 旧方式（アブレーション用に残す）。こちらは頭の中心からのオフセット。
             self._rest_pos = self.data.body("head").xpos.copy() + self._toy_offset
+            if self._toy2:
+                # toy_offset方式(旧アブレーション)との組み合わせは未検証。
+                #   y方向へ一定量ずらすだけの簡易対応（視野内に収まる保証はない）。
+                self._rest_pos2 = self._rest_pos + np.array([0.0, 0.08, 0.0])
         # 2026-07-27：柵の内側にとどめる。人間の親は柵の外に手を出さない。
         #   新生児は仰向けで顔を横に向けているのが普通（頭位選好・右65%／Michel 1981）で、
         #   そのとき「視線の正面」は柵の外になる。実際 Viewer の初期姿勢で
@@ -996,18 +1085,54 @@ class ToySupineEnv(SupineMimoEnv):
                                               -FENCE_HALF_X + _mgn, FENCE_HALF_X - _mgn))
             self._rest_pos[1] = float(np.clip(self._rest_pos[1],
                                               -FENCE_HALF_Y + _mgn, FENCE_HALF_Y - _mgn))
+            if self._rest_pos2 is not None:
+                self._rest_pos2[0] = float(np.clip(self._rest_pos2[0],
+                                                   -FENCE_HALF_X + _mgn, FENCE_HALF_X - _mgn))
+                self._rest_pos2[1] = float(np.clip(self._rest_pos2[1],
+                                                   -FENCE_HALF_Y + _mgn, FENCE_HALF_Y - _mgn))
         self._rest_pos[2] = float(max(self._rest_pos[2], 0.04))   # 床にめり込ませない
+        if self._rest_pos2 is not None:
+            self._rest_pos2[2] = float(max(self._rest_pos2[2], 0.04))
+        # 【2026-08-18】toy1・toy2が近すぎて重なるとき、互いに引き離す
+        #   （重なったままだと誤接触になり、toy1の「触れたら光る」演出が誤発火する）。
+        self._separate_toys()
         # 【2026-08-03】屈曲した手・前腕と重なるときだけ最小限ずらす（上のコメント参照）。
         #   重ならなければ無変化＝既存シーンの配置は1ビットも変わらない。
         self._rest_pos = self._avoid_arm_collision(self._rest_pos)
+        if self._rest_pos2 is not None:
+            self._rest_pos2 = self._avoid_arm_collision(self._rest_pos2,
+                                                         toy_radius=self._toy2_radius)
         self._anchor = self._rest_pos + np.array([0.0, 0.0, self._tether_len])
 
-    def _avoid_arm_collision(self, pos):
+    def _separate_toys(self):
+        """toy1・toy2の中心が近すぎるとき、左右に押し離す（重なり・誤接触の防止）。
+
+        【2026-08-18・目標F・F1】視線正面からの振り分け角度が小さいと、距離次第では
+        2個のバウンディング球が重なりうる（実測で角度12度・距離8.6cm・半径2cmの
+        組み合わせは重なる）。toy2=Falseなら self._rest_pos2 が None なので無効。
+        """
+        if self._rest_pos2 is None:
+            return
+        need = self._toy_radius + self._toy2_radius + TOY_COLLIDE_MARGIN
+        d = self._rest_pos2 - self._rest_pos
+        d[2] = 0.0                       # 高さは変えない・左右にだけ引き離す
+        dist = float(np.linalg.norm(d))
+        if dist >= need or dist < 1e-9:
+            return
+        direction = d / dist
+        push = (need - dist) / 2.0
+        self._rest_pos = self._rest_pos - direction * push
+        self._rest_pos2 = self._rest_pos2 + direction * push
+
+    def _avoid_arm_collision(self, pos, toy_radius=None):
         """おもちゃの候補位置 pos が、屈曲した手・前腕(TOY_COLLIDE_BODIES)と重ならない
         よう最小限ずらす。重ならなければ pos をそのまま返す。
 
         定数・判定方法の根拠は TOY_COLLIDE_* のコメント参照（2026-08-03 追加）。
+        toy_radius: 押し離す対象の半径。省略時は self._toy_radius（toy1）を使う
+            （2026-08-18・toy2向けにNoneなら従来どおりtoy1の半径＝1ビットも変わらない）。
         """
+        r = self._toy_radius if toy_radius is None else float(toy_radius)
         p = np.array(pos, dtype=float)
         for _ in range(TOY_COLLIDE_ITERS):
             moved = False
@@ -1027,7 +1152,7 @@ class ToySupineEnv(SupineMimoEnv):
                 bpos = np.array(self.data.xpos[bid], dtype=float)
                 d = p - bpos
                 dist = float(np.linalg.norm(d))
-                need = radius + self._toy_radius + TOY_COLLIDE_MARGIN
+                need = radius + r + TOY_COLLIDE_MARGIN
                 if dist < need:
                     moved = True
                     direction = (d / dist) if dist > 1e-9 else np.array([0.0, 0.0, 1.0])
@@ -1092,13 +1217,17 @@ class ToySupineEnv(SupineMimoEnv):
         物理を止めているあいだは登場演出そのものが意味を持たないので、
         待たずに定位置へ置く。
         """
-        if not self._toy:
+        if not (self._toy or self._toy2):
             return
         self._set_anchor()
-        self._place(self._toy_qadr, self._rest_pos)
-        self.data.qvel[self._toy_dadr:self._toy_dadr + 6] = 0.0
-        self._toy_pending = False
-        self._toy_arriving = False
+        if self._toy:
+            self._place(self._toy_qadr, self._rest_pos)
+            self.data.qvel[self._toy_dadr:self._toy_dadr + 6] = 0.0
+            self._toy_pending = False
+            self._toy_arriving = False
+        if self._toy2 and self._rest_pos2 is not None:
+            self._place(self._obj2_qadr, self._rest_pos2)
+            self.data.qvel[self._obj2_dadr:self._obj2_dadr + 6] = 0.0
         mujoco.mj_forward(self.model, self.data)
 
     def _parent_intervene(self):
@@ -1180,6 +1309,20 @@ class ToySupineEnv(SupineMimoEnv):
             f = -self._tether_c * vel
         self.data.xfrc_applied[self._toy_bid, :3] = f
 
+    def _hold_toy2(self):
+        """2個目のおもちゃ(toy2)を定位置に固定する（常にhold系＝押しても動かない）。
+
+        【2026-08-18・目標F・F1】toy1のtoy_mode（hold/tether/free）とは独立させた。
+        目標Fは「並べて置かれた2つを見比べる」場面で、toy2側を押す・随伴性を学ぶ
+        実験は今のところ無いため、常に固定でよい。toy2=False（既定）なら
+        self._rest_pos2 がNoneのままなので何もしない＝従来と不変。
+        """
+        if not self._toy2 or self._rest_pos2 is None:
+            return
+        self._place(self._obj2_qadr, self._rest_pos2)
+        self.data.qvel[self._obj2_dadr:self._obj2_dadr + 6] = 0.0
+        self.data.xfrc_applied[self._obj2_bid, :3] = 0.0
+
     def _spawn_toy(self):
         # おもちゃの登場を遅らせる（TOY_APPEAR_DELAY 参照）。
         #   最初は遠くに置き、太郎が落ち着いてから親が運んでくる。
@@ -1187,18 +1330,28 @@ class ToySupineEnv(SupineMimoEnv):
         self._toy_carry_t = 0.0
         self._t_since_reset = 0.0
         self._rest_pos = None          # 到着するまで置き場所は決まっていない
+        self._rest_pos2 = None
+        # 【2026-08-18・目標F・F1】toy1・toy2のどちらかが有効なら位置を決めておく
+        #   （toy2は登場演出(carry-in)を持たず常に即座に定位置＝ここで確定させる）。
+        #   toy1がdelay>0のときは、この直後に FAR_AWAY へ置き直し・anchor=None に
+        #   戻すので、toy1自身の見た目は従来と変わらない。
+        if self._toy or self._toy2:
+            self._set_anchor()
         if self._toy and self._toy_appear_delay > 0.0:
             self._place(self._toy_qadr, FAR_AWAY)
             self._anchor = None            # 到着するまで吊らない
             self._toy_pending = True
         elif self._toy:
             self._toy_pending = False
-            self._set_anchor()
             self._place(self._toy_qadr, self._rest_pos)   # 支点の真下＝紐が垂れた位置
         else:
             self._toy_pending = False
             self._place(self._toy_qadr, FAR_AWAY)
-        self._place(self._obj2_qadr, FAR_AWAY + np.array([0.5, 0.0, 0.0]))
+        if self._toy2 and self._rest_pos2 is not None:
+            self._place(self._obj2_qadr, self._rest_pos2)
+            self.data.qvel[self._obj2_dadr:self._obj2_dadr + 6] = 0.0
+        else:
+            self._place(self._obj2_qadr, FAR_AWAY + np.array([0.5, 0.0, 0.0]))
         self.data.qvel[self._toy_dadr:self._toy_dadr + 6] = 0.0
         self.n_respawn += 1
         self.respawned_this_step = True
@@ -1257,7 +1410,7 @@ class ToySupineEnv(SupineMimoEnv):
         if self._orienting is not None:
             self._orienting.reset()        # 前エピソードの画像を持ち越さない
         if self._toy:
-            self.model.geom_rgba[self._toy_gadr] = TOY_RGBA_OFF
+            self.model.geom_rgba[self._toy_gadr] = self._toy_rgba_off
             self.toy_lit = False
         mujoco.mj_forward(self.model, self.data)
         # 【2026-08-15・座位保持の学習】層2（立ち直り反射）の三半規管フィルタが
@@ -1318,6 +1471,7 @@ class ToySupineEnv(SupineMimoEnv):
         self._parent_intervene()   # 見失ったら親が差し出し直す
         self._carry_toy()          # 親がおもちゃを運んでくる（登場を遅らせる仕組み）
         self._apply_tether()
+        self._hold_toy2()          # 2個目のおもちゃ（toy2=False なら何もしない）
         self._update_glow()
         if self._vor is not None:
             # 方策の眼球出力を捨て、VORの指令に差し替える（皮質は反射弓に介入しない）
@@ -1657,7 +1811,7 @@ class ToySupineEnv(SupineMimoEnv):
             self._glow_until = float(self.data.time) + GLOW_HOLD_S
         lit = float(self.data.time) < getattr(self, "_glow_until", -1e9)
         if lit != self.toy_lit:
-            self.model.geom_rgba[self._toy_gadr] = TOY_RGBA_ON if lit else TOY_RGBA_OFF
+            self.model.geom_rgba[self._toy_gadr] = TOY_RGBA_ON if lit else self._toy_rgba_off
             self.toy_lit = lit
 
     def anchor_distance(self):

@@ -145,6 +145,23 @@ def default_scene(name="無題"):
                 # 登場を遅らせるとき（delay_sec > 0）だけ効く運び方
                 "approach_sec": 0.5,
                 "approach_from": "above",
+                # 【2026-08-18新設】色。None なら従来どおりの既定色（赤）。
+                #   例: [0.8, 0.1, 0.1, 1.0]。未指定シーンは1ビットも挙動が変わらない。
+                "rgba": None,
+            },
+            # 【2026-08-18新設・目標F・F1】2個目のおもちゃ。語↔物の対応づけ判定
+            #   （左右に2個置いて、語を聞いてどちらを見るかを測る）に使う。
+            #   enabled=False（既定）なら test_object2 は従来どおり遠方へ退避するだけ
+            #   ＝toy2を書かない既存シーンは1ビットも挙動が変わらない。
+            "toy2": {
+                "enabled": False,
+                "shape": "sphere",
+                "radius": 0.020,
+                "rgba": None,            # None なら白系の既定色（TOY2_RGBA_DEFAULT）
+                "dist": 0.086,           # 目からtoy2まで（toy1と独立に指定可能）
+                # 視線正面からtoy1/toy2を振り分ける角度[度]（片側あたり）。
+                # 例：12なら toy1=左12度・toy2=右12度（視野半角30度に収まる）。
+                "angle_deg": 12.0,
             },
             "parent_intervene": False,
             "parent_wait_sec": 2.0,      # 見失ってから差し出し直すまで
@@ -340,6 +357,7 @@ def build(scene, orient=None, vor=True, seed=0, verbose=False, actuation_model=N
     """
     b, w, s = scene["body"], scene["world"], scene["setup"]
     toy = w["toy"]
+    toy2 = w["toy2"]
 
     # 【なぜ、2026-08-10】body.flexion=True のとき、infant_body.apply_runtime_corrections が
     #   環境構築の途中で apply_limb_tone(profile="newborn_flexor") を隠れて呼び、
@@ -467,6 +485,16 @@ def build(scene, orient=None, vor=True, seed=0, verbose=False, actuation_model=N
             fence=bool(w["fence"]),
             toy_radius=float(toy["radius"]),
             toy_dist=float(toy["dist"]),
+            # 【2026-08-18新設・目標F・F1】色（未指定なら従来色）と2個目のおもちゃ。
+            #   toy2.enabled=False（既定）なら1ビットも挙動が変わらない
+            #   （e_toy_env.ToySupineEnv側の対応する引数のコメント参照）。
+            toy_rgba=(None if toy["rgba"] is None else list(toy["rgba"])),
+            toy2=bool(toy2["enabled"]),
+            toy2_shape=str(toy2["shape"]),
+            toy2_radius=float(toy2["radius"]),
+            toy2_rgba=(None if toy2["rgba"] is None else list(toy2["rgba"])),
+            toy2_dist=float(toy2["dist"]),
+            toy_angle_deg=float(toy2["angle_deg"]),
             newborn_neck=bool(b["neck_fix"]),
             newborn_limbs=bool(b["limb_fix"]),
             # 【2026-08-17・配線改修ステージA】以前はモジュール定数の直接上書き
