@@ -455,7 +455,7 @@ class ToySupineEnv(SupineMimoEnv):
                  toy2_dist=None, toy_angle_deg=None,
                  toy_appear_delay=None, toy_approach_sec=None, toy_approach_from=None,
                  parent_intervene=None, parent_wait_sec=None, parent_lost_deg=None,
-                 plain=None, static_tex=None, orient_v=None,
+                 plain=None, static_tex=None, orient_v=None, orienting_hold=None,
                  eye_rest_vertical_deg=None, eye_centering=None,
                  eye_muscle_scale=None, **kwargs):
         # VOR（前庭動眼反射）。眼球を方策から切り離し、頭の動きを打ち消して視線を安定させる。
@@ -564,6 +564,11 @@ class ToySupineEnv(SupineMimoEnv):
         # 視線誘導反射の実装バージョン。None なら従来どおり環境変数（既定"1"）。
         self._orient_v = (os.environ.get("E_ORIENT_V", "1") if orient_v is None
                           else str(orient_v))
+        # 【2026-08-19新設・F1-3a続き】保持成分（ステップ）のON/OFF。既定False＝
+        #   v2は従来どおりパルスのみ（1ビット不変）。根拠は e_orienting_v2.py の
+        #   HOLD_FB_GAIN 直前のコメント（Robinson 1975 pulse-step model）参照。
+        self._orienting_hold = (os.environ.get("E_ORIENT_HOLD", "0") == "1"
+                                if orienting_hold is None else bool(orienting_hold))
         self._fence_half_x = float(fence_half_x)
         self._fence_half_y = float(fence_half_y)
         self._fence_post_w = float(fence_post_w)
@@ -717,13 +722,15 @@ class ToySupineEnv(SupineMimoEnv):
                 #   **今の眼球角度と目標角度の差を見ながら**動かす（位置の内部
                 #   フィードバック＝Robinson 1975 の local feedback model）。
                 self._orienting = OrientingReflexV2(self.model, data=self.data,
-                                                    dt=self.dt)
+                                                    dt=self.dt,
+                                                    hold=self._orienting_hold)
             else:
                 from e_orienting import OrientingReflex
                 self._orienting = OrientingReflex(self.model)
             print(f"[orient] enabled: v{ver} ({type(self._orienting).__name__}) "
                   f"neck={list(self._orienting.neck_idx.keys())} "
-                  f"eye_h={len(self._orienting.eye_idx['h'])} eye_v={len(self._orienting.eye_idx['v'])}")
+                  f"eye_h={len(self._orienting.eye_idx['h'])} eye_v={len(self._orienting.eye_idx['v'])} "
+                  f"hold={self._orienting_hold}")
 
     # ------------------------------------------------------------------
     def _make_visually_plain(self, spec):

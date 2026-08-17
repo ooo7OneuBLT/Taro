@@ -333,12 +333,73 @@ DEFAULT_DT = 0.01
 #   ここではノイズのみで、偏り項は入れない＝人間の近似。
 LI_NOISE = 0.05
 
+# ---- ステップ4b（保持成分＝ステップ）・2026-08-19 追加 ---------------------
+# 【診断】サッケードの位置フィードバック（EYE_FB_GAIN）が有効なのは
+#   `_sacc_remaining > 0` の間（＝撃ってから SACCADE_DURATION 経過 or
+#   目標に SACCADE_DONE_DEG 以内まで届くまでの、たかだか数十ms）だけだった。
+#   目標に届いて `_sacc_remaining` が0になった瞬間、apply() は以後
+#   `return action`（何も足さない）に落ち、次にまた撃てるのは
+#   SACCADE_LATENCY=0.90秒後（かつ新たな動き信号が SACCADE_MIN_DIR 以上のとき）
+#   だけ＝その間ずっと筋活性ゼロの空白ができる。中央復帰バネ（k=0.03、
+#   0.3秒で中央へ戻る）に対抗する力がこの空白では出ないため、目標へ着いた
+#   直後から眼球は中央へ戻り始める＝「パルス（サッケード）はあるがステップ
+#   （保持）が無い」状態だった。
+#
+# 【人間はどうか】Robinson DA (1975) の pulse-step model（脳幹の
+#   burst generator + 神経積分器）が示すのは、サッケードは
+#     パルス：バースト神経支配で素早く動かす
+#     ステップ：目標位置に達したあとも、その位置に比例した持続的な
+#       神経支配（トニック発火）を出し続け、眼窩の弾性復元力（本実装の
+#       中央復帰バネに相当）と釣り合わせて位置を保つ
+#   の2つで構成される。以後のサッケード生成モデルの標準形。
+#
+# 【実装の形】新しい力学を書き起こすのではなく、サッケード実行中に使っている
+#   位置フィードバック（今の関節角と self._tgt の差 → ゲイン倍）と同じ考え方を、
+#   サッケードが終わった（_sacc_remaining=0 になった）あとも回し続ける
+#   （HOLD_FB_GAIN。ただしバースト用の EYE_FB_GAIN をそのまま使うと保持が
+#   振動して収束しなかったため、角速度の制動項とセットで別途実測で選び直した。
+#   詳細は HOLD_FB_GAIN 定義直前のコメントと _hold_command 参照）。
+#   これは Robinson の local feedback model（バースト生成器は「目標までの
+#   残差がゼロになるまで」発射し続ける）を、バースト区間の外にも延長した形にあたる。
+#   釣り合いの式（参考。実装はこれを解いて開ループで u を出すのではなく、
+#   フィードバックが収束した先が結果的にこの釣り合い点になる＝暗黙の逆算）：
+#     定常状態で 筋の出す力 ＝ バネの復元力
+#       spring torque ≈ EYE_CENTERING_STIFFNESS(=0.03) * θ_err [N・m/rad]
+#         （infant_body.apply_eye_centering_spring、jnt_stiffness による）
+#       muscle torque(u) ≈ f(u, eye_muscle_scale) （MuscleModelの非線形写像。
+#         解析的な逆関数を持たないため、開ループで u=k*θ/… と逆算する式は書けない）
+#   E_ORIENT_HOLD=1 でON（既定OFF＝v2は従来どおり1ビット不変）。
+USE_HOLD = _os.environ.get("E_ORIENT_HOLD", "0") == "1"
+# 保持中のゲイン。当初はバーストと同じ EYE_FB_GAIN(0.25) を暫定採用したが、
+#   保持を数百ms〜秒オーダーで続けると P制御だけでは筋の活性化ダイナミクスと
+#   共振して振動し収束しなかった（実測：診断で目標-1.71度に対し眼球が
+#   -1.06〜-2.52度を往復し続けた。_hold_command のコメント参照）。
+#   角速度に比例する制動項（HOLD_DAMP_GAIN、PDのD項）を足したうえで、
+#   gain×damp を実測で振って選んだ（f13_hold_gain_sweep.py、揺らし条件・
+#   後半2秒の残差）：
+#     0.25×0.00（元案）  平均0.70度 最大4.27度（振動）
+#     0.10×0.00          平均1.45度 最大3.66度（振動）
+#     0.25×0.02          平均0.19度 最大0.98度
+#     0.25×0.05          平均1.59度 最大3.92度（強すぎて悪化）
+#     0.10×0.02          平均0.14度 最大0.82度 ← 採用（最小）
+HOLD_FB_GAIN = float(_os.environ.get("E_HOLD_GAIN", "0.10"))
+# 角速度に比例する制動項（PDのD項）。[Tier3・ARBITRARY] 工学的な安定化であり、
+#   神経系のdamping機構そのものの模倣ではない。値の根拠は上のHOLD_FB_GAINと同じ実測。
+HOLD_DAMP_GAIN = float(_os.environ.get("E_HOLD_DAMP", "0.02"))
+# 「目標が視野内にある限り」の近似：動き検出が最近 SACCADE_MIN_STRENGTH 以上の
+#   信号を出したか（＝対象が実際に動いて見えているか）で判定する。
+#   本物の「視野内にあるか」（対象位置と眼球可動域・カメラ画角からの幾何判定）は
+#   行っていない。注意：[Tier3・ARBITRARY] 待ち時間そのものに文献値は無い。
+#   固視微動さえ止められない人間の网膜像消失（本ファイル冒頭の注釈）を踏まえ、
+#   「揺れが止まって数百ms検出が途切れたら見失ったとみなす」という暫定値。
+HOLD_LOSE_SEC = float(_os.environ.get("E_HOLD_LOSE", "0.5"))
+
 
 class OrientingReflexV2:
     """視線誘導反射・新版。段階的に組み立てる。"""
 
     def __init__(self, model, data=None, time_scales=TIME_SCALES, noise=LI_NOISE,
-                 seed=None, dt=DEFAULT_DT):
+                 seed=None, dt=DEFAULT_DT, hold=None):
         # 2026-07-27：seed が None だと神経ノイズが毎回変わり、**同じ設定でも
         #   結果がばらつく**（同一条件3回で 0.319 / 0.215 / 0.189）。
         #   高速化の前後を1回ずつ比べて「悪化した」と誤判定した。
@@ -349,6 +410,8 @@ class OrientingReflexV2:
         self.noise = float(noise)
         self.rng = np.random.default_rng(seed)
         self.dt = float(dt)
+        # ステップ4b（保持成分）。既定OFF＝v2は従来のまま1ビット不変。
+        self.hold = bool(USE_HOLD if hold is None else hold)
         # ステップ4（階段状サッケード）の状態
         self._t = 0.0                # apply() が刻む内部時刻[秒]
         self._last_saccade_t = -1e9  # 前回サッケードを撃った時刻
@@ -356,6 +419,7 @@ class OrientingReflexV2:
         self._sacc_end_t = -1e9      # サッケードが終わった時刻（抑制の起点）
         self._sacc_h = 0.0           # 今のサッケードの方向（撃った瞬間に固定）
         self._sacc_v = 0.0
+        self._hold_last_seen_t = -1e9   # 動きを最後に検出した時刻（保持の解除判定）
         # 撃った瞬間に決める目標角度[度]（位置フィードバックの目標）
         self._tgt = {"eye_h": 0.0, "eye_v": 0.0, "neck_h": 0.0, "neck_v": 0.0}
         self.n_saccades = 0          # 撃った回数（テスト・観察用）
@@ -417,6 +481,7 @@ class OrientingReflexV2:
         self._sacc_end_t = -1e9
         self._sacc_h = 0.0
         self._sacc_v = 0.0
+        self._hold_last_seen_t = -1e9
         self.n_saccades = 0
 
     # ------------------------------------------------------------
@@ -461,6 +526,11 @@ class OrientingReflexV2:
         self.biased_map = biased
         h, v, s = self._select_and_centroid(biased)      # ステップ3
         self.h_dir, self.v_dir, self.strength = h, v, s
+        # ステップ4b（保持）：対象が実際に動いて見えた最後の時刻を記録する。
+        #   hold=False のときも記録だけはしておく（副作用は無い＝ hold=False の
+        #   出力には影響しない。apply() 側で self.hold を見て使うかどうかを決める）。
+        if s >= SACCADE_MIN_STRENGTH:
+            self._hold_last_seen_t = self._t
         # ステップ4（階段状サッケード）・5（IOR）は未実装
 
     def _angle_deg(self, adrs):
@@ -508,6 +578,12 @@ class OrientingReflexV2:
                     self._tgt["neck_h"] = self._angle_deg(self.neck_qadr["h"]) + NECK_SHARE * dh
                 if "v" in self.neck_qadr:
                     self._tgt["neck_v"] = self._angle_deg(self.neck_qadr["v"]) + NECK_SHARE * dv
+            elif self.hold and self._should_hold():
+                # ステップ4b（保持）：サッケードは撃たないが、既に定めた目標
+                #   （self._tgt）へ向けた位置フィードバックだけは続ける。
+                #   本体のサッケード実行中ブロック（この if の外）とは独立の
+                #   経路なので、hold=False の既存挙動には一切触れない。
+                return self._hold_command(action)
             else:
                 return action     # サッケード中でなければ何も足さない
 
@@ -570,6 +646,74 @@ class OrientingReflexV2:
         for i in self.eye_idx["v"]:
             _write_joint_command(out, i, EYE_GAIN * v, self.n_actuator,
                                  co_activation=0.0, additive=True)
+        return out
+
+    # ------------------------------------------------------------
+    # ステップ4b：保持（サッケードが終わったあとも目標角度を維持する）
+    # ------------------------------------------------------------
+    def _should_hold(self):
+        """保持を続けてよいか（＝目標がまだ視野内にありそうか、の近似）。
+
+        既に1発もサッケードを撃っていなければ保持する目標が無い。
+        直近 HOLD_LOSE_SEC 以内に動き検出が SACCADE_MIN_STRENGTH 以上の
+        信号を出していれば「まだ見えている」とみなす。
+        """
+        if self.n_saccades == 0 or self.data is None:
+            return False
+        return (self._t - self._hold_last_seen_t) < HOLD_LOSE_SEC
+
+    def _angle_vel_deg(self, adrs):
+        """今の関節角速度[度/秒]。複数あれば平均。保持のダンピング項に使う。"""
+        if self.data is None:
+            return 0.0
+        if isinstance(adrs, (list, tuple)):
+            if not adrs:
+                return 0.0
+            return float(np.degrees(np.mean([self.data.qvel[a] for a in adrs])))
+        return float(np.degrees(self.data.qvel[adrs]))
+
+    def _hold_command(self, action):
+        """サッケード実行中のブロックと同じ位置フィードバック（の考え方）を、
+        _sacc_remaining の外（＝サッケードを撃っていない間）でも回す。
+        HOLD_FB_GAIN で目標角度との差を打ち消す持続的な筋活性＝ステップ成分
+        （Robinson 1975・脳幹の神経積分器の近似。本ファイル冒頭の
+        HOLD_FB_GAIN 直前のコメント参照。値はバースト用EYE_FB_GAINとは別に
+        実測で選んだ、後述の振動対策とセットで）。
+        サッケードの状態（_sacc_remaining・_sacc_end_t・n_saccades）は
+        一切変更しない＝サッケードの状態機械そのものには手を触れない。
+
+        【2026-08-19追記・振動対策】位置だけの比例フィードバック（P制御）を
+        バーストの外（数百ms〜秒オーダー）まで延ばすと、筋の活性化ダイナミクス
+        （力が立ち上がるまでの遅れ）と噛み合って**減衰しない振動**になった
+        （実測：診断スクリプトで目標-1.71度に対し眼球が-1.06〜-2.52度を往復し
+        続け、収束しない）。バースト中（0.05秒以内）は遅れが問題にならないが、
+        保持はもっと長く続くため顕在化する。
+        対策として角速度に比例する制動項を引く（比例・微分＝PD制御。工学的な
+        安定化であり、神経系の damping 機構そのものの模倣ではない
+        [Tier3・ARBITRARY]）：
+            cmd = HOLD_FB_GAIN * 位置誤差[度] − HOLD_DAMP_GAIN * 角速度[度/秒]
+        """
+        out = np.array(action, dtype=float).copy()
+        eh = self._tgt["eye_h"] - self._angle_deg(self.eye_qadr["h"])
+        ev = self._tgt["eye_v"] - self._angle_deg(self.eye_qadr["v"])
+        vh = self._angle_vel_deg(self.eye_dadr["h"])
+        vv = self._angle_vel_deg(self.eye_dadr["v"])
+        cmd_h = HOLD_FB_GAIN * eh - HOLD_DAMP_GAIN * vh
+        cmd_v = HOLD_FB_GAIN * ev - HOLD_DAMP_GAIN * vv
+        for i in self.eye_idx["h"]:
+            _write_joint_command(out, i, float(np.clip(cmd_h, -1, 1)),
+                                 self.n_actuator, co_activation=0.0, additive=True)
+        for i in self.eye_idx["v"]:
+            _write_joint_command(out, i, float(np.clip(cmd_v, -1, 1)),
+                                 self.n_actuator, co_activation=0.0, additive=True)
+        if NECK_SHARE != 0.0:
+            for key in ("h", "v"):
+                if key in self.neck_idx and key in self.neck_qadr:
+                    e = self._tgt[f"neck_{key}"] - self._angle_deg(self.neck_qadr[key])
+                    _write_joint_command(out, self.neck_idx[key],
+                                         float(np.clip(NECK_FB_GAIN * e, -1, 1)),
+                                         self.n_actuator, co_activation=0.0,
+                                         additive=True)
         return out
 
     # ------------------------------------------------------------

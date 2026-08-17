@@ -129,6 +129,10 @@ def default_scene(name="無題"):
             #     指定を忘れると**黙って旧版で走る**（実際に踏んだ）。
             #   v1 は構造的な穴が6つ見つかっている旧版。比較・アブレーション用に残す。
             "orienting_version": 2,
+            # 【2026-08-19新設・F1-3a続き】保持成分（ステップ）のON/OFF。既定False＝
+            #   v2は従来どおりパルスのみ（1ビット不変）。実体は
+            #   e_orienting_v2.OrientingReflexV2 の hold 引数。
+            "orienting_hold": False,
         },
 
         # ② 環境のオブジェクト。これもモデル構築時
@@ -521,6 +525,7 @@ def build(scene, orient=None, vor=True, seed=0, verbose=False, actuation_model=N
             plain=bool(w["plain"]),
             static_tex=bool(w["static_tex"]),
             orient_v=str(b["orienting_version"]),
+            orienting_hold=bool(b.get("orienting_hold", False)),
             eye_rest_vertical_deg=float(b["eye_rest_vertical_deg"]),
             eye_centering=bool(b.get("eye_centering", False)),
             **kw)
