@@ -101,3 +101,6 @@ doc/検証の落とし穴チェックリスト*.md
 doc/_private/
 CLAUDE.md
 現在地.md
+
+# 目標Fのログ
+F/logs/
