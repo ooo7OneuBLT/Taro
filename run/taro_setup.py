@@ -311,6 +311,32 @@ def _setup_righting_damper(taro, cfg, env, *, verbose=True):
               f"対象アクチュエータ=act:head_tilt(neg={aid}, pos={aid + n})", flush=True)
 
 
+def _setup_hearing(taro, cfg, *, verbose=True):
+    """耳＋連合器の配線（2026-08-18新設・F1-3）。Taro.__init__ から呼ぶ。
+
+    F1-2「耳の移植」（F/docs/仕様_F1-2_耳の移植.md）で taro_core 側に置いた部品
+    （taro_core/src/senses/hearing.py の Hearing、taro_core/src/brain/lexicon.py の
+    Lexicon）をそのまま装着するだけ。env（体）に依存しないので、_setup_postural_gate
+    等と違い on_body_change での再構築は不要。
+
+    既定OFF（cfg.hearing=False）：taro.hearing/taro.lexiconはNoneのまま＝
+    run/trainer.py の step_k 内の配線コードが1行も実行されない
+    （既存実験の挙動は1ビットも変わらない）。
+    """
+    if not cfg.hearing:
+        taro.hearing = None
+        taro.lexicon = None
+        return
+    from hearing import Hearing
+    from lexicon import Lexicon
+    taro.hearing = Hearing()
+    # state_dim=64：taro.fusion.vision(...)（視覚エンコーダのみ、64次元）の出力次元に
+    #   合わせる（F1-3仕様書の技術付録「部品2」の指示どおり）。
+    taro.lexicon = Lexicon(state_dim=64)
+    if verbose:
+        print("[耳] taro.hearing/taro.lexicon ON（F1-2移植部品。state_dim=64）", flush=True)
+
+
 class _DoubleTouchBonusContributor:
     """taro.reward_contributors の1要素（2026-08-05・全身一般化の設計1-4節）。
 
@@ -476,6 +502,10 @@ class Taro:
                                            touch_map=touch_map).freeze()
         if cfg.somatosensory and cfg.touch and self.fusion.touch is not None and verbose:
             print(self.fusion.touch.summary(), flush=True)
+
+        # 【2026-08-18新設・F1-3】耳＋連合器（既定OFF）。fusion（視覚エンコーダ含む）を
+        #   作った直後＝taro.fusion.visionが以後いつでも呼べる状態になってから。
+        _setup_hearing(self, cfg, verbose=verbose)
 
         # ---- ② 行動の次元 ---------------------------------------------------
         n_env_act = env.action_space.shape[0]

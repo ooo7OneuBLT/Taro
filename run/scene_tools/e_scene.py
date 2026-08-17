@@ -177,6 +177,24 @@ def default_scene(name="無題"):
             "parent_intervene": False,
             "parent_wait_sec": 2.0,      # 見失ってから差し出し直すまで
             "parent_lost_deg": 25.0,     # 「見失った」と判定する角度
+            # 【2026-08-18新設・F1-3】親のfollow-in labeling。enabled=False（既定）なら
+            #   ParentLabeling(enabled=False)が組まれるだけ＝1ビットも挙動が変わらない。
+            #   値の根拠は E/scripts/parent_labeling.py と
+            #   F/docs/仕様_F1-3_親のfollow-in labelingと耳の配線.md 技術付録を参照。
+            "parent_labeling": {
+                "enabled": False,
+                "shake_amp_m": 0.02,
+                "shake_hz": 1.5,
+                "gaze_deg": 10.0,
+                "gaze_margin_deg": 3.0,
+                "gaze_hold_sec": 0.3,
+                "attract_timeout_sec": 3.0,
+                "utterances": {"toy1": "ぶーぶー", "toy2": "わんわん"},
+                "respond_prob": 1.0,
+                "refractory_sec": 1.0,
+                "shuffle_refractory_sec": 3.0,
+                "shuffle_after": 5,
+            },
         },
 
         # ③ 実験開始前の設定。モデルを作ったあとに効かせる
@@ -522,6 +540,10 @@ def build(scene, orient=None, vor=True, seed=0, verbose=False, actuation_model=N
             parent_intervene=bool(w["parent_intervene"]),
             parent_wait_sec=float(w["parent_wait_sec"]),
             parent_lost_deg=float(w["parent_lost_deg"]),
+            # 【2026-08-18新設・F1-3】辞書をそのままkwargs直渡し（ParentLabelingの
+            #   コンストラクタが受ける）。未指定シーンでもdefault_scene()の
+            #   既定値（enabled=False）がここに入るので1ビットも挙動が変わらない。
+            parent_labeling=dict(w["parent_labeling"]),
             plain=bool(w["plain"]),
             static_tex=bool(w["static_tex"]),
             orient_v=str(b["orienting_version"]),

@@ -1,0 +1,25 @@
+{
+  "name": "F1-3スモーク：親のfollow-in labeling＋耳の配線",
+  "note": "2026-08-17。受け入れテスト用。前提3点セット（orienting_reflex/orienting_hold/eye_muscle_scale=3.0）とtaro.hearing=trueを有効にし、parent_labelingを有効化した座位_6ヶ月_2おもちゃシーンで3000stepのtrainを回す。",
+  "scene": "座位_6ヶ月_2おもちゃ_F1-3較正_2026-08-17",
+  "taro": {
+    "actuation": "muscle",
+    "vision": true,
+    "orienting_reflex": true,
+    "hearing": true,
+    "save": "F/models/F1-3_スモーク_2026-08-17.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 3000,
+    "seed": 0,
+    "checkpoint": 300,
+    "csv": "F/logs/F1-3_スモーク_2026-08-17/checkpoints.csv"
+  },
+  "plugins": {
+    "word_learning": {
+      "events_out": "F/logs/F1-3_スモーク_2026-08-17/発話イベント.csv"
+    },
+    "dashboard": false
+  }
+}

@@ -456,6 +456,10 @@ class ToySupineEnv(SupineMimoEnv):
                  toy_appear_delay=None, toy_approach_sec=None, toy_approach_from=None,
                  parent_intervene=None, parent_wait_sec=None, parent_lost_deg=None,
                  plain=None, static_tex=None, orient_v=None, orienting_hold=None,
+                 # 【2026-08-18新設・F1-3】親のfollow-in labeling。既定None→
+                 #   ParentLabeling(enabled=False)相当になり1ビットも挙動が変わらない。
+                 #   `world.parent_labeling`（辞書）をkwargs直渡しする（環境変数は新設しない）。
+                 parent_labeling=None,
                  eye_rest_vertical_deg=None, eye_centering=None,
                  eye_muscle_scale=None, **kwargs):
         # VOR（前庭動眼反射）。眼球を方策から切り離し、頭の動きを打ち消して視線を安定させる。
@@ -600,6 +604,10 @@ class ToySupineEnv(SupineMimoEnv):
         # 視線正面からの振り分け角度[度]（片側あたり）。toy2=Falseなら使われない。
         self._toy_angle_deg = float(TOY_ANGLE_DEG_DEFAULT if toy_angle_deg is None
                                     else toy_angle_deg)
+        # 【2026-08-18新設・F1-3】toy1/toy2の左右符号。+1.0が既定（従来どおりtoy1=左・
+        #   toy2=右）。ParentLabelingが5発話ごとに反転させ、_set_anchorを呼び直す
+        #   （場所の丸暗記を防ぐ仕掛け。F/docs/仕様_F1-3_....md参照）。
+        self._toy_swap_sign = 1.0
         self._anchor = None        # 吊り下げの基準点（リセット時に頭の位置から決める）
         # 置き直し(親が渡す)の回数と、そのstepで置き直したかのフラグ。
         # ＝「おもちゃが動いた」を随伴性の証拠として数えるとき、瞬間移動を除くために要る
@@ -694,6 +702,12 @@ class ToySupineEnv(SupineMimoEnv):
             self._configure_toy_geom(self._obj2_bid, obj2_gadr,
                                      self._toy2_shape, self._toy2_radius,
                                      self._toy2_rgba)
+
+        # 【2026-08-18新設・F1-3】親のfollow-in labeling。parent_labeling未指定(None)なら
+        #   ParentLabeling(enabled=False)になり、update()は毎stepNoneを返すだけ＝
+        #   1ビットも既存の挙動を変えない。E/scripts/parent_labeling.py の本体を参照。
+        from parent_labeling import ParentLabeling
+        self._parent_labeling = ParentLabeling(**dict(parent_labeling or {}))
 
         # 首の補正は「落ち着いた初期姿勢」で重力モーメントを測ってから適用する
         # （姿勢で腕の長さが変わるため）。SupineMimoEnvのsettle後＝ここが適切な位置。
@@ -1032,6 +1046,25 @@ class ToySupineEnv(SupineMimoEnv):
         cid = int(self.model.camera(cam).id)
         return -np.array(self.data.cam_xmat[cid], dtype=float).reshape(3, 3)[:, 2]
 
+    def _gaze_angle_to(self, body_name):
+        """視線とbody_nameの中心のなす角度[度]。求まらなければNone。
+
+        【2026-08-18新設・F1-3】_parent_intervene（下方）の内積計算を一般化したもの。
+        toy1・toy2の両方に使う（ParentLabelingの注視判定）。
+        """
+        cid = int(self.model.camera("eye_left").id)
+        eye = np.array(self.data.cam_xpos[cid], dtype=float)
+        fwd = -np.array(self.data.cam_xmat[cid], dtype=float).reshape(3, 3)[:, 2]
+        try:
+            pos = np.array(self.data.body(body_name).xpos, dtype=float)
+        except Exception:
+            return None
+        vec = pos - eye
+        n = float(np.linalg.norm(vec))
+        if n < 1e-9:
+            return None
+        return float(np.degrees(np.arccos(np.clip(np.dot(fwd, vec / n), -1.0, 1.0))))
+
     def _set_anchor(self):
         """吊り下げの基準点（ベビージムの支点）を決める。
 
@@ -1077,8 +1110,12 @@ class ToySupineEnv(SupineMimoEnv):
                 right = np.array(self.data.cam_xmat[cid],
                                  dtype=float).reshape(3, 3)[:, 0]
                 ang = np.radians(self._toy_angle_deg)
-                g1 = g * np.cos(ang) - right * np.sin(ang)     # 左（toy1）
-                g2 = g * np.cos(ang) + right * np.sin(ang)     # 右（toy2）
+                # 【2026-08-18新設・F1-3】左右入れ替え。既定+1.0なら従来どおり
+                #   toy1=左・toy2=右（ParentLabelingが5発話ごとに-1.0へ反転させ、
+                #   この_set_anchorを呼び直す＝場所の丸暗記を防ぐ仕掛け）。
+                sign = getattr(self, "_toy_swap_sign", 1.0)
+                g1 = g * np.cos(ang) - sign * right * np.sin(ang)     # 左（toy1、既定）
+                g2 = g * np.cos(ang) + sign * right * np.sin(ang)     # 右（toy2、既定）
                 self._rest_pos2 = origin + g2 * self._toy2_dist
             else:
                 g1 = g
@@ -1433,6 +1470,8 @@ class ToySupineEnv(SupineMimoEnv):
         self._vision_cache = None          # data.time が巻き戻るのでキャッシュを捨てる
         if self._orienting is not None:
             self._orienting.reset()        # 前エピソードの画像を持ち越さない
+        if getattr(self, "_parent_labeling", None) is not None:
+            self._parent_labeling.reset()  # 【2026-08-18新設・F1-3】前エピソードの状態を持ち越さない
         if self._toy:
             self.model.geom_rgba[self._toy_gadr] = self._toy_rgba_off
             self.toy_lit = False
@@ -1496,6 +1535,11 @@ class ToySupineEnv(SupineMimoEnv):
         self._carry_toy()          # 親がおもちゃを運んでくる（登場を遅らせる仕組み）
         self._apply_tether()
         self._hold_toy2()          # 2個目のおもちゃ（toy2=False なら何もしない）
+        # 【2026-08-18新設・F1-3】親のfollow-in labeling。_hold_toy2の直後に呼ぶ
+        #   ＝振っている間はここでtoy1/toy2の位置を上乗せで揺らす（_apply_shake）。
+        #   parent_labeling未指定（enabled=False）なら常にNoneを返すだけ＝
+        #   1ビットも既存の挙動を変えない。
+        self._parent_utterance = self._parent_labeling.update(self)
         self._update_glow()
         if self._vor is not None:
             # 方策の眼球出力を捨て、VORの指令に差し替える（皮質は反射弓に介入しない）
@@ -1520,6 +1564,14 @@ class ToySupineEnv(SupineMimoEnv):
         #   reset_model()も呼ばない。terminated/truncatedもいじらない）。
         if taro is not None:
             self._check_posture_fall(taro)
+        # 【2026-08-18新設・F1-3】親の発話をinfo経由で受け渡す（trainerが耳→連合器へ渡す）。
+        #   発話が無かったstep（ほとんど）はNoneのままなのでinfoは1キーも増えず、
+        #   既存のinfo読み取り側（あれば）に影響しない。
+        if self._parent_utterance is not None:
+            obs, rew, term, trunc, info = out
+            info = dict(info)
+            info["parent_utterance"] = self._parent_utterance
+            out = (obs, rew, term, trunc, info)
         return out
 
     # -------------------------------------------------- 座位保持の学習（2026-08-15）

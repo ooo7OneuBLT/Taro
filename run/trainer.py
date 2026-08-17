@@ -110,6 +110,7 @@ class Trainer:
         # 測定の前に体を控えるための入れ物（重いので1つ作って使い回す）
         self._snap_data = None
         self._snap_model = None
+        self._last_parent_events = []      # 【2026-08-18新設・F1-3】直近step_kの発話イベント
 
     # ------------------------------------------------------------ 組み立て
     def build(self):
@@ -189,6 +190,7 @@ class Trainer:
         """
         o, term = self.state["obs"], False
         t = self.taro
+        self._last_parent_events = []      # 【2026-08-18新設・F1-3】この判断(K tick)分の発話イベント
         if getattr(t, "reflex_common_active", False):
             am = self.env.unwrapped.actuation_model
             a_np = np.asarray(a, dtype=np.float64)
@@ -196,6 +198,7 @@ class Trainer:
                 r = t.brain.step_reflex_common(DT, am.muscle_lengths, am.muscle_velocities)
                 a_tick = np.clip(a_np + r, 0.0, 1.0).astype(np.float32)
                 o, rew, te, tr, info = self.env.step(a_tick)
+                self._hear_parent_utterance(o, info)
                 if te or tr:
                     term = True
                     break
@@ -205,11 +208,47 @@ class Trainer:
             return o, term
         for _ in range(self.cfg.K):
             o, r, te, tr, info = self.env.step(a)
+            self._hear_parent_utterance(o, info)
             if te or tr:
                 term = True
                 break
         o = t.apply_touch_adaptation(o, is_reset=False)
         return o, term
+
+    def _hear_parent_utterance(self, o, info):
+        """親の発話（info["parent_utterance"]）を耳→連合器へ渡す（2026-08-18新設・F1-3）。
+
+        taro.hearing/taro.lexicon は既定None（cfg.hearing=False）＝この関数は
+        呼ばれても何もしない＝既存実験の挙動は1ビットも変わらない
+        （E/scripts/parent_labeling.py が無効なら info にキー自体が無いので、
+        いずれにせよ何も起きない）。
+
+        仕様書（F/docs/仕様_F1-3_....md 技術付録「部品2」）の指定どおり：
+          tokens = taro.hearing.hear(text)
+          state  = taro.fusion.vision(左目画像, 右目画像)  ※視覚64次元のみ
+          taro.lexicon.observe(tokens, state=state)
+        confidences は F1-2 仕様書の単純化「発話全体を1チャンクとして扱ってよい」に従い、
+        全要素同値（谷が生まれない＝発話全体が1つの単位として切り出される）を渡す。
+        """
+        t = self.taro
+        if getattr(t, "hearing", None) is None or getattr(t, "lexicon", None) is None:
+            return
+        pu = info.get("parent_utterance") if isinstance(info, dict) else None
+        if not pu:
+            return
+        text = pu.get("text")
+        tokens = t.hearing.hear(text)
+        confidences = [1.0] * len(tokens)
+        # detach＝この統計（共起の平均）は学習の逆伝播に使わない値であるため
+        #   （Lexiconは純Pythonの累積平均。計算グラフを持ち越さない）。
+        state = t.fusion.vision(o["eye_left"], o["eye_right"]).detach().cpu().tolist()
+        t.lexicon.observe(tokens, confidences, state=state)
+        # 【なぜstateもここに置くか】word_learningプラグイン（読むだけ）が「正解物の
+        #   特徴EMA」を作るのに使う（プラグインがtaro.fusionを呼び直すと二重計算に
+        #   なるうえ、この瞬間のobs（o）はstep_kのK tick内の値でctx.last["obs_out"]
+        #   より新しい＝取り直すと精度が落ちる）。
+        self._last_parent_events.append(
+            {"text": text, "target": pu.get("target"), "state": state})
 
     def reset_state(self):
         self.state["obs"], _ = self.env.reset()
@@ -778,6 +817,9 @@ class Trainer:
             self.ctx.last = {"obs_in": obs_in, "obs_out": state["obs"], "sv": sv,
                              "cf": cf, "clp": clp, "z": z, "mean": mean, "std": std,
                              "a": a, "pred": pred, "nlp": nlp}
+            # 【2026-08-18新設・F1-3】この判断(K tick)ぶんの親の発話イベント（無ければ空）。
+            #   ctx.last_double_touchと同じ「置いておくだけ」の流儀（プラグインは読むだけ）。
+            self.ctx.last_parent_utterance = list(self._last_parent_events)
             for p in self.plugins:
                 p.on_step(self.ctx)
             # ---- 学習 --------------------------------------------------------

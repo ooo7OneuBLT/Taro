@@ -66,6 +66,7 @@ def _register():
     from run.plugins.common.plateau_stop import PlateauStop
     from run.plugins.common.posture_probe import PostureProbe
     from run.plugins.common.toy_in_view import ToyInView
+    from run.plugins.common.word_learning import WordLearning
     PLUGINS["toy_touch"] = ToyTouch
     PLUGINS["toy_in_view"] = ToyInView   # おもちゃが視界に入っている割合（幾何・脳不要＝measure可）
     PLUGINS["hand_in_view"] = HandInView
@@ -79,6 +80,7 @@ def _register():
     PLUGINS["posture_probe"] = PostureProbe   # 頭の高さと報酬をCSVに残す（姿勢の学習の結果そのもの）
     PLUGINS["trace"] = Trace           # 内部の値の指紋を残す（原因追跡用）
     PLUGINS["dashboard"] = Dashboard   # 学習の様子の絵を自動で作り直す
+    PLUGINS["word_learning"] = WordLearning   # 親のfollow-in labelingで語彙が育っているか（F1-3）
     # 注意：self_model / trace / reach_success / double_touch は太郎の脳が要る
     #   （run.type=train のみ）。measure（脳を通さず環境だけ進める）では使えない。
     #   reach_success・double_touch はさらに taro.goal_space="reach_self" も要る。
