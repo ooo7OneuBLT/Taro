@@ -1,0 +1,26 @@
+{
+  "name": "F1-3cスモーク：1個ずつ見せる提示（solo_presentation）での語↔物連合の再走行",
+  "note": "2026-08-19。F1-3b（DINOv2・fovea既定64px）からの変更は提示方法だけ：親が名指しする間、もう片方のおもちゃを視界外へ退避（solo_presentation=true）。根拠＝発話瞬間の画像目視で『2個並びだと64px切り出しに両方＋背景が写り、どちらの語でもほぼ同じ絵』と確定（F1-3b最終0.108）。32pxへ絞る案は切り出しのばらつき増で逆効果だった（最終0.036）。フォビアは既定64pxへ戻す。",
+  "scene": "座位_6ヶ月_2おもちゃ_F1-3c_1個提示_2026-08-19",
+  "taro": {
+    "actuation": "muscle",
+    "vision": true,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {"backend": "dinov2_vits14"},
+    "save": "F/models/F1-3c_スモーク_1個提示_2026-08-19.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 3000,
+    "seed": 0,
+    "checkpoint": 300,
+    "csv": "F/logs/F1-3c_スモーク_1個提示_2026-08-19/checkpoints.csv"
+  },
+  "plugins": {
+    "word_learning": {
+      "events_out": "F/logs/F1-3c_スモーク_1個提示_2026-08-19/発話イベント.csv"
+    },
+    "dashboard": false
+  }
+}

@@ -42,6 +42,13 @@ class ParentLabeling:
         refractory_sec       発話後、黙る秒数（連呼防止）
         shuffle_refractory_sec  左右入れ替え直後、黙る秒数（親がおもちゃを動かしている間）
         shuffle_after        発話が何回に達するごとに左右を入れ替えるか
+        solo_presentation    既定False。Trueなら、振って名指しする間、もう片方の
+                             おもちゃを視界外（FAR_AWAY）へ退避させる＝1個ずつ見せる提示。
+                             【F1-3c・2026-08-19】2個並べたままだと、発話瞬間の視覚に
+                             両方のおもちゃが同時に写り、どちらの語のときもほぼ同じ絵に
+                             なって連合が分かれない（目視で確認）。実際の親も1個だけ
+                             目の前に持ってきて名づけるので、人間模倣としても自然。
+                             不応期には両方が戻る（親が持ち替える動作に相当）。
     """
 
     _PICK = "pick"
@@ -51,7 +58,8 @@ class ParentLabeling:
     def __init__(self, enabled=False, shake_amp_m=0.02, shake_hz=1.5,
                  gaze_deg=10.0, gaze_margin_deg=3.0, gaze_hold_sec=0.3,
                  attract_timeout_sec=3.0, utterances=None, respond_prob=1.0,
-                 refractory_sec=1.0, shuffle_refractory_sec=3.0, shuffle_after=5):
+                 refractory_sec=1.0, shuffle_refractory_sec=3.0, shuffle_after=5,
+                 solo_presentation=False):
         self.enabled = bool(enabled)
         self.shake_amp_m = float(shake_amp_m)
         self.shake_hz = float(shake_hz)
@@ -64,6 +72,7 @@ class ParentLabeling:
         self.refractory_sec = float(refractory_sec)
         self.shuffle_refractory_sec = float(shuffle_refractory_sec)
         self.shuffle_after = int(shuffle_after)
+        self.solo_presentation = bool(solo_presentation)
         self.reset()
 
     def reset(self):
@@ -104,6 +113,8 @@ class ParentLabeling:
 
         # ここに来るのは常に SHAKE 状態（振っている最中）
         self._apply_shake(env)
+        if self.solo_presentation:
+            self._hide_other(env)
         if self._gaze_on_target(env):
             self._hold_t += dt
         else:
@@ -154,6 +165,25 @@ class ParentLabeling:
                 return
             env._place(env._obj2_qadr, np.array(base, dtype=float) + wob)
             env.data.qvel[env._obj2_dadr:env._obj2_dadr + 6] = 0.0
+
+    def _hide_other(self, env):
+        """名指ししていない方のおもちゃを視界外へ退避させる（solo_presentation時のみ）。
+
+        _apply_shake と同じく「毎stepの _apply_tether / _hold_toy2 が置いた位置を
+        上書きする」流儀。SHAKE状態の間だけ呼ばれるので、不応期に入れば
+        次のstepから環境側の通常配置（両方見える）へ自動的に戻る。
+        退避先は e_toy_env.FAR_AWAY（未使用物体の既存の退避先）＋オフセット
+        （toy2無効時の退避位置 FAR_AWAY+[0.5,0,0] と重ねないため）。
+        """
+        from e_toy_env import FAR_AWAY   # 循環import回避のため関数内で読む
+        #   （e_toy_env側の `from parent_labeling import ...` と同じ素の名前で読む
+        #    ＝E/scripts がsys.path上にある前提。読み込み済みの同一モジュールを指す）
+        if self._target == "toy1":
+            qadr, dadr = env._obj2_qadr, env._obj2_dadr
+        else:
+            qadr, dadr = env._toy_qadr, env._toy_dadr
+        env._place(qadr, FAR_AWAY + np.array([1.0, 0.0, 0.0]))
+        env.data.qvel[dadr:dadr + 6] = 0.0
 
     def _speak(self, env):
         """注視が確認できた瞬間。respond_probで実際に言うかを決め、言えば不応期へ入る。

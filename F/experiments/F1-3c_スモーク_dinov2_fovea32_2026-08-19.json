@@ -1,0 +1,26 @@
+{
+  "name": "F1-3cスモーク：フォビアを32pxへ絞っての語↔物連合の再走行",
+  "note": "2026-08-19。F1-3b（fovea既定=64px）の不合格（assoc_sep最終0.108<基準0.313）の診断で、発話瞬間の画像を目視した結果＝『64px切り出しには両方のおもちゃと背景が同時に写り、どちらの語のときもほぼ同じ絵になっていた』。1変数だけ変更：fovea_px 64→32（画像辺の1/4）。保存済み画像での試作では、32pxなら名指しされたおもちゃが切り出しの主役になる（ぶーぶー7/7、わんわん3例中2例は捕捉）。",
+  "scene": "座位_6ヶ月_2おもちゃ_F1-3較正_2026-08-17",
+  "taro": {
+    "actuation": "muscle",
+    "vision": true,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {"backend": "dinov2_vits14", "fovea_px": 32},
+    "save": "F/models/F1-3c_スモーク_dinov2_fovea32_2026-08-19.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 3000,
+    "seed": 0,
+    "checkpoint": 300,
+    "csv": "F/logs/F1-3c_スモーク_dinov2_fovea32_2026-08-19/checkpoints.csv"
+  },
+  "plugins": {
+    "word_learning": {
+      "events_out": "F/logs/F1-3c_スモーク_dinov2_fovea32_2026-08-19/発話イベント.csv"
+    },
+    "dashboard": false
+  }
+}
