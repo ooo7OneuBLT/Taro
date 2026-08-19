@@ -456,6 +456,7 @@ class ToySupineEnv(SupineMimoEnv):
                  toy_appear_delay=None, toy_approach_sec=None, toy_approach_from=None,
                  parent_intervene=None, parent_wait_sec=None, parent_lost_deg=None,
                  plain=None, static_tex=None, orient_v=None, orienting_hold=None,
+                 orienting_static=None,
                  # 【2026-08-18新設・F1-3】親のfollow-in labeling。既定None→
                  #   ParentLabeling(enabled=False)相当になり1ビットも挙動が変わらない。
                  #   `world.parent_labeling`（辞書）をkwargs直渡しする（環境変数は新設しない）。
@@ -573,6 +574,12 @@ class ToySupineEnv(SupineMimoEnv):
         #   HOLD_FB_GAIN 直前のコメント（Robinson 1975 pulse-step model）参照。
         self._orienting_hold = (os.environ.get("E_ORIENT_HOLD", "0") == "1"
                                 if orienting_hold is None else bool(orienting_hold))
+        # 【2026-08-19新設・F1-4c】静的顕著性チャンネル（動かないものにも視線が
+        #   向く）のON/OFF。既定None → e_orienting_v2側の環境変数既定（E_STATIC_SAL、
+        #   既定"0"=OFF）に従うので1ビットも挙動が変わらない。
+        #   設計：F/docs/設計_F1-4c_静的顕著性.md。orienting_holdと同じ配線パターン。
+        self._orienting_static = (None if orienting_static is None
+                                  else bool(orienting_static))
         self._fence_half_x = float(fence_half_x)
         self._fence_half_y = float(fence_half_y)
         self._fence_post_w = float(fence_post_w)
@@ -737,14 +744,15 @@ class ToySupineEnv(SupineMimoEnv):
                 #   フィードバック＝Robinson 1975 の local feedback model）。
                 self._orienting = OrientingReflexV2(self.model, data=self.data,
                                                     dt=self.dt,
-                                                    hold=self._orienting_hold)
+                                                    hold=self._orienting_hold,
+                                                    static_salience=self._orienting_static)
             else:
                 from e_orienting import OrientingReflex
                 self._orienting = OrientingReflex(self.model)
             print(f"[orient] enabled: v{ver} ({type(self._orienting).__name__}) "
                   f"neck={list(self._orienting.neck_idx.keys())} "
                   f"eye_h={len(self._orienting.eye_idx['h'])} eye_v={len(self._orienting.eye_idx['v'])} "
-                  f"hold={self._orienting_hold}")
+                  f"hold={self._orienting_hold} static_salience={getattr(self._orienting, 'static_salience', None)}")
 
     # ------------------------------------------------------------------
     def _make_visually_plain(self, spec):

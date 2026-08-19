@@ -133,6 +133,11 @@ def default_scene(name="無題"):
             #   v2は従来どおりパルスのみ（1ビット不変）。実体は
             #   e_orienting_v2.OrientingReflexV2 の hold 引数。
             "orienting_hold": False,
+            # 【2026-08-19新設・F1-4c】静的顕著性チャンネル（動かないものにも視線が
+            #   向く）のON/OFF。既定False＝v2は従来どおり動きチャンネルのみ
+            #   （1ビット不変）。実体は e_orienting_v2.OrientingReflexV2 の
+            #   static_salience 引数。orienting_holdと同じ配線パターン。
+            "orienting_static": False,
         },
 
         # ② 環境のオブジェクト。これもモデル構築時
@@ -548,6 +553,7 @@ def build(scene, orient=None, vor=True, seed=0, verbose=False, actuation_model=N
             static_tex=bool(w["static_tex"]),
             orient_v=str(b["orienting_version"]),
             orienting_hold=bool(b.get("orienting_hold", False)),
+            orienting_static=bool(b.get("orienting_static", False)),
             eye_rest_vertical_deg=float(b["eye_rest_vertical_deg"]),
             eye_centering=bool(b.get("eye_centering", False)),
             **kw)

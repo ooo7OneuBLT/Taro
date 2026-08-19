@@ -409,12 +409,34 @@ HOLD_LOSE_SEC = float(_os.environ.get("E_HOLD_LOSE", "0.5"))
 #   この値の妥当性は上（ユーザー）判断待ち＝作業記録「上に上げること」参照。
 REC_THRESHOLD = float(_os.environ.get("E_REC_THRESHOLD", "0.80"))
 
+# ---- 静的顕著性（動かないものにも視線が向く）・2026-08-19 追加 -----------------
+# 設計：F/docs/設計_F1-4c_静的顕著性.md 後半「実装」節。
+#
+# 【なぜ】文献（Frank 2009・原文精読）：6ヶ月児の視線を一番よく当てる予測モデルは
+#   「動き＋静的な明暗コントラストを**同じ重み**で足したもの」。今までの太郎の
+#   視線誘導反射は動きチャンネルしか持たず、静止した目立つものには吸い付かない
+#   ＝人間模倣として不十分だった。
+#
+# 【機構】中心-周辺差分（DoG＝ガウスぼかし(σ小)とガウスぼかし(σ大)の差の絶対値）。
+#   Itti-Koch系の luminance contrast の最小実装。σは fovy 60度に対し
+#   中心約1〜2度／周辺約5〜10度相当から開始し、手順0の絵（境界線問題の確認）で
+#   調整した（`F/logs/F1-4c_顕著性地図_2026-08-19/` 参照）。
+#   [Tier2]（機構の存在は実在するが、具体的なσの値は文献に無く目視で調整した
+#   暫定値。DoGの中心-周辺拮抗そのものは網膜神経節細胞の受容野構造として実測されている）。
+STATIC_SIGMA_CENTER_DEG = float(_os.environ.get("E_STATIC_SIGMA_C", "1.5"))
+STATIC_SIGMA_SURROUND_DEG = float(_os.environ.get("E_STATIC_SIGMA_S", "7.0"))
+# 【根拠：Frank 2009】動きと輝度コントラストを**チャンネル正規化後に等重み**で
+#   足したものが乳児の視線を最良予測。STATIC_W=1.0（等重み）。
+STATIC_W = float(_os.environ.get("E_STATIC_W", "1.0"))
+# スイッチ：既定OFF（過去の実験・既定設定は1ビットも変わらない）。
+USE_STATIC_SALIENCE = _os.environ.get("E_STATIC_SAL", "0") == "1"
+
 
 class OrientingReflexV2:
     """視線誘導反射・新版。段階的に組み立てる。"""
 
     def __init__(self, model, data=None, time_scales=TIME_SCALES, noise=LI_NOISE,
-                 seed=None, dt=DEFAULT_DT, hold=None):
+                 seed=None, dt=DEFAULT_DT, hold=None, static_salience=None):
         # 2026-07-27：seed が None だと神経ノイズが毎回変わり、**同じ設定でも
         #   結果がばらつく**（同一条件3回で 0.319 / 0.215 / 0.189）。
         #   高速化の前後を1回ずつ比べて「悪化した」と誤判定した。
@@ -427,6 +449,11 @@ class OrientingReflexV2:
         self.dt = float(dt)
         # ステップ4b（保持成分）。既定OFF＝v2は従来のまま1ビット不変。
         self.hold = bool(USE_HOLD if hold is None else hold)
+        # 静的顕著性チャンネル。既定OFF＝v2は従来のまま1ビット不変
+        #   （OFF時は _static_contrast を呼びもしない。update() 参照）。
+        self.static_salience = bool(USE_STATIC_SALIENCE if static_salience is None
+                                    else static_salience)
+        self.raw_static_map = None    # 診断用：DoG後・正規化前の静的地図
         # ステップ4（階段状サッケード）の状態
         self._t = 0.0                # apply() が刻む内部時刻[秒]
         self._last_saccade_t = -1e9  # 前回サッケードを撃った時刻
@@ -482,6 +509,7 @@ class OrientingReflexV2:
     def reset(self):
         self._frame_buffer = []
         self.motion_map = None
+        self.raw_static_map = None
         self.biased_map = None
         self.competed_map = None
         self.sc_input = None
@@ -551,6 +579,19 @@ class OrientingReflexV2:
             motion = _object_motion(motion, VISION_FOVY_DEG,
                                     surround_deg=OMS_SURROUND_DEG,
                                     uniform_gain=OMS_UNIFORM_GAIN)
+        # ステップ1.6（静的顕著性・2026-08-19）：OMS適用後の動き地図に、静止した
+        #   明暗コントラストの地図をチャンネル正規化後の等重みで足す。
+        #   OMSは自己運動の割引＝動きチャンネル専用なので、静的チャンネルには
+        #   適用しない（OMSより後ろで合成する）。
+        #   OFF時は _static_contrast を一切呼ばない＝既存経路と完全一致。
+        if self.static_salience:
+            static_map = self._static_contrast(eye_image)
+            self.raw_static_map = static_map
+            mmax = float(motion.max()) if motion.size else 0.0
+            motion_norm = motion / mmax if mmax > 1e-12 else motion
+            smax = float(static_map.max()) if static_map.size else 0.0
+            static_norm = static_map / smax if smax > 1e-12 else static_map
+            motion = motion_norm + STATIC_W * static_norm
         self.motion_map = motion
         biased = self._apply_center_bias(motion)         # ステップ2
         self.biased_map = biased
@@ -794,6 +835,29 @@ class OrientingReflexV2:
         if used == 0:
             return np.zeros_like(cur_gray)
         return motion / used
+
+    # ------------------------------------------------------------
+    # ステップ1.6：静的顕著性（中心-周辺差分＝DoG）
+    # ------------------------------------------------------------
+    def _static_contrast(self, image):
+        """輝度画像の局所コントラスト地図を返す（中心-周辺差分の絶対値＝DoG）。
+
+        Itti-Koch系 luminance contrast の最小実装。網膜神経節細胞の
+        中心-周辺拮抗型受容野に対応する（機構の存在は[Tier2]、σの具体値は
+        文献に無く手順0の絵で調整した暫定値[Tier3・ARBITRARY]）。
+        """
+        arr = np.asarray(image)
+        cur = (arr.astype(np.float32) / 255.0 if arr.dtype == np.uint8
+               else arr.astype(np.float32))
+        gray = cur.mean(axis=-1) if cur.ndim == 3 else cur
+        h, w = gray.shape
+        # 視野角 → 画素（retina.object_motion と同じ変換：画像1辺=fovy_deg）。
+        scale = max(h, w) / VISION_FOVY_DEG
+        sigma_c = STATIC_SIGMA_CENTER_DEG * scale
+        sigma_s = STATIC_SIGMA_SURROUND_DEG * scale
+        center = gaussian_filter(gray, sigma_c)
+        surround = gaussian_filter(gray, sigma_s)
+        return np.abs(center - surround)
 
     # ------------------------------------------------------------
     # ステップ2：中心視野バイアス
