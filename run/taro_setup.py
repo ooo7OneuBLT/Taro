@@ -753,6 +753,28 @@ class Taro:
                   f"既定init={self.lp.pe_fast:.1f}からの助走が入り、続きから学習した直後の"
                   "progressがしばらく大きくプラスに振れます（自己接触とは無関係の"
                   "アーティファクト）。", flush=True)
+        # 【2026-08-19・F1-4a】語彙(hearing.vocab / lexicon)の復元。
+        #   _load は __init__ から呼ばれるが、_setup_hearing はそれより前
+        #   （taro_setup.py内の呼び出し順）に実行済みなので、この時点で
+        #   self.hearing/self.lexicon は（hearing有効なら）生成済み。
+        if self.hearing is not None:
+            if "hearing_vocab" in blob and "lexicon" in blob:
+                hv = blob["hearing_vocab"]
+                self.hearing.vocab.char2idx = hv["char2idx"]
+                self.hearing.vocab.idx2char = hv["idx2char"]
+                self.hearing.vocab.size = hv["size"]
+                lx = blob["lexicon"]
+                self.lexicon.counts = lx["counts"]
+                self.lexicon.state_sum = lx["state_sum"]
+                self.lexicon.state_dim = lx["state_dim"]
+                self.lexicon.min_len = lx["min_len"]
+                if verbose:
+                    print(f"  [語彙] 復元：耳={self.hearing.vocab.size}文字"
+                          f" 語彙={len(self.lexicon.counts)}語", flush=True)
+            else:
+                print("注意[load] いまの設定は耳(hearing)ありですが、保存されたモデルに"
+                      "語彙(hearing_vocab/lexicon)がありません"
+                      "（2026-08-19以前の保存）。語彙は空から開始します。", flush=True)
 
     # -------------------------------------------------------- 体が変わったとき
     def on_body_change(self, env):
@@ -1082,5 +1104,23 @@ class Taro:
                                **(extra or {}))}
         if self.fusion.touch is not None:
             blob["fusion_touch"] = self.fusion.touch.state_dict()
+        # 【2026-08-19・F1-4a】語彙の保存。耳(hearing)が有効なときだけ足す
+        #   （既定hearing=Falseでは何も足さない＝既存モデルとバイト互換）。
+        #   視覚未保存事件(2026-08-19発覚)・語彙未保存(同日発覚)に続く同型バグ
+        #   （「センサ/学習器を足したのに保存を足し忘れる」）を、下のassertで
+        #   機械的に止める。
+        if self.hearing is not None:
+            vocab = self.hearing.vocab
+            blob["hearing_vocab"] = {"char2idx": vocab.char2idx,
+                                      "idx2char": vocab.idx2char,
+                                      "size": vocab.size}
+            blob["lexicon"] = {"counts": self.lexicon.counts,
+                                "state_sum": self.lexicon.state_sum,
+                                "state_dim": self.lexicon.state_dim,
+                                "min_len": self.lexicon.min_len}
+        assert self.hearing is None or ("hearing_vocab" in blob and "lexicon" in blob), (
+            "耳(hearing)が有効なのに語彙(vocab/lexicon)がblobに入っていない。"
+            "視覚未保存事件(2026-08-19発覚)・語彙未保存(同日発覚)に続く同型バグを"
+            "機械で止める（このassertを消さないこと）。")
         torch.save(blob, path)
         print(f"SAVED MODEL {path}", flush=True)
