@@ -394,6 +394,21 @@ HOLD_DAMP_GAIN = float(_os.environ.get("E_HOLD_DAMP", "0.02"))
 #   「揺れが止まって数百ms検出が途切れたら見失ったとみなす」という暫定値。
 HOLD_LOSE_SEC = float(_os.environ.get("E_HOLD_LOSE", "0.5"))
 
+# 【F1-4b・2026-08-19】語から注意への読み出し回路の受け口。設計：
+#   F/docs/設計_F1-4b_語から注意への読み出し回路.md 後半「部品1」。
+#   「思い浮かべているものと似たものを見ている間も、離れない」という1行の追加。
+#   set_recognition() が一度も呼ばれなければ self._recognition は0.0のままで、
+#   REC_THRESHOLD（>0）を下回るため既存の hold 判定に一切影響しない
+#   （既定 word_attention=null では trainer.py 側が呼ばないので既存経路と完全一致）。
+# REC_THRESHOLDは決め打ちにせず較正する予定だったが、F1-3cの保存済み画像
+#   （solo確認=正解おもちゃ注視時／full3000=2個並び・背景優位）でDINOv2の
+#   sim分布を測ったところ、正例(0.65〜0.94)と負例(0.58〜0.92)が広く重なり、
+#   分離できる値が無かった（実装・較正スクリプトの実測、2026-08-19）。
+#   [Tier3・ARBITRARY・未解決] 分離不能のまま機構だけ通す必要があったため、
+#   暫定的に正例分布の中央値付近（較正ログの目安）を仮置きした。
+#   この値の妥当性は上（ユーザー）判断待ち＝作業記録「上に上げること」参照。
+REC_THRESHOLD = float(_os.environ.get("E_REC_THRESHOLD", "0.80"))
+
 
 class OrientingReflexV2:
     """視線誘導反射・新版。段階的に組み立てる。"""
@@ -420,6 +435,9 @@ class OrientingReflexV2:
         self._sacc_h = 0.0           # 今のサッケードの方向（撃った瞬間に固定）
         self._sacc_v = 0.0
         self._hold_last_seen_t = -1e9   # 動きを最後に検出した時刻（保持の解除判定）
+        # F1-4b：語から読み出した認識信号（0〜1）。set_recognition() でのみ更新される。
+        #   呼ばれなければ0.0のまま＝既存挙動と完全一致（下記 apply() 参照）。
+        self._recognition = 0.0
         # 撃った瞬間に決める目標角度[度]（位置フィードバックの目標）
         self._tgt = {"eye_h": 0.0, "eye_v": 0.0, "neck_h": 0.0, "neck_v": 0.0}
         self.n_saccades = 0          # 撃った回数（テスト・観察用）
@@ -483,10 +501,22 @@ class OrientingReflexV2:
         self._sacc_v = 0.0
         self._hold_last_seen_t = -1e9
         self.n_saccades = 0
+        # F1-4b：認識信号もreset()でクリアする（前の走行・エピソードの値を持ち越さない）。
+        self._recognition = 0.0
 
     # ------------------------------------------------------------
     # 公開インターフェース
     # ------------------------------------------------------------
+    def set_recognition(self, sim):
+        """F1-4b：語から読み出した「思い浮かべているものとの一致度」を渡す。
+
+        sim: 0〜1（cos類似度をmax(0, sim)した値を想定。呼び出し側＝trainer.pyが
+             クリップ済みのものを渡す前提だが、念のためここでも[0,1]へclipする）。
+        毎判断ステップで上書きする想定（trainer.py側が期限切れ・OFF時は0.0を渡すか
+        呼ばない）。hold=False のときは apply() 側で参照しないので無害。
+        """
+        self._recognition = float(np.clip(sim, 0.0, 1.0))
+
     def update(self, eye_image):
         """新しい画像で内部状態を更新する。両眼平均を想定するが単眼画像でも動く。"""
         # サッケードを撃った直後は、その間の画像を動き検出に使わない。
@@ -555,6 +585,15 @@ class OrientingReflexV2:
         """
         step = self.dt if dt is None else float(dt)
         self._t += step
+
+        # F1-4b：「思い浮かべているものと似たものを見ている間も、離れない」。
+        #   _should_hold() 自体は無変更のまま、動き検出と同じ「最後に見た時刻」を
+        #   認識でも更新する形にする（設計の指示どおり最小実装）。
+        #   hold=False のときは既存OFF経路を一切変えない（self.hold を先頭で見る）。
+        #   self._recognition は set_recognition() が呼ばれない限り0.0のままなので、
+        #   REC_THRESHOLD>0 である限りここは常にFalse＝既存挙動と完全一致。
+        if self.hold and self._recognition >= REC_THRESHOLD:
+            self._hold_last_seen_t = self._t
 
         if self._sacc_remaining <= 0.0:
             ready = (self._t - self._last_saccade_t) >= SACCADE_LATENCY

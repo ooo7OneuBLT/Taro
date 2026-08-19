@@ -87,6 +87,15 @@ TARO_DEFAULTS = {
                        "fusion.vision(64次元)。辞書で指定：{'backend': 'dinov2_vits14', "
                        "'fovea_px': 64}等（taro_core/src/senses/vision_backends.py の"
                        "登録式レジストリから選ぶ）", None),
+    # 【2026-08-19新設・F1-4b】語から注意への読み出し回路。「思い浮かべているものと
+    #   似たものを見ている間も、視線が離れにくくなる」。既定None＝OFF。
+    #   trainer.py側は設定がNoneなら一切の追加計算（DINOv2 encode等）をしない
+    #   （既存実験の挙動もコストも1ビットも変わらない）。hearing=true かつ
+    #   orienting_reflex=true のときだけ意味を持つ（どちらか無ければ静かに無視される）。
+    #   設計：F/docs/設計_F1-4b_語から注意への読み出し回路.md 後半「部品2」。
+    "word_attention": (None, "語→注意の読み出し回路。None=OFF（既定）。有効化する"
+                       "ときは {'active_sec': 3.0, 'enabled': true} の形（辞書）で指定",
+                       None),
     # 座位保持の学習（2026-08-15）。層1＝姿勢制御反射（ゲート方式）、
     # 層2＝立ち直り反射（角速度ダンパー、Tier3）。
     # 設計：作業記録（非公開）
@@ -676,6 +685,14 @@ class Config:
                     f"lexicon_vision は None か 'backend' キーを持つ辞書である必要がある: "
                     f"{self.lexicon_vision!r}\n"
                     "  例：{'backend': 'dinov2_vits14', 'fovea_px': 64}")
+        # 語から注意への読み出し回路（2026-08-19新設・F1-4b）のバリデーション。
+        #   lexicon_visionと同じ形式のパターンに倣う（項94の索引参照）。
+        if self.word_attention is not None:
+            if not isinstance(self.word_attention, dict):
+                raise ValueError(
+                    f"word_attention は None か辞書である必要がある: "
+                    f"{self.word_attention!r}\n"
+                    "  例：{'active_sec': 3.0, 'enabled': true}")
         if self.K >= 100:
             print(f"[!] K={self.K}（{100/self.K:.0f}Hz）＝人間の最遅神経発火7Hzより遅い。"
                   f"比較・再現目的でなければ K=10 を使うこと", flush=True)

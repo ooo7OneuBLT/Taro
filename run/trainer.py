@@ -38,6 +38,22 @@ torch.set_num_threads(1)
 DT = 0.01                    # MuJoCo の1物理ステップの秒数
 
 
+def _cosine_sim(a, b):
+    """コサイン類似度。F1-4b（語から注意への読み出し回路）の一致度計算に使う。
+
+    a: np.ndarray、b: tuple/list（Lexicon.assoc()の戻り値）。どちらかがゼロベクトル
+    なら0.0（run/plugins/common/word_learning.py の_cos()と同じ規約だが、Noneでなく
+    0.0を返す＝呼び出し側set_recognition()がそのままmax(0,・)に渡せる形にする）。
+    """
+    va = np.asarray(a, dtype=np.float64)
+    vb = np.asarray(b, dtype=np.float64)
+    na = float(np.linalg.norm(va))
+    nb = float(np.linalg.norm(vb))
+    if na < 1e-12 or nb < 1e-12:
+        return 0.0
+    return float(np.dot(va, vb) / (na * nb))
+
+
 def _mj_arrays(d):
     """MuJoCo の `data` から**書き換えられる配列を全部**控える。
 
@@ -111,6 +127,10 @@ class Trainer:
         self._snap_data = None
         self._snap_model = None
         self._last_parent_events = []      # 【2026-08-18新設・F1-3】直近step_kの発話イベント
+        # 【2026-08-19新設・F1-4b】語から注意への読み出し。「思い浮かべている」語の
+        #   記憶＝(vec, 思い浮かべ始めた時刻)。cfg.word_attentionがNoneのままなら
+        #   一度も書き込まれず参照もされない＝既定挙動不変（設計後半「部品2」）。
+        self._active_assoc = None
 
     # ------------------------------------------------------------ 組み立て
     def build(self):
@@ -246,13 +266,54 @@ class Trainer:
         #   出力は従来コード（t.fusion.vision(...).detach().cpu().tolist()）と同一
         #   （custom backendのencode()内でも同じdetach().cpu()を行う）。
         state = t.vision_backend.encode(o["eye_left"], o["eye_right"]).tolist()
-        t.lexicon.observe(tokens, confidences, state=state)
+        chunk = t.lexicon.observe(tokens, confidences, state=state)
         # 【なぜstateもここに置くか】word_learningプラグイン（読むだけ）が「正解物の
         #   特徴EMA」を作るのに使う（プラグインがtaro.fusionを呼び直すと二重計算に
         #   なるうえ、この瞬間のobs（o）はstep_kのK tick内の値でctx.last["obs_out"]
         #   より新しい＝取り直すと精度が落ちる）。
         self._last_parent_events.append(
             {"text": text, "target": pu.get("target"), "state": state})
+        # 【2026-08-19新設・F1-4b】語から注意への読み出し回路（設計：
+        #   F/docs/設計_F1-4b_語から注意への読み出し回路.md 後半「部品2」）。
+        #   cfg.word_attentionがNoneのままなら、この行自体を実行しない
+        #   （lexicon.assoc()の呼び出しコストすら払わない＝既定挙動・コスト不変）。
+        if self.cfg.word_attention is not None and chunk is not None:
+            vec = t.lexicon.assoc(chunk)
+            if vec is not None:
+                self._active_assoc = (vec, self.ctx.sim_sec)
+
+    def _apply_word_attention(self, o):
+        """語から注意への読み出し回路（設計：F/docs/設計_F1-4b_....md 後半「部品2」）。
+
+        「思い浮かべている」語のメモ（_active_assoc）と、いま実際に見ているものの
+        DINOv2表現の一致度を、視線誘導反射（OrientingReflexV2）へ渡す。渡された
+        反射側は、一致度が高い間は保持（hold）の解除を遅らせる
+        （E/scripts/e_orienting_v2.py の set_recognition() / REC_THRESHOLD）。
+
+        既定（cfg.word_attention is None）では最初のifで即returnし、DINOv2の
+        encode等の追加計算は一切走らない＝既存実験の挙動・コストは1ビットも
+        変わらない（仕様の要求どおり）。
+        """
+        wa = self.cfg.word_attention
+        if wa is None or not wa.get("enabled", True):
+            return
+        t = self.taro
+        if getattr(t, "hearing", None) is None or getattr(t, "lexicon", None) is None:
+            return          # 耳無効なら思い浮かべる元(_active_assoc)自体が育たない
+        orienting = getattr(self.env.unwrapped, "_orienting", None)
+        if orienting is None:
+            return          # 視線誘導反射(orienting_reflex)が無効なら渡す先が無い
+        active_sec = float(wa.get("active_sec", 3.0))
+        active = self._active_assoc
+        now = self.ctx.sim_sec
+        if active is not None and (now - active[1]) < active_sec:
+            vec = t.vision_backend.encode(o["eye_left"], o["eye_right"])
+            sim = _cosine_sim(vec, active[0])
+            orienting.set_recognition(max(0.0, sim))
+        else:
+            # 期限切れ（ACTIVE_SEC超過）。信号を明示的に0へ戻す
+            #   （戻さないと反射側に前回のsimが居座り続けて保持が解除されなくなる）。
+            orienting.set_recognition(0.0)
 
     def reset_state(self):
         self.state["obs"], _ = self.env.reset()
@@ -815,6 +876,10 @@ class Trainer:
             #   接触のような一瞬の事象は tick 単位で見た方が正確だが、
             #   まず元と同じ数値が出ることを確かめるため頻度も合わせる。
             self.ctx.step = i + 1
+            # 【2026-08-19新設・F1-4b】語から注意への読み出し回路（部品2の後半）。
+            #   cfg.word_attentionがNoneなら_apply_word_attention内で即returnし、
+            #   DINOv2 encode等の追加計算は一切走らない（既定挙動・コスト不変）。
+            self._apply_word_attention(state["obs"])
             # このステップの内部の値を「置いておく」だけ（プラグインは読むだけ）。
             #   同じシードで結果がばらつく原因を追うのに使う（落とし穴 項79）。
             #   注意：参照を入れるだけなので計算はしない＝学習の数値は変わらない。
