@@ -241,7 +241,11 @@ class Trainer:
         confidences = [1.0] * len(tokens)
         # detach＝この統計（共起の平均）は学習の逆伝播に使わない値であるため
         #   （Lexiconは純Pythonの累積平均。計算グラフを持ち越さない）。
-        state = t.fusion.vision(o["eye_left"], o["eye_right"]).detach().cpu().tolist()
+        # 【2026-08-19・F1-3b】視覚表現の作り方はt.vision_backend経由（差し替え可能）。
+        #   既定null時はcustomバックエンドがtaro.fusion.visionをそのまま呼ぶだけなので、
+        #   出力は従来コード（t.fusion.vision(...).detach().cpu().tolist()）と同一
+        #   （custom backendのencode()内でも同じdetach().cpu()を行う）。
+        state = t.vision_backend.encode(o["eye_left"], o["eye_right"]).tolist()
         t.lexicon.observe(tokens, confidences, state=state)
         # 【なぜstateもここに置くか】word_learningプラグイン（読むだけ）が「正解物の
         #   特徴EMA」を作るのに使う（プラグインがtaro.fusionを呼び直すと二重計算に

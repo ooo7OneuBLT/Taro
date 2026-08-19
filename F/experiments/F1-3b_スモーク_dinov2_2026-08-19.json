@@ -1,0 +1,26 @@
+{
+  "name": "F1-3bスモーク：DINOv2視覚バックエンドでの語↔物連合の再走行",
+  "note": "2026-08-19。F1-3_スモーク_2026-08-17.jsonの複製に taro.lexicon_vision（DINOv2 ViT-S/14、既定fovea_px）を足しただけ。決定的検証（受け入れ検証C）。前回（未訓練の自作CNN経由）はassoc_sepが発話20回で0.013へ崩壊。",
+  "scene": "座位_6ヶ月_2おもちゃ_F1-3較正_2026-08-17",
+  "taro": {
+    "actuation": "muscle",
+    "vision": true,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {"backend": "dinov2_vits14"},
+    "save": "F/models/F1-3b_スモーク_dinov2_2026-08-19.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 3000,
+    "seed": 0,
+    "checkpoint": 300,
+    "csv": "F/logs/F1-3b_スモーク_dinov2_2026-08-19/checkpoints.csv"
+  },
+  "plugins": {
+    "word_learning": {
+      "events_out": "F/logs/F1-3b_スモーク_dinov2_2026-08-19/発話イベント.csv"
+    },
+    "dashboard": false
+  }
+}

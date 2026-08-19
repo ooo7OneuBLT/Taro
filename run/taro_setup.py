@@ -319,22 +319,34 @@ def _setup_hearing(taro, cfg, *, verbose=True):
     Lexicon）をそのまま装着するだけ。env（体）に依存しないので、_setup_postural_gate
     等と違い on_body_change での再構築は不要。
 
-    既定OFF（cfg.hearing=False）：taro.hearing/taro.lexiconはNoneのまま＝
-    run/trainer.py の step_k 内の配線コードが1行も実行されない
+    既定OFF（cfg.hearing=False）：taro.hearing/taro.lexicon/taro.vision_backendは
+    Noneのまま＝run/trainer.py の step_k 内の配線コードが1行も実行されない
     （既存実験の挙動は1ビットも変わらない）。
+
+    【2026-08-19追記・F1-3b】Lexiconへ渡す視覚表現の作り方を差し替え可能にした
+    （taro_core/src/senses/vision_backends.py の登録式レジストリ）。cfg.lexicon_vision
+    が既定None（未指定）なら、taro.fusion.vision（従来の未訓練CNN、64次元）を
+    そのまま包む"custom"バックエンドが選ばれ、Lexiconのstate_dimも従来どおり64になる
+    （既定挙動は1ビットも変わらない）。設計：
+    F/docs/仕様_F1-3b_視覚バックエンドの差し替え機構.md
     """
     if not cfg.hearing:
         taro.hearing = None
         taro.lexicon = None
+        taro.vision_backend = None
         return
     from hearing import Hearing
     from lexicon import Lexicon
+    from vision_backends import get_backend
     taro.hearing = Hearing()
-    # state_dim=64：taro.fusion.vision(...)（視覚エンコーダのみ、64次元）の出力次元に
-    #   合わせる（F1-3仕様書の技術付録「部品2」の指示どおり）。
-    taro.lexicon = Lexicon(state_dim=64)
+    # 手打ち数字の根絶：state_dimはバックエンドのdimプロパティから取る
+    #   （既定null時はcustomバックエンド経由でfusion.visionの出力次元＝従来どおり64）。
+    taro.vision_backend = get_backend(cfg.lexicon_vision, vision_encoder=taro.fusion.vision)
+    taro.lexicon = Lexicon(state_dim=taro.vision_backend.dim)
     if verbose:
-        print("[耳] taro.hearing/taro.lexicon ON（F1-2移植部品。state_dim=64）", flush=True)
+        print(f"[耳] taro.hearing/taro.lexicon ON（視覚バックエンド="
+              f"{taro.vision_backend.name} state_dim={taro.vision_backend.dim}）",
+              flush=True)
 
 
 class _DoubleTouchBonusContributor:

@@ -79,6 +79,14 @@ TARO_DEFAULTS = {
     #   配線が一度も実行されない＝既存実験の挙動は1ビットも変わらない。
     #   F1-2「耳の移植」で taro_core 側に置いた部品（Hearing・Lexicon）を装着するだけ。
     "hearing":       (False, "耳＋連合器（親の発話→トークン→見えているものとの連合）を装着", None),
+    # 【2026-08-19新設・F1-3b】語彙学習(Lexicon)へ渡す視覚表現の作り方を差し替え可能にする。
+    #   既定None＝従来どおりtaro.fusion.vision（未訓練の自作CNN、64次元）をそのまま使う
+    #   （既存実験の挙動は1ビットも変わらない）。hearing=trueのときのみ意味を持つ。
+    #   設計：F/docs/仕様_F1-3b_視覚バックエンドの差し替え機構.md
+    "lexicon_vision": (None, "語彙学習へ渡す視覚表現のバックエンド。None=従来通り"
+                       "fusion.vision(64次元)。辞書で指定：{'backend': 'dinov2_vits14', "
+                       "'fovea_px': 64}等（taro_core/src/senses/vision_backends.py の"
+                       "登録式レジストリから選ぶ）", None),
     # 座位保持の学習（2026-08-15）。層1＝姿勢制御反射（ゲート方式）、
     # 層2＝立ち直り反射（角速度ダンパー、Tier3）。
     # 設計：作業記録（非公開）
@@ -660,6 +668,14 @@ class Config:
             raise ValueError(
                 f"mouth_touch_bonus={self.mouth_touch_bonus} は負の値です。\n"
                 "  加点専用として設計されています。0以上の値にしてください。")
+        # 視覚バックエンドの差し替え機構（2026-08-19新設・F1-3b）のバリデーション。
+        #   型を誤ったまま実行時までエラーが出ない（黙って壊れる）のを避ける。
+        if self.lexicon_vision is not None:
+            if not isinstance(self.lexicon_vision, dict) or "backend" not in self.lexicon_vision:
+                raise ValueError(
+                    f"lexicon_vision は None か 'backend' キーを持つ辞書である必要がある: "
+                    f"{self.lexicon_vision!r}\n"
+                    "  例：{'backend': 'dinov2_vits14', 'fovea_px': 64}")
         if self.K >= 100:
             print(f"[!] K={self.K}（{100/self.K:.0f}Hz）＝人間の最遅神経発火7Hzより遅い。"
                   f"比較・再現目的でなければ K=10 を使うこと", flush=True)
