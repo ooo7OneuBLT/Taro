@@ -924,6 +924,16 @@ def apply_state(env, state):
         u._anchor = pos + np.array([0.0, 0.0, u._tether_len])
         u._toy_pending = False
         u._toy_arriving = False
+    # 【2026-08-20・toy2視野外バグの修正】_rest_pos2 は env.reset() 中の
+    #   _spawn_toy()→_set_anchor() が「保存姿勢が入る前のデフォルト姿勢」を基準に
+    #   計算した誤値のまま残り、毎stepの _hold_toy2() がtoy2をそこ（実測：視線から
+    #   176度＝ほぼ真後ろ）へ書き戻していた。qpos一括復元（上のd.qpos[:] = q）で
+    #   toy2の物理位置は既に保存値＝正しい位置に戻っているので、それを_rest_pos2へ
+    #   写す（toy1のstate.toy_pos特別扱いと対称の処理）。toy2無効シーンでは分岐に
+    #   入らない＝既存挙動は1ビットも変わらない。
+    #   経緯：F/logs/F1-4d_視線探索_2026-08-20/想定外_toy2視界外問題.md
+    if getattr(u, "_toy2", False):
+        u._rest_pos2 = d.qpos[u._obj2_qadr:u._obj2_qadr + 3].copy()
     mujoco.mj_forward(m, d)
 
 
