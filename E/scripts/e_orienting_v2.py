@@ -431,12 +431,68 @@ STATIC_W = float(_os.environ.get("E_STATIC_W", "1.0"))
 # スイッチ：既定OFF（過去の実験・既定設定は1ビットも変わらない）。
 USE_STATIC_SALIENCE = _os.environ.get("E_STATIC_SAL", "0") == "1"
 
+# ---- ステップ5（IOR＝Inhibition of Return）・馴化・2026-08-20 追加 -----------
+# 設計：F/docs/設計_F1-4d_馴化とIOR.md 後半「技術付録」節。
+#
+# 【なぜ】F1-4cで確定した実害：静的顕著性ONにすると、一番目立つ縁（座面の影の縁）に
+#   視線が吸い付いたまま動かなくなる（親の名づけ発話 5回→1回、実測）。「目立つ縁を
+#   見る」こと自体は乳児として正しい（新生児は高コントラストの縁を凝視する）。
+#   欠けているのは「見飽きて次へ移る」機構。
+#
+# 【IOR：上丘格子上の抑制地図】
+#   サッケードが終わった瞬間（_sacc_remainingが0になった瞬間）に、着地点（撃った
+#   瞬間に側方抑制の競合が選んだ方向 self._sacc_h/_sacc_v＝勝者の位置。SACCADE_FRAC
+#   で縮めた実際の到達量ではなく、SCが「選んだ」位置そのものにIORを立てる方が
+#   「戻りにくくする」という機能に合う、という判断。[Tier3・モデル上の選択]）を
+#   上丘座標（u,v）へ写した位置へガウス抑制を加算する。以後は毎step指数減衰
+#   （時定数 IOR_DECAY_SEC）。_select_on_collicular_grid() の競合入力
+#   （self.sc_input＝受容野でまとめた直後の上丘の活動）から IOR_STRENGTH 倍して
+#   減算し、負は0にクリップする。
+#   人間側の根拠：サッケードベースのIORは新生児（生後2〜4日）から報告があり
+#   （Valenza 1994／Simion 1995、抄録レベル。文献調査
+#   `F/docs/文献調査/2026-08-19_乳児のIORと馴化.md`）、6ヶ月で機能しているとみてよい。
+#   持続時間の乳児一次値は入手できず、成人の「約3秒でピーク→減衰」を出発点に
+#   較正する[Tier2〜3]。IOR_SIGMA_MM は側方抑制（LI_SIGMA_INH_MM=1.00mm）と
+#   同じ流儀・同程度の値を暫定採用[Tier3・ARBITRARY]。IOR_STRENGTHも同様。
+#
+# 【馴化：固視対象へのスカラー順応】
+#   状態はスカラー self._habituation（0=未馴化〜1=最大馴化。地図で持つ案はIORと
+#   重複するため最小はスカラー、という設計どおり）。保持（hold）が継続している間
+#   HAB_RISE_SECの時定数で1へ近づき、保持が切れるとHAB_RECOVER_SECの時定数で0へ戻る。
+#   「ピーク注視の50%まで減衰」が乳児馴化研究の標準的な解除基準
+#   （Cohen & Gelber 1975、総説原文で確認）であることから、スカラーが0（未馴化）〜
+#   1（ピーク相当）の範囲で近似したとき、HAB_BREAK=0.5をピーク(1.0)の半分＝解除の
+#   基準とした[Tier2の考え方をTier3のスカラー実装に写した]。時定数そのものの乳児
+#   一次値は無く、参考オーダー（数秒〜十数秒）から暫定値を置く[Tier3・ARBITRARY]。
+#   較正は受け入れ検証Bで行う。
+#
+# 【F1-4bとの綱引き】「意味のある物は飽きにくい」を直接支持する一次文献は見つから
+#   なかった（2026-08-19調査）。よって当初案の係数（馴化を遅くするHAB_REC_SLOW）は
+#   **廃止**し、「認識信号（self._recognition >= REC_THRESHOLD）が立っている間は、
+#   馴化による保持解除を保留する」という単純な優先順位に変更する
+#   [Tier3・モデル上の選択・文献根拠なし]。根拠のない調整係数を1個持たずに済み、
+#   語がアクティブな数秒間（active_sec上限）だけ飽きを無視する、という制限が
+#   自動的にかかる。
+#
+# スイッチ：それぞれ既定OFF＝過去の実験・既定設定は1ビットも変わらない
+#   （OFF時は関連コード自体を呼ばない。下記 __init__/apply/_should_hold 参照）。
+USE_IOR = _os.environ.get("E_IOR", "0") == "1"
+IOR_DECAY_SEC = float(_os.environ.get("E_IOR_DECAY", "3.0"))
+IOR_SIGMA_MM = float(_os.environ.get("E_IOR_SIGMA", "1.0"))
+IOR_STRENGTH = float(_os.environ.get("E_IOR_STRENGTH", "1.0"))
+
+USE_HABITUATION = _os.environ.get("E_HABITUATION", "0") == "1"
+HAB_RISE_SEC = float(_os.environ.get("E_HAB_RISE", "5.0"))
+HAB_RECOVER_SEC = float(_os.environ.get("E_HAB_RECOVER", "5.0"))
+HAB_BREAK = float(_os.environ.get("E_HAB_BREAK", "0.5"))
+
 
 class OrientingReflexV2:
     """視線誘導反射・新版。段階的に組み立てる。"""
 
     def __init__(self, model, data=None, time_scales=TIME_SCALES, noise=LI_NOISE,
-                 seed=None, dt=DEFAULT_DT, hold=None, static_salience=None):
+                 seed=None, dt=DEFAULT_DT, hold=None, static_salience=None,
+                 ior=None, habituation=None):
         # 2026-07-27：seed が None だと神経ノイズが毎回変わり、**同じ設定でも
         #   結果がばらつく**（同一条件3回で 0.319 / 0.215 / 0.189）。
         #   高速化の前後を1回ずつ比べて「悪化した」と誤判定した。
@@ -454,6 +510,13 @@ class OrientingReflexV2:
         self.static_salience = bool(USE_STATIC_SALIENCE if static_salience is None
                                     else static_salience)
         self.raw_static_map = None    # 診断用：DoG後・正規化前の静的地図
+        # ステップ5（IOR）。既定OFF＝v2は従来のまま1ビット不変
+        #   （OFF時は _ior_map を一度も割り当てず、関連コードも呼ばない）。
+        self.ior = bool(USE_IOR if ior is None else ior)
+        self._ior_map = None          # 上丘格子と同形の抑制地図。使うまでNoneのまま
+        # 馴化（固視対象へのスカラー順応）。既定OFF＝v2は従来のまま1ビット不変。
+        self.habituation = bool(USE_HABITUATION if habituation is None else habituation)
+        self._habituation = 0.0       # 0=未馴化 〜 1=最大馴化
         # ステップ4（階段状サッケード）の状態
         self._t = 0.0                # apply() が刻む内部時刻[秒]
         self._last_saccade_t = -1e9  # 前回サッケードを撃った時刻
@@ -531,6 +594,9 @@ class OrientingReflexV2:
         self.n_saccades = 0
         # F1-4b：認識信号もreset()でクリアする（前の走行・エピソードの値を持ち越さない）。
         self._recognition = 0.0
+        # ステップ5：IOR地図・馴化スカラーも前の走行・エピソードの値を持ち越さない。
+        self._ior_map = None
+        self._habituation = 0.0
 
     # ------------------------------------------------------------
     # 公開インターフェース
@@ -627,6 +693,14 @@ class OrientingReflexV2:
         step = self.dt if dt is None else float(dt)
         self._t += step
 
+        # ステップ5：IOR地図の指数減衰。OFF時は_ior_mapを一度も割り当てないので
+        #   このブロックは何もしない（if self.ior が False で即抜ける）。
+        if self.ior and self._ior_map is not None:
+            self._ior_map *= float(np.exp(-step / IOR_DECAY_SEC))
+        # ステップ5：馴化スカラーの更新。OFF時は呼ばない。
+        if self.habituation:
+            self._update_habituation(step)
+
         # F1-4b：「思い浮かべているものと似たものを見ている間も、離れない」。
         #   _should_hold() 自体は無変更のまま、動き検出と同じ「最後に見た時刻」を
         #   認識でも更新する形にする（設計の指示どおり最小実装）。
@@ -705,6 +779,10 @@ class OrientingReflexV2:
                 self._sacc_remaining = 0.0
             if self._sacc_remaining <= 0.0:
                 self._sacc_end_t = self._t      # 終わった時刻を記録
+                # ステップ5（IOR）：サッケードが終わった瞬間、着地点へガウス抑制を
+                #   加算する。OFF時は呼ばない。
+                if self.ior:
+                    self._add_ior_bump(self._sacc_h, self._sacc_v)
             return out
 
         # data が無い場合の従来動作（力を一定時間かける）。互換のため残す。
@@ -740,7 +818,84 @@ class OrientingReflexV2:
         """
         if self.n_saccades == 0 or self.data is None:
             return False
-        return (self._t - self._hold_last_seen_t) < HOLD_LOSE_SEC
+        if (self._t - self._hold_last_seen_t) >= HOLD_LOSE_SEC:
+            return False
+        # ステップ5（馴化・2026-08-20）：馴化がHAB_BREAKを超えたら、動き信号が
+        #   あっても保持を解除する。ただしF1-4bの認識信号（_recognition が
+        #   REC_THRESHOLD以上）が立っている間は、馴化による解除を保留する
+        #   （係数でなく優先順位。設計「調査結果の反映 2026-08-19」節の指示どおり。
+        #   [Tier3・モデル上の選択・文献根拠なし]）。
+        #   habituation=False（既定）のときはこの分岐に入らず既存挙動と完全一致。
+        if self.habituation and self._habituation >= HAB_BREAK:
+            if not (self._recognition >= REC_THRESHOLD):
+                return False
+        return True
+
+    def _update_habituation(self, step):
+        """馴化スカラーの更新（ステップ5・2026-08-20）。
+
+        保持（サッケード実行中でなく、かつ _should_hold() が真＝今まさに
+        同じ対象へ留まっている）の間は HAB_RISE_SEC の時定数で1へ近づき、
+        そうでない間（サッケード実行中・対象を見失った・馴化で保持が
+        切れた）は HAB_RECOVER_SEC の時定数で0へ戻る。
+        _should_hold() 自体を呼ぶが副作用は無い（読み取りのみ）ので、ここで
+        何度呼んでも安全。呼び出し元（apply()）で self.habituation を
+        先に見ているので、OFF時はこのメソッドごと呼ばれない。
+        """
+        holding = self._sacc_remaining <= 0.0 and self._should_hold()
+        tau = HAB_RISE_SEC if holding else HAB_RECOVER_SEC
+        target = 1.0 if holding else 0.0
+        self._habituation += step * (target - self._habituation) / max(tau, 1e-6)
+        self._habituation = float(np.clip(self._habituation, 0.0, 1.0))
+
+    def _ior_landing_uv(self, h_dir, v_dir):
+        """視野の方向（[-1,1]、右・上が正）を上丘座標(u,v)[mm]へ写す。
+
+        CollicularMap.__init__ が画像の各画素を写すのと同じ式
+        （visual_to_collicular・右側への折り返し）を、1点（サッケードの
+        着地方向）についてだけ計算する。self._smap が未構築（＝一度も
+        画像を処理していない）なら None を返す。
+        """
+        smap = self._smap
+        if smap is None:
+            return None
+        import sys as _s, os as _o
+        _b = _o.path.abspath(_o.path.join(
+            _o.path.dirname(_o.path.abspath(__file__)), _o.pardir, _o.pardir,
+            "taro_core", "src", "brain"))
+        if _b not in _s.path:
+            _s.path.insert(0, _b)
+        from superior_colliculus import visual_to_collicular
+        half = smap.half_fov
+        x_deg = float(h_dir) * half
+        y_deg = float(v_dir) * half
+        side = 1.0 if x_deg >= 0.0 else -1.0
+        ecc = float(np.hypot(x_deg, y_deg))
+        azim_folded = float(np.arctan2(y_deg, abs(x_deg)))
+        u, v = visual_to_collicular(ecc, azim_folded, smap.a, smap.bu, smap.bv)
+        return side, float(u), float(v)
+
+    def _add_ior_bump(self, h_dir, v_dir):
+        """サッケードの着地点（撃った瞬間にSCが選んだ方向）へガウス抑制を加算する。
+
+        h_dir, v_dir: self._sacc_h, self._sacc_v（撃った瞬間に固定された、
+            側方抑制の競合が選んだ勝者の方向）。SACCADE_FRACで縮めた実際の
+            到達量ではなく、SCが「選んだ」位置そのものにIORを立てる
+            [Tier3・モデル上の選択。本ファイル冒頭「IOR・馴化」節参照]。
+        """
+        res = self._ior_landing_uv(h_dir, v_dir)
+        if res is None:
+            return
+        side, u0, v0 = res
+        smap = self._smap
+        shape = (2, smap.nv, smap.nu)
+        if self._ior_map is None or self._ior_map.shape != shape:
+            self._ior_map = np.zeros(shape, dtype=np.float32)
+        si = 0 if side >= 0.0 else 1
+        du = smap.grid_u - u0
+        dv = smap.grid_v - v0
+        bump = np.exp(-(du ** 2 + dv ** 2) / (2.0 * IOR_SIGMA_MM ** 2))
+        self._ior_map[si] += bump.astype(np.float32)
 
     def _angle_vel_deg(self, adrs):
         """今の関節角速度[度/秒]。複数あれば平均。保持のダンピング項に使う。"""
@@ -926,6 +1081,12 @@ class OrientingReflexV2:
         # 中心では狭く周辺では広くなる＝偏心度依存が座標変換から自動的に出る。
         sv, su = smap.rf_sigma_cells
         g = gaussian_filter(g, (0.0, sv, su))
+        # ステップ5（IOR）：受容野でまとめた直後の上丘の活動（＝競合入力）から
+        #   抑制地図を引く。負は0でクリップする。OFF時は呼ばない
+        #   （self.ior が False なら _ior_map は一度も割り当てられないので
+        #   このブロックには入らない）。
+        if self.ior and self._ior_map is not None and self._ior_map.shape == g.shape:
+            g = np.clip(g - IOR_STRENGTH * self._ior_map, 0, None)
         self.sc_input = g
         if g.max() < 1e-9:
             self.competed_map = g

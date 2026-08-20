@@ -138,6 +138,15 @@ def default_scene(name="無題"):
             #   （1ビット不変）。実体は e_orienting_v2.OrientingReflexV2 の
             #   static_salience 引数。orienting_holdと同じ配線パターン。
             "orienting_static": False,
+            # 【2026-08-20新設・F1-4d】IOR（戻りの抑制）のON/OFF。既定False＝
+            #   v2は従来どおりIOR無し（1ビット不変）。実体は
+            #   e_orienting_v2.OrientingReflexV2 の ior 引数。
+            #   orienting_hold/orienting_staticと同じ配線パターン。
+            "orienting_ior": False,
+            # 【2026-08-20新設・F1-4d】馴化（見飽きて次を見る）のON/OFF。既定False＝
+            #   v2は従来どおり馴化無し（1ビット不変）。実体は
+            #   e_orienting_v2.OrientingReflexV2 の habituation 引数。
+            "orienting_habituation": False,
         },
 
         # ② 環境のオブジェクト。これもモデル構築時
@@ -554,6 +563,8 @@ def build(scene, orient=None, vor=True, seed=0, verbose=False, actuation_model=N
             orient_v=str(b["orienting_version"]),
             orienting_hold=bool(b.get("orienting_hold", False)),
             orienting_static=bool(b.get("orienting_static", False)),
+            orienting_ior=bool(b.get("orienting_ior", False)),
+            orienting_habituation=bool(b.get("orienting_habituation", False)),
             eye_rest_vertical_deg=float(b["eye_rest_vertical_deg"]),
             eye_centering=bool(b.get("eye_centering", False)),
             **kw)

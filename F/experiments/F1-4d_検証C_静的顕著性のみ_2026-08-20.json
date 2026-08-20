@@ -1,0 +1,26 @@
+{
+  "name": "F1-4d検証C：静的顕著性のみ（IOR/馴化なし）300step・実害再確認用",
+  "note": "2026-08-20。F1-4c実害（5→1回）が今のコードでも再現するかの直接比較点として、座位_6ヶ月_2おもちゃ_F1-4c_顕著性_2026-08-19（静的顕著性ON・IOR/馴化は無指定=OFF）を300stepだけ回す。実装・検証専用の使い捨て実験ファイル。",
+  "scene": "座位_6ヶ月_2おもちゃ_F1-4c_顕著性_2026-08-19",
+  "taro": {
+    "actuation": "muscle",
+    "vision": true,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {"backend": "dinov2_vits14"},
+    "save": "F/models/F1-4d_検証C_静的顕著性のみ_2026-08-20.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 300,
+    "seed": 0,
+    "checkpoint": 300,
+    "csv": "F/logs/F1-4d_視線探索_2026-08-20/C_静的顕著性のみ_checkpoints.csv"
+  },
+  "plugins": {
+    "word_learning": {
+      "events_out": "F/logs/F1-4d_視線探索_2026-08-20/C_静的顕著性のみ_発話イベント.csv"
+    },
+    "dashboard": false
+  }
+}

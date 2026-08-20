@@ -456,7 +456,7 @@ class ToySupineEnv(SupineMimoEnv):
                  toy_appear_delay=None, toy_approach_sec=None, toy_approach_from=None,
                  parent_intervene=None, parent_wait_sec=None, parent_lost_deg=None,
                  plain=None, static_tex=None, orient_v=None, orienting_hold=None,
-                 orienting_static=None,
+                 orienting_static=None, orienting_ior=None, orienting_habituation=None,
                  # 【2026-08-18新設・F1-3】親のfollow-in labeling。既定None→
                  #   ParentLabeling(enabled=False)相当になり1ビットも挙動が変わらない。
                  #   `world.parent_labeling`（辞書）をkwargs直渡しする（環境変数は新設しない）。
@@ -580,6 +580,15 @@ class ToySupineEnv(SupineMimoEnv):
         #   設計：F/docs/設計_F1-4c_静的顕著性.md。orienting_holdと同じ配線パターン。
         self._orienting_static = (None if orienting_static is None
                                   else bool(orienting_static))
+        # 【2026-08-20新設・F1-4d】IOR（戻りの抑制）と馴化（見飽きて次を見る）。
+        #   既定None → e_orienting_v2側の環境変数既定（E_IOR/E_HABITUATION、
+        #   既定"0"=OFF）に従うので1ビットも挙動が変わらない。
+        #   設計：F/docs/設計_F1-4d_馴化とIOR.md。orienting_hold/orienting_staticと
+        #   同じ配線パターン。
+        self._orienting_ior = (None if orienting_ior is None
+                               else bool(orienting_ior))
+        self._orienting_habituation = (None if orienting_habituation is None
+                                       else bool(orienting_habituation))
         self._fence_half_x = float(fence_half_x)
         self._fence_half_y = float(fence_half_y)
         self._fence_post_w = float(fence_post_w)
@@ -745,14 +754,18 @@ class ToySupineEnv(SupineMimoEnv):
                 self._orienting = OrientingReflexV2(self.model, data=self.data,
                                                     dt=self.dt,
                                                     hold=self._orienting_hold,
-                                                    static_salience=self._orienting_static)
+                                                    static_salience=self._orienting_static,
+                                                    ior=self._orienting_ior,
+                                                    habituation=self._orienting_habituation)
             else:
                 from e_orienting import OrientingReflex
                 self._orienting = OrientingReflex(self.model)
             print(f"[orient] enabled: v{ver} ({type(self._orienting).__name__}) "
                   f"neck={list(self._orienting.neck_idx.keys())} "
                   f"eye_h={len(self._orienting.eye_idx['h'])} eye_v={len(self._orienting.eye_idx['v'])} "
-                  f"hold={self._orienting_hold} static_salience={getattr(self._orienting, 'static_salience', None)}")
+                  f"hold={self._orienting_hold} static_salience={getattr(self._orienting, 'static_salience', None)} "
+                  f"ior={getattr(self._orienting, 'ior', None)} "
+                  f"habituation={getattr(self._orienting, 'habituation', None)}")
 
     # ------------------------------------------------------------------
     def _make_visually_plain(self, spec):
