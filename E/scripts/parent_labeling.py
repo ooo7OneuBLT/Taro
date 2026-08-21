@@ -289,12 +289,20 @@ class WordSchedule:
                 #   ビルド時点（e_scene.build()）ではtaro（run/taro_setup.py側）が
                 #   まだ存在せずhearing設定を見られないため、taroが配線済みに
                 #   なる最初の使用時（＝ここ）で止める。
+                # 【2026-08-21修正】env.taro は posture_reflex/righting_reflex の
+                #   どちらかが有効なときにしか配線されない（run/taro_setup.py:272,307）。
+                #   語彙テストは姿勢反射なしで走るため、taroが無い＝hearing無効と
+                #   誤診してassertで落ちていた（F1-4hパイロット第2段で実際に発生）。
+                #   taroが取れる場合だけ検査し、取れない場合は素通しする
+                #   （発話はParentLabelingと同じ info 経路で耳へ届くので、
+                #   hearing側の有効確認は実験ログの発話イベントで行う）。
                 taro = getattr(env, "taro", None)
-                assert getattr(taro, "hearing", None) is not None, (
-                    "WordSchedule: taro.hearing が無効です（実験JSONの "
-                    "taro.hearing を true にしてください）。語を注入しても "
-                    "run/trainer.py._hear_parent_utterance の早期returnで "
-                    "黙って捨てられ、テストとして成立しません。")
+                if taro is not None:
+                    assert getattr(taro, "hearing", None) is not None, (
+                        "WordSchedule: taro.hearing が無効です（実験JSONの "
+                        "taro.hearing を true にしてください）。語を注入しても "
+                        "run/trainer.py._hear_parent_utterance の早期returnで "
+                        "黙って捨てられ、テストとして成立しません。")
                 word = item.get("word")
                 self._next_idx += 1
         if self.csv_path is not None:

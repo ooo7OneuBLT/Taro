@@ -1,0 +1,29 @@
+{
+  "name": "F1-4h_語彙_学習走行_パイロット",
+  "note": "2026-08-21。F1-4hパイロット第1段：語彙の学習走行。シーン座位_6ヶ月_2おもちゃ_F1-3c_1個提示_2026-08-19（親の名づけ・1個ずつ提示）でhearing+DINOv2視覚バックエンド+orienting_reflexを有効にし、6000stepの学習後にblobをE/models/F1-4h_語彙_2026-08-21.ptへ保存する。word_learningプラグインで発話回数・assoc_sepを計測する。環境変数E_FIELD_MEMORY/E_WINNER_ONLY/E_REMAPPING/E_SACC_CHAIN/E_K_FATIGUEはシェル側でexportしてから実行する（実験ファイルに渡す経路が無いため）。【steps=600とした理由】依頼書は『6000step（60秒相当）』としていたが、実測（run/trainer.py:364 dt=timestep*frame_skip*cfg.K、K既定10）では1トレーニングstep=0.1秒（=timestep0.005s*frame_skip2*K10）。よって『60秒相当』を満たすにはsteps=600が正しい（6000だと600秒=10分相当になり意図とズレる）。同日作成済みの第2段実験ファイル(F1-4h_語彙テスト_パイロット.json)が同じ理由でsteps=500(50秒)としていたのと同じ補正。",
+  "scene": "座位_6ヶ月_2おもちゃ_F1-3c_1個提示_2026-08-19",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 6.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 64
+    },
+    "save": "E/models/F1-4h_語彙_2026-08-21.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 600,
+    "seed": 0,
+    "K": 10,
+    "checkpoint": 600,
+    "csv": "E/logs/F1-4h_語彙_学習走行_パイロット/run_seed0.csv"
+  },
+  "plugins": {
+    "word_learning": {
+      "events_out": "E/logs/F1-4h_語彙_学習走行_パイロット/発話イベント.csv"
+    }
+  }
+}
