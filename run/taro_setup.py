@@ -342,7 +342,10 @@ def _setup_hearing(taro, cfg, *, verbose=True):
     # 手打ち数字の根絶：state_dimはバックエンドのdimプロパティから取る
     #   （既定null時はcustomバックエンド経由でfusion.visionの出力次元＝従来どおり64）。
     taro.vision_backend = get_backend(cfg.lexicon_vision, vision_encoder=taro.fusion.vision)
-    taro.lexicon = Lexicon(state_dim=taro.vision_backend.dim)
+    # 【F1-5・2026-08-21】lexicon_mode="sum"（既定）なら旧挙動と完全一致。
+    #   "contrast"のときだけ対照学習（引き寄せ＋引き離し）が有効になる。
+    #   設計：F/docs/設計_F1-5_連合器の対照学習化.md
+    taro.lexicon = Lexicon(state_dim=taro.vision_backend.dim, mode=cfg.lexicon_mode)
     if verbose:
         print(f"[耳] taro.hearing/taro.lexicon ON（視覚バックエンド="
               f"{taro.vision_backend.name} state_dim={taro.vision_backend.dim}）",
@@ -768,6 +771,12 @@ class Taro:
                 self.lexicon.state_sum = lx["state_sum"]
                 self.lexicon.state_dim = lx["state_dim"]
                 self.lexicon.min_len = lx["min_len"]
+                # 【F1-5・2026-08-21】旧blob（mode/protoキー無し）はそのまま
+                #   sumモード・proto空辞書として復元される（従来どおり）。
+                if "mode" in lx:
+                    self.lexicon.mode = lx["mode"]
+                if "proto" in lx:
+                    self.lexicon.proto = lx["proto"]
                 if verbose:
                     print(f"  [語彙] 復元：耳={self.hearing.vocab.size}文字"
                           f" 語彙={len(self.lexicon.counts)}語", flush=True)
@@ -1118,6 +1127,12 @@ class Taro:
                                 "state_sum": self.lexicon.state_sum,
                                 "state_dim": self.lexicon.state_dim,
                                 "min_len": self.lexicon.min_len}
+            # 【F1-5・2026-08-21】mode/protoは既定sumモードでは追加しない
+            #   （旧blobとバイト互換を維持する。落とし穴メモリ「新キーは条件付きで」
+            #   と同じ流儀。設計：F/docs/設計_F1-5_連合器の対照学習化.md）。
+            if self.lexicon.mode == "contrast":
+                blob["lexicon"]["mode"] = self.lexicon.mode
+                blob["lexicon"]["proto"] = self.lexicon.proto
         assert self.hearing is None or ("hearing_vocab" in blob and "lexicon" in blob), (
             "耳(hearing)が有効なのに語彙(vocab/lexicon)がblobに入っていない。"
             "視覚未保存事件(2026-08-19発覚)・語彙未保存(同日発覚)に続く同型バグを"

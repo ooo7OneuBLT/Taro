@@ -137,11 +137,82 @@ def test_2_new_word_no_collision():
     print("未知語の独立性テスト PASS")
 
 
+def _make_blob_contrast(hearing, lexicon):
+    """F1-5：contrastモードの保存形式（mode/protoキーを追加した6キー）。"""
+    blob = _make_blob(hearing, lexicon)
+    blob["lexicon"]["mode"] = lexicon.mode
+    blob["lexicon"]["proto"] = lexicon.proto
+    return blob
+
+
+def _restore_into_contrast(blob, hearing, lexicon):
+    """F1-5：contrastモードの復元手順（run/taro_setup.py _load()と同じ手順）。"""
+    _restore_into(blob, hearing, lexicon)
+    lx = blob["lexicon"]
+    if "mode" in lx:
+        lexicon.mode = lx["mode"]
+    if "proto" in lx:
+        lexicon.proto = lx["proto"]
+
+
+def test_3_contrast_roundtrip():
+    """F1-5：mode="contrast"での往復一致テスト（proto含む4+2キー）。
+
+    既定sumモードのテスト（test_1）とは別に、contrastモードでも
+    mode/protoが正しく保存・復元されるかを確認する。
+    設計：F/docs/設計_F1-5_連合器の対照学習化.md
+    """
+    print("=" * 60)
+    print("3. contrastモード往復一致テスト（mode/proto含む）")
+    print("=" * 60)
+    rng = random.Random(1)
+    hearing = Hearing()
+    lexicon = Lexicon(min_len=2, state_dim=8, mode="contrast")
+    words = ["わんわん", "ぶーぶー", "まんま", "わんわん", "ぶーぶー"]
+    for w in words:
+        tokens = hearing.hear(w)
+        conf = _monotonic_confidences(len(tokens), rng)
+        state = [rng.uniform(-1, 1) for _ in range(8)]
+        lexicon.observe(tokens, conf, state=state)
+    assert len(lexicon.proto) > 0, "前提が崩れている：contrastモードでprotoが育っていない"
+
+    blob = _make_blob_contrast(hearing, lexicon)
+    assert set(blob["lexicon"].keys()) == {
+        "counts", "state_sum", "state_dim", "min_len", "mode", "proto"}, (
+        "contrastモードのblobキーが4+2キーになっていない")
+    path = os.path.join(os.path.dirname(__file__), "_tmp_test_lexicon_persistence_contrast.pt")
+    torch.save(blob, path)
+    loaded = torch.load(path, map_location="cpu", weights_only=False)
+    os.remove(path)
+
+    hearing2 = Hearing()
+    lexicon2 = Lexicon(min_len=1, state_dim=1, mode="sum")  # 復元前はわざと違う値
+    _restore_into_contrast(loaded, hearing2, lexicon2)
+
+    assert lexicon2.mode == "contrast", "modeが復元されていない"
+    assert lexicon2.proto.keys() == lexicon.proto.keys(), "protoのキー集合が一致しない"
+    for chunk, p in lexicon.proto.items():
+        p2 = lexicon2.proto[chunk]
+        diff = max(abs(a - b) for a, b in zip(p, p2))
+        assert diff <= 1e-12, f"proto不一致: {chunk}: diff={diff}"
+
+    for chunk in lexicon.counts:
+        a1 = lexicon.assoc(chunk)
+        a2 = lexicon2.assoc(chunk)
+        assert a1 is not None and a2 is not None
+        diff = max(abs(x - y) for x, y in zip(a1, a2))
+        assert diff <= 1e-12, f"assoc不一致(contrast): {chunk}: diff={diff}"
+
+    print(f"proto語数復元: {len(lexicon2.proto)} (元={len(lexicon.proto)})")
+    print("contrastモード往復一致テスト PASS")
+
+
 def main():
     test_1_roundtrip()
     test_2_new_word_no_collision()
+    test_3_contrast_roundtrip()
     print("=" * 60)
-    print("全2項目 PASS")
+    print("全3項目 PASS")
     print("=" * 60)
 
 

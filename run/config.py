@@ -87,6 +87,12 @@ TARO_DEFAULTS = {
                        "fusion.vision(64次元)。辞書で指定：{'backend': 'dinov2_vits14', "
                        "'fovea_px': 64}等（taro_core/src/senses/vision_backends.py の"
                        "登録式レジストリから選ぶ）", None),
+    # 【F1-5新設・2026-08-21】連合器(Lexicon)の学習則。既定"sum"＝従来どおり単純平均
+    #   （1ビットも変わらない）。"contrast"にすると引き寄せ＋引き離しの対照学習に
+    #   切り替わる（hearing=trueのときのみ意味を持つ）。
+    #   設計：F/docs/設計_F1-5_連合器の対照学習化.md
+    "lexicon_mode": ("sum", "連合器の学習則。'sum'=従来の単純平均（既定）、"
+                     "'contrast'=引き寄せ＋引き離しの対照学習", None),
     # 【2026-08-19新設・F1-4b】語から注意への読み出し回路。「思い浮かべているものと
     #   似たものを見ている間も、視線が離れにくくなる」。既定None＝OFF。
     #   trainer.py側は設定がNoneなら一切の追加計算（DINOv2 encode等）をしない

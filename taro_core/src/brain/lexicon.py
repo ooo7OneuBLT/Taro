@@ -26,6 +26,18 @@ B6-1b修正：初版は「発話内平均以上の連続run」で切っていた
 """
 
 
+def _unit(vec):
+    """L2正規化したリストを返す（ゼロノルムならNone＝呼び出し側でスキップ）。
+
+    【F1-5】対照学習は「向き」だけを扱う（引き寄せ・引き離しの式が内積的な
+    差分更新のため、ノルムが揃っていないと語ごとに更新量が不公平になる）。
+    """
+    s = sum(float(x) * float(x) for x in vec) ** 0.5
+    if s <= 0.0:
+        return None
+    return [float(x) / s for x in vec]
+
+
 class Lexicon:
     """
     原-辞書。聞いた発話から予測しやすい並びを切り出して頻度を数える。
@@ -33,7 +45,8 @@ class Lexicon:
     counts: tuple(tokens) → 出会った回数
     """
 
-    def __init__(self, min_len=2, state_dim=3):
+    def __init__(self, min_len=2, state_dim=3, mode="sum",
+                 eta_pull=0.2, eta_push=0.1):
         # min_len：単位として登録する最短の長さ（1音は語の型とみなさない）。
         # 注意：構造的な下限であって調整用の恣意的定数ではない（1にすると全単音が語になる）。
         self.min_len = min_len
@@ -45,6 +58,18 @@ class Lexicon:
         # 内的状態、視覚があれば見えているものの特徴ベクトルなど、任意次元を渡せる。
         self.state_dim = state_dim
         self.state_sum = {}   # chunk -> [Σstate[0], ..., Σstate[state_dim-1], n]
+        # 【F1-5・2026-08-21】連合器の対照学習化（設計 F/docs/設計_F1-5_連合器の
+        #   対照学習化.md）。mode="sum"（既定）は上のstate_sumによる単純平均のまま
+        #   ＝1ビットも変わらない。mode="contrast"のときだけ、聞いた語の想像を
+        #   いま見ている指紋へ近づけ（引き寄せ）、他の全語の想像をそこから遠ざける
+        #   （引き離し）。背景等の共通成分は引き寄せと引き離しで相殺され、語ごとの
+        #   「らしさ」の差だけが残る（CLIP型対照学習の最小オンライン版）。
+        #   人間側対応：乳児の語彙学習は共起だけでなく非共起も使う（相互排他性の
+        #   基盤）[Tier2・原理レベル]。
+        self.mode = str(mode)
+        self.eta_pull = float(eta_pull)
+        self.eta_push = float(eta_push)
+        self.proto = {}       # contrast用: chunk -> [p_0..p_{state_dim-1}]（リスト）
 
     def segment(self, tokens, confidences):
         """
@@ -87,6 +112,9 @@ class Lexicon:
         if chunk is not None:
             self.counts[chunk] = self.counts.get(chunk, 0) + 1
             if state is not None and len(state) >= self.state_dim:
+                # sum系の累積は contrast モードでも並行して行う（counts/segment等の
+                # 他機能の互換のため。二重帳簿だが数KBオーダーで無視できる。
+                # F/docs/設計_F1-5…技術付録より）。
                 acc = self.state_sum.get(chunk)
                 if acc is None:
                     acc = [0.0] * self.state_dim + [0]
@@ -94,12 +122,40 @@ class Lexicon:
                 for i in range(self.state_dim):
                     acc[i] += float(state[i])
                 acc[self.state_dim] += 1
+                # 【F1-5】mode=="sum"ならここで終わり＝従来コードのみ実行、1ビットも
+                #   変わらない。mode=="contrast"のときだけ引き寄せ＋引き離しを行う。
+                if self.mode == "contrast":
+                    v = _unit(state[:self.state_dim])
+                    if v is not None:
+                        p = self.proto.get(chunk)
+                        if p is None:
+                            # 初回はこの語の想像がまだ無いので、現在の見えをそのまま
+                            # 初期値にする（引き寄せの式では前がゼロだと不安定なため）。
+                            p = list(v)
+                            self.proto[chunk] = p
+                        else:
+                            # 引き寄せ（EMA）：聞いた語の想像を今の指紋へ少し近づける。
+                            for i in range(self.state_dim):
+                                p[i] += self.eta_pull * (v[i] - p[i])
+                        # 引き離し：他の全語の想像を今の指紋から遠ざける。
+                        # q ← q − η⁻(v − q)。η⁻<η⁺とし、全語の瞬間に共通して写る
+                        # 背景成分は引き寄せと引き離しで相殺される（設計2026-08-21）。
+                        for other, q in self.proto.items():
+                            if other == chunk:
+                                continue
+                            for i in range(self.state_dim):
+                                q[i] -= self.eta_push * (v[i] - q[i])
         return chunk
 
     def assoc(self, chunk):
         """
-        B6-4：その語が結びつく状態の平均（state_dim次元のtuple）を返す（無ければNone）。
+        B6-4：その語が結びつく状態を返す（無ければNone）。
+        mode=="sum"（既定）：単純平均（state_dim次元のtuple）＝従来どおり。
+        mode=="contrast"：対照学習で育てたproto（引き寄せ＋引き離し後のベクトル）。
         """
+        if self.mode == "contrast":
+            p = self.proto.get(chunk)
+            return tuple(p) if p is not None else None
         acc = self.state_sum.get(chunk)
         if not acc or acc[self.state_dim] == 0:
             return None
