@@ -486,37 +486,35 @@ HAB_RISE_SEC = float(_os.environ.get("E_HAB_RISE", "5.0"))
 HAB_RECOVER_SEC = float(_os.environ.get("E_HAB_RECOVER", "5.0"))
 HAB_BREAK = float(_os.environ.get("E_HAB_BREAK", "0.5"))
 
-# ---- 改訂（2026-08-20・実測を受けて）：馴化を「地図上の順応」へ ------------
-# 設計：F/docs/設計_F1-4d_馴化とIOR.md 末尾「改訂（2026-08-20・実測を受けて）」節。
+# ---- 改訂3（2026-08-20・抑制を「中央固定」から「活動依存の疲労」へ）--------
+# 設計：F/docs/設計_F1-4d_馴化とIOR.md 末尾「改訂3」節。
 #
-# 【なぜ】初版（馴化＝保持解除のスイッチのみ）は競合の点数に触らないため、
-#   静止2おもちゃ・全機構ONの実測で「toy1に張り付いたまま toy2への訪問ゼロ」
-#   になった（`F/logs/F1-4d_視線探索_2026-08-20/B2_修正後_視線タイムライン.png`）。
-#   固視ゾーン（中央付近）はそもそもサッケードを撃たないのでIORが乗らず、
-#   馴化スカラーだけでは競合が凍りつく。人間の馴化は「見続けている刺激への
-#   神経反応そのものの減衰」＝競合の点数自体が下がる現象であるため、
-#   IORの減算と同じ場所（_select_on_collicular_grid の競合入力）に、
-#   「いま見ている中央」への抑制を追加する。
+# 【改訂2の敗因（絵で確定）】中央固定の抑制（σ=1mm、旧 HAB_SUPPRESS_*。
+#   ここで廃止）が、実際のtoy1の山（中央から数mmずれ・強度0.25）に届かず
+#   空撃ちしていた（`F/logs/F1-4d_視線探索_2026-08-20/B_停止時_競合入力ヒートマップ.png`）。
+#   場所を決め打ちする設計自体が誤りだった。
 #
-# 【地図の中央の求め方】上丘座標系は視線中心の座標系（着地点をこの座標系へ
-#   写しているのがIORの _ior_landing_uv と同じ流儀）なので、「中央＝視野中心
-#   （偏心0）」は grid_u=0, grid_v=0 に対応する（visual_to_collicular は
-#   偏心0でu=0,v=0を返す＝OTTES変換のlog(1+ecc/a)がecc=0でゼロになるため）。
-#   左右2枚（0:右視野/1:左視野）の格子はどちらも u=0（偏心0）が中心視野側の
-#   境界にあり、同じ grid_u/grid_v 配列を共有するため、ガウス抑制を
-#   smap.grid_u, smap.grid_v から作れば**両方の地図に自動的に同じ形で載る**
-#   （IORの着地点抑制のように片側だけを選ぶ必要が無い＝視野中心は左右の
-#   境界そのものなので両側にまたがる、という扱い。既存IORの流儀に合わせつつ、
-#   中央だけは「側を選ばない」形にした）[Tier3・モデル上の選択]。
+# 【機構】場所を決め打ちせず、**いま活動が高い場所ほど疲労する**地図 H
+#   （上丘格子と同形）に置き換える。文献の動的神経場モデル
+#   （Ibáñez-Gijón J & Jacobs DM 2012、サッケード選択の神経場モデル。
+#   `F/docs/文献調査/2026-08-20_神経順応と勝者の疲労.md`で原文精読）が示す式：
+#     τH・dH/dt = −H + kH・a・S   （活動Sに比例してHが一次遅れで蓄積）
+#     出力は (1−H) 倍される（減算でなく乗算）
+#   をオイラー法で離散化したもの（詳細は _update_fatigue のdocstring）。
 #
-# HAB_SUPPRESS_STRENGTH: 抑制の強さの係数。文献値は無く、Bの受け入れ検証
-#   （toy1/toy2の両方に10度以内の滞在が発生するか）を指標に較正する。
-#   [Tier3・ARBITRARY]
-HAB_SUPPRESS_STRENGTH = float(_os.environ.get("E_HAB_SUP", "1.0"))
-# HAB_SUPPRESS_SIGMA_MM: 中央抑制の広がり[mm]。側方抑制・IORと同じ流儀で、
-#   初期値はIOR_SIGMA_MMと同じにする（両方とも根拠は無く、上丘上の抑制の
-#   広がりとして同程度と仮定した暫定値）[Tier3・ARBITRARY]
-HAB_SUPPRESS_SIGMA_MM = float(_os.environ.get("E_HAB_SUP_SIGMA", "1.0"))
+# 【正直な注記】太郎の競合層に疲労項を入れるのは、上記の一次資料とも完全
+#   一致ではない拡張[Tier2の部品をTier3の場所に置く、と明記]。乳児の
+#   「視線の張り付き」の主流の説明は抑制回路の未成熟であり疲労とは別の
+#   説明軸だが、本実装は「6ヶ月児は張り付きを脱し始める時期」の機構候補
+#   として置く。
+#
+# TAU_FATIGUE: 疲労の時定数[秒]。Ibáñez-Gijón & Jacobs 2012 の値[文献値・Tier2]。
+TAU_FATIGUE = float(_os.environ.get("E_TAU_FATIGUE", "1.62"))
+# K_FATIGUE: 蓄積のゲイン。同文献の値だが、調査が「単位表記に文字化けの
+#   疑いあり」と明記しており実測較正が前提[文献値だが単位に疑義・要較正]。
+#   受け入れ検証Bで {3.5, 7, 14} を較正する。E_K_FATIGUE=0 で疲労だけ無効化
+#   できる（Hは減衰のみでゼロへ収束し、g_effは事実上gに一致する）。
+K_FATIGUE = float(_os.environ.get("E_K_FATIGUE", "7"))
 
 # ---- 改訂2（2026-08-20・文献調査を受けてリセット条件を人間仕様へ）------------
 # 設計：F/docs/設計_F1-4d_馴化とIOR.md 末尾「改訂2（2026-08-20・文献調査を
@@ -588,6 +586,13 @@ class OrientingReflexV2:
         # 馴化（固視対象へのスカラー順応）。既定OFF＝v2は従来のまま1ビット不変。
         self.habituation = bool(USE_HABITUATION if habituation is None else habituation)
         self._habituation = 0.0       # 0=未馴化 〜 1=最大馴化
+        # 改訂3（2026-08-20）：疲労場 H（上丘格子と同形）。使うまでNoneのまま。
+        self._fatigue_map = None
+        # 直近の update() 呼び出しで作った駆動信号（正規化済み競合入力）。
+        #   vision は物理stepより粗い周期でしか更新されないため、_update_fatigue
+        #   （apply()から毎step呼ばれる）は次のupdate()が来るまでこれをそのまま
+        #   使い続ける（ゼロ次ホールド）。
+        self._fatigue_drive = None
         # 改訂2（2026-08-20）：「固視の場所」（眼球角度[度]、h/v）。Noneのうちは
         #   未確定＝_update_fixation_locus の最初の呼び出しで現在の視線位置を採用する。
         self._fix_locus_h = None
@@ -674,6 +679,9 @@ class OrientingReflexV2:
         # ステップ5：IOR地図・馴化スカラーも前の走行・エピソードの値を持ち越さない。
         self._ior_map = None
         self._habituation = 0.0
+        # 改訂3（2026-08-20）：疲労場・駆動信号も前の走行・エピソードを持ち越さない。
+        self._fatigue_map = None
+        self._fatigue_drive = None
         # 改訂2（2026-08-20）：固視の場所・逸れの計時も前の走行を持ち越さない。
         self._fix_locus_h = None
         self._fix_locus_v = None
@@ -786,6 +794,9 @@ class OrientingReflexV2:
         # ステップ5：馴化スカラーの更新。OFF時は呼ばない。
         if self.habituation:
             self._update_habituation(step)
+        # 改訂3：疲労場 H の毎step更新（活動依存の順応）。OFF時は呼ばない。
+        if self.habituation:
+            self._update_fatigue(step)
 
         # F1-4b：「思い浮かべているものと似たものを見ている間も、離れない」。
         #   _should_hold() 自体は無変更のまま、動き検出と同じ「最後に見た時刻」を
@@ -986,6 +997,42 @@ class OrientingReflexV2:
         target = 1.0 if holding else 0.0
         self._habituation += step * (target - self._habituation) / max(tau, 1e-6)
         self._habituation = float(np.clip(self._habituation, 0.0, 1.0))
+
+    def _update_fatigue(self, step):
+        """改訂3（2026-08-20）：疲労場 H の毎step更新（活動依存の順応）。
+
+        文献の式（Ibáñez-Gijón J & Jacobs DM 2012、サッケード選択の動的神経場
+        モデル。`F/docs/文献調査/2026-08-20_神経順応と勝者の疲労.md`で原文精読）：
+            τH・dH/dt = −H + kH・a・S
+        （活動Sに比例してHが一次遅れで蓄積、出力は(1−H)倍される）を
+        オイラー法で離散化：
+            H += (dt/τH) * (−H + kH * S)
+        S（駆動信号）は _select_on_collicular_grid が直近の update() 呼び出しで
+        キャッシュした self._fatigue_drive（正規化済み競合入力＝g/g.max()。
+        文献の"a"は個々のニューロンの活動水準の意味合いだが、太郎の地図は
+        既に[0,1]へ正規化しているためa=1として式に吸収した[Tier3・離散化の
+        実装上の選択]）を、次の update() が来るまでそのまま使い続ける
+        （vision は物理stepより粗い周期でしか更新されないため。既存の馴化
+        スカラー更新と同じゼロ次ホールドの流儀）。
+        改訂3項4：認識信号（F1-4b、self._recognition >= REC_THRESHOLD）が
+        立っている間は蓄積項を保留する（減衰−Hは続く）
+        [Tier3・モデル上の選択・文献根拠なし。設計「改訂3」節 項4参照]。
+        呼び出し元（apply()）で self.habituation を先に見ているので、
+        OFF時はこのメソッドごと呼ばれない＝既存挙動と完全一致。
+        """
+        if self._fatigue_map is None:
+            return   # 一度も画像を処理していない（_select_on_collicular_gridが
+                     #   まだ一度も呼ばれていない）＝疲労場の形がまだ決まらない
+        if self._fatigue_drive is None:
+            drive = np.zeros_like(self._fatigue_map)
+        else:
+            drive = self._fatigue_drive
+        if self._recognition >= REC_THRESHOLD:
+            accumulate = np.zeros_like(self._fatigue_map)
+        else:
+            accumulate = K_FATIGUE * drive
+        self._fatigue_map += (step / max(TAU_FATIGUE, 1e-6)) * (
+            -self._fatigue_map + accumulate)
 
     def _ior_landing_uv(self, h_dir, v_dir):
         """視野の方向（[-1,1]、右・上が正）を上丘座標(u,v)[mm]へ写す。
@@ -1226,23 +1273,25 @@ class OrientingReflexV2:
         #   このブロックには入らない）。
         if self.ior and self._ior_map is not None and self._ior_map.shape == g.shape:
             g = np.clip(g - IOR_STRENGTH * self._ior_map, 0, None)
-        # 改訂（2026-08-20）項2：馴化スカラーを、地図の中央領域への抑制として
-        #   競合入力から引く（IORの減算と同じ場所）。中央＝視野中心（偏心0）
-        #   に対応する grid_u=0, grid_v=0（本ファイル冒頭 HAB_SUPPRESS_STRENGTH
-        #   直前のコメント参照）。左右2枚（gの2軸目）は同じgrid_u/grid_vを
-        #   共有するので、[nv,nu]のガウスをブロードキャストするだけで両方の
-        #   地図に同じ形で載る＝側を選ぶ必要が無い。
-        #   項4：認識信号が立っている間は中央抑制の適用も保留する
-        #   （馴化の上昇の保留と同じ優先順位方式。_update_habituation参照）
-        #   [Tier3・モデル上の選択・文献根拠なし]。
+        # 改訂3（2026-08-20）項1・2：中央固定の抑制（旧・馴化スカラーによる
+        #   grid_u=0,grid_v=0への一律ガウス抑制）は廃止した。実際のtoy1の山は
+        #   中央から数mmずれた場所にでき、中央固定の抑制は届かず空撃ちしていた
+        #   （実測：`F/logs/F1-4d_視線探索_2026-08-20/B_停止時_競合入力ヒートマップ.png`）。
+        #   代わりに、**いま活動が高い場所ほど疲労する**地図 H で g を減衰させる
+        #   （文献の式の乗算適用。本ファイル冒頭「改訂3」節・_update_fatigue参照）。
+        #   ここでは①直近のHでg_effを作り②次の蓄積に使う駆動信号（正規化済みg。
+        #   Hの更新そのものは apply()->_update_fatigue が毎stepオイラー法で回す。
+        #   vision は物理stepより粗い周期でしか来ないため、ここでは駆動信号を
+        #   キャッシュするだけ）を用意する。
         #   OFF時（self.habituation=False）は呼ばない＝既存挙動と完全一致。
-        if (self.habituation and self._habituation > 0.0
-                and self._recognition < REC_THRESHOLD):
-            du = smap.grid_u
-            dv = smap.grid_v
-            hab_bump = HAB_SUPPRESS_STRENGTH * self._habituation * np.exp(
-                -(du ** 2 + dv ** 2) / (2.0 * HAB_SUPPRESS_SIGMA_MM ** 2))
-            g = np.clip(g - hab_bump.astype(np.float32), 0, None)
+        if self.habituation:
+            if self._fatigue_map is None or self._fatigue_map.shape != g.shape:
+                self._fatigue_map = np.zeros_like(g, dtype=np.float32)
+            gmax = float(g.max())
+            self._fatigue_drive = ((g / gmax) if gmax > 1e-9
+                                    else np.zeros_like(g, dtype=np.float32))
+            h_clip = np.clip(self._fatigue_map, 0.0, 1.0)
+            g = g * (1.0 - h_clip)
         self.sc_input = g
         if g.max() < 1e-9:
             self.competed_map = g
