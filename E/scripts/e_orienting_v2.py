@@ -460,6 +460,20 @@ STATIC_SIGMA_SURROUND_DEG = float(_os.environ.get("E_STATIC_SIGMA_S", "7.0"))
 # 【根拠：Frank 2009】動きと輝度コントラストを**チャンネル正規化後に等重み**で
 #   足したものが乳児の視線を最良予測。STATIC_W=1.0（等重み）。
 STATIC_W = float(_os.environ.get("E_STATIC_W", "1.0"))
+# 【2026-08-21・正規化の床】チャンネルを「そのフレームの最大値」で割る従来方式は、
+#   信号が無いとき（静止シーンの動きチャンネル＝描画ノイズと眼の微小ドリフトのみ、
+#   実測max 0.029〜0.046）にノイズを振幅1.0まで約35倍増幅し、本物の目立ち度と
+#   対等の一票にしてしまっていた（実測：サッケード15回中11回がどの対象でもない
+#   方向へ＝選挙のランダム化。F日誌2026-08-21追記2）。
+#   人間側：視覚のコントラスト利得調整には半飽和定数＝絶対的な床があり、無信号の
+#   チャンネルは静かなまま[機構はTier2・床の値は較正Tier3]。
+#   較正（2026-08-21実測）：本物の動き（親の振り2cm/1.5Hz）の生max中央値=0.315、
+#   ノイズ=0.029〜0.046 → 床0.15（本物の半分・ノイズの3倍超）。
+#   静的側は最強エッジ（コントラスト1.0の段差）のDoG理論上限=0.314 → 同じく床0.15
+#   （今のシーンの実測maxは0.284で床より上＝健全な信号の挙動は変わらない）。
+#   床より強い信号は従来どおりそのフレームのmaxで正規化＝挙動不変。
+MOTION_NORM_FLOOR = float(_os.environ.get("E_MOTION_NORM_FLOOR", "0.15"))
+STATIC_NORM_FLOOR = float(_os.environ.get("E_STATIC_NORM_FLOOR", "0.15"))
 # スイッチ：既定OFF（過去の実験・既定設定は1ビットも変わらない）。
 USE_STATIC_SALIENCE = _os.environ.get("E_STATIC_SAL", "0") == "1"
 
@@ -783,10 +797,12 @@ class OrientingReflexV2:
         if self.static_salience:
             static_map = self._static_contrast(eye_image)
             self.raw_static_map = static_map
+            # 【2026-08-21修正】正規化に床を敷く（MOTION_NORM_FLOOR直前のコメント
+            #   参照）。信号が床より弱いチャンネルは増幅されず、弱いまま合成される。
             mmax = float(motion.max()) if motion.size else 0.0
-            motion_norm = motion / mmax if mmax > 1e-12 else motion
+            motion_norm = motion / max(mmax, MOTION_NORM_FLOOR)
             smax = float(static_map.max()) if static_map.size else 0.0
-            static_norm = static_map / smax if smax > 1e-12 else static_map
+            static_norm = static_map / max(smax, STATIC_NORM_FLOOR)
             motion = motion_norm + STATIC_W * static_norm
         self.motion_map = motion
         biased = self._apply_center_bias(motion)         # ステップ2
@@ -1388,6 +1404,12 @@ class OrientingReflexV2:
         # 中心では狭く周辺では広くなる＝偏心度依存が座標変換から自動的に出る。
         sv, su = smap.rf_sigma_cells
         g = gaussian_filter(g, (0.0, sv, su))
+        # 【2026-08-21修正】抑制（IOR・疲労）を引く**前**の地形の最大値を覚えておく。
+        #   以後の正規化（競合入力・疲労の駆動信号）はこの値を基準にする。
+        #   従来は抑制後のg自身のmaxで割っていたため、疲労で地形全体がカスカスに
+        #   なるとカスを1.0へ再増幅して全力で選挙し続けた（焦土化の正体の片割れ。
+        #   F日誌2026-08-21追記2）。抑制OFF時は g0max==g.max() で従来と完全一致。
+        g0max = float(g.max())
         # ステップ5（IOR）：受容野でまとめた直後の上丘の活動（＝競合入力）から
         #   抑制地図を引く。負は0でクリップする。OFF時は呼ばない
         #   （self.ior が False なら _ior_map は一度も割り当てられないので
@@ -1408,8 +1430,9 @@ class OrientingReflexV2:
         if self.habituation:
             if self._fatigue_map is None or self._fatigue_map.shape != g.shape:
                 self._fatigue_map = np.zeros_like(g, dtype=np.float32)
-            gmax = float(g.max())
-            self._fatigue_drive = ((g / gmax) if gmax > 1e-9
+            # 【2026-08-21修正】駆動信号の基準を抑制前の地形の最大値 g0max に変更。
+            #   本当に目立っている場所だけが疲れる（弱い残りカスは疲れも遅い）。
+            self._fatigue_drive = ((g / g0max) if g0max > 1e-9
                                     else np.zeros_like(g, dtype=np.float32))
             h_clip = np.clip(self._fatigue_map, 0.0, 1.0)
             g = g * (1.0 - h_clip)
@@ -1418,7 +1441,9 @@ class OrientingReflexV2:
             self.competed_map = g
             return 0.0, 0.0, 0.0
 
-        inp = g / g.max()
+        # 【2026-08-21修正】競合入力の基準も抑制前の g0max。疲労が地形を削ったら
+        #   競合はその分だけ静かになる（削りカスを1.0へ再増幅しない）。
+        inp = g / g0max
         # 【F1-4e・2026-08-20】場の記憶（綱引きの持ち越し）。既定OFF。
         #   従来は毎フレーム u = inp.copy() で競合を仕切り直していたため、
         #   対称な2標的ではノイズが一瞬対称を破っても次のフレームで消え、
@@ -1435,7 +1460,12 @@ class OrientingReflexV2:
             u = inp.copy()
         se = (0.0, LI_SIGMA_EXC_MM / smap.dv, LI_SIGMA_EXC_MM / smap.du)
         si = (0.0, LI_SIGMA_INH_MM / smap.dv, LI_SIGMA_INH_MM / smap.du)
-        noise_scale = self.noise * np.sqrt(LI_RATE)
+        # 【2026-08-21修正】ノイズを入力の強さに比例させる（正規化の床と同じ思想）。
+        #   従来は固定振幅で、疲労が地形を0.1程度まで削った瞬間にノイズが選挙を
+        #   支配していた。神経活動の揺らぎは発火率に応じて増える（Poisson的）＝
+        #   相対ノイズ一定が生理的[Tier2]。入力が満額（inp.max()==1、抑制なしの
+        #   既定経路は常にこれ）なら従来と完全一致。
+        noise_scale = self.noise * np.sqrt(LI_RATE) * float(inp.max())
         for _ in range(LI_N_ITER):
             f = np.clip(u, 0, None)
             exc = gaussian_filter(f, se) * LI_W_EXC
