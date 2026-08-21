@@ -206,6 +206,17 @@ PLAIN_RGBA = np.array([0.55, 0.62, 0.70, 1.0])       # 床・柵・空に共通�
 #   **実験条件を乳児研究の標準に合わせる**ことであり、太郎の中身をいじる話ではない。
 #   注意：ただし現実の乳児の視野にも床と壁の境界はあるので、環境としては簡略化。
 FLOOR_DIM = float(os.environ.get("E_FLOOR_DIM", "1.0"))
+# 2026-08-21：床の「横縞」対策（F1-4h・語彙テストシーン調査）。
+# 【原因】上のFLOOR_DIMコメントの通り床には照明が当たりskyboxには当たらない。
+#   床はmaterial無し（geom.rgba直指定）でレンダリングされるため、Lambertian陰影
+#   （拡散反射＝法線と光源方向のなす角のcos）がそのままかかる。床は無限平面
+#   （benchmarkv2_scene.xml:40 の <geom type="plane" size="0 0 .25">）なので、
+#   地平線に近い（＝光源から見て入射角が直角に近い）画素ほどcosがゼロに近づき
+#   黒に落ちる。実測（scratchpad probe, 2026-08-21）：128x128視界の行78〜90が
+#   平均輝度0.075〜0.10（他行0.6前後）まで落ちる暗帯として現れた。
+# 【対処】床にmaterialを与え、emission（自己発光）を上げて陰影の影響を弱める。
+#   emission=0（既定）なら旧来どおり material="" のままでバイト単位不変。
+FLOOR_EMISSION = float(os.environ.get("E_FLOOR_EMISSION", "0.0"))
 FENCE_RGBA_RICH = np.array([0.35, 0.45, 0.85, 1.0])  # 豊かな条件での柵＝青（従来の色）
 # 2026-07-26：5cm角 → 4cm角へ。ユーザーが姿勢編集パネル（`e_pose_editor.py`）で
 #   Viewer を見ながら調整した値（`E/docs/pose_editor_saved.json`）。
@@ -447,12 +458,17 @@ class ToySupineEnv(SupineMimoEnv):
                  #   設定を伝える方法が無かった（run/scene_tools/e_scene.py 参照）。
                  #   None なら従来どおりモジュール定数（＝環境変数の既定値）にフォールバック
                  #   するので、これらを渡さない既存の呼び出し元は1ビットも挙動が変わらない。
-                 seat_friction=None, floor_dim=None, toy_shape=None, toy_mode=None,
+                 seat_friction=None, floor_dim=None, floor_emission=None,
+                 toy_shape=None, toy_mode=None,
                  toy_rgba=None,
                  # 【2026-08-18・目標F・F1】2個目のおもちゃ。toy2=None（既定）なら
                  #   test_object2は従来どおり遠方退避のみ＝1ビットも挙動が変わらない。
                  toy2=None, toy2_shape=None, toy2_radius=None, toy2_rgba=None,
                  toy2_dist=None, toy_angle_deg=None,
+                 # 【2026-08-21新設・F1-4h】おもちゃの垂直方向の角度[度]。既定None→0.0。
+                 #   壁の無地部分を背にする高さへ上げるためのテスト専用パラメータ。
+                 #   _set_anchor参照。既定0.0はsin(0)=0で従来位置と完全一致する。
+                 toy_elev_deg=None, toy2_elev_deg=None,
                  toy_appear_delay=None, toy_approach_sec=None, toy_approach_from=None,
                  parent_intervene=None, parent_wait_sec=None, parent_lost_deg=None,
                  plain=None, static_tex=None, orient_v=None, orienting_hold=None,
@@ -461,6 +477,10 @@ class ToySupineEnv(SupineMimoEnv):
                  #   ParentLabeling(enabled=False)相当になり1ビットも挙動が変わらない。
                  #   `world.parent_labeling`（辞書）をkwargs直渡しする（環境変数は新設しない）。
                  parent_labeling=None,
+                 # 【2026-08-21新設・F1-4h】語の再生装置。既定None→
+                 #   WordSchedule(schedule=None)相当になり1ビットも挙動が変わらない。
+                 #   `world.word_test`（辞書）をkwargs直渡しする。
+                 word_test=None,
                  eye_rest_vertical_deg=None, eye_centering=None,
                  eye_muscle_scale=None, **kwargs):
         # VOR（前庭動眼反射）。眼球を方策から切り離し、頭の動きを打ち消して視線を安定させる。
@@ -540,6 +560,8 @@ class ToySupineEnv(SupineMimoEnv):
         self._seat_friction = float(SEAT_FRICTION if seat_friction is None
                                     else seat_friction)
         self._floor_dim = float(FLOOR_DIM if floor_dim is None else floor_dim)
+        self._floor_emission = float(FLOOR_EMISSION if floor_emission is None
+                                      else floor_emission)
         self._toy_shape = str(TOY_SHAPE if toy_shape is None else toy_shape)
         self._toy_mode = str(TOY_MODE if toy_mode is None else toy_mode)
         self._toy_appear_delay = float(TOY_APPEAR_DELAY if toy_appear_delay is None
@@ -620,6 +642,9 @@ class ToySupineEnv(SupineMimoEnv):
         # 視線正面からの振り分け角度[度]（片側あたり）。toy2=Falseなら使われない。
         self._toy_angle_deg = float(TOY_ANGLE_DEG_DEFAULT if toy_angle_deg is None
                                     else toy_angle_deg)
+        # 【2026-08-21新設・F1-4h】垂直方向の角度[度]。既定0.0（_set_anchor参照）。
+        self._toy_elev_deg = float(0.0 if toy_elev_deg is None else toy_elev_deg)
+        self._toy2_elev_deg = float(0.0 if toy2_elev_deg is None else toy2_elev_deg)
         # 【2026-08-18新設・F1-3】toy1/toy2の左右符号。+1.0が既定（従来どおりtoy1=左・
         #   toy2=右）。ParentLabelingが5発話ごとに反転させ、_set_anchorを呼び直す
         #   （場所の丸暗記を防ぐ仕掛け。F/docs/仕様_F1-3_....md参照）。
@@ -722,8 +747,13 @@ class ToySupineEnv(SupineMimoEnv):
         # 【2026-08-18新設・F1-3】親のfollow-in labeling。parent_labeling未指定(None)なら
         #   ParentLabeling(enabled=False)になり、update()は毎stepNoneを返すだけ＝
         #   1ビットも既存の挙動を変えない。E/scripts/parent_labeling.py の本体を参照。
-        from parent_labeling import ParentLabeling
+        from parent_labeling import ParentLabeling, WordSchedule
         self._parent_labeling = ParentLabeling(**dict(parent_labeling or {}))
+
+        # 【2026-08-21新設・F1-4h】語の再生装置。word_test未指定(None)なら
+        #   WordSchedule(schedule=None)になり、update()は毎stepNoneを返すだけ＝
+        #   1ビットも既存の挙動を変えない。E/scripts/parent_labeling.py参照。
+        self._word_schedule = WordSchedule(**dict(word_test or {}))
 
         # 首の補正は「落ち着いた初期姿勢」で重力モーメントを測ってから適用する
         # （姿勢で腕の長さが変わるため）。SupineMimoEnvのsettle後＝ここが適切な位置。
@@ -789,10 +819,38 @@ class ToySupineEnv(SupineMimoEnv):
         """
         for g in spec.geoms:                      # worldbody直下のgeom（床はここ）
             if g.name == "floor":
-                g.material = ""                   # 市松テクスチャを外す
                 _fr = PLAIN_RGBA.copy()
                 _fr[:3] *= self._floor_dim        # 照明で明るくなるぶんを相殺する
-                g.rgba = list(_fr)
+                if self._floor_emission > 0.0:
+                    # 2026-08-21：床の横縞対策。material無し（旧来）だと geom.rgba に
+                    #   陰影（cos(法線, 光源方向)）がそのままかかり、無限平面の床は
+                    #   地平線付近（入射角が直角に近い）で黒に落ちる（実測は
+                    #   FLOOR_EMISSION定義直前のコメント参照）。専用material を新設し、
+                    #   emission（自己発光）を上げる。
+                    #   注意：MuJoCoのシェーディングは emission と拡散反射(diffuse)が
+                    #     **同じ material.rgba** を係数倍する（emission_color =
+                    #     emission_scalar × rgba、diffuse_color = cos(N,L) × rgba）。
+                    #     このため単に emission=1.0 だけ上げると、光源に近い画素
+                    #     （cos成分が大きい）で emission と diffuse が足し合わさって
+                    #     1.0を超え白飛びする（実測：emission=1.0でrow108-122が
+                    #     mean 0.99〜1.00に飽和）。
+                    #   対処：floor_emission を「emission_scalar と同じ値」として使い、
+                    #     rgba 側を 1/floor_emission に縮小する
+                    #     （emission_scalar × rgba = 元の目標色のまま、
+                    #     diffuse側の寄与だけ 1/floor_emission に縮む）。
+                    #     floor_emissionを大きくするほど陰影の影響（横縞）が小さくなる。
+                    k = float(self._floor_emission)
+                    mat = spec.add_material()
+                    mat.name = "e_floor_plain"
+                    mat.rgba = list(_fr[:3] / k) + [float(_fr[3])]
+                    mat.emission = k
+                    mat.specular = 0.0
+                    mat.shininess = 0.0
+                    mat.reflectance = 0.0
+                    g.material = "e_floor_plain"
+                else:
+                    g.material = ""                   # 市松テクスチャを外す（従来どおり）
+                    g.rgba = list(_fr)
                 break
         # 空（skybox）も同じ色の単色に。仰向けの太郎が最も長く見ているのは空なので、
         # ここが水色のグラデーションのままだと「床＝灰／空＝水色／柵＝その境界」で
@@ -1126,10 +1184,16 @@ class ToySupineEnv(SupineMimoEnv):
         self._rest_pos2 = None
         if self._toy_offset is None:
             g = self._gaze_dir()
+            # 【2026-08-21新設・F1-4h】up（カメラローカルの上方向）。垂直角
+            #   （elev_deg）の適用に使う。right・up・g（=-cam_xmatのz列）は
+            #   カメラの正規直交基底なので、right/gの線形結合であるg1・g2は
+            #   常にupと直交する＝下のcos/sin合成は単位ベクトルのまま回転できる。
+            #   toy2の有無に関わらず毎回計算するが、cam_xmatの参照だけで軽い。
+            cid = int(self.model.camera("eye_left").id)
+            cmat = np.array(self.data.cam_xmat[cid], dtype=float).reshape(3, 3)
+            right = cmat[:, 0]
+            up = cmat[:, 1]
             if self._toy2:
-                cid = int(self.model.camera("eye_left").id)
-                right = np.array(self.data.cam_xmat[cid],
-                                 dtype=float).reshape(3, 3)[:, 0]
                 ang = np.radians(self._toy_angle_deg)
                 # 【2026-08-18新設・F1-3】左右入れ替え。既定+1.0なら従来どおり
                 #   toy1=左・toy2=右（ParentLabelingが5発話ごとに-1.0へ反転させ、
@@ -1137,9 +1201,16 @@ class ToySupineEnv(SupineMimoEnv):
                 sign = getattr(self, "_toy_swap_sign", 1.0)
                 g1 = g * np.cos(ang) - sign * right * np.sin(ang)     # 左（toy1、既定）
                 g2 = g * np.cos(ang) + sign * right * np.sin(ang)     # 右（toy2、既定）
+                # 【2026-08-21新設・F1-4h】toy2の垂直角。既定0.0ならsin(0)=0で
+                #   g2は不変（1ビットも既存の挙動と変わらない）。
+                elev2 = np.radians(self._toy2_elev_deg)
+                g2 = g2 * np.cos(elev2) + up * np.sin(elev2)
                 self._rest_pos2 = origin + g2 * self._toy2_dist
             else:
                 g1 = g
+            # 【2026-08-21新設・F1-4h】toy1の垂直角。既定0.0ならsin(0)=0でg1は不変。
+            elev1 = np.radians(self._toy_elev_deg)
+            g1 = g1 * np.cos(elev1) + up * np.sin(elev1)
             self._rest_pos = origin + g1 * self._toy_dist   # 視線の正面・距離 _toy_dist
         else:
             # 旧方式（アブレーション用に残す）。こちらは頭の中心からのオフセット。
@@ -1493,6 +1564,8 @@ class ToySupineEnv(SupineMimoEnv):
             self._orienting.reset()        # 前エピソードの画像を持ち越さない
         if getattr(self, "_parent_labeling", None) is not None:
             self._parent_labeling.reset()  # 【2026-08-18新設・F1-3】前エピソードの状態を持ち越さない
+        if getattr(self, "_word_schedule", None) is not None:
+            self._word_schedule.reset()    # 【2026-08-21新設・F1-4h】同上（試行の頭出し）
         if self._toy:
             self.model.geom_rgba[self._toy_gadr] = self._toy_rgba_off
             self.toy_lit = False
@@ -1561,6 +1634,12 @@ class ToySupineEnv(SupineMimoEnv):
         #   parent_labeling未指定（enabled=False）なら常にNoneを返すだけ＝
         #   1ビットも既存の挙動を変えない。
         self._parent_utterance = self._parent_labeling.update(self)
+        # 【2026-08-21新設・F1-4h】語の再生装置。親のfollow-in labelingが同stepで
+        #   発話済み（parent_utterance is not None）でなければ呼ぶ＝両方が同時に
+        #   耳へ入って発話イベントが潰れ合う事態を避ける（word_testはparent_labeling
+        #   を使わないテスト場面での使用を想定しており、通常は競合しない）。
+        if self._parent_utterance is None:
+            self._parent_utterance = self._word_schedule.update(self)
         self._update_glow()
         if self._vor is not None:
             # 方策の眼球出力を捨て、VORの指令に差し替える（皮質は反射弓に介入しない）

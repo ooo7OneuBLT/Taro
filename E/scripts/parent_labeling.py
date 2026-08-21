@@ -23,6 +23,9 @@ toy_angle_deg度ずつ振り分けて配置される（既定12度・間隔24度
 既定値3.0度はこの保証(4度)より安全側に低く取った値。gaze_deg・toy_angle_degを
 大きく変える実験では、この保証が成り立たなくなる可能性がある点に注意。
 """
+import csv
+import os
+
 import numpy as np
 
 
@@ -208,3 +211,102 @@ class ParentLabeling:
         self._state = self._REFRACTORY
         self._silent_t = 0.0
         return result
+
+
+class WordSchedule:
+    """語の再生装置（F1-4h） — 親の状態機械を経由せず、指定した時刻に指定した語を
+    太郎の耳へ直接注入する（乳児語彙テストの音声再生に相当）。
+
+    【設計】F/docs/設計_F1-4h_語彙テストの測定装置.md 技術付録「3. 語の再生装置」
+    「4. 記録と集計」。ParentLabelingが発話を耳へ入れているのと**同じ経路だけ**を
+    流用する（ToySupineEnv.step()が self._parent_utterance を通じて
+    info["parent_utterance"]へ載せ、run/trainer.py._hear_parent_utteranceが
+    耳→連合器へ渡す。トップのdocstring・parent_labeling.py参照）。
+    状態機械・振り・視線確認は一切持たない＝ParentLabelingとは独立した最小限のクラス。
+
+    Args（`world.word_test` から kwargs直渡し。実験ファイル側の書式は
+        技術付録どおり `{"schedule": [...], "csv": "パス"}`）:
+        schedule  [{"t": 秒, "word": 語}, ...]（時刻昇順を想定。エピソード開始
+                  ＝env.data.time=0からの経過秒）。既定None＝空リスト＝
+                  update()は毎stepNoneを返すだけ（CSV書き出しもcsv未指定なら無効）
+                  ＝1ビットも既存の挙動を変えない。
+        csv       毎stepの視線角度・語イベントを書き出す先のパス。既定None＝
+                  書き出さない（技術付録4節「CSVの列」の実体。既存のCSVフック
+                  （run/plugins/common/trace.py 等）はa1/a2/直近語を持たないため、
+                  ここに自前で持たせた＝依頼書「無ければ自前のCSV書き出しを
+                  持たせる」の判断）。
+    """
+
+    def __init__(self, schedule=None, csv=None):
+        self.schedule = list(schedule or [])
+        self.csv_path = csv
+        self._csv_fp = None
+        self._csv_writer = None
+        self.reset()
+
+    def reset(self):
+        """エピソード境界で呼ぶ（ParentLabeling.resetと同じ位置づけ）。
+
+        注意：CSVファイルはエピソードをまたいで開いたままにする（試行=語イベントは
+        1エピソード内で複数回・複数試行の実験JSONを想定しており、エピソードごとに
+        ファイルを作り直すと集計側が読みにくくなるため）。
+        """
+        self._next_idx = 0
+
+    def _ensure_csv(self):
+        if self.csv_path is None or self._csv_writer is not None:
+            return
+        d = os.path.dirname(self.csv_path)
+        if d:
+            os.makedirs(d, exist_ok=True)
+        self._csv_fp = open(self.csv_path, "w", newline="", encoding="utf-8")
+        self._csv_writer = csv.writer(self._csv_fp)
+        self._csv_writer.writerow(["t", "a1", "a2", "word"])
+
+    def update(self, env):
+        """1物理stepぶん進める。
+
+        csv指定があれば毎stepの視線角度（a1=toy1への角度・a2=toy2への角度）と
+        直近に注入された語（無ければ空）を1行書く（技術付録4節）。
+        scheduleの時刻を跨いだstepだけ {"text": word, "target": None} を返す
+        （他はNone）。target は ParentLabeling.update() の戻り値形式に合わせた
+        だけで、WordScheduleでは使わない（toy1/toy2の対応づけは無いテスト場面）。
+
+        env: ToySupineEnv自身（self）。env.data.time（エピソード開始からの秒数）・
+             env._gaze_angle_to・env.taro（run/taro_setup.pyがビルド後に
+             env.unwrapped.taroへ設定する。耳へ到達する唯一の経路）を使う。
+        """
+        word = None
+        if self._next_idx < len(self.schedule):
+            item = self.schedule[self._next_idx]
+            if float(env.data.time) >= float(item.get("t", 0.0)):
+                # 【なぜ、2026-08-21】taro.hearingが無効（既定False）のまま語を
+                #   注入しても、run/trainer.py._hear_parent_utteranceの早期return
+                #   （hearing/lexiconがNoneなら何もしない）で黙って捨てられる。
+                #   語彙テストでこれが起きると「試行は回ったが一語も学習器に
+                #   届いていない」という気づきにくい空振りになる（設計
+                #   技術付録3節「注意：hearing有効が前提」の指定）。
+                #   ビルド時点（e_scene.build()）ではtaro（run/taro_setup.py側）が
+                #   まだ存在せずhearing設定を見られないため、taroが配線済みに
+                #   なる最初の使用時（＝ここ）で止める。
+                taro = getattr(env, "taro", None)
+                assert getattr(taro, "hearing", None) is not None, (
+                    "WordSchedule: taro.hearing が無効です（実験JSONの "
+                    "taro.hearing を true にしてください）。語を注入しても "
+                    "run/trainer.py._hear_parent_utterance の早期returnで "
+                    "黙って捨てられ、テストとして成立しません。")
+                word = item.get("word")
+                self._next_idx += 1
+        if self.csv_path is not None:
+            self._ensure_csv()
+            a1 = env._gaze_angle_to("test_object1")
+            a2 = env._gaze_angle_to("test_object2")
+            self._csv_writer.writerow([
+                f"{float(env.data.time):.4f}",
+                "" if a1 is None else f"{a1:.3f}",
+                "" if a2 is None else f"{a2:.3f}",
+                word or ""])
+            self._csv_fp.flush()
+        if word is not None:
+            return {"text": word, "target": None}
+        return None

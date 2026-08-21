@@ -156,7 +156,32 @@ def default_scene(name="無題"):
             "fence": True,
             "plain": True,
             "floor_dim": 1.0,
+            # 【2026-08-21新設・F1-4h語彙テスト視界調査】床の「横縞」対策。既定0.0＝
+            #   従来どおり床にmaterialを与えない（1ビットも変わらない）。実体は
+            #   e_toy_env.ToySupineEnv._make_visually_plain のfloor_emission引数。
+            #   原因：床（benchmarkv2_scene.xml:40の無限平面）には照明が当たり、
+            #   地平線付近（入射角が直角に近い画素）でLambertian陰影がほぼ0まで
+            #   落ちて暗帯になる（castshadow=OFFでも別原因で残る。no_shadowとは別物）。
+            #   0より大きい値kを与えると、床に専用materialを作りemission=k・
+            #   material.rgba=目標色/kにする（emission×rgba=目標色は保ったまま、
+            #   陰影の寄与だけ1/kに縮む）。実測（scratchpad probe、2026-08-21）：
+            #   k=8で「おもちゃ除く行内std最大0.0212」「行平均のstd0.0326」まで縮小
+            #   （合格基準0.03/0.05）。本シーンはk=10.0を採用（さらに余裕をとった値）。
+            "floor_emission": 0.0,
             "static_tex": False,         # 背景のテクスチャを固定するか
+            # 【2026-08-21新設・F1-4h】影スイッチ。既定False＝従来どおり
+            #   全光源の影が有効（1ビットも変わらない）。Trueで全光源の
+            #   castshadowを切る。根拠：素材md（scratchpad/テスト場面素材.md）
+            #   問1①の実測＝benchmarkv2_scene.xml:43の光源がcastshadow未指定
+            #   （MuJoCo既定true）のままで、太郎の体が無地の床に影を落とし
+            #   暗い帯を作っていた。設計：F/docs/設計_F1-4h_....md 技術付録1節。
+            "no_shadow": False,
+            # 【2026-08-21新設・F1-4h】語の再生装置（WordSchedule）。既定None＝
+            #   不使用（1ビットも変わらない）。形式：
+            #   {"schedule": [{"t":2.0,"word":"わんわん"}, ...], "csv": "パス"}
+            #   実体は E/scripts/parent_labeling.WordSchedule。
+            #   設計：F/docs/設計_F1-4h_....md 技術付録3・4節。
+            "word_test": None,
             # 床の物理。注意体の滑り方が変わるので実験条件として効く
             "floor_roll": None,          # None なら環境の既定
             "floor_condim": None,
@@ -173,6 +198,11 @@ def default_scene(name="無題"):
                 # 【2026-08-18新設】色。None なら従来どおりの既定色（赤）。
                 #   例: [0.8, 0.1, 0.1, 1.0]。未指定シーンは1ビットも挙動が変わらない。
                 "rgba": None,
+                # 【2026-08-21新設・F1-4h】垂直方向の角度[度]。既定0.0＝従来どおり
+                #   視線の正面（sin(0)=0で1ビットも変わらない）。壁の無地部分を
+                #   背にする高さへ上げるためのテスト専用パラメータ。
+                #   設計：F/docs/設計_F1-4h_....md 技術付録2節。
+                "elev_deg": 0.0,
             },
             # 【2026-08-18新設・目標F・F1】2個目のおもちゃ。語↔物の対応づけ判定
             #   （左右に2個置いて、語を聞いてどちらを見るかを測る）に使う。
@@ -187,6 +217,10 @@ def default_scene(name="無題"):
                 # 視線正面からtoy1/toy2を振り分ける角度[度]（片側あたり）。
                 # 例：12なら toy1=左12度・toy2=右12度（視野半角30度に収まる）。
                 "angle_deg": 12.0,
+                # 【2026-08-21新設・F1-4h】toy1のelev_degと同じ意味・同じ既定0.0。
+                #   toy1と独立に指定できる（左右で同じ高さにしたい実験がほとんど
+                #   だが、独立指定できないと困る場面のために分けた）。
+                "elev_deg": 0.0,
             },
             "parent_intervene": False,
             "parent_wait_sec": 2.0,      # 見失ってから差し出し直すまで
@@ -453,6 +487,14 @@ def build(scene, orient=None, vor=True, seed=0, verbose=False, actuation_model=N
     os.environ["E_RECLINE"] = str(w["recline_deg"])
     os.environ["E_SEAT_FRICTION"] = str(w["seat_friction"])
     os.environ["E_FLOOR_DIM"] = str(w["floor_dim"])
+    # 【2026-08-21】E_FLOOR_EMISSIONは既定0.0のとき**設定しない**（floor_rollと
+    #   同じ条件付きの流儀）。無条件に設定すると、ハーネスが照合する環境変数
+    #   スナップショットに新キーが加わり、既存ベースライン全件が機械的に不一致に
+    #   なる（実測：物理は完全一致のまま36シーン全滅の誤検知。切り分け記録＝
+    #   scratchpad/ハーネス全滅切り分け.md 2026-08-21）。値はkwargs直渡しが常に
+    #   勝つため、環境変数を立てなくても新シーンの動作には影響しない。
+    if w["floor_emission"]:
+        os.environ["E_FLOOR_EMISSION"] = str(w["floor_emission"])
     os.environ["E_PLAIN"] = "1" if w["plain"] else "0"
     os.environ["E_FENCE"] = "1" if w["fence"] else "0"
     os.environ["E_TOY_OBJ"] = "1" if toy["enabled"] else "0"
@@ -538,6 +580,10 @@ def build(scene, orient=None, vor=True, seed=0, verbose=False, actuation_model=N
             toy2_rgba=(None if toy2["rgba"] is None else list(toy2["rgba"])),
             toy2_dist=float(toy2["dist"]),
             toy_angle_deg=float(toy2["angle_deg"]),
+            # 【2026-08-21新設・F1-4h】垂直角。既定0.0で従来位置と完全一致
+            #   （e_toy_env.ToySupineEnv側のコメント参照）。
+            toy_elev_deg=float(toy["elev_deg"]),
+            toy2_elev_deg=float(toy2["elev_deg"]),
             newborn_neck=bool(b["neck_fix"]),
             newborn_limbs=bool(b["limb_fix"]),
             # 【2026-08-17・配線改修ステージA】以前はモジュール定数の直接上書き
@@ -546,6 +592,7 @@ def build(scene, orient=None, vor=True, seed=0, verbose=False, actuation_model=N
             #   ここから直接渡す（kwargsが常に勝つ）。
             seat_friction=float(w["seat_friction"]),
             floor_dim=float(w["floor_dim"]),
+            floor_emission=float(w["floor_emission"]),
             toy_shape=str(toy["shape"]),
             toy_mode=str(toy["mode"]),
             toy_appear_delay=float(toy["delay_sec"]),
@@ -558,6 +605,10 @@ def build(scene, orient=None, vor=True, seed=0, verbose=False, actuation_model=N
             #   コンストラクタが受ける）。未指定シーンでもdefault_scene()の
             #   既定値（enabled=False）がここに入るので1ビットも挙動が変わらない。
             parent_labeling=dict(w["parent_labeling"]),
+            # 【2026-08-21新設・F1-4h】語の再生装置。未指定(None)なら
+            #   WordSchedule(schedule=None)相当になり1ビットも変わらない
+            #   （parent_labelingと同じkwargs直渡しの流儀）。
+            word_test=(dict(w["word_test"]) if w["word_test"] else None),
             plain=bool(w["plain"]),
             static_tex=bool(w["static_tex"]),
             orient_v=str(b["orienting_version"]),
@@ -569,6 +620,12 @@ def build(scene, orient=None, vor=True, seed=0, verbose=False, actuation_model=N
             eye_centering=bool(b.get("eye_centering", False)),
             **kw)
         env.reset(seed=seed)
+
+        # 【2026-08-21新設・F1-4h】影スイッチ。物理には無関係（描画設定のみ）なので
+        #   reset直後・姿勢を作り込む前のこの位置でよい。既定False（従来どおり）なら
+        #   このifブロックは実行されず1ビットも変わらない。
+        if w["no_shadow"]:
+            env.unwrapped.model.light_castshadow[:] = 0
 
         # --- 4. 実験開始前の設定 --------------------------------------------
         hands = _apply_setup(env, s, age=b["age_months"], verbose=verbose)
