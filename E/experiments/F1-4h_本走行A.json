@@ -1,0 +1,29 @@
+{
+  "name": "F1-4h_本走行A",
+  "note": "2026-08-21。F1-4h_語彙テスト_パイロット.json のコピー。12試行本走行A（現行の左右・toy1=ぶーぶー/toy2=わんわん）。run.steps=1000（仕様は『10000step（100秒）』と書いていたが、K=10・物理dt=0.01秒/stepより1トレーニングstep=0.1秒（パイロットのnote・trainer.py:364と同じ換算）。1000step=100秒が指示の括弧内『100秒』と一致し、最終語t=90秒+測定6秒=96秒に対して4秒の余裕を持つ（パイロットの500step=50秒・余裕2秒と同じ考え方）。10000stepのままだと1000秒＝10倍の実行時間になり指示の『100秒』と矛盾するため、括弧内の意図を優先して1000に修正した。測定の判断（着手前の想定外・自分で決めた範囲）。",
+  "scene": "座位_6ヶ月_2おもちゃ_F1-4h_テスト12試行A_2026-08-21",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 6.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 64
+    },
+    "model": "E/models/F1-4h_語彙_2026-08-21.pt",
+    "word_attention": {
+      "active_sec": 3.0,
+      "enabled": true
+    },
+    "lr": 0.0
+  },
+  "run": {
+    "type": "train",
+    "steps": 1000,
+    "seed": 0,
+    "K": 10,
+    "checkpoint": 1000,
+    "csv": "E/logs/F1-4h_本走行A/run_seed0.csv"
+  }
+}

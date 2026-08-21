@@ -1,0 +1,29 @@
+{
+  "name": "F1-4h_本走行B",
+  "note": "2026-08-21。F1-4h_語彙テスト_パイロット.json のコピー。12試行本走行B（左右反転・toy2.angle_deg=-12.0でtoy1=右/toy2=左）。stateはbuild→_set_anchor→_apply_tether/_hold_toy2→saveで再取得済み、視界確認スナップショットで箱右・球左を目視確認済み（F/logs/F1-4h_語彙テスト_2026-08-21/走行B_視界確認.png）。run.steps=1000（走行Aと同じ理由で『10000step（100秒）』の括弧内を優先し1000へ修正。詳細は走行Aのnote参照）。",
+  "scene": "座位_6ヶ月_2おもちゃ_F1-4h_テスト12試行B_2026-08-21",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 6.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 64
+    },
+    "model": "E/models/F1-4h_語彙_2026-08-21.pt",
+    "word_attention": {
+      "active_sec": 3.0,
+      "enabled": true
+    },
+    "lr": 0.0
+  },
+  "run": {
+    "type": "train",
+    "steps": 1000,
+    "seed": 0,
+    "K": 10,
+    "checkpoint": 1000,
+    "csv": "E/logs/F1-4h_本走行B/run_seed0.csv"
+  }
+}
