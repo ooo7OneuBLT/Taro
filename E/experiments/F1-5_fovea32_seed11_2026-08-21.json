@@ -1,0 +1,32 @@
+{
+  "name": "F1-5_fovea32_seed11",
+  "note": "2026-08-21（修正版）。段階1のオフライン窓検証でfovea_px=32が有効と確認できたため本走行。gaze_deg=5は棄却（発話激減で学習不成立と判明）し、シーンは元のF1-3c_1個提示（gaze10）に戻した。taro.lexicon_vision.fovea_px=32のみ変更。seed=11。凍結eta=(0.05,0.025)・steps=600。保存先は前回の不成立モデル（gaze5版）を上書き（無価値なため。save側の自動退避ガードも効く）。",
+  "scene": "座位_6ヶ月_2おもちゃ_F1-3c_1個提示_2026-08-19",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 6.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.025,
+    "save": "E/models/F1-5_fovea32_seed11_2026-08-21.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 600,
+    "seed": 11,
+    "K": 10,
+    "checkpoint": 600,
+    "csv": "E/logs/F1-5_fovea32検証/学習_seed11/run_seed11.csv"
+  },
+  "plugins": {
+    "word_learning": {
+      "events_out": "E/logs/F1-5_fovea32検証/学習_seed11/発話イベント.csv"
+    }
+  }
+}

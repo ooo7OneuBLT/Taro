@@ -152,6 +152,9 @@ def parse_args():
                           "DINOv2なので既定のままで内容は再現される）")
     ap.add_argument("--report", default=None,
                      help=f"レポートmdの出力先（既定: {_REPORT_PATH_DEFAULT}）")
+    ap.add_argument("--fovea-px", type=int, default=64,
+                    help="視覚エンコードのフォビア窓[px]（学習時の設定と一致させること。"
+                         "既定64=従来動作。F1-5フォビア32検証用に追加 2026-08-21）")
     ap.add_argument("--tag", default="",
                      help="ログ・レポート見出しに付ける表示用ラベル（例: 延長）")
     ap.add_argument("--scenes", nargs="+", default=None,
@@ -286,6 +289,9 @@ def imagine_embedding(taro, word):
 def main():
     args = parse_args()
     model_path = args.model
+    # --fovea-px：テスト側の視点エンコードを学習時の窓幅に合わせる（不一致だと
+    #   照合が壊れる）。既定64は従来と完全一致。
+    TARO_BASE["lexicon_vision"]["fovea_px"] = int(args.fovea_px)
     e_dir = _resolve(args.e_dir) if args.e_dir else _E_DIR_DEFAULT
     fig_path = _resolve(args.fig) if args.fig else _FIG_PATH_DEFAULT
     views_dir = _resolve(args.views_dir) if args.views_dir else _VIEWS_DIR_DEFAULT
