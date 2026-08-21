@@ -1101,6 +1101,21 @@ class Taro:
           （2026-07-25 に感度分析のモデルが同一だと分かっても原因を追えなかった）。
         """
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        # 【2026-08-21・上書き事故の再発防止】保存先に既存ファイルがあれば、
+        #   上書きの前に <元名>.prev.pt へ退避する（1世代のみ・毎回入れ替え）。
+        #   経緯：実験JSONのsave先を残したまま再走した際、過去の合格を出した
+        #   モデル2本を上書きし、git管理外のため復元不能になった（F日誌
+        #   2026-08-21追記12）。モデル保存系の事故は累計4件目のため、
+        #   文書でなく機械で防ぐ（CLAUDE.md自浄ルール）。
+        if os.path.exists(path):
+            backup = path + ".prev.pt"
+            try:
+                if os.path.exists(backup):
+                    os.remove(backup)
+                os.replace(path, backup)
+                print(f"注意[save] 既存のモデルを退避しました: {backup}")
+            except OSError as e:
+                print(f"注意[save] 既存モデルの退避に失敗（続行します）: {e}")
         blob = {"brain": self.brain.state_dict(),
                 "fusion_insula": self.fusion.insula.state_dict(),
                 "fusion_proprio": self.fusion.proprio.state_dict(),
