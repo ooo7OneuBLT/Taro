@@ -426,6 +426,25 @@ USE_WINNER_ONLY = _os.environ.get("E_WINNER_ONLY", "0") == "1"
 #   既定OFFでは新設メソッドを一度も呼ばず、既存の挙動を1ビットも変えない。
 USE_REMAPPING = _os.environ.get("E_REMAPPING", "0") == "1"
 
+# ---- 目標まで届くサッケード（同一目標への階段状の連射）・F1-4g・2026-08-21 ----
+# 設計：F/docs/設計_F1-4g_目標まで届くサッケード.md 後半「技術付録」。
+#
+# 【なぜ】1発では届かない遠くの目標（球=約19度先）へ行くには複数発が要るが、
+#   今は着地のたびに選挙をゼロからやり直しており、2発目の選挙では出発点の
+#   飽きが回復し始めていて出発点へ引き戻される（「回復レース」。
+#   F日誌2026-08-21追記2で実測確定）。
+# 【人間はどうか】脳幹には目標との差がゼロになるまで撃ち続ける内部フィード
+#   バック回路がある（Robinson DA 1975・標準モデル）。乳児は1発が小さく
+#   階段状になるが、階段の途中で目標を選び直すことはない
+#   （Aslin & Salapatek 1975）。
+# 【既定】OFF。E_SACC_CHAIN=1のときだけ連射する。既定OFFでは _chain_goal が
+#   常にNoneのまま＝既存挙動を1ビットも変えない（IORバンプも従来どおり毎発）。
+USE_SACC_CHAIN = _os.environ.get("E_SACC_CHAIN", "0") == "1"
+SACC_CHAIN_LATENCY = float(_os.environ.get("E_SACC_CHAIN_LATENCY", "0.15"))
+#   修正サッケードの潜時[秒]。成人100-150ms[Tier2]の上端を暫定採用[Tier3・要較正]
+SACC_CHAIN_MAX = int(_os.environ.get("E_SACC_CHAIN_MAX", "4"))
+#   連射の上限発数（無限連射の保険。FRAC=0.3で4発=残り24%まで詰まる）
+
 # 【F1-4b・2026-08-19】語から注意への読み出し回路の受け口。設計：
 #   F/docs/設計_F1-4b_語から注意への読み出し回路.md 後半「部品1」。
 #   「思い浮かべているものと似たものを見ている間も、離れない」という1行の追加。
@@ -655,6 +674,11 @@ class OrientingReflexV2:
         self._sacc_end_t = -1e9      # サッケードが終わった時刻（抑制の起点）
         self._sacc_h = 0.0           # 今のサッケードの方向（撃った瞬間に固定）
         self._sacc_v = 0.0
+        # F1-4g（2026-08-21）：連射（同一目標への階段状サッケード）の状態。
+        #   USE_SACC_CHAIN=Falseなら常にNoneのまま＝既存挙動と完全一致。
+        self._chain_goal = None      # (h_deg, v_deg) 連射の残り目標（視野角・度）。None=連射なし
+        self._chain_count = 0        # 今の連射で撃った発数
+        self._chain_wait = 0.0       # 次の1発までの残り待ち時間[秒]
         self._hold_last_seen_t = -1e9   # 動きを最後に検出した時刻（保持の解除判定）
         # F1-4b：語から読み出した認識信号（0〜1）。set_recognition() でのみ更新される。
         #   呼ばれなければ0.0のまま＝既存挙動と完全一致（下記 apply() 参照）。
@@ -723,6 +747,10 @@ class OrientingReflexV2:
         self._sacc_end_t = -1e9
         self._sacc_h = 0.0
         self._sacc_v = 0.0
+        # F1-4g：連射の状態も前の走行・エピソードを持ち越さない。
+        self._chain_goal = None
+        self._chain_count = 0
+        self._chain_wait = 0.0
         self._hold_last_seen_t = -1e9
         self.n_saccades = 0
         # F1-4b：認識信号もreset()でクリアする（前の走行・エピソードの値を持ち越さない）。
@@ -865,46 +893,74 @@ class OrientingReflexV2:
             self._hold_last_seen_t = self._t
 
         if self._sacc_remaining <= 0.0:
-            ready = (self._t - self._last_saccade_t) >= SACCADE_LATENCY
-            # 中心に十分近ければ撃たない（固視）。自己運動由来の向きは小さいので、
-            #   ここで落ちる。対象があるときは向きが大きく偏るので通る。
-            far_enough = (abs(self.h_dir) >= SACCADE_MIN_DIR
-                          or abs(self.v_dir) >= SACCADE_MIN_DIR)
-            if ready and self.strength >= SACCADE_MIN_STRENGTH and far_enough:
-                self._sacc_h = self.h_dir
-                self._sacc_v = self.v_dir
-                self._sacc_remaining = SACCADE_DURATION
-                self._last_saccade_t = self._t
-                self.n_saccades += 1
-                # F1-4f：命令が確定した瞬間（＝遠心性コピーに相当）に、IOR地図・
-                #   疲労地図をこれから動く分だけずらして書き直す。既定OFF。
-                if USE_REMAPPING:
-                    self._remap_inhibition_maps(self._sacc_h, self._sacc_v)
-                # F1-4e：サッケードで網膜座標がずれるため、持ち越していた競合の場は
-                #   ここで仕切り直す（固視中の持ち越しだけが狙い。OFF時はNoneのまま無害）。
-                self._field = None
-                # 改訂2（2026-08-20）項1：サッケード発火時の馴化リセットは廃止した。
-                #   乳児の馴化の「1回の注視」はサッケードを何度挟んでも継続する
-                #   （Baillargeon et al. 1985）。リセット条件は _update_fixation_locus
-                #   （固視の場所から2秒以上連続で逸れたか）へ一本化した。
-                # 網膜上のずれ[度] → 1発で詰める分だけ目標角度をずらす
-                half = VISION_FOVY_DEG / 2.0
-                dh = EYE_SIGN_H * SACCADE_FRAC * self.h_dir * half
-                dv = EYE_SIGN_V * SACCADE_FRAC * self.v_dir * half
-                self._tgt["eye_h"] = self._angle_deg(self.eye_qadr["h"]) + EYE_SHARE * dh
-                self._tgt["eye_v"] = self._angle_deg(self.eye_qadr["v"]) + EYE_SHARE * dv
-                if "h" in self.neck_qadr:
-                    self._tgt["neck_h"] = self._angle_deg(self.neck_qadr["h"]) + NECK_SHARE * dh
-                if "v" in self.neck_qadr:
-                    self._tgt["neck_v"] = self._angle_deg(self.neck_qadr["v"]) + NECK_SHARE * dv
-            elif self.hold and self._should_hold():
-                # ステップ4b（保持）：サッケードは撃たないが、既に定めた目標
-                #   （self._tgt）へ向けた位置フィードバックだけは続ける。
-                #   本体のサッケード実行中ブロック（この if の外）とは独立の
-                #   経路なので、hold=False の既存挙動には一切触れない。
-                return self._hold_command(action)
+            fire = False
+            # F1-4g：連射中は選挙結果(h_dir/v_dir)を使わず、_chain_goal から
+            #   次の1発を撃つ。連射待ちの間は通常の発火判定（SACCADE_LATENCY待ち等）
+            #   をスキップする（連射が状態機械を占有する）。既定OFF時は
+            #   _chain_goal が常にNoneのままなので、このブロックには一度も入らず
+            #   下のelse（既存の判定）へそのまま進む＝既存挙動と完全一致。
+            if USE_SACC_CHAIN and self._chain_goal is not None:
+                self._chain_wait -= step
+                if self._chain_wait <= 0.0:
+                    half = self._smap.half_fov if self._smap is not None else VISION_FOVY_DEG / 2.0
+                    goal_h, goal_v = self._chain_goal
+                    self._sacc_h = goal_h / half
+                    self._sacc_v = goal_v / half
+                    self._chain_count += 1
+                    fire = True
             else:
+                ready = (self._t - self._last_saccade_t) >= SACCADE_LATENCY
+                # 中心に十分近ければ撃たない（固視）。自己運動由来の向きは小さいので、
+                #   ここで落ちる。対象があるときは向きが大きく偏るので通る。
+                far_enough = (abs(self.h_dir) >= SACCADE_MIN_DIR
+                              or abs(self.v_dir) >= SACCADE_MIN_DIR)
+                if ready and self.strength >= SACCADE_MIN_STRENGTH and far_enough:
+                    self._sacc_h = self.h_dir
+                    self._sacc_v = self.v_dir
+                    fire = True
+                elif self.hold and self._should_hold():
+                    # ステップ4b（保持）：サッケードは撃たないが、既に定めた目標
+                    #   （self._tgt）へ向けた位置フィードバックだけは続ける。
+                    #   本体のサッケード実行中ブロック（この if の外）とは独立の
+                    #   経路なので、hold=False の既存挙動には一切触れない。
+                    return self._hold_command(action)
+
+            if not fire:
                 return action     # サッケード中でなければ何も足さない
+
+            self._sacc_remaining = SACCADE_DURATION
+            self._last_saccade_t = self._t
+            self.n_saccades += 1
+            # F1-4g：発火の直後（選挙発の初弾のみ。連射中の継続弾は _chain_goal が
+            #   既に立っているのでここには入らない）、連射の目標を登録する。
+            if USE_SACC_CHAIN and self._chain_goal is None:
+                half = self._smap.half_fov if self._smap is not None else VISION_FOVY_DEG / 2.0
+                self._chain_goal = (float(self.h_dir) * half, float(self.v_dir) * half)
+                self._chain_count = 1
+            # F1-4f：命令が確定した瞬間（＝遠心性コピーに相当）に、IOR地図・
+            #   疲労地図をこれから動く分だけずらして書き直す。既定OFF。
+            if USE_REMAPPING:
+                self._remap_inhibition_maps(self._sacc_h, self._sacc_v)
+            # F1-4e：サッケードで網膜座標がずれるため、持ち越していた競合の場は
+            #   ここで仕切り直す（固視中の持ち越しだけが狙い。OFF時はNoneのまま無害）。
+            self._field = None
+            # 改訂2（2026-08-20）項1：サッケード発火時の馴化リセットは廃止した。
+            #   乳児の馴化の「1回の注視」はサッケードを何度挟んでも継続する
+            #   （Baillargeon et al. 1985）。リセット条件は _update_fixation_locus
+            #   （固視の場所から2秒以上連続で逸れたか）へ一本化した。
+            # 網膜上のずれ[度] → 1発で詰める分だけ目標角度をずらす
+            # F1-4g：連射中は self._sacc_h/_v が self.h_dir/v_dir ではなく
+            #   goal_h/half（連射目標由来）になるため、ここは self._sacc_h/_v を
+            #   使う（通常発火では self._sacc_h == self.h_dir なので既存挙動と同じ）。
+            half = VISION_FOVY_DEG / 2.0
+            dh = EYE_SIGN_H * SACCADE_FRAC * self._sacc_h * half
+            dv = EYE_SIGN_V * SACCADE_FRAC * self._sacc_v * half
+            self._tgt["eye_h"] = self._angle_deg(self.eye_qadr["h"]) + EYE_SHARE * dh
+            self._tgt["eye_v"] = self._angle_deg(self.eye_qadr["v"]) + EYE_SHARE * dv
+            if "h" in self.neck_qadr:
+                self._tgt["neck_h"] = self._angle_deg(self.neck_qadr["h"]) + NECK_SHARE * dh
+            if "v" in self.neck_qadr:
+                self._tgt["neck_v"] = self._angle_deg(self.neck_qadr["v"]) + NECK_SHARE * dv
 
         # サッケード実行中：目標角度との差を見ながら動かす
         self._sacc_remaining -= step
@@ -944,9 +1000,34 @@ class OrientingReflexV2:
                 self._sacc_remaining = 0.0
             if self._sacc_remaining <= 0.0:
                 self._sacc_end_t = self._t      # 終わった時刻を記録
-                # ステップ5（IOR）：サッケードが終わった瞬間、着地点へガウス抑制を
-                #   加算する。OFF時は呼ばない。
-                if self.ior:
+                if USE_SACC_CHAIN and self._chain_goal is not None:
+                    # F1-4g：連射中の完了点。撃った分（SACCADE_FRAC）を残り目標
+                    #   から引く＝残り目標を (1-SACCADE_FRAC) 倍に縮める
+                    #   （毎発、残りの3割を撃つ＝残りが0.7倍ずつ縮む）。
+                    gh, gv = self._chain_goal
+                    gh *= (1.0 - SACCADE_FRAC)
+                    gv *= (1.0 - SACCADE_FRAC)
+                    half = self._smap.half_fov if self._smap is not None else VISION_FOVY_DEG / 2.0
+                    # far_enoughと同じ判定（OR）の否定＝両軸ともMIN_DIR未満で終了。
+                    too_small = (abs(gh) < SACCADE_MIN_DIR * half
+                                 and abs(gv) < SACCADE_MIN_DIR * half)
+                    if too_small or self._chain_count >= SACC_CHAIN_MAX:
+                        # 連射終了。中間着地にはバンプを立てず、最終地点にだけ
+                        #   「もう見た」印を付ける（ここだけIORバンプ）。
+                        self._chain_goal = None
+                        self._chain_count = 0
+                        self._chain_wait = 0.0
+                        if self.ior:
+                            self._add_ior_bump(self._sacc_h, self._sacc_v)
+                    else:
+                        # 連射続行：次の1発は修正サッケードの潜時のあとに撃つ。
+                        #   中間着地にはIORバンプを立てない。
+                        self._chain_goal = (gh, gv)
+                        self._chain_wait = SACC_CHAIN_LATENCY
+                elif self.ior:
+                    # ステップ5（IOR）：サッケードが終わった瞬間、着地点へガウス抑制を
+                    #   加算する。OFF時は呼ばない。連射OFF時（既定）はここが従来どおり
+                    #   毎発通る＝既定挙動は1ビットも変えない。
                     self._add_ior_bump(self._sacc_h, self._sacc_v)
             return out
 
