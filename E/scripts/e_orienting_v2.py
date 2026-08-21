@@ -518,6 +518,45 @@ HAB_SUPPRESS_STRENGTH = float(_os.environ.get("E_HAB_SUP", "1.0"))
 #   広がりとして同程度と仮定した暫定値）[Tier3・ARBITRARY]
 HAB_SUPPRESS_SIGMA_MM = float(_os.environ.get("E_HAB_SUP_SIGMA", "1.0"))
 
+# ---- 改訂2（2026-08-20・文献調査を受けてリセット条件を人間仕様へ）------------
+# 設計：F/docs/設計_F1-4d_馴化とIOR.md 末尾「改訂2（2026-08-20・文献調査を
+# 受けてリセット条件を人間仕様へ）」節。
+#
+# 【改訂1の敗因（実測）】「サッケードのたびに馴化リセット」（旧・項3。廃止済み。
+#   apply() のサッケード発火ブロック参照）が、自己運動ジッターの小サッケード
+#   （約0.9秒ごと）と噛み合い、馴化が2割までしか積み上がらず全機構が空転した。
+#   1個提示の発話も6→1回に退化（リセットが支配因と切り分け済み）。
+#
+# 【文献の答え】`F/docs/文献調査/2026-08-20_馴化のリセット条件.md`（3本とも
+#   原文精読）：
+#   ・乳児の馴化の「1回の注視」は最大120秒・サッケードを何度挟んでも継続する。
+#     中断の定義は「対象から2秒以上連続して視線が逸れる」のみ
+#     （Baillargeon et al. 1985）
+#   ・リセット経路は「対象の変化（脱馴化）」と「時間経過（自発的回復）」の2つ
+#     （Rankin et al. 2009）
+#   ・固視微動が打ち消すのは低次の感覚順応（Troxler消失）で、行動レベルの
+#     馴化とは別階層の現象（Martinez-Conde et al. 2013）。改訂1はこの2階層を
+#     混同していた
+#
+# 【機構】「固視の場所」（直近の視線方向。眼球角度＝_angle_deg で得る関節角
+#   ベースで近似する。対象そのものの同定はしない＝場所ベースの近似
+#   [Tier3・モデル上の選択]）を追跡する。現在の視線がそこからFIX_LOCUS_DEG
+#   以内なら同一注視の継続とみなし、サッケードがあっても馴化は積み上がり
+#   続ける（_update_fixation_locus 参照）。FIX_LOCUS_DEGを超えて外れた状態が
+#   LOOKAWAY_RESET_SEC連続で戻らなければ、その注視は終了：馴化をリセットし、
+#   新しい視線位置を新たな固視の場所とする（「対象が変わったら完全にゼロ」は
+#   文献の「部分的般化がありうる」より強い単純化＝[Tier3]）。2秒未満の
+#   逸れ・戻りは同一注視の継続（馴化は既存のHAB_RECOVERで自然回復に任せ、
+#   ゼロにはしない＝自発的回復の経路に対応）。
+#   habituation=False（既定）のときはこの経路ごと呼ばれない＝既存挙動と完全一致。
+FIX_LOCUS_DEG = float(_os.environ.get("E_FIX_LOCUS", "10.0"))
+# 【根拠】乳児の「固視の場所」の許容範囲そのものに文献値は無い。既存の
+#   注視判定（SACCADE_MIN_DIR）と同じオーダーから出発する暫定値として
+#   10.0度を置いた（較正はBの受け入れ検証で行う）[Tier3・較正]。
+LOOKAWAY_RESET_SEC = float(_os.environ.get("E_LOOKAWAY_RESET", "2.0"))
+# 【根拠】Baillargeon et al. 1985 の実測基準（対象から2秒以上連続して視線が
+#   逸れたら注視終了とみなす）[Tier2]。
+
 
 class OrientingReflexV2:
     """視線誘導反射・新版。段階的に組み立てる。"""
@@ -549,6 +588,12 @@ class OrientingReflexV2:
         # 馴化（固視対象へのスカラー順応）。既定OFF＝v2は従来のまま1ビット不変。
         self.habituation = bool(USE_HABITUATION if habituation is None else habituation)
         self._habituation = 0.0       # 0=未馴化 〜 1=最大馴化
+        # 改訂2（2026-08-20）：「固視の場所」（眼球角度[度]、h/v）。Noneのうちは
+        #   未確定＝_update_fixation_locus の最初の呼び出しで現在の視線位置を採用する。
+        self._fix_locus_h = None
+        self._fix_locus_v = None
+        # 固視の場所から連続して外れ続けている時刻の起点（Noneなら「今は範囲内」）。
+        self._lookaway_since_t = None
         # ステップ4（階段状サッケード）の状態
         self._t = 0.0                # apply() が刻む内部時刻[秒]
         self._last_saccade_t = -1e9  # 前回サッケードを撃った時刻
@@ -629,6 +674,10 @@ class OrientingReflexV2:
         # ステップ5：IOR地図・馴化スカラーも前の走行・エピソードの値を持ち越さない。
         self._ior_map = None
         self._habituation = 0.0
+        # 改訂2（2026-08-20）：固視の場所・逸れの計時も前の走行を持ち越さない。
+        self._fix_locus_h = None
+        self._fix_locus_v = None
+        self._lookaway_since_t = None
 
     # ------------------------------------------------------------
     # 公開インターフェース
@@ -729,6 +778,11 @@ class OrientingReflexV2:
         #   このブロックは何もしない（if self.ior が False で即抜ける）。
         if self.ior and self._ior_map is not None:
             self._ior_map *= float(np.exp(-step / IOR_DECAY_SEC))
+        # 改訂2：固視の場所からの逸れの計時（2秒以上の逸れでのみ馴化リセット）。
+        #   馴化の更新より先に判定する＝リセットされたその同じstepからHAB_RISEに
+        #   従って0から積み上がる。OFF時は呼ばない＝既存挙動と完全一致。
+        if self.habituation:
+            self._update_fixation_locus(step)
         # ステップ5：馴化スカラーの更新。OFF時は呼ばない。
         if self.habituation:
             self._update_habituation(step)
@@ -754,13 +808,10 @@ class OrientingReflexV2:
                 self._sacc_remaining = SACCADE_DURATION
                 self._last_saccade_t = self._t
                 self.n_saccades += 1
-                # 改訂（2026-08-20）項3：サッケードを撃った瞬間に馴化スカラーを
-                #   0へリセットする。順応は刺激特異的であり、網膜（＝地図）座標の
-                #   まま持ち越すと着地先の新しい対象を誤って抑制するため
-                #   [Tier3・モデル上の選択。設計「改訂」節 項3参照]。
-                #   OFF時（self.habituation=False）は触らない＝既存挙動と完全一致。
-                if self.habituation:
-                    self._habituation = 0.0
+                # 改訂2（2026-08-20）項1：サッケード発火時の馴化リセットは廃止した。
+                #   乳児の馴化の「1回の注視」はサッケードを何度挟んでも継続する
+                #   （Baillargeon et al. 1985）。リセット条件は _update_fixation_locus
+                #   （固視の場所から2秒以上連続で逸れたか）へ一本化した。
                 # 網膜上のずれ[度] → 1発で詰める分だけ目標角度をずらす
                 half = VISION_FOVY_DEG / 2.0
                 dh = EYE_SIGN_H * SACCADE_FRAC * self.h_dir * half
@@ -869,6 +920,47 @@ class OrientingReflexV2:
             if not (self._recognition >= REC_THRESHOLD):
                 return False
         return True
+
+    def _update_fixation_locus(self, step):
+        """改訂2（2026-08-20）：馴化のリセット条件（「固視の場所」の追跡）。
+
+        視線方向は眼球の関節角（_angle_deg・度）で近似する。対象の同定は
+        しない＝場所ベースの近似[Tier3・モデル上の選択。本ファイル冒頭
+        「改訂2」節参照]。現在の視線が固視の場所からFIX_LOCUS_DEG以内なら
+        同一注視の継続とみなし何もしない（逸れの計時があればクリアする）。
+        FIX_LOCUS_DEGを超えて外れている間は逸れの継続時間を数え、
+        LOOKAWAY_RESET_SEC（Baillargeon 1985の実測基準[Tier2]）に達したら
+        馴化をリセットし、そのときの視線位置を新たな固視の場所とする。
+        呼び出し元（apply()）で self.habituation を先に見ているので、
+        OFF時はこのメソッドごと呼ばれない。
+        """
+        if self.data is None:
+            return
+        cur_h = self._angle_deg(self.eye_qadr["h"])
+        cur_v = self._angle_deg(self.eye_qadr["v"])
+        if self._fix_locus_h is None:
+            # 最初の呼び出し：今の視線位置をそのまま固視の場所として採用する。
+            self._fix_locus_h = cur_h
+            self._fix_locus_v = cur_v
+            self._lookaway_since_t = None
+            return
+        dist = float(np.hypot(cur_h - self._fix_locus_h, cur_v - self._fix_locus_v))
+        if dist <= FIX_LOCUS_DEG:
+            # 固視の場所の近傍内＝同一注視の継続。2秒未満の逸れ・戻りは
+            #   継続とみなす（＝逸れの計時をクリアするだけで馴化はゼロにしない。
+            #   自発的回復の経路はHAB_RECOVERに任せる）。
+            self._lookaway_since_t = None
+            return
+        # 固視の場所から外れている。
+        if self._lookaway_since_t is None:
+            self._lookaway_since_t = self._t
+        elif (self._t - self._lookaway_since_t) >= LOOKAWAY_RESET_SEC:
+            # 2秒以上連続して戻らなかった＝その注視は終了。馴化をリセットし、
+            #   新しい視線位置を新たな固視の場所とする。
+            self._habituation = 0.0
+            self._fix_locus_h = cur_h
+            self._fix_locus_v = cur_v
+            self._lookaway_since_t = None
 
     def _update_habituation(self, step):
         """馴化スカラーの更新（ステップ5・2026-08-20）。
