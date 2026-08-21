@@ -394,6 +394,21 @@ HOLD_DAMP_GAIN = float(_os.environ.get("E_HOLD_DAMP", "0.02"))
 #   「揺れが止まって数百ms検出が途切れたら見失ったとみなす」という暫定値。
 HOLD_LOSE_SEC = float(_os.environ.get("E_HOLD_LOSE", "0.5"))
 
+# 【F1-4e・2026-08-20】場の記憶（競合を毎フレーム仕切り直さず持ち越す）。既定OFF。
+#   根拠と使い方は _select_on_collicular_grid 内のコメント参照。
+#   [Tier2の枠組み（動的神経場の連続時間進化）を既存の離散実装に足す形]
+USE_FIELD_MEMORY = _os.environ.get("E_FIELD_MEMORY", "0") == "1"
+
+# 【F1-4e・2026-08-20】開票の変更：重心を「閾値以上の全マス」でなく「最大値を含む
+#   1つの山だけ」で取る。既定OFF。
+#   根拠：現行の全マス重心は、左右の半球に山が両立すると平均＝中央を指し続け
+#   永遠に決着しない（実測：両立72〜85%・toy2方向を指した回数ゼロ）。人間は
+#   45度超の分離では片方を選ぶ（bimodal選択、Van der Stigchel & Nijboer 2013）。
+#   注意：[Tier3・単純化] 人間は35度以内では平均サッケードが実在するため、
+#   「常に勝者の山だけ」は近距離分離での人間の平均化を再現しない（将来、
+#   分離角依存にする改良の余地を残す）。
+USE_WINNER_ONLY = _os.environ.get("E_WINNER_ONLY", "0") == "1"
+
 # 【F1-4b・2026-08-19】語から注意への読み出し回路の受け口。設計：
 #   F/docs/設計_F1-4b_語から注意への読み出し回路.md 後半「部品1」。
 #   「思い浮かべているものと似たものを見ている間も、離れない」という1行の追加。
@@ -610,6 +625,8 @@ class OrientingReflexV2:
         # F1-4b：語から読み出した認識信号（0〜1）。set_recognition() でのみ更新される。
         #   呼ばれなければ0.0のまま＝既存挙動と完全一致（下記 apply() 参照）。
         self._recognition = 0.0
+        # F1-4e：競合の場の持ち越し（USE_FIELD_MEMORY時のみ使用。OFFなら常にNone）。
+        self._field = None
         # 撃った瞬間に決める目標角度[度]（位置フィードバックの目標）
         self._tgt = {"eye_h": 0.0, "eye_v": 0.0, "neck_h": 0.0, "neck_v": 0.0}
         self.n_saccades = 0          # 撃った回数（テスト・観察用）
@@ -676,6 +693,8 @@ class OrientingReflexV2:
         self.n_saccades = 0
         # F1-4b：認識信号もreset()でクリアする（前の走行・エピソードの値を持ち越さない）。
         self._recognition = 0.0
+        # F1-4e：競合の場もエピソード境界で仕切り直す。
+        self._field = None
         # ステップ5：IOR地図・馴化スカラーも前の走行・エピソードの値を持ち越さない。
         self._ior_map = None
         self._habituation = 0.0
@@ -819,6 +838,9 @@ class OrientingReflexV2:
                 self._sacc_remaining = SACCADE_DURATION
                 self._last_saccade_t = self._t
                 self.n_saccades += 1
+                # F1-4e：サッケードで網膜座標がずれるため、持ち越していた競合の場は
+                #   ここで仕切り直す（固視中の持ち越しだけが狙い。OFF時はNoneのまま無害）。
+                self._field = None
                 # 改訂2（2026-08-20）項1：サッケード発火時の馴化リセットは廃止した。
                 #   乳児の馴化の「1回の注視」はサッケードを何度挟んでも継続する
                 #   （Baillargeon et al. 1985）。リセット条件は _update_fixation_locus
@@ -1298,7 +1320,20 @@ class OrientingReflexV2:
             return 0.0, 0.0, 0.0
 
         inp = g / g.max()
-        u = inp.copy()
+        # 【F1-4e・2026-08-20】場の記憶（綱引きの持ち越し）。既定OFF。
+        #   従来は毎フレーム u = inp.copy() で競合を仕切り直していたため、
+        #   対称な2標的ではノイズが一瞬対称を破っても次のフレームで消え、
+        #   永遠に決着しなかった（実測：左右両視野に山が両立するフレーム72%・
+        #   toy2方向を勝者が指した回数ゼロ。日誌2026-08-20追記7）。
+        #   動的神経場の標準形は場を時間の中で連続進化させ、ノイズが破った対称が
+        #   自己強化されて1山に収束する（Wilimzig et al. 2006・原文精読：対称2標的の
+        #   選択には確率的な対称性の破れが必須）。ONのときは前フレームの場を
+        #   初期値に使う（固視中の持ち越し。サッケード発火時は網膜座標がずれるため
+        #   apply() 側で場をリセットする＝新しい視点で仕切り直し）。
+        if USE_FIELD_MEMORY and self._field is not None and self._field.shape == inp.shape:
+            u = self._field
+        else:
+            u = inp.copy()
         se = (0.0, LI_SIGMA_EXC_MM / smap.dv, LI_SIGMA_EXC_MM / smap.du)
         si = (0.0, LI_SIGMA_INH_MM / smap.dv, LI_SIGMA_INH_MM / smap.du)
         noise_scale = self.noise * np.sqrt(LI_RATE)
@@ -1312,7 +1347,20 @@ class OrientingReflexV2:
             if noise_scale > 0:
                 u = u + noise_scale * self.rng.standard_normal(u.shape)
         u = np.clip(u, 0, None)
+        if USE_FIELD_MEMORY:
+            self._field = u.copy()      # 次フレームへ持ち越す（F1-4e）
         self.competed_map = u
+        if USE_WINNER_ONLY and u.max() > 1e-12:
+            # 最大値を含む連結成分（＝勝者の山）だけを残して重心を取る（F1-4e）。
+            #   場の持ち越し(self._field)には触れない＝競合の力学は変えず読み出しのみ。
+            from scipy.ndimage import label as _ndlabel
+            mask = u >= CENTROID_THRESH_FRAC * u.max()
+            side, iv, iu = np.unravel_index(int(np.argmax(u)), u.shape)
+            lab, _n = _ndlabel(mask[side])
+            keep = lab == lab[iv, iu]
+            u_win = np.zeros_like(u)
+            u_win[side][keep] = u[side][keep]
+            u = u_win
         h_dir, v_dir = smap.grid_direction(u, thresh_frac=CENTROID_THRESH_FRAC)
         strength = float(min(activity.max(), 1.0))
         return float(h_dir), float(v_dir), strength
