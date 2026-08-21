@@ -409,6 +409,23 @@ USE_FIELD_MEMORY = _os.environ.get("E_FIELD_MEMORY", "0") == "1"
 #   分離角依存にする改良の余地を残す）。
 USE_WINNER_ONLY = _os.environ.get("E_WINNER_ONLY", "0") == "1"
 
+# ---- ステップ7（remapping）・2026-08-21 追加 ----
+# 設計：F/docs/設計_F1-4f_抑制地図のremapping.md 後半「技術付録」節。
+# 根拠調査：F/docs/文献調査/2026-08-21_IORの座標系とremapping.md
+#
+# 【なぜ】IOR地図・疲労地図はどちらも「視野のどこか」（網膜基準）で書かれて
+#   いるため、サッケードで目が動くたびにメモと実際の物の位置がずれる。実測
+#   （2026-08-21色替え実験）：箱に飽きて逃げても、新しい注視点が「さっき視野
+#   中心に溜めた疲労」の真上に重なって即ブレーキし、箱は視野の別の場所へ
+#   移るのでメモが外れ、また目立つ物として復活する往復が起きていた。
+# 【人間はどうか】サッケード命令が決まった瞬間（遠心性コピー）を使って、
+#   IOR等の地図をこれから動く分だけ逆向きにずらし、世界基準へ書き直す
+#   （remapping。サッケード前100〜200msから先回りで始まる、Duhamel 1992
+#   Tier1。上丘そのもので観測、Tier1〜2）。
+# 【既定】OFF。E_REMAPPING=1のときだけ _remap_inhibition_maps を呼ぶ。
+#   既定OFFでは新設メソッドを一度も呼ばず、既存の挙動を1ビットも変えない。
+USE_REMAPPING = _os.environ.get("E_REMAPPING", "0") == "1"
+
 # 【F1-4b・2026-08-19】語から注意への読み出し回路の受け口。設計：
 #   F/docs/設計_F1-4b_語から注意への読み出し回路.md 後半「部品1」。
 #   「思い浮かべているものと似たものを見ている間も、離れない」という1行の追加。
@@ -603,6 +620,9 @@ class OrientingReflexV2:
         self._habituation = 0.0       # 0=未馴化 〜 1=最大馴化
         # 改訂3（2026-08-20）：疲労場 H（上丘格子と同形）。使うまでNoneのまま。
         self._fatigue_map = None
+        # F1-4f（2026-08-20）：remapping用・各升の視野座標キャッシュ。
+        #   USE_REMAPPING=Falseなら一度も計算されずNoneのまま（既存挙動と完全一致）。
+        self._grid_xy_deg = None
         # 直近の update() 呼び出しで作った駆動信号（正規化済み競合入力）。
         #   vision は物理stepより粗い周期でしか更新されないため、_update_fatigue
         #   （apply()から毎step呼ばれる）は次のupdate()が来るまでこれをそのまま
@@ -701,6 +721,8 @@ class OrientingReflexV2:
         # 改訂3（2026-08-20）：疲労場・駆動信号も前の走行・エピソードを持ち越さない。
         self._fatigue_map = None
         self._fatigue_drive = None
+        # F1-4f：格子座標キャッシュも仕切り直す（画像サイズが変わる可能性への保険）。
+        self._grid_xy_deg = None
         # 改訂2（2026-08-20）：固視の場所・逸れの計時も前の走行を持ち越さない。
         self._fix_locus_h = None
         self._fix_locus_v = None
@@ -838,6 +860,10 @@ class OrientingReflexV2:
                 self._sacc_remaining = SACCADE_DURATION
                 self._last_saccade_t = self._t
                 self.n_saccades += 1
+                # F1-4f：命令が確定した瞬間（＝遠心性コピーに相当）に、IOR地図・
+                #   疲労地図をこれから動く分だけずらして書き直す。既定OFF。
+                if USE_REMAPPING:
+                    self._remap_inhibition_maps(self._sacc_h, self._sacc_v)
                 # F1-4e：サッケードで網膜座標がずれるため、持ち越していた競合の場は
                 #   ここで仕切り直す（固視中の持ち越しだけが狙い。OFF時はNoneのまま無害）。
                 self._field = None
@@ -1104,6 +1130,79 @@ class OrientingReflexV2:
         dv = smap.grid_v - v0
         bump = np.exp(-(du ** 2 + dv ** 2) / (2.0 * IOR_SIGMA_MM ** 2))
         self._ior_map[si] += bump.astype(np.float32)
+
+    def _remap_inhibition_maps(self, h_dir, v_dir):
+        """サッケードをまたいで「飽きメモ」を世界の場所に貼り続ける（F1-4f）。
+
+        目が (dx,dy)[度] 動くと、世界の点は視界の中で (-dx,-dy) ずれる。
+        「メモを世界の点に貼り続ける」＝各升の新しい値を、(dx,dy)だけ先の
+        視野位置の旧値から取る（forward remapping・最小近似・最近傍）。
+        設計：F/docs/設計_F1-4f_抑制地図のremapping.md 後半「技術付録」節。
+
+        h_dir, v_dir: self._sacc_h, self._sacc_v（撃った瞬間に確定した方向、
+            すなわち遠心性コピーに相当する命令そのもの）。
+        """
+        if self._ior_map is None and self._fatigue_map is None:
+            return   # どちらの地図もまだ無い（一度も画像を処理していない）
+        smap = self._smap
+        if smap is None:
+            return
+
+        import sys as _s, os as _o
+        _b = _o.path.abspath(_o.path.join(
+            _o.path.dirname(_o.path.abspath(__file__)), _o.pardir, _o.pardir,
+            "taro_core", "src", "brain"))
+        if _b not in _s.path:
+            _s.path.insert(0, _b)
+        from superior_colliculus import collicular_to_visual, visual_to_collicular
+
+        # 命令として送るずらし量[度]。IORバンプの位置（SCが選んだ方向そのもの）
+        #   とは別物：ここは EYE_SIGN を掛けない実際の視野角の移動量（`:850-851`と
+        #   同じ量・眼球関節の符号合わせは地図には無関係）。
+        half = smap.half_fov
+        dx = SACCADE_FRAC * float(h_dir) * half   # 右が正[度]
+        dy = SACCADE_FRAC * float(v_dir) * half   # 上が正[度]
+
+        # 各升の視野座標（初回のみ計算してキャッシュ）。
+        if self._grid_xy_deg is None or self._grid_xy_deg[0].shape != (2,) + smap.grid_u.shape:
+            gx_deg, gy_deg = collicular_to_visual(smap.grid_u, smap.grid_v,
+                                                  smap.a, smap.bu, smap.bv)
+            x_cell = np.stack([gx_deg, -gx_deg], axis=0)     # side0:右(+)、side1:左(-)
+            y_cell = np.stack([gy_deg, gy_deg], axis=0)
+            self._grid_xy_deg = (x_cell, y_cell)
+        x_cell, y_cell = self._grid_xy_deg
+
+        # 取り出し元の視野座標＝(dx,dy)だけ先。
+        x_src = x_cell + dx
+        y_src = y_cell + dy
+
+        side_src = np.where(x_src >= 0.0, 0, 1)
+        ecc = np.hypot(x_src, y_src)
+        azim_folded = np.arctan2(y_src, np.abs(x_src))
+        u, v = visual_to_collicular(ecc, azim_folded, smap.a, smap.bu, smap.bv)
+
+        v_max = smap.dv * smap.nv / 2.0
+        iu = np.round(u / smap.du - 0.5).astype(np.intp)
+        iv = np.round((v + v_max) / smap.dv - 0.5).astype(np.intp)
+
+        valid = (iu >= 0) & (iu < smap.nu) & (iv >= 0) & (iv < smap.nv)
+        iu_c = np.clip(iu, 0, smap.nu - 1)
+        iv_c = np.clip(iv, 0, smap.nv - 1)
+
+        def _remap_one(old):
+            shape = (2, smap.nv, smap.nu)
+            if old is None or old.shape != shape:
+                return old
+            new = np.zeros_like(old)
+            # 最近傍で一括取得（升をforループで回さない）。
+            gathered = old[side_src, iv_c, iu_c]
+            new[valid] = gathered[valid]
+            return new
+
+        if self._ior_map is not None:
+            self._ior_map = _remap_one(self._ior_map)
+        if self._fatigue_map is not None:
+            self._fatigue_map = _remap_one(self._fatigue_map)
 
     def _angle_vel_deg(self, adrs):
         """今の関節角速度[度/秒]。複数あれば平均。保持のダンピング項に使う。"""
