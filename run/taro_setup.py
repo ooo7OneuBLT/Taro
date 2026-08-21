@@ -345,7 +345,8 @@ def _setup_hearing(taro, cfg, *, verbose=True):
     # 【F1-5・2026-08-21】lexicon_mode="sum"（既定）なら旧挙動と完全一致。
     #   "contrast"のときだけ対照学習（引き寄せ＋引き離し）が有効になる。
     #   設計：F/docs/設計_F1-5_連合器の対照学習化.md
-    taro.lexicon = Lexicon(state_dim=taro.vision_backend.dim, mode=cfg.lexicon_mode)
+    taro.lexicon = Lexicon(state_dim=taro.vision_backend.dim, mode=cfg.lexicon_mode,
+                          eta_pull=cfg.lexicon_eta_pull, eta_push=cfg.lexicon_eta_push)
     if verbose:
         print(f"[耳] taro.hearing/taro.lexicon ON（視覚バックエンド="
               f"{taro.vision_backend.name} state_dim={taro.vision_backend.dim}）",

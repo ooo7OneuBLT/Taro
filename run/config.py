@@ -93,6 +93,14 @@ TARO_DEFAULTS = {
     #   設計：F/docs/設計_F1-5_連合器の対照学習化.md
     "lexicon_mode": ("sum", "連合器の学習則。'sum'=従来の単純平均（既定）、"
                      "'contrast'=引き寄せ＋引き離しの対照学習", None),
+    # 【F1-5新設・2026-08-21・較正掃引の配線】lexicon_mode="contrast"のときだけ意味を持つ
+    #   学習率2つ。既定値はLexiconコンストラクタの既定と同一（eta_pull=0.2, eta_push=0.1）
+    #   ＝渡さなければ挙動は1ビットも変わらない。実験ファイルの学習率掃引用に追加した
+    #   だけで、taro_core/src/brain/lexicon.py 側のロジックは変更していない。
+    "lexicon_eta_pull": (0.2, "連合器の対照学習：引き寄せの学習率（mode='contrast'のみ"
+                         "意味を持つ）", None),
+    "lexicon_eta_push": (0.1, "連合器の対照学習：引き離しの学習率（mode='contrast'のみ"
+                         "意味を持つ）", None),
     # 【2026-08-19新設・F1-4b】語から注意への読み出し回路。「思い浮かべているものと
     #   似たものを見ている間も、視線が離れにくくなる」。既定None＝OFF。
     #   trainer.py側は設定がNoneなら一切の追加計算（DINOv2 encode等）をしない

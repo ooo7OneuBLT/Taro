@@ -1,0 +1,32 @@
+{
+  "name": "F1-5_contrast_seed1",
+  "note": "2026-08-21。F1-5受け入れバッチ 段階2（凍結値で本番）。段階1の較正で最良だった (eta_pull, eta_push)=(0.05, 0.025)（c3、40/40）を凍結して使用。E/experiments/F1-4h_語彙_学習走行_パイロット.json のコピーに lexicon_mode='contrast' と凍結eta・run.seed=1 を追加。他は無変更（scene・steps=600=60秒相当）。",
+  "scene": "座位_6ヶ月_2おもちゃ_F1-3c_1個提示_2026-08-19",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 6.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 64
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.025,
+    "save": "E/models/F1-5_contrast_seed1_2026-08-21.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 600,
+    "seed": 1,
+    "K": 10,
+    "checkpoint": 600,
+    "csv": "E/logs/F1-5_受け入れ/学習_seed1/run_seed1.csv"
+  },
+  "plugins": {
+    "word_learning": {
+      "events_out": "E/logs/F1-5_受け入れ/学習_seed1/発話イベント.csv"
+    }
+  }
+}
