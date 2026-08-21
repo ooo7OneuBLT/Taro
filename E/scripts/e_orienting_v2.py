@@ -486,6 +486,38 @@ HAB_RISE_SEC = float(_os.environ.get("E_HAB_RISE", "5.0"))
 HAB_RECOVER_SEC = float(_os.environ.get("E_HAB_RECOVER", "5.0"))
 HAB_BREAK = float(_os.environ.get("E_HAB_BREAK", "0.5"))
 
+# ---- 改訂（2026-08-20・実測を受けて）：馴化を「地図上の順応」へ ------------
+# 設計：F/docs/設計_F1-4d_馴化とIOR.md 末尾「改訂（2026-08-20・実測を受けて）」節。
+#
+# 【なぜ】初版（馴化＝保持解除のスイッチのみ）は競合の点数に触らないため、
+#   静止2おもちゃ・全機構ONの実測で「toy1に張り付いたまま toy2への訪問ゼロ」
+#   になった（`F/logs/F1-4d_視線探索_2026-08-20/B2_修正後_視線タイムライン.png`）。
+#   固視ゾーン（中央付近）はそもそもサッケードを撃たないのでIORが乗らず、
+#   馴化スカラーだけでは競合が凍りつく。人間の馴化は「見続けている刺激への
+#   神経反応そのものの減衰」＝競合の点数自体が下がる現象であるため、
+#   IORの減算と同じ場所（_select_on_collicular_grid の競合入力）に、
+#   「いま見ている中央」への抑制を追加する。
+#
+# 【地図の中央の求め方】上丘座標系は視線中心の座標系（着地点をこの座標系へ
+#   写しているのがIORの _ior_landing_uv と同じ流儀）なので、「中央＝視野中心
+#   （偏心0）」は grid_u=0, grid_v=0 に対応する（visual_to_collicular は
+#   偏心0でu=0,v=0を返す＝OTTES変換のlog(1+ecc/a)がecc=0でゼロになるため）。
+#   左右2枚（0:右視野/1:左視野）の格子はどちらも u=0（偏心0）が中心視野側の
+#   境界にあり、同じ grid_u/grid_v 配列を共有するため、ガウス抑制を
+#   smap.grid_u, smap.grid_v から作れば**両方の地図に自動的に同じ形で載る**
+#   （IORの着地点抑制のように片側だけを選ぶ必要が無い＝視野中心は左右の
+#   境界そのものなので両側にまたがる、という扱い。既存IORの流儀に合わせつつ、
+#   中央だけは「側を選ばない」形にした）[Tier3・モデル上の選択]。
+#
+# HAB_SUPPRESS_STRENGTH: 抑制の強さの係数。文献値は無く、Bの受け入れ検証
+#   （toy1/toy2の両方に10度以内の滞在が発生するか）を指標に較正する。
+#   [Tier3・ARBITRARY]
+HAB_SUPPRESS_STRENGTH = float(_os.environ.get("E_HAB_SUP", "1.0"))
+# HAB_SUPPRESS_SIGMA_MM: 中央抑制の広がり[mm]。側方抑制・IORと同じ流儀で、
+#   初期値はIOR_SIGMA_MMと同じにする（両方とも根拠は無く、上丘上の抑制の
+#   広がりとして同程度と仮定した暫定値）[Tier3・ARBITRARY]
+HAB_SUPPRESS_SIGMA_MM = float(_os.environ.get("E_HAB_SUP_SIGMA", "1.0"))
+
 
 class OrientingReflexV2:
     """視線誘導反射・新版。段階的に組み立てる。"""
@@ -722,6 +754,13 @@ class OrientingReflexV2:
                 self._sacc_remaining = SACCADE_DURATION
                 self._last_saccade_t = self._t
                 self.n_saccades += 1
+                # 改訂（2026-08-20）項3：サッケードを撃った瞬間に馴化スカラーを
+                #   0へリセットする。順応は刺激特異的であり、網膜（＝地図）座標の
+                #   まま持ち越すと着地先の新しい対象を誤って抑制するため
+                #   [Tier3・モデル上の選択。設計「改訂」節 項3参照]。
+                #   OFF時（self.habituation=False）は触らない＝既存挙動と完全一致。
+                if self.habituation:
+                    self._habituation = 0.0
                 # 網膜上のずれ[度] → 1発で詰める分だけ目標角度をずらす
                 half = VISION_FOVY_DEG / 2.0
                 dh = EYE_SIGN_H * SACCADE_FRAC * self.h_dir * half
@@ -843,6 +882,14 @@ class OrientingReflexV2:
         先に見ているので、OFF時はこのメソッドごと呼ばれない。
         """
         holding = self._sacc_remaining <= 0.0 and self._should_hold()
+        # 改訂（2026-08-20）項4：認識信号（F1-4b）が立っている間は馴化の上昇を
+        #   保留する。「保持しているのに上昇させない」を、holdingを見かけ上
+        #   Falseとして扱うことで実現する＝rise用のtargetを使わず、通常の
+        #   非保持時と同じ経路（recoverへ向かう）に合流させる。初版の
+        #   「解除の保留」（_should_hold内）と同じ優先順位方式の拡張
+        #   [Tier3・モデル上の選択・文献根拠なし。設計「改訂」節 項4参照]。
+        if self._recognition >= REC_THRESHOLD:
+            holding = False
         tau = HAB_RISE_SEC if holding else HAB_RECOVER_SEC
         target = 1.0 if holding else 0.0
         self._habituation += step * (target - self._habituation) / max(tau, 1e-6)
@@ -1087,6 +1134,23 @@ class OrientingReflexV2:
         #   このブロックには入らない）。
         if self.ior and self._ior_map is not None and self._ior_map.shape == g.shape:
             g = np.clip(g - IOR_STRENGTH * self._ior_map, 0, None)
+        # 改訂（2026-08-20）項2：馴化スカラーを、地図の中央領域への抑制として
+        #   競合入力から引く（IORの減算と同じ場所）。中央＝視野中心（偏心0）
+        #   に対応する grid_u=0, grid_v=0（本ファイル冒頭 HAB_SUPPRESS_STRENGTH
+        #   直前のコメント参照）。左右2枚（gの2軸目）は同じgrid_u/grid_vを
+        #   共有するので、[nv,nu]のガウスをブロードキャストするだけで両方の
+        #   地図に同じ形で載る＝側を選ぶ必要が無い。
+        #   項4：認識信号が立っている間は中央抑制の適用も保留する
+        #   （馴化の上昇の保留と同じ優先順位方式。_update_habituation参照）
+        #   [Tier3・モデル上の選択・文献根拠なし]。
+        #   OFF時（self.habituation=False）は呼ばない＝既存挙動と完全一致。
+        if (self.habituation and self._habituation > 0.0
+                and self._recognition < REC_THRESHOLD):
+            du = smap.grid_u
+            dv = smap.grid_v
+            hab_bump = HAB_SUPPRESS_STRENGTH * self._habituation * np.exp(
+                -(du ** 2 + dv ** 2) / (2.0 * HAB_SUPPRESS_SIGMA_MM ** 2))
+            g = np.clip(g - hab_bump.astype(np.float32), 0, None)
         self.sc_input = g
         if g.max() < 1e-9:
             self.competed_map = g
