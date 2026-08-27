@@ -1,0 +1,36 @@
+{
+  "name": "F2-9_視線プローブ",
+  "note": "2026-08-26。学習中の太郎の視線が的にどれだけ連続で留まるかを測る（120秒）。hold=1.0秒ですら発話0回だった原因を、連続注視区間の分布として絵にする。親はhold0.3のシーン（発話が起きる条件）で動かす。",
+  "scene": "座位_12ヶ月_2おもちゃ_F2-9_hold0.3_2026-08-26",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 12.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.025,
+    "save": "F/models/_F2-9_gazeprobe_2026-08-26.pt",
+    "model": "F/models/F2-6_P1_喃語900s_12ヶ月_seed10_2026-08-24.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 1200,
+    "seed": 10,
+    "K": 10,
+    "checkpoint": 1200,
+    "csv": "F/logs/F2-9_共同注意/視線プローブ/run.csv"
+  },
+  "plugins": {
+    "word_learning": {
+      "events_out": "F/logs/F2-9_共同注意/視線プローブ/発話イベント.csv"
+    },
+    "gaze_probe": {
+      "angles_out": "F/logs/F2-9_共同注意/視線プローブ/視線角度.csv"
+    }
+  }
+}

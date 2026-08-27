@@ -1,0 +1,16 @@
+{
+  "name": "目視：12ヶ月の体で座位が保てるか",
+  "note": "2026-08-23。F2-2（初語）を12〜15ヶ月でやる方針に変えたため、12ヶ月の体で座位が破綻していないかを編集ウィンドウ付きViewerで目視する。シーンの関節角度(state)は6ヶ月版の流用（シーンのnoteに『未検証・目視確認要』と明記されている）。headlessの実測ではhip移動0.0000m（ただし全関節が固定＝arm/finger/head/leg/trunk、root_pinned=true なので崩れようがない設定であることに注意。数値では判断できない＝落とし穴チェックリスト項70）。見る観点：①座り姿勢が自然か（前かがみ・脚の投げ出し方） ②体格が6ヶ月版より大きくなっているか ③おもちゃ（球）が視界に入る位置か ④中心窩カメラ336pxで何が見えているか。学習済みモデルは6ヶ月で学習したF1-5（見た物→語が学習済み）。",
+  "scene": "座位_12ヶ月_2おもちゃ_F1-3c_1個提示_fovea_2026-08-23",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 12.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": { "backend": "dinov2_vits14", "fovea_px": 32 },
+    "lexicon_mode": "contrast",
+    "model": "F/models/F1-5_fovea32_300s_seed10_2026-08-21.pt"
+  },
+  "run": { "type": "edit" },
+  "plugins": {}
+}

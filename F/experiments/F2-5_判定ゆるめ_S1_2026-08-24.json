@@ -1,0 +1,33 @@
+{
+  "name": "F2-5_判定ゆるめ_セッション1",
+  "note": "2026-08-24。親の発話回数を回復させる試み。喃語900秒を経た6ヶ月モデルから、判定をゆるめたシーンで4語学習のセッション1（ぱぱ・ねこ）を走らせる。比較対象：まっさら+厳しい判定=46回（実測）／見飽きた+厳しい判定=13回／喃語後+厳しい判定（12ヶ月）=5回。この走行は6ヶ月で行う（12ヶ月は1本20分かかるため。角度は実測でほぼ同じと確認済み）。",
+  "scene": "座位_6ヶ月_2おもちゃ_F2-5_判定ゆるめ_セッション1_2026-08-24",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 6.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.025,
+    "save": "F/models/F2-5_S1_判定ゆるめ_seed10_2026-08-24.pt",
+    "model": "F/models/F2-4_P1_喃語900s_seed10_2026-08-24.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 3000,
+    "seed": 10,
+    "K": 10,
+    "checkpoint": 3000,
+    "csv": "F/logs/F2-5_判定ゆるめ/S1/run.csv"
+  },
+  "plugins": {
+    "word_learning": {
+      "events_out": "F/logs/F2-5_判定ゆるめ/S1/発話イベント.csv"
+    }
+  }
+}

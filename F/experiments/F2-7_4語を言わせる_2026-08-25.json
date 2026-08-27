@@ -1,0 +1,41 @@
+{
+  "name": "F2-7_4語を言わせる",
+  "note": "2026-08-25。**物を見せて、太郎に名前を言わせる**（物→語）。これまでの4語テストは「語を聞かせて、どの物を思い浮かべるか」（語→物）で、方向が逆だった。本来やりたいのは今朝F2-2で実現した形＝見た物の名前を言う。使うモデルは4語を覚え、帳面（473行・68種）も持っている F2-6_ABAB3_B2。4語とも発音可能。実行モード（produce.learn無し・exploration_noise無し）＝学習はせず、帳面を引いて言うだけ。トリガーは視覚（じっと見て・それが何か分かって・クールダウン）。 【修正】シーンを4物体テスト用へ、モデルをABAB最終（B2＝4語学習済み・帳面473行）へ訂正。",
+  "scene": "座位_12ヶ月_4おもちゃ_F2-6_4語テスト_2026-08-25",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 12.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.025,
+    "model": "F/models/F2-6_ABAB3_B2_seed10_2026-08-24.pt",
+    "produce": {
+      "mode": "word",
+      "threshold": 0.8,
+      "cooldown_sec": 2.0,
+      "max_length": 8,
+      "develop_from_age": true,
+      "vocal_tract_decoupled": true
+    },
+    "save": "F/models/_F2-7_言わせる_2026-08-25.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 3000,
+    "seed": 10,
+    "K": 10,
+    "checkpoint": 3000,
+    "csv": "F/logs/F2-7_4語を言わせる/run.csv"
+  },
+  "plugins": {
+    "word_production": {
+      "events_out": "F/logs/F2-7_4語を言わせる/発話イベント.csv"
+    }
+  }
+}

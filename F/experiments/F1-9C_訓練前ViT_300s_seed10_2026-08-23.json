@@ -1,0 +1,33 @@
+{
+  "name": "F1-9C_訓練前ViT_300s_seed10",
+  "note": "2026-08-23。目のアブレーション（設計 F/docs/設計_F1-9_物差しの修復と目のアブレーション.md 第2部C節）。F1-5_fovea32_300s_seed10 と**視覚バックエンドだけ**を差し替えた対照実験（dinov2_vits14＝実写1.42億枚で訓練済み → vits14_untrained＝まったく同じ形で重みだけランダム）。他の設定・シーン・seed・steps は1つも変えていない。狙い：太郎の語の習得が「1.42億枚の訓練済みの重み」に依存しているかを切り分ける。訓練前でも語と物が結びつくなら、逸脱その23（大人の目を借りている）が不要になる。事前の静止画テスト（2026-08-23）では、訓練前ViTのほうが赤い箱と白い球をはっきり区別した（違う物のcos：訓練済み+0.910 vs 訓練前+0.082）が、明るさ変化には弱い（+0.998 vs +0.745）。",
+  "scene": "座位_6ヶ月_2おもちゃ_F1-3c_1個提示_2026-08-19",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 6.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "vits14_untrained",
+      "fovea_px": 32,
+      "seed": 0
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.025,
+    "save": "F/models/F1-9C_訓練前ViT_300s_seed10_2026-08-23.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 3000,
+    "seed": 10,
+    "K": 10,
+    "checkpoint": 3000,
+    "csv": "F/logs/F1-9C_目のアブレーション/訓練前ViT_300s_seed10/run.csv"
+  },
+  "plugins": {
+    "word_learning": {
+      "events_out": "F/logs/F1-9C_目のアブレーション/訓練前ViT_300s_seed10/発話イベント.csv"
+    }
+  }
+}

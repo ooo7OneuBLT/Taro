@@ -1,0 +1,33 @@
+{
+  "name": "F2-6_ABAB3_A2",
+  "note": "2026-08-24。語彙4語化 ABAB方式の A2（セッション1）。A=ぱぱ(赤い箱)・ねこ(白い球)／B=くつ(青い円柱)・みず(緑のたまご)。A→B→A→B と交互に学習することで、後から覚えた語が前の語を押しのける（対照学習の引き離しは辞書の全語に働く：lexicon.py:160-164）のを、次の周で復習して補う。起点は12ヶ月で900秒の喃語を終えたモデル（帳面473行・68種・語彙0語・おもちゃ未見）。親の振る速度3.0Hz・判定10度。 【やり直し】振り幅20mm→10mm（角度の振れが判定10度をはみ出していたため）。 【3回目】toy2を正面(angle_deg 12→0)へ。1個ずつ提示なのに2個並べる前提の配置だったため、toy2が一度も判定内に入っていなかった（実測10.8〜19.3度）。",
+  "scene": "座位_12ヶ月_2おもちゃ_F2-6_セッション1_2026-08-24",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 12.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.025,
+    "save": "F/models/F2-6_ABAB3_A2_seed10_2026-08-24.pt",
+    "model": "F/models/F2-6_ABAB3_B1_seed10_2026-08-24.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 3000,
+    "seed": 10,
+    "K": 10,
+    "checkpoint": 3000,
+    "csv": "F/logs/F2-6_4語化_12ヶ月/ABAB3_A2/run.csv"
+  },
+  "plugins": {
+    "word_learning": {
+      "events_out": "F/logs/F2-6_4語化_12ヶ月/ABAB3_A2/発話イベント.csv"
+    }
+  }
+}

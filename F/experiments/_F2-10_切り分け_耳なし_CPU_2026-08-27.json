@@ -1,0 +1,33 @@
+{
+  "name": "_F2-10_切り分け_耳なし_CPU",
+  "note": "2026-08-27。切り分け：今のコードのまま耳の長音展開だけ無効化しCPUで走らせる。F2-9Cと一致すれば差の原因は耳と確定。",
+  "scene": "座位_12ヶ月_イラスト2枚_F2-9C_A_2026-08-26",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 12.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.025,
+    "save": "F/models/_F2-10_切り分け_耳なし_CPU.pt",
+    "model": "F/models/F2-6_P1_喃語900s_12ヶ月_seed10_2026-08-24.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 500,
+    "seed": 10,
+    "K": 10,
+    "checkpoint": 500,
+    "csv": "F/logs/F2-10_切り分け/耳なし_CPU/run.csv"
+  },
+  "plugins": {
+    "word_learning": {
+      "events_out": "F/logs/F2-10_切り分け/耳なし_CPU/発話イベント.csv"
+    }
+  }
+}

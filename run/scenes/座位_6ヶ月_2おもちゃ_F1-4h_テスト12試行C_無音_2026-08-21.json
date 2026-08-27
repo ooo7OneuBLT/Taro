@@ -38,7 +38,7 @@
     "no_shadow": true,
     "word_test": {
       "schedule": [],
-      "csv": "E/logs/F1-4h_本走行C_無音/word_schedule_log.csv"
+      "csv": "F/logs/F1-4h_本走行C_無音/word_schedule_log.csv"
     },
     "floor_roll": null,
     "floor_condim": null,

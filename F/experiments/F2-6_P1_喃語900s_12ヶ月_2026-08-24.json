@@ -1,0 +1,45 @@
+{
+  "name": "F2-6_フェーズ1_喃語900s_12ヶ月",
+  "note": "2026-08-24。語彙4語化の**フェーズ1（12ヶ月版）**。まっさらな太郎が、おもちゃも親も無い場所でひとりで900秒（9000ステップ）喃語を出し、口の帳面を作る。6ヶ月版（F2-4_P1）では声道stage2のため無声音（ぱ・か・た行）が帳面に入らず、4語のうち3語（ぱぱ・ねこ・くつ）が言えなかった。12ヶ月はstage3なので無声音が出せる（実測：stage2=52文字／stage3=71文字）。人間もカノニカル喃語の比率は24ヶ月まで増え続ける（Cychosz et al. 2026）ので、12ヶ月で喃語を続けるのは人間の姿と整合する。produce.develop_from_age=true で声道stageを月齢から自動決定する。",
+  "scene": "座位_12ヶ月_喃語専用_おもちゃ無し_2026-08-24",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 12.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.025,
+    "produce": {
+      "mode": "babble",
+      "cooldown_sec": 0.5,
+      "jaw_cycles": [
+        1,
+        2
+      ],
+      "vocal_tract_decoupled": true,
+      "develop_from_age": true
+    },
+    "save": "F/models/F2-6_P1_喃語900s_12ヶ月_seed10_2026-08-24.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 9000,
+    "seed": 10,
+    "K": 10,
+    "checkpoint": 9000,
+    "csv": "F/logs/F2-6_4語化_12ヶ月/P1_喃語900s/run.csv"
+  },
+  "plugins": {
+    "babble_probe": {
+      "events_out": "F/logs/F2-6_4語化_12ヶ月/P1_喃語900s/発話イベント.csv",
+      "growth_out": "F/logs/F2-6_4語化_12ヶ月/P1_喃語900s/帳面の成長.csv",
+      "practice_out": "F/logs/F2-6_4語化_12ヶ月/P1_喃語900s/音ごとの練習回数.csv",
+      "growth_every": 200
+    }
+  }
+}

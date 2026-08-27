@@ -1,0 +1,43 @@
+{
+  "name": "F2-1_喃語_本走行3000s",
+  "note": "2026-08-23。F2-1「喃語で口の内部モデルを作る」の10倍走行。300秒版（F2-1_喃語_本走行300s）で帳面が163行・48文字・902回まで育ったが、個々の子音の練習回数が少なすぎた（「わ」5回・「ま」6回・「ば」6回）。原因は子音の割合ではなく絶対数（子音つき370回を60種で分けるので1種あたり6回）。人間の乳児は1日に数千〜1万回発声しそれを何ヶ月も続けるので、練習量が桁で足りない。10倍（3000秒＝30000ステップ）走らせて、帳面が伸び続けるのか頭打ちになるのかを見る。測定はF2-1で新設した babble_probe（旧 word_production は喃語を1件も数えなかった）。設計：F/docs/設計_F2-1_喃語で口の内部モデルを作る.md。",
+  "scene": "座位_6ヶ月_2おもちゃ_F1-3c_1個提示_2026-08-19",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 6.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.025,
+    "produce": {
+      "mode": "babble",
+      "cooldown_sec": 0.5,
+      "jaw_cycles": [1, 2],
+      "vocal_tract_stage": 2,
+      "vocal_tract_decoupled": true
+    },
+    "model": "F/models/F1-5_fovea32_300s_seed10_2026-08-21.pt",
+    "save": "F/models/F2-1_喃語_3000s_seed10_2026-08-23.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 30000,
+    "seed": 10,
+    "K": 10,
+    "checkpoint": 30000,
+    "csv": "F/logs/F2-1_喃語/本走行3000s/run.csv"
+  },
+  "plugins": {
+    "babble_probe": {
+      "events_out": "F/logs/F2-1_喃語/本走行3000s/発話イベント.csv",
+      "growth_out": "F/logs/F2-1_喃語/本走行3000s/帳面の成長.csv",
+      "practice_out": "F/logs/F2-1_喃語/本走行3000s/音ごとの練習回数.csv",
+      "growth_every": 200
+    }
+  }
+}

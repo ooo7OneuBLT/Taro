@@ -1,0 +1,29 @@
+{
+  "name": "F1-4h_語彙テスト_パイロット",
+  "note": "2026-08-21。設計_F1-4h_語彙テストの測定装置.md 技術付録『テスト時の太郎設定』節どおりのパイロット実験ファイル。無地背景・影スイッチON・2おもちゃ（elev_deg=10で壁の無地部分を背にする高さ）・親の介入なし・WordSchedule（わんわん/ぶーぶーを8秒間隔=静寂2秒+測定6秒で計6語）を使う。E_STATIC_SAL/E_IOR/E_HABITUATION/E_FIELD_MEMORY/E_WINNER_ONLY/E_REMAPPING/E_SACC_CHAIN/E_K_FATIGUEはOS環境変数（実験JSONに渡す経路が無い）。このうちE_STATIC_SAL・E_IOR・E_HABITUATIONは、このシーン側のbody.orienting_static/orienting_ior/orienting_habituation（いずれもtrue）と同じ機能への別経路なのでシーンで足りている。残りE_FIELD_MEMORY/E_WINNER_ONLY/E_REMAPPING/E_SACC_CHAIN/E_K_FATIGUEに対応するシーン側キーは見当たらないため、実行時に手動でexportする。run.steps=500（K=10・物理dt=0.01秒/step実測（run/trainer.py:364）なので1トレーニングstep=0.1秒。scheduleの最終語t=42秒+測定6秒=48秒ぶんに余裕を持たせた500=50秒）。【2026-08-21追記】taro.modelキーはrun/config.pyのTARO_DEFAULTSに実在し（'model':(None,'続きから学習するモデルのパス','E_LOADMODEL')）、run/taro_setup.py:601-602でcfg.modelがあれば_loadに渡ることを確認した（旧noteの『ロード経路が見当たらない』は誤りだったため訂正し、taro.modelとtaro.lexicon_visionを追加した）。 lr=0.0を追加（run.type=trainのまま学習だけ止める。cfg.lrはlearner/cere_optの両方に使われるため0で勾配更新が実質無効になる。viewer経路はword_attention配線がtrainer.py側にしか無いためtrain型のまま使う）。",
+  "scene": "座位_6ヶ月_2おもちゃ_F1-4h_テスト_2026-08-21",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 6.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 64
+    },
+    "model": "F/models/F1-4h_語彙_2026-08-21.pt",
+    "word_attention": {
+      "active_sec": 3.0,
+      "enabled": true
+    },
+    "lr": 0.0
+  },
+  "run": {
+    "type": "train",
+    "steps": 500,
+    "seed": 0,
+    "K": 10,
+    "checkpoint": 500,
+    "csv": "F/logs/F1-4h_語彙テスト_パイロット/run_seed0.csv"
+  }
+}

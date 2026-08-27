@@ -1,0 +1,169 @@
+{
+  "name": "F1-8_hwA_e2_d2_a4",
+  "note": "F1-8宿題A（難所入り新セット）の生成物（f16_scene_matrix.py generate_hw_matrix、2026-08-22）。基準シーン 座位_6ヶ月_2おもちゃ_F1-4h_テスト12試行A_2026-08-21 のコピーに、world.toy.elev_deg=world.toy2.elev_deg=40.0度、world.toy.dist=0.25・world.toy2.dist=0.25（基準×1.25）、world.toy2.angle_deg=25.0度（toy1は自動で-25.0度）を適用。水準は対象おもちゃ(箱)自身のマスク平均輝度の実測で選定（F/logs/F1-6_100場面/宿題A_水準決定.json）。fovea_cameraは既定false（旧モデル対照用、旧目のまま）。stateキーは削除済み。fingerprintも無効化。",
+  "created": "2026-08-22",
+  "schema": 1,
+  "body": {
+    "age_months": 6.0,
+    "shape": true,
+    "shape_scales": null,
+    "head_elongation": null,
+    "flexion": true,
+    "flexion_stiffness": null,
+    "joint_compliance": false,
+    "joint_compliance_groups": null,
+    "joint_compliance_joints": null,
+    "joint_compliance_params": null,
+    "limb_scale": 10.0,
+    "limb_fix": true,
+    "distal_mass": 1.0,
+    "neck_fix": true,
+    "eye_rest_vertical_deg": 0.0,
+    "eye_centering": true,
+    "eye_muscle_scale": 3.0,
+    "orienting_version": 2,
+    "orienting_hold": true,
+    "orienting_static": true,
+    "orienting_ior": true,
+    "orienting_habituation": true
+  },
+  "world": {
+    "recline_deg": 0.0,
+    "seat_friction": 2.0,
+    "fence": false,
+    "plain": true,
+    "floor_dim": 1.0,
+    "floor_emission": 10.0,
+    "static_tex": false,
+    "no_shadow": true,
+    "word_test": {
+      "schedule": [
+        {
+          "t": 2.0,
+          "word": "わんわん"
+        },
+        {
+          "t": 10.0,
+          "word": "ぶーぶー"
+        },
+        {
+          "t": 18.0,
+          "word": "ぶーぶー"
+        },
+        {
+          "t": 26.0,
+          "word": "わんわん"
+        },
+        {
+          "t": 34.0,
+          "word": "ぶーぶー"
+        },
+        {
+          "t": 42.0,
+          "word": "わんわん"
+        },
+        {
+          "t": 50.0,
+          "word": "わんわん"
+        },
+        {
+          "t": 58.0,
+          "word": "ぶーぶー"
+        },
+        {
+          "t": 66.0,
+          "word": "わんわん"
+        },
+        {
+          "t": 74.0,
+          "word": "ぶーぶー"
+        },
+        {
+          "t": 82.0,
+          "word": "ぶーぶー"
+        },
+        {
+          "t": 90.0,
+          "word": "わんわん"
+        }
+      ],
+      "csv": "F/logs/F1-4h_本走行A/word_schedule_log.csv"
+    },
+    "floor_roll": null,
+    "floor_condim": null,
+    "toy": {
+      "enabled": true,
+      "shape": "box",
+      "radius": 0.02,
+      "mode": "hold",
+      "dist": 0.25,
+      "delay_sec": 0.0,
+      "approach_sec": 0.5,
+      "approach_from": "above",
+      "rgba": [
+        0.8,
+        0.1,
+        0.1,
+        1.0
+      ],
+      "elev_deg": 40.0
+    },
+    "toy2": {
+      "enabled": true,
+      "shape": "sphere",
+      "radius": 0.02,
+      "rgba": [
+        0.95,
+        0.95,
+        0.95,
+        1.0
+      ],
+      "dist": 0.25,
+      "angle_deg": 25.0,
+      "elev_deg": 40.0
+    },
+    "parent_intervene": false,
+    "parent_wait_sec": 2.0,
+    "parent_lost_deg": 25.0,
+    "parent_labeling": {
+      "enabled": false,
+      "shake_amp_m": 0.02,
+      "shake_hz": 1.5,
+      "gaze_deg": 10.0,
+      "gaze_margin_deg": 3.0,
+      "gaze_hold_sec": 0.3,
+      "attract_timeout_sec": 3.0,
+      "utterances": {
+        "toy1": "ぶーぶー",
+        "toy2": "わんわん"
+      },
+      "respond_prob": 1.0,
+      "refractory_sec": 1.0,
+      "shuffle_refractory_sec": 3.0,
+      "shuffle_after": 5,
+      "solo_presentation": true
+    }
+  },
+  "setup": {
+    "neck_tone": {
+      "target_deg": -45.0,
+      "stiffness": 0.4
+    },
+    "limb_tone": {
+      "hold_deg": 20.0,
+      "groups": [
+        "arm",
+        "leg"
+      ]
+    },
+    "head_hold": null,
+    "body_support": {
+      "stiffness": 200,
+      "free": [],
+      "pin_joints": true,
+      "pin_root": true
+    }
+  },
+  "fingerprint": null,
+  "noise_mode": "white"
+}

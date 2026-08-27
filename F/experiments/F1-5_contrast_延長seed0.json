@@ -1,0 +1,32 @@
+{
+  "name": "F1-5_contrast_延長seed0",
+  "note": "2026-08-21。F1-5受け入れバッチ 段階2（凍結値で本番・延長）。F/experiments/F1-4_語彙_延長学習.json（steps=3000=300秒相当）のコピーに lexicon_mode='contrast' と段階1で凍結した (eta_pull, eta_push)=(0.05, 0.025) を追加。scene・seed=0・steps=3000は延長学習と同一。判定(b)「延長300秒≧同シード60秒（段階1のc3=40/40）」の比較対象。",
+  "scene": "座位_6ヶ月_2おもちゃ_F1-3c_1個提示_2026-08-19",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 6.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 64
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.025,
+    "save": "F/models/F1-5_contrast_延長seed0_2026-08-21.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 3000,
+    "seed": 0,
+    "K": 10,
+    "checkpoint": 3000,
+    "csv": "F/logs/F1-5_受け入れ/学習_延長seed0/run_seed0.csv"
+  },
+  "plugins": {
+    "word_learning": {
+      "events_out": "F/logs/F1-5_受け入れ/学習_延長seed0/発話イベント.csv"
+    }
+  }
+}

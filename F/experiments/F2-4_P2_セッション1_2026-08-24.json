@@ -1,0 +1,33 @@
+{
+  "name": "F2-4_フェーズ2_セッション1",
+  "note": "2026-08-24。語彙4語化の**フェーズ2**（12ヶ月）。セッション1＝ぱぱ・ねこを学習する。フェーズ1（おもちゃ無しで900秒の喃語・帳面200行51種）のモデルから続けるので、4つの物すべてが太郎にとって初対面。学習条件はF1-5と同一（dinov2_vits14・中心窩32px・contrast・eta=(0.05,0.025)・3000ステップ）。帳面は今日直した素通し保存（run/taro_setup.py）で、produceキーが無くても保持される。",
+  "scene": "座位_12ヶ月_2おもちゃ_F2-4_セッション1_2026-08-24",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 12.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.025,
+    "save": "F/models/F2-4_P2_S1_seed10_2026-08-24.pt",
+    "model": "F/models/F2-4_P1_喃語900s_seed10_2026-08-24.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 3000,
+    "seed": 10,
+    "K": 10,
+    "checkpoint": 3000,
+    "csv": "F/logs/F2-4_4語化/P2_セッション1/run.csv"
+  },
+  "plugins": {
+    "word_learning": {
+      "events_out": "F/logs/F2-4_4語化/P2_セッション1/発話イベント.csv"
+    }
+  }
+}

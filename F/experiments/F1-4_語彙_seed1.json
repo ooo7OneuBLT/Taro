@@ -1,0 +1,29 @@
+{
+  "name": "F1-4_語彙_seed1",
+  "note": "2026-08-21。F/experiments/F1-4h_語彙_学習走行_パイロット.json のコピー。コーディネーター依頼『再現試験』：seed0（既存のF/models/F1-4h_語彙_2026-08-21.pt）が32/40合格だったのは1シードだけの結果のため、別シードで学習し直しても同じ確認試験に通るかを見る。taro欄・scene・steps=600（60秒相当）は無変更、run.seedのみ1に変更。保存先・ログ出力先をseed1用に分離。環境変数E_FIELD_MEMORY=1 E_WINNER_ONLY=1 E_REMAPPING=1 E_SACC_CHAIN=1 E_K_FATIGUE=1.0はパイロットと同じくシェル側でexportしてから実行する。",
+  "scene": "座位_6ヶ月_2おもちゃ_F1-3c_1個提示_2026-08-19",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 6.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 64
+    },
+    "save": "F/models/F1-4_語彙_seed1_2026-08-21.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 600,
+    "seed": 1,
+    "K": 10,
+    "checkpoint": 600,
+    "csv": "F/logs/F1-4_語彙_seed1/run_seed1.csv"
+  },
+  "plugins": {
+    "word_learning": {
+      "events_out": "F/logs/F1-4_語彙_seed1/発話イベント.csv"
+    }
+  }
+}

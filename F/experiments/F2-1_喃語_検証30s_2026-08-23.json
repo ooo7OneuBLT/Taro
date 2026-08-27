@@ -1,0 +1,32 @@
+{
+  "name": "F2-1_喃語_検証30s",
+  "note": "2026-08-23。F2-1「喃語で口の内部モデルを作る」の配線・自己検証用（工程1）。produce.mode=babbleで視覚トリガーを使わず自発的に発声し、発話小脳（taro.produce_cerebellum）の帳面（forward_map/inverse_map）を溜める。30秒（steps=300,K=10）。設計：F/docs/設計_F2-1_喃語で口の内部モデルを作る.md。同等の走行を run/tools/check_f2_1_babble.py で自動検証済み（forward_map=50行・inverse_map=15文字・発話長分布{1:35,2:25}、seed=7）。",
+  "scene": "座位_6ヶ月_2おもちゃ_F1-3c_1個提示_2026-08-19",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 6.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32
+    },
+    "lexicon_mode": "contrast",
+    "produce": {
+      "mode": "babble",
+      "cooldown_sec": 0.5,
+      "jaw_cycles": [1, 2],
+      "vocal_tract_stage": 2,
+      "vocal_tract_decoupled": true
+    },
+    "save": "F/models/F2-1_喃語_検証30s_seed7_2026-08-23.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 300,
+    "seed": 7,
+    "K": 10,
+    "checkpoint": 300,
+    "csv": "F/logs/F2-1_喃語検証/検証30s/run.csv"
+  }
+}

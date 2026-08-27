@@ -1,0 +1,46 @@
+{
+  "name": "F2-1_喃語_6to12ヶ月_継ぎ足し300s",
+  "note": "2026-08-23。F2-1の帳面づくりを「6ヶ月の続き」として走らせる。直前の12ヶ月走行は帳面が空のF1-5から始めたため、6ヶ月で作った帳面（48種・「わ」を含む）を捨てていた。その結果 stage3 は選択肢が71文字に増えて1文字あたりの確率が下がり、908回発声しても「わ」が0回になった（stage2では370回の子音発声で「わ」5回＝期待値2.6回。stage3では無声音の解禁で有声の取り分が減り期待値1.0回）。人間は6ヶ月ぶんの喃語練習を捨てないので、6ヶ月で帳面を作ったモデルを起点に12ヶ月の走行を継ぎ足す＝発達の順序の再現。期待：stage2で得た半母音（わ・や）を保ったまま、stage3の無声音（か・た・は・ぱ行）が加わる。設計：F/docs/設計_F2-1_喃語で口の内部モデルを作る.md。",
+  "scene": "座位_12ヶ月_2おもちゃ_F1-3c_1個提示_fovea_2026-08-23",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 12.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.025,
+    "produce": {
+      "mode": "babble",
+      "cooldown_sec": 0.5,
+      "jaw_cycles": [
+        1,
+        2
+      ],
+      "develop_from_age": true,
+      "vocal_tract_decoupled": true
+    },
+    "model": "F/models/F2-1_喃語_300s_seed10_2026-08-23.pt",
+    "save": "F/models/F2-1_喃語_6to12ヶ月_300s_seed10_2026-08-23.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 3000,
+    "seed": 11,
+    "K": 10,
+    "checkpoint": 3000,
+    "csv": "F/logs/F2-1_喃語/6to12ヶ月_継ぎ足し300s/run.csv"
+  },
+  "plugins": {
+    "babble_probe": {
+      "events_out": "F/logs/F2-1_喃語/6to12ヶ月_継ぎ足し300s/発話イベント.csv",
+      "growth_out": "F/logs/F2-1_喃語/6to12ヶ月_継ぎ足し300s/帳面の成長.csv",
+      "practice_out": "F/logs/F2-1_喃語/6to12ヶ月_継ぎ足し300s/音ごとの練習回数.csv",
+      "growth_every": 50
+    }
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "name": "F2-9C_診断_閾値なし",
+  "note": "2026-08-26。産出0回の切り分け：threshold=-1（常に通る）・120秒。発話が出れば閾値/確信度の問題、出なければ注視判定の問題。",
+  "scene": "座位_12ヶ月_1イラスト_F2-9C_わんわんだけ_2026-08-26",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 12.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.025,
+    "model": "F/models/F2-9C_ABAB3_B2_seed10_2026-08-26.pt",
+    "produce": {
+      "mode": "word",
+      "threshold": -1.0,
+      "cooldown_sec": 2.0,
+      "max_length": 8,
+      "develop_from_age": true,
+      "vocal_tract_decoupled": true
+    },
+    "save": "F/models/_F2-9C_diag_2026-08-26.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 1200,
+    "seed": 10,
+    "K": 10,
+    "checkpoint": 1200,
+    "csv": "F/logs/F2-9C_産出テスト/診断/run.csv"
+  },
+  "plugins": {
+    "word_production": {
+      "events_out": "F/logs/F2-9C_産出テスト/診断/発話イベント.csv"
+    }
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "name": "F2-9C_切り分け_単色dist025",
+  "note": "2026-08-26。イラスト版発話0回の切り分け（単色dist025・300秒）。",
+  "scene": "座位_12ヶ月_切り分け_単色dist025_2026-08-26",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 12.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.025,
+    "save": "F/models/_F2-9C_cut_単色dist025_2026-08-26.pt",
+    "model": "F/models/F2-6_P1_喃語900s_12ヶ月_seed10_2026-08-24.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 3000,
+    "seed": 10,
+    "K": 10,
+    "checkpoint": 3000,
+    "csv": "F/logs/F2-9_共同注意/切り分け_単色dist025/run.csv"
+  },
+  "plugins": {
+    "word_learning": {
+      "events_out": "F/logs/F2-9_共同注意/切り分け_単色dist025/発話イベント.csv"
+    },
+    "gaze_probe": {
+      "angles_out": "F/logs/F2-9_共同注意/切り分け_単色dist025/視線角度.csv"
+    }
+  }
+}

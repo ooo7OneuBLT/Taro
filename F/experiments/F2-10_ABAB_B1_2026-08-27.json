@@ -1,0 +1,33 @@
+{
+  "name": "F2-10_ABAB_B1",
+  "note": "2026-08-27・F2-10。F2-9Cと同一条件での再学習。唯一の違いは耳が長音「ー」を直前の母音に展開するようになったこと（taro_core/src/senses/hearing.py の expand_long_vowel、2026-08-27追加）。親の発話表記は「ぶーぶー」のままで、太郎の耳に届く音が「ぶうぶう」になる。F2-9Cの学習済みモデルは耳の文字表に「ー」を含み非互換のため、喃語900sから学習し直す。元: F2-9C_ABAB_B1_2026-08-26.json（2026-08-26。イラスト板＋差し出し方式の本学習ABAB1周目・B1（30）",
+  "scene": "座位_12ヶ月_イラスト2枚_F2-9C_B_2026-08-26",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 12.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.025,
+    "save": "F/models/F2-10_ABAB_B1_seed10_2026-08-27.pt",
+    "model": "F/models/F2-10_ABAB_A1_seed10_2026-08-27.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 3000,
+    "seed": 10,
+    "K": 10,
+    "checkpoint": 3000,
+    "csv": "F/logs/F2-10_本学習/ABAB_B1/run.csv"
+  },
+  "plugins": {
+    "word_learning": {
+      "events_out": "F/logs/F2-10_本学習/ABAB_B1/発話イベント.csv"
+    }
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "name": "F2-1_喃語_12ヶ月_本走行3000s",
+  "note": "2026-08-23。F2-1「喃語で口の内部モデル（帳面）を作る」の本走行。12ヶ月の体・声道stage3。月齢を12ヶ月にしたのは、日本語版CDI（小椋2007・1230名）で『わんわん』の表出が15ヶ月・理解が12ヶ月であり、6ヶ月で初語を言わせるのは9ヶ月ぶんの先行になるため（人間の喃語期は6〜12ヶ月）。12ヶ月と15ヶ月は体格・視力・声道stageがほぼ同じなので、この帳面はF2-2（15ヶ月の初語）でそのまま使える。前提はすべて実測で確認済み：座位が保てる（目視）／6ヶ月学習済みモデルが読める／声道stage3が効く（無声音が出る）／喃語の長さが1〜2に収まる。※ develop_from_age の月齢がenvから取れずstage0（母音のみ）で走っていたバグを直した後の走行（run/taro_setup.py:425、2026-08-23）。設計：F/docs/設計_F2-1_喃語で口の内部モデルを作る.md。",
+  "scene": "座位_12ヶ月_2おもちゃ_F1-3c_1個提示_fovea_2026-08-23",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 12.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": { "backend": "dinov2_vits14", "fovea_px": 32 },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.025,
+    "produce": {
+      "mode": "babble",
+      "cooldown_sec": 0.5,
+      "jaw_cycles": [1, 2],
+      "develop_from_age": true,
+      "vocal_tract_decoupled": true
+    },
+    "model": "F/models/F1-5_fovea32_300s_seed10_2026-08-21.pt",
+    "save": "F/models/F2-1_喃語_12ヶ月_3000s_seed10_2026-08-23.pt"
+  },
+  "run": {
+    "type": "train", "steps": 30000, "seed": 10, "K": 10, "checkpoint": 30000,
+    "csv": "F/logs/F2-1_喃語/12ヶ月_本走行3000s/run.csv"
+  },
+  "plugins": {
+    "babble_probe": {
+      "events_out": "F/logs/F2-1_喃語/12ヶ月_本走行3000s/発話イベント.csv",
+      "growth_out": "F/logs/F2-1_喃語/12ヶ月_本走行3000s/帳面の成長.csv",
+      "practice_out": "F/logs/F2-1_喃語/12ヶ月_本走行3000s/音ごとの練習回数.csv",
+      "growth_every": 200
+    }
+  }
+}

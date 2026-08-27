@@ -1,0 +1,43 @@
+{
+  "name": "F2_初語_produceON_300s",
+  "note": "2026-08-22。F2「見た物の名前を言う」の本走行。F/models/F1-5_fovea32_300s_seed10_2026-08-21.ptを読み込み、taro.produceをONにして300秒（steps=3000,K=10）続きから学習する。設計：F/docs/設計_F2_初語（見た物の名前を言う）.md。同値性テスト（produce=None、run/tools/check_f2_produce_equivalence.py）で3シードとも旧2場面テストの正答数が変わらないことを確認済み。",
+  "scene": "座位_6ヶ月_2おもちゃ_F1-3c_1個提示_2026-08-19",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 6.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.025,
+    "produce": {
+      "threshold": 0.80,
+      "cooldown_sec": 2.0,
+      "max_length": 8,
+      "vocal_tract_stage": 2,
+      "vocal_tract_decoupled": true
+    },
+    "model": "F/models/F1-5_fovea32_300s_seed10_2026-08-21.pt",
+    "save": "F/models/F2_初語_produceON_300s_seed10_2026-08-22.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 3000,
+    "seed": 10,
+    "K": 10,
+    "checkpoint": 3000,
+    "csv": "F/logs/F2_初語検証/本走行300s/run.csv"
+  },
+  "plugins": {
+    "word_learning": {
+      "events_out": "F/logs/F2_初語検証/本走行300s/発話イベント_親.csv"
+    },
+    "word_production": {
+      "events_out": "F/logs/F2_初語検証/本走行300s/発話イベント_太郎.csv"
+    }
+  }
+}

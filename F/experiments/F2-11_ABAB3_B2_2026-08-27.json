@@ -1,0 +1,33 @@
+{
+  "name": "F2-11_ABAB3_B2",
+  "note": "2026-08-27・F2-11。F2-10と全く同じ条件で、**引き離しだけを止めた**版（lexicon_eta_push=0.0）。目的：①引き離しの目的A（背景を消す）はF2-8の両側引き算と重複しており不要ではないか ②目的B（相互排他性）は人間では16〜17ヶ月からで12ヶ月の太郎には早い ③実装がLVQ2.1と同型で発散が既知（想像図の大きさが1→857）。外して同等以上なら、人間模倣として正しくかつ発散も消える。F1-5では引き離し無し（単純平均）が不安定と判定されたが、当時は両側引き算がまだ無かった（F2-8で追加）ため条件が違う。",
+  "scene": "座位_12ヶ月_イラスト2枚_F2-9C_B_2026-08-26",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 12.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.0,
+    "save": "F/models/F2-11_ABAB3_B2_seed10_2026-08-27.pt",
+    "model": "F/models/F2-11_ABAB3_A2_seed10_2026-08-27.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 3000,
+    "seed": 10,
+    "K": 10,
+    "checkpoint": 3000,
+    "csv": "F/logs/F2-11_本学習/ABAB3_B2/run.csv"
+  },
+  "plugins": {
+    "word_learning": {
+      "events_out": "F/logs/F2-11_本学習/ABAB3_B2/発話イベント.csv"
+    }
+  }
+}

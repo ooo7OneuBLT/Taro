@@ -1,0 +1,40 @@
+{
+  "name": "F2-1_喃語_本走行300s",
+  "note": "2026-08-23。F2-1「喃語で口の内部モデルを作る」の本走行。視覚・語彙が学習済みのF1-5モデル（F/models/F1-5_fovea32_300s_seed10_2026-08-21.pt）から続け、produce.mode=babbleで視覚トリガーを使わず自発的に発声し、発話小脳（taro.produce_cerebellum）の帳面（forward_map=口の動き→音／inverse_map=音→口の動き）を溜める。300秒（steps=3000, K=10）。月齢は6ヶ月のまま（人間の喃語期は6〜10ヶ月、初語が12ヶ月。「わ」＝半母音はstage2から、「ん」＝両唇鼻音はstage1から出せるので、わんわんの材料はstage2で揃う）。到達条件：inverse_mapに「わ」と「ん」が載ること（これがF2-2＝初語の前提）。設計：F/docs/設計_F2-1_喃語で口の内部モデルを作る.md。",
+  "scene": "座位_6ヶ月_2おもちゃ_F1-3c_1個提示_2026-08-19",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 6.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.025,
+    "produce": {
+      "mode": "babble",
+      "cooldown_sec": 0.5,
+      "jaw_cycles": [1, 2],
+      "vocal_tract_stage": 2,
+      "vocal_tract_decoupled": true
+    },
+    "model": "F/models/F1-5_fovea32_300s_seed10_2026-08-21.pt",
+    "save": "F/models/F2-1_喃語_300s_seed10_2026-08-23.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 3000,
+    "seed": 10,
+    "K": 10,
+    "checkpoint": 3000,
+    "csv": "F/logs/F2-1_喃語/本走行300s/run.csv"
+  },
+  "plugins": {
+    "word_production": {
+      "events_out": "F/logs/F2-1_喃語/本走行300s/発話イベント_太郎.csv"
+    }
+  }
+}

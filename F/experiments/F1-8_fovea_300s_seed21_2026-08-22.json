@@ -1,0 +1,32 @@
+{
+  "name": "F1-8_fovea_300s_seed21",
+  "note": "2026-08-22。仕様_F1-8_中心窩の目での再学習と前後比較.md 第2部手順(1)。F/experiments/F1-5_fovea32_300s_seed11_2026-08-21.json のコピーに、scene=座位_6ヶ月_2おもちゃ_F1-3c_1個提示_fovea_2026-08-22（=F1-5基準シーンにbody.fovea_camera=trueを足したのみ）・seed=21・保存先変更。目以外（contrast・凍結eta=(0.05,0.025)・solo_presentation・steps=3000・K=10）はF1-5と完全に同一。",
+  "scene": "座位_6ヶ月_2おもちゃ_F1-3c_1個提示_fovea_2026-08-22",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 6.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.025,
+    "save": "F/models/F1-8_fovea_300s_seed21_2026-08-22.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 3000,
+    "seed": 21,
+    "K": 10,
+    "checkpoint": 3000,
+    "csv": "F/logs/F1-8_fovea_300s検証/学習300s_seed21/run_seed21.csv"
+  },
+  "plugins": {
+    "word_learning": {
+      "events_out": "F/logs/F1-8_fovea_300s検証/学習300s_seed21/発話イベント.csv"
+    }
+  }
+}

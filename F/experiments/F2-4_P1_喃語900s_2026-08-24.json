@@ -1,0 +1,45 @@
+{
+  "name": "F2-4_フェーズ1_喃語900s",
+  "note": "2026-08-24。語彙4語化の**フェーズ1**。まっさらな太郎が、おもちゃも親も無い場所でひとりで900秒（9000ステップ）喃語を出し、口の帳面（発話小脳）を作る。【なぜおもちゃを出さないか】前回の試みでは喃語フェーズでおもちゃを目の前に置いたまま900秒走らせたため、太郎がその物を見飽き、次の語の学習で親の発話が41回→13回に激減した（実測：まっさらなら46回。2026-08-24の診断）。太郎の報酬は学習の進み具合なので、見慣れた物は報酬にならず視線が向かなくなる。人間の乳児も喃語期に見ていた物の名前を後で教わるわけではない。フェーズ2で全ての物が初対面になるようにする。設計：F/docs/設計_F2-1_喃語で口の内部モデルを作る.md。",
+  "scene": "座位_6ヶ月_喃語専用_おもちゃ無し_2026-08-24",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 6.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.025,
+    "produce": {
+      "mode": "babble",
+      "cooldown_sec": 0.5,
+      "jaw_cycles": [
+        1,
+        2
+      ],
+      "vocal_tract_stage": 2,
+      "vocal_tract_decoupled": true
+    },
+    "save": "F/models/F2-4_P1_喃語900s_seed10_2026-08-24.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 9000,
+    "seed": 10,
+    "K": 10,
+    "checkpoint": 9000,
+    "csv": "F/logs/F2-4_4語化/P1_喃語900s/run.csv"
+  },
+  "plugins": {
+    "babble_probe": {
+      "events_out": "F/logs/F2-4_4語化/P1_喃語900s/発話イベント.csv",
+      "growth_out": "F/logs/F2-4_4語化/P1_喃語900s/帳面の成長.csv",
+      "practice_out": "F/logs/F2-4_4語化/P1_喃語900s/音ごとの練習回数.csv",
+      "growth_every": 200
+    }
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "name": "F1-5_contrast_較正_c1",
+  "note": "2026-08-21。F1-5受け入れバッチ 段階1（較正・seed0のみ）。F/experiments/F1-4h_語彙_学習走行_パイロット.json のコピーに lexicon_mode='contrast' と (eta_pull, eta_push)=(0.2, 0.1)（=Lexiconの既定値）を追加。設計：F/docs/設計_F1-5_連合器の対照学習化.md 後半5節「較正と受け入れ」1。他は無変更（scene・steps=600・seed=0）。環境変数E_FIELD_MEMORY=1 E_WINNER_ONLY=1 E_REMAPPING=1 E_SACC_CHAIN=1 E_K_FATIGUE=1.0はシェル側でexport。",
+  "scene": "座位_6ヶ月_2おもちゃ_F1-3c_1個提示_2026-08-19",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 6.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 64
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.2,
+    "lexicon_eta_push": 0.1,
+    "save": "F/models/F1-5_contrast_c1_0.2_0.1_2026-08-21.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 600,
+    "seed": 0,
+    "K": 10,
+    "checkpoint": 600,
+    "csv": "F/logs/F1-5_受け入れ/学習_c1/run_seed0.csv"
+  },
+  "plugins": {
+    "word_learning": {
+      "events_out": "F/logs/F1-5_受け入れ/学習_c1/発話イベント.csv"
+    }
+  }
+}

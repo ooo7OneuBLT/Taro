@@ -1,0 +1,21 @@
+{
+  "name": "目視：F2-9共同注意の親の動き",
+  "note": "2026-08-26。F2-9（共同注意による名付け）実装後の初目視。見る観点：①親の振りが『振る→止まる→振る』のバーストになっているか ②太郎が振りに釣られて見るか ③見てから約3秒待って発話するか ④発話の瞬間にひと振り入るか（言いながら動かす） ⑤タイムアウト12秒で諦めて次へ行くか。",
+  "scene": "座位_12ヶ月_2おもちゃ_F2-9_共同注意_2026-08-26",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 12.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32
+    },
+    "lexicon_mode": "contrast",
+    "model": "F/models/F2-6_ABAB_A2_seed10_2026-08-24.pt"
+  },
+  "run": {
+    "type": "edit"
+  },
+  "plugins": {}
+}

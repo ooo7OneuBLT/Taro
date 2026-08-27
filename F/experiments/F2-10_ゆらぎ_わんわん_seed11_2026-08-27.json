@@ -1,0 +1,41 @@
+{
+  "name": "F2-10_ゆらぎ_わんわん_seed11",
+  "note": "2026-08-27。テストそのものの揺らぎ幅を測る。学習済みモデルは固定（F2-10_ABAB3_B2）で産出テストの種だけ変える。わんわん86.0%→78.5%の7.5ポイントが揺らぎに埋もれるかの判定用。",
+  "scene": "座位_12ヶ月_1イラスト_F2-9C_わんわんだけ_2026-08-26",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 12.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.025,
+    "model": "F/models/F2-10_ABAB3_B2_seed10_2026-08-27.pt",
+    "produce": {
+      "mode": "word",
+      "threshold": 0.15,
+      "cooldown_sec": 2.0,
+      "max_length": 8,
+      "develop_from_age": true,
+      "vocal_tract_decoupled": true
+    },
+    "save": "F/models/_F2-10_ゆらぎ_わんわん_seed11.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 3000,
+    "seed": 11,
+    "K": 10,
+    "checkpoint": 3000,
+    "csv": "F/logs/F2-10_ゆらぎ/わんわん_seed11/run.csv"
+  },
+  "plugins": {
+    "word_production": {
+      "events_out": "F/logs/F2-10_ゆらぎ/わんわん_seed11/発話イベント.csv"
+    }
+  }
+}

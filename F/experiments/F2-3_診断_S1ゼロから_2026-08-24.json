@@ -1,0 +1,32 @@
+{
+  "name": "F2-3_診断_セッション1をゼロから",
+  "note": "2026-08-24。診断：セッション1で親の発話が13回しか起きなかった原因の切り分け。F1-5（同一シーン・同一seed・同一設定）は41回だったが、今回は13回で「ねこ」は2回だけ。唯一の違いは起点モデル（F1-5=ゼロから／今回=F2-1の帳面つきモデルから継続）。太郎はこのシーンで合計1200秒（F1-5 300秒＋喃語3本900秒、いずれも視線反射ON）を過ごしており、報酬がrew=progress（学習の進み具合）なので「見飽きて報酬にならない」可能性がある。この実験はモデル指定を外してゼロから走らせる。41回に戻れば起点モデルが原因、13回のままなら別の原因（語彙リセットの副作用など）。",
+  "scene": "座位_6ヶ月_2おもちゃ_F2-3_セッション1_2026-08-24",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 6.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.025,
+    "save": "F/models/_診断_F2-3_S1ゼロから_2026-08-24.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 3000,
+    "seed": 10,
+    "K": 10,
+    "checkpoint": 3000,
+    "csv": "F/logs/F2-3_語彙4語化/診断_S1ゼロから/run.csv"
+  },
+  "plugins": {
+    "word_learning": {
+      "events_out": "F/logs/F2-3_語彙4語化/診断_S1ゼロから/発話イベント.csv"
+    }
+  }
+}

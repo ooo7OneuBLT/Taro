@@ -1,0 +1,32 @@
+{
+  "name": "F1-8b_fovea_seed22",
+  "note": "2026-08-22。F1-8修正1：学習の量を秒でなく発話回数（語別40回前後）で揃えるための再学習。F/experiments/F1-8_fovea_300s_seed22_2026-08-22.json のコピー。前回(steps=3000=300秒)の発話回数はseed20:19/25(計44回)、seed21:15/19(計34回)、seed22:15/17(計32回)で、F1-5基準の41/40(計81回)に対し語別で半減していた。最も遅いseed22のtoy1レート(15回/3000ステップ)を基準に『語別40回前後』へ届く見込みのsteps=8000(=800秒)に延長。他（scene=座位_6ヶ月_2おもちゃ_F1-3c_1個提示_fovea_2026-08-22・contrast・凍結eta=(0.05,0.025)・solo_presentation・seed=22・K=10）はF1-8/F1-5と同一。保存先を新規(F1-8b)にし、F1-8モデル・F1-5基準モデルは上書きしない。",
+  "scene": "座位_6ヶ月_2おもちゃ_F1-3c_1個提示_fovea_2026-08-22",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 6.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.025,
+    "save": "F/models/F1-8b_fovea_seed22_2026-08-22.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 8000,
+    "seed": 22,
+    "K": 10,
+    "checkpoint": 8000,
+    "csv": "F/logs/F1-8b_fovea_発話数基準_2026-08-22/学習_seed22/run_seed22.csv"
+  },
+  "plugins": {
+    "word_learning": {
+      "events_out": "F/logs/F1-8b_fovea_発話数基準_2026-08-22/学習_seed22/発話イベント.csv"
+    }
+  }
+}

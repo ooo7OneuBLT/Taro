@@ -1,0 +1,33 @@
+{
+  "name": "F2-3_語彙4語化_セッション2",
+  "note": "2026-08-24。目標F2作業C：語彙4語化のセッション2。セッション1の保存モデル(F2-3_4語_セッション1_seed10_2026-08-24.pt)から続ける。学習条件はF1-5と同一（dinov2_vits14・fovea_px 32・contrast・eta=(0.05,0.025)・steps=3000）。シーンは座位_6ヶ月_2おもちゃ_F1-3c_1個提示_2026-08-19のコピーでtoy1=cylinder(青)->「くつ」、toy2=ellipsoid(緑)->「みず」（座位_6ヶ月_2おもちゃ_F2-3_セッション2_2026-08-24）。狙い：対照学習の引き離しは辞書の全語に働くため、セッション1で覚えた「ぱぱ」「ねこ」がこのセッション中に押しのけられる可能性がある＝作業Dで実測する。",
+  "scene": "座位_6ヶ月_2おもちゃ_F2-3_セッション2_2026-08-24",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 6.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.025,
+    "model": "F/models/F2-3_4語_セッション1_seed10_2026-08-24.pt",
+    "save": "F/models/F2-3_4語_seed10_2026-08-24.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 3000,
+    "seed": 10,
+    "K": 10,
+    "checkpoint": 3000,
+    "csv": "F/logs/F2-3_語彙4語化/セッション2_seed10/run_seed10.csv"
+  },
+  "plugins": {
+    "word_learning": {
+      "events_out": "F/logs/F2-3_語彙4語化/セッション2_seed10/発話イベント.csv"
+    }
+  }
+}

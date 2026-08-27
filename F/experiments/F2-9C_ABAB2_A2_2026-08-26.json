@@ -1,0 +1,33 @@
+{
+  "name": "F2-9C_ABAB2_A2",
+  "note": "2026-08-26。イラスト板＋差し出しの本学習ABAB2周目・A2（300秒）。1周目B2を引き継ぐ。",
+  "scene": "座位_12ヶ月_イラスト2枚_F2-9C_A_2026-08-26",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 12.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.025,
+    "save": "F/models/F2-9C_ABAB2_A2_seed10_2026-08-26.pt",
+    "model": "F/models/F2-9C_ABAB2_B1_seed10_2026-08-26.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 3000,
+    "seed": 10,
+    "K": 10,
+    "checkpoint": 3000,
+    "csv": "F/logs/F2-9C_本学習/ABAB2_A2/run.csv"
+  },
+  "plugins": {
+    "word_learning": {
+      "events_out": "F/logs/F2-9C_本学習/ABAB2_A2/発話イベント.csv"
+    }
+  }
+}

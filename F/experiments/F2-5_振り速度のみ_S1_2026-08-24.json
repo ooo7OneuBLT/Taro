@@ -1,0 +1,33 @@
+{
+  "name": "F2-5_振り速度のみ_セッション1",
+  "note": "2026-08-24。切り分け：判定は元のまま、振る速度だけ 1.5→3.0Hz。他はF2-5_判定ゆるめと同一条件。",
+  "scene": "座位_6ヶ月_2おもちゃ_F2-5_振り速度のみ_セッション1_2026-08-24",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 6.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.025,
+    "save": "F/models/F2-5_S1_振り速度のみ_seed10_2026-08-24.pt",
+    "model": "F/models/F2-4_P1_喃語900s_seed10_2026-08-24.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 3000,
+    "seed": 10,
+    "K": 10,
+    "checkpoint": 3000,
+    "csv": "F/logs/F2-5_振り速度のみ/S1/run.csv"
+  },
+  "plugins": {
+    "word_learning": {
+      "events_out": "F/logs/F2-5_振り速度のみ/S1/発話イベント.csv"
+    }
+  }
+}

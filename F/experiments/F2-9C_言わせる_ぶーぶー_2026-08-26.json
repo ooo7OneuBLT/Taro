@@ -1,0 +1,41 @@
+{
+  "name": "F2-9C_言わせる_ぶーぶー",
+  "note": "2026-08-26。産出テスト：ぶーぶー のイラスト板だけを見せて太郎が何と言うか。正解「ぶーぶー」。モデルはABAB3周（イラスト・差し出し・計180〜214回/語）。threshold=0.15（F2-8引き算後のスケール。旧0.8では一度も発話しない）。",
+  "scene": "座位_12ヶ月_1イラスト_F2-9C_ぶーぶーだけ_2026-08-26",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 12.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.025,
+    "model": "F/models/F2-9C_ABAB3_B2_seed10_2026-08-26.pt",
+    "produce": {
+      "mode": "word",
+      "threshold": 0.15,
+      "cooldown_sec": 2.0,
+      "max_length": 8,
+      "develop_from_age": true,
+      "vocal_tract_decoupled": true
+    },
+    "save": "F/models/_F2-9C_test_ぶーぶー_2026-08-26.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 3000,
+    "seed": 10,
+    "K": 10,
+    "checkpoint": 3000,
+    "csv": "F/logs/F2-9C_産出テスト/ぶーぶー/run.csv"
+  },
+  "plugins": {
+    "word_production": {
+      "events_out": "F/logs/F2-9C_産出テスト/ぶーぶー/発話イベント.csv"
+    }
+  }
+}

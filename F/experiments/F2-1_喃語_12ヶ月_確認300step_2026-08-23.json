@@ -1,0 +1,33 @@
+{
+  "name": "F2-1_喃語_12ヶ月_確認300step",
+  "note": "2026-08-23。12ヶ月の体・声道stage3で喃語が回るかの前提確認（300ステップのみ）。6ヶ月で学習したF1-5モデルを12ヶ月シーン（中心窩336px）で読めるか、develop_from_age=trueで声道stageが3になるかを実測する。本走行の前の確かめ。",
+  "scene": "座位_12ヶ月_2おもちゃ_F1-3c_1個提示_fovea_2026-08-23",
+  "taro": {
+    "actuation": "muscle",
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": { "backend": "dinov2_vits14", "fovea_px": 32 },
+    "lexicon_mode": "contrast",
+    "produce": {
+      "mode": "babble",
+      "cooldown_sec": 0.5,
+      "jaw_cycles": [1, 2],
+      "develop_from_age": true,
+      "vocal_tract_decoupled": true
+    },
+    "model": "F/models/F1-5_fovea32_300s_seed10_2026-08-21.pt",
+    "save": "F/models/_確認用_F2-1_12ヶ月_300step_2026-08-23.pt"
+  },
+  "run": {
+    "type": "train", "steps": 300, "seed": 10, "K": 10, "checkpoint": 300,
+    "csv": "F/logs/F2-1_喃語/確認_12ヶ月300step/run.csv"
+  },
+  "plugins": {
+    "babble_probe": {
+      "events_out": "F/logs/F2-1_喃語/確認_12ヶ月300step/発話イベント.csv",
+      "growth_out": "F/logs/F2-1_喃語/確認_12ヶ月300step/帳面の成長.csv",
+      "practice_out": "F/logs/F2-1_喃語/確認_12ヶ月300step/音ごとの練習回数.csv",
+      "growth_every": 50
+    }
+  }
+}

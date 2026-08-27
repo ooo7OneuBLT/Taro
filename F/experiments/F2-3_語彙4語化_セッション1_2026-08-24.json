@@ -1,0 +1,33 @@
+{
+  "name": "F2-3_語彙4語化_セッション1",
+  "note": "2026-08-24。目標F2作業C：語彙2語→4語化のセッション1。F/experiments/F1-5_fovea32_300s_seed10_2026-08-21.json と学習条件を揃える（dinov2_vits14・fovea_px 32・contrast・eta=(0.05,0.025)・steps=3000）。起点モデルは F2-3_語彙リセット_帳面つき（帳面339行68種は保持・語彙0語）。シーンは座位_6ヶ月_2おもちゃ_F1-3c_1個提示_2026-08-19のコピーでutterancesだけ「ぱぱ」（赤い箱）「ねこ」（白い球）へ変更（座位_6ヶ月_2おもちゃ_F2-3_セッション1_2026-08-24）。注意：taro.produceキーを付けていないため、F1-5と同じ条件を厳密に保つ代わりに、読み込んだ発話小脳(produce_cerebellum＝帳面)は taro_setup.py の仕様上このセッションの保存時に失われる（run/taro_setup.py:390-410、cfg.produce is Noneだと_pending_produce_cerebellumが警告なく破棄される）。判断を仰ぐ点として作業記録に記載。",
+  "scene": "座位_6ヶ月_2おもちゃ_F2-3_セッション1_2026-08-24",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 6.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.025,
+    "model": "F/models/F2-3_語彙リセット_帳面つき_2026-08-23.pt",
+    "save": "F/models/F2-3_4語_セッション1_seed10_2026-08-24.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 3000,
+    "seed": 10,
+    "K": 10,
+    "checkpoint": 3000,
+    "csv": "F/logs/F2-3_語彙4語化/セッション1_seed10/run_seed10.csv"
+  },
+  "plugins": {
+    "word_learning": {
+      "events_out": "F/logs/F2-3_語彙4語化/セッション1_seed10/発話イベント.csv"
+    }
+  }
+}
