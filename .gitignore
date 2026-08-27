@@ -47,6 +47,9 @@ D/archive/
 C/models/
 D/models/
 E/models/
+# 目標F（2026-08-27追加：F だけ除外されておらず models が284MBに達していた）
+F/logs/
+F/models/
 MIMo/
 
 # MuJoCoの実行時ログ（生成物）
