@@ -176,7 +176,7 @@ class TaroBrain(nn.Module):
 
     def generate(self, hidden, max_length, eos_idx, stamina=None,
                  vocal_tract=None, ne_level=0.5, cerebellum=None,
-                 speech_plan=None, body_state=None):
+                 speech_plan=None, body_state=None, jaw_cycles=None):
         """
         太郎の番に文字を産出する。
 
@@ -186,6 +186,14 @@ class TaroBrain(nn.Module):
 
         speech_plan: SpeechPlannerが作った計画（plan()済み）
         計画がなければ体力分だけ探索的に発声する（喃語期）
+
+        jaw_cycles: 【F2-1・決定1】喃語モード専用。指定すると、体力
+          （stamina）や max_length を無視して、この文字数（＝顎のサイクル
+          数のつもり。日本語では1モーラ≒1文字なので厳密な音節数ではない）
+          で打ち切る。設計：F/docs/設計_F2-1_喃語で口の内部モデルを作る.md
+          第2部決定1（Fagan 2009：乳児の1発声は平均0.84音節、単一CV音節・
+          単母音が大半）。speech_plan が与えられている場合はそちらを優先
+          （speech_plan は None のときだけ意味を持つ）。
         """
         if vocal_tract is None:
             vocal_tract = VocalTract()
@@ -201,24 +209,32 @@ class TaroBrain(nn.Module):
         # 発話計画がない場合：体力分だけ探索的に発声（喃語）
         if speech_plan is not None and speech_plan.has_next():
             max_chars = min(speech_plan.get_plan_length(), int(stamina) if stamina is not None else max_length)
+        elif jaw_cycles is not None:
+            # 【F2-1・決定1・2026-08-23】喃語の長さは肺活量ではなく
+            # 「顎のサイクル数」（1〜2から一様ランダムに引いた値、呼び出し側で
+            # 決める）で決める。肺は「絶対に超えない上限」に戻す（文献に呼吸を
+            # 主因とする裏付けが無いため。設計第2部決定1参照）。
+            max_chars = int(jaw_cycles)
+            speech_plan = None
         else:
             max_chars = min(max_length, int(stamina) if stamina is not None else max_length)
             speech_plan = None
 
-        # 喃語期（発話計画なし）だけに適用する発声停止。
-        # B-7では学習可能な停止headを試みたが、知覚時と生成時で隠れ状態が
-        # 異なり誤発火した（撤去済み）。
-        #
-        # B2-4→B2-5で修正：単純な「息切れ（残り呼気が少ないほど止まりやすい）」
-        # だけでは不十分と判明。文献調査の結果、乳児の喃語がいつ止まるかは
-        # 呼吸容量が上限を作るだけでなく、新奇性追求（まだ習得していない・
-        # 面白い音を出し続けたい動機）と養育者の反応が主な決定要因だと
-        # 判明した（呼吸容量は「絶対に超えない上限」であって「止まる理由」
-        # そのものではない）。ここでは新奇性を「GRUの出力分布のエントロピー
-        # （まだどの音を選ぶか定まっていない度合い）」として近似し、
-        # 興味が高いほど息切れの影響を弱める。決め打ちパラメータは増やさず、
-        # 既存のサンプリング分布を再利用するだけ。
-        is_babble = speech_plan is None
+        # 【F2-1・決定2・2026-08-23／実装作業⑥・想定外につき部分保留】
+        # 設計は息切れ停止（breath_pressure/stop_prob）を「設定で戻せる形に
+        # せず削除」と決めていたが、実測でこれを字義どおり削除すると
+        # **既存のF2「見た物の名前を言う」word産出（mode未指定・jaw_cycles未指定）
+        # の乱数列・出力が変わってしまう**ことが判明した
+        # （既存呼び出しは speech_plan を渡さないため is_babble=True の
+        #  この分岐を常に通っていた。run/tools/check_f2_1_babble_equivalence.py
+        #  で確認：5トライアル中5トライアルとも生成文字列・log_probsが不一致）。
+        # 「produce未設定／mode未指定の既存実験は乱数列を含め1ビットも変わらない
+        # こと」という絶対条件（仕様「絶対に守ること」1）を優先し、
+        # **jaw_cycles が指定されている（＝喃語モード）ときだけ息切れ停止を
+        # 無効化**する形に変更した（jaw_cycles未指定＝既存呼び出しでは旧コード
+        # と完全に同じ経路を通る）。設計の「設定で戻せる形にはせず削除」の
+        # 方針そのものとは食い違うため、作業記録の「上に上げること」に記載する。
+        is_babble = speech_plan is None and jaw_cycles is None
 
         # 【人間模倣】反復バイアス用：直前の音節の口の形を覚えておく（Frame/Content）。
         # generate()呼び出しごとにリセット（前の発話を引きずらない）。
@@ -229,6 +245,10 @@ class TaroBrain(nn.Module):
             pl, ml, vl, vol = self.forward_articulation(h_last)
 
             if is_babble and t > 0 and max_chars > 0:
+                # B2-4→B2-5の息切れ停止（旧実装）。jaw_cycles指定時（喃語モード）
+                # は上でmax_charsが1〜2に固定されるため、この停止機構は出番が
+                # なく（決定1・2の意図どおり）、jaw_cycles未指定の既存呼び出し
+                # 経路のみ、この停止機構を含めて完全に旧挙動を保つ。
                 breath_pressure = t / max_chars
                 interest = (self._normalized_entropy(pl, allowed_place)
                            + self._normalized_entropy(vl, allowed_voicing)
@@ -276,7 +296,13 @@ class TaroBrain(nn.Module):
             # 運動ノイズを抑えて安定して出す＝形の結晶化。報酬は足さず、練習回数だけで
             # 決まる（小脳の手続き的学習）。自動化度auto∈[0,1]でNEノイズを縮小する。
             eff_ne = ne_level
-            if cerebellum is not None:
+            # 【F2-1・決定4・2026-08-23】喃語モード（jaw_cycles指定）では
+            #   automatization()を呼ばない。automatization_scale=2000は未検証の
+            #   決め打ちのため、今回（喃語フェーズ）は使わない方針（設計第2部
+            #   決定4）。automatization自体は削除せず、呼ばないだけにする
+            #   （cerebellum.py冒頭コメント参照）。word産出モード（jaw_cycles
+            #   未指定）は従来どおりautomatization()を呼ぶ＝1ビットも変えない。
+            if cerebellum is not None and jaw_cycles is None:
                 auto = cerebellum.automatization(s_place, s_manner, s_voicing, s_vowel)
                 eff_ne = ne_level * (1.0 - auto)
 
@@ -395,6 +421,34 @@ class TaroBrain(nn.Module):
         【人間模倣】鳥のLMANが運動指令にノイズを注入するのと同じ原理。
         元の値から1つ隣にずれる確率がNEに比例する。
         NE=0 → ずれない。NE=1 → 高確率でずれる。ただし2つ以上は稀。
+
+        ⚠【要検討・2026-08-23 ユーザーの指摘により記録。まだ直していない】
+        **「1つ隣にずれる」の"隣"が、音の近さと対応していない。**
+
+            PLACES  = [なし, 両唇, 歯茎, 歯茎硬口蓋, 硬口蓋, 軟口蓋, 声門]
+                        口の前 →→→→→→→→→→→→→→→→→→ 口の奥
+                        ← ここだけは物理的に連続していて、隣＝近い
+
+            MANNERS = [なし, 鼻音, 破裂音, 摩擦音, 破擦音, 弾き音, 半母音]
+                        ← 鼻から抜く／口で破裂／隙間で擦る…は連続していない。
+                          「鼻音の隣が破裂音」に物理的な意味は無い
+
+            VOWELS  = [あ, い, う, え, お, （母音なし）]
+                        ← 五十音順。舌の位置とは無関係。
+                          「あ」の隣が「い」だが、舌の位置は最も遠い部類。
+                          近いのは「お」（後舌）なのに配列上は4つ離れている
+
+        そのため、人間の運動ノイズ（筋の出力がぶれる→舌の位置が少しずれる→
+        音が少し曖昧になる＝連続的なずれ）ではなく、**記号がまるごと別の音に
+        置き換わる**（離散的な置換）になっている。
+        LMANが注入するのは連続的な運動指令へのノイズであり、原理が異なる。
+
+        実測（F2-2・2026-08-23）：計画が正しく「わ・ん・わ・ん」でも、
+        実走行では「わおざあ」「らあぱん」のように別の音へ飛ぶ。
+
+        直すなら：素性空間の距離（`vocal_tract.param_distance` の考え方）や
+        調音の物理的な近さで「隣」を定義し直す必要がある。
+        目標B以来この形なので、直すと過去の実験の再現性に影響する。
         """
         import random
         if len(allowed) <= 1:

@@ -147,10 +147,35 @@ def default_scene(name="無題"):
             #   v2は従来どおり馴化無し（1ビット不変）。実体は
             #   e_orienting_v2.OrientingReflexV2 の habituation 引数。
             "orienting_habituation": False,
+            # 【2026-08-22新設・F1-7】中心窩カメラ（視野15度・解像度は月齢から自動計算）
+            #   のON/OFF。既定False＝従来どおり周辺カメラ(eye_left/eye_right)のみ
+            #   （1ビットも変わらない）。実体は e_toy_env.infant_vision_params の
+            #   fovea_camera引数。視線系（顕著性・サッケード・remapping）は
+            #   周辺カメラのまま変わらない。設計：F/docs/仕様_F1-7_....md。
+            "fovea_camera": False,
+            # 【2026-08-23新設】月齢から発達パラメータを自動で決める一本化
+            #   （taro_core/src/body/development.py）への切替キー。既定False＝
+            #   従来どおり周辺カメラの解像度は固定値(VISION_RES=128)のまま
+            #   （1ビットも変わらない）。Trueにすると周辺カメラの解像度も
+            #   age_monthsから自動計算される（e_toy_env.infant_vision_paramsの
+            #   develop_from_age引数）。声道の成熟ステージ側は別キー
+            #   （produce.develop_from_age、run/taro_setup.py参照。run/config.pyを
+            #   変更できないため、taro.develop_from_age という単一キーではなく
+            #   既存の自由辞書(produce/body)にそれぞれ載せた。詳細は実装報告参照）。
+            "develop_from_age": False,
         },
 
         # ② 環境のオブジェクト。これもモデル構築時
         "world": {
+            # 【2026-08-25新設・目標F・4語テスト】ベースのXML（MIMoの舞台そのもの）
+            #   の差し替え。None（既定）なら MIMoV2DummyEnv 既定の
+            #   benchmarkv2_scene.xml のまま（1ビットも変わらない）。
+            #   値は太郎リポジトリのルートからの相対パス（例:
+            #   "MIMo/mimoEnv/assets/benchmarkv2_scene_f4toys.xml"）。
+            #   共有XML(benchmarkv2_scene.xml)自体は一切変更しない方針
+            #   （toy_env.pyの既存コメント参照）なので、test_object3/4を
+            #   含むような別XMLが要る実験だけがこのキーを使う。
+            "xml": None,
             "recline_deg": 0.0,
             "seat_friction": 2.0,
             "fence": True,
@@ -220,6 +245,31 @@ def default_scene(name="無題"):
                 # 【2026-08-21新設・F1-4h】toy1のelev_degと同じ意味・同じ既定0.0。
                 #   toy1と独立に指定できる（左右で同じ高さにしたい実験がほとんど
                 #   だが、独立指定できないと困る場面のために分けた）。
+                "elev_deg": 0.0,
+            },
+            # 【2026-08-25新設・目標F・4語テスト】3個目・4個目のおもちゃ。
+            #   toy2と全く同じ形式（enabled=False（既定）なら test_object3/4 は
+            #   触らない＝toy3/toy4を書かない既存シーンは1ビットも挙動が変わらない）。
+            #   【なぜtoy1/toy2と角度の意味が違うか】toy1/toy2は視線正面から
+            #   「左右」に振り分ける（左右軸）。toy3/toy4は「上下」に振り分ける
+            #   （角度0度なら正面・toy1と同じ位置＝4語テストが1個ずつ提示する
+            #   前提で重なりを許容している。e_toy_env.py 2026-08-25コメント参照）。
+            "toy3": {
+                "enabled": False,
+                "shape": "box",
+                "radius": 0.020,
+                "rgba": None,            # None なら青系の既定色（TOY3_RGBA_DEFAULT）
+                "dist": 0.086,
+                "angle_deg": 0.0,        # toy1/toy2と同じ左右振り分け角。既定0=正面
+                "elev_deg": 0.0,         # 上下方向の角度（toy1/toy2のelev_degと同じ意味）
+            },
+            "toy4": {
+                "enabled": False,
+                "shape": "sphere",
+                "radius": 0.020,
+                "rgba": None,            # None なら緑系の既定色（TOY4_RGBA_DEFAULT）
+                "dist": 0.086,
+                "angle_deg": 0.0,
                 "elev_deg": 0.0,
             },
             "parent_intervene": False,
@@ -435,6 +485,15 @@ def build(scene, orient=None, vor=True, seed=0, verbose=False, actuation_model=N
     b, w, s = scene["body"], scene["world"], scene["setup"]
     toy = w["toy"]
     toy2 = w["toy2"]
+    # 【2026-08-25新設・目標F・4語テスト】旧シーン（load()でdefault_scene()の
+    #   既定値がマージされる前提でも、それより古いシーンJSONを直接dictで渡す
+    #   呼び出し元がいる可能性を考え）に無くても安全に既定値へフォールバックする。
+    toy3 = w.get("toy3") or {"enabled": False, "shape": "box", "radius": 0.020,
+                             "rgba": None, "dist": 0.086, "angle_deg": 0.0,
+                             "elev_deg": 0.0}
+    toy4 = w.get("toy4") or {"enabled": False, "shape": "sphere", "radius": 0.020,
+                             "rgba": None, "dist": 0.086, "angle_deg": 0.0,
+                             "elev_deg": 0.0}
 
     # 【なぜ、2026-08-10】body.flexion=True のとき、infant_body.apply_runtime_corrections が
     #   環境構築の途中で apply_limb_tone(profile="newborn_flexor") を隠れて呼び、
@@ -547,6 +606,14 @@ def build(scene, orient=None, vor=True, seed=0, verbose=False, actuation_model=N
     #     呼び出し側が返り値を上書きできる余地が残り、2026-07-25／07-28 と
     #     同じ事故（Viewer と測定で別の体）が再発する。
     kw = _body_kwargs(b, verbose=verbose)
+    # 【2026-08-25新設・目標F・4語テスト】ベースXMLの差し替え。
+    #   w["xml"]=None（既定・load()経由なら常にキーが存在する）なら model_path は
+    #   一切渡さない＝MIMoV2DummyEnv既定のbenchmarkv2_scene.xmlのまま
+    #   （1ビットも変わらない）。値は太郎リポジトリのルートからの相対パスとして
+    #   解釈する（絶対パスが来たらそのまま使う）。
+    if w.get("xml"):
+        _xml = str(w["xml"])
+        kw["model_path"] = _xml if os.path.isabs(_xml) else os.path.join(_ROOT, _xml)
 
     # --- 3. 環境を作る -------------------------------------------------------
     buf = io.StringIO()
@@ -560,7 +627,10 @@ def build(scene, orient=None, vor=True, seed=0, verbose=False, actuation_model=N
             #   （約977MB）を単色化する。目標B/C/Dは既にこの経路に乗っていたが、
             #   目標Eだけ常に非Noneを渡していたため発動していなかった
             #   （測定の実測：作業記録（非公開） 24節）。
-            vision_params=(TE.infant_vision_params(acuity_age=b["age_months"])
+            vision_params=(TE.infant_vision_params(
+                               acuity_age=b["age_months"],
+                               fovea_camera=bool(b.get("fovea_camera", False)),
+                               develop_from_age=bool(b.get("develop_from_age", False)))
                            if vision else None),
             age=float(b["age_months"]),
             toy=bool(toy["enabled"]),
@@ -580,6 +650,23 @@ def build(scene, orient=None, vor=True, seed=0, verbose=False, actuation_model=N
             toy2_rgba=(None if toy2["rgba"] is None else list(toy2["rgba"])),
             toy2_dist=float(toy2["dist"]),
             toy_angle_deg=float(toy2["angle_deg"]),
+            # 【2026-08-25新設・目標F・4語テスト】3個目・4個目のおもちゃ。
+            #   toy3/toy4.enabled=False（既定）なら1ビットも挙動が変わらない
+            #   （e_toy_env.ToySupineEnv側の対応する引数のコメント参照）。
+            toy3=bool(toy3["enabled"]),
+            toy3_shape=str(toy3["shape"]),
+            toy3_radius=float(toy3["radius"]),
+            toy3_rgba=(None if toy3["rgba"] is None else list(toy3["rgba"])),
+            toy3_dist=float(toy3["dist"]),
+            toy3_angle_deg=float(toy3["angle_deg"]),
+            toy3_elev_deg=float(toy3["elev_deg"]),
+            toy4=bool(toy4["enabled"]),
+            toy4_shape=str(toy4["shape"]),
+            toy4_radius=float(toy4["radius"]),
+            toy4_rgba=(None if toy4["rgba"] is None else list(toy4["rgba"])),
+            toy4_dist=float(toy4["dist"]),
+            toy4_angle_deg=float(toy4["angle_deg"]),
+            toy4_elev_deg=float(toy4["elev_deg"]),
             # 【2026-08-21新設・F1-4h】垂直角。既定0.0で従来位置と完全一致
             #   （e_toy_env.ToySupineEnv側のコメント参照）。
             toy_elev_deg=float(toy["elev_deg"]),
@@ -766,6 +853,61 @@ def constraint_summary(scene):
     }
 
 
+def _disable_self_contact(u, sup, verbose=False):
+    """支え付き座位で体が固定されているとき、**体の部位どうし**の接触判定を切る。
+
+    【なぜ、2026-08-24】12ヶ月シーンが6ヶ月の3.8倍遅い原因を切り分けたところ、
+    主因は体の大きさだった（中心窩カメラの寄与は +5〜15秒に対し、体の差は +26秒）。
+    体が大きくなると**体の部位どうしが触れ合う箇所が増える**：
+
+        接触点   6ヶ月 6件 → 12ヶ月 12件
+        中身     12件のうち **10件が自己接触**（指↔すね6件・指↔手2件・足↔足1件ほか）
+                 床との接触は2件だけ（腰と床・左足と床）
+        mj_step  6ヶ月 30ms → 12ヶ月 51ms（200回あたり）
+
+    支え付き座位（body_support）では**関節が固定されていて体は動かない**ので、
+    この自己接触を解いても姿勢は変わらない。また、この構成では
+    **触覚は太郎の脳に繋がっていない**（実測：`taro.fusion.touch is None`）ため、
+    切っても脳に入る情報は1つも変わらない。
+
+    【床との接触は残す】接触を全部切ると床がなくなり体が落下する
+    （実測：腰が10.8m移動）。ここで切るのは**体の geom どうし**だけで、
+    床・おもちゃ・世界との接触はそのまま。
+
+    【やり方】MuJoCoの `contype`/`conaffinity` のビットで、体の geom を
+    「世界とは当たるが、体どうしでは当たらない」グループに移す。
+    `e_toy_env.py:1075` の天井（contype=0 で見えるだけ）と同じ流儀。
+
+    【切らない条件】自由に動く関節がある構成（＝手を伸ばす・自己接触を扱う実験）では
+    自己接触が研究対象そのものなので**切らない**。`free` に何か入っていれば見送る。
+    """
+    free = _resolve_free(sup)
+    if free:
+        # 自由に動く部位がある＝自己接触が意味を持つ構成。触らない。
+        if verbose:
+            print(f"[contact] 自由な部位があるので自己接触は切らない（free={list(free)}）")
+        return
+    if not sup.get("pin_joints", True):
+        return
+    m = u.model
+    body_geoms = []
+    for gid in range(m.ngeom):
+        bid = int(m.geom_bodyid[gid])
+        name = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_BODY, bid) or ""
+        if name and name != "world" and not name.startswith("test_object"):
+            body_geoms.append(gid)
+    if not body_geoms:
+        return
+    # 体は「グループ2」に入れる。世界（既定の1）とは当たり、体どうし（2と2）では当たらない。
+    for gid in body_geoms:
+        m.geom_contype[gid] = 2
+        m.geom_conaffinity[gid] = 1
+    mujoco.mj_forward(m, u.data)
+    if verbose:
+        print(f"[contact] 自己接触を切った（体のgeom {len(body_geoms)}個・床との接触は残す）"
+              f" 接触点={u.data.ncon}")
+
+
 def _repin(env, scene, verbose=False):
     """体そのものを、いまの位置・向きで空間に留める。
 
@@ -865,6 +1007,7 @@ def _apply_setup(env, s, age, verbose=False):
                       f"[人間のリーチ実験も乳児を椅子に固定する＝von Hofsten 1982]")
         # 注意：体そのものを留めるのは**姿勢を復元したあと**（`_repin`）。
         #   ここで留めるとリセット直後の位置で固まり、シーンの姿勢とずれる。
+        _disable_self_contact(u, sup, verbose=verbose)
     hold = s.get("head_hold")
     if not hold:
         return None

@@ -52,7 +52,13 @@ class Dashboard(Plugin):
         # 見出しは実験ファイルの name を既定にする（どの実験の絵か分かるように）
         self.title = self.config.get("title") or ctx.spec.get("name")
         self.made = None
-        self.open_browser = bool(self.config.get("open", True))
+        # 【2026-08-24・ユーザーの指示で既定を True→False に変更】
+        #   学習を始めるたびにブラウザが勝手に開くのをやめる。
+        #   HTMLの生成は今までどおり続ける（ファイルは作られる）ので、
+        #   見たいときは出力先のHTMLを自分で開けばよい。
+        #   実験ファイルの plugins.dashboard.open を true にすれば従来どおり開く。
+        #   （このダッシュボードは将来アプリ化する予定＝ブラウザ版はもう使わない）
+        self.open_browser = bool(self.config.get("open", False))
         if not self.dir:
             print("注意[dashboard] 出力先が決まらないので絵を作りません"
                   "（run.csv か plugins.dashboard.dir を指定してください）", flush=True)

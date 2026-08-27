@@ -141,6 +141,21 @@ _IMAGENET_STD = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
 _MODEL_INPUT_PX = 224
 
 
+# 【2026-08-27・速度改善】視覚の推論をどこで計算するか（CPU/GPU）。
+#   実測（F/logs/F2-9C_速度内訳/run.csv）：走行時間の65%がこのバックエンドの推論
+#   （60秒ぶんの走行で129.6秒）。GPUがあれば載せる＝**同じ重み・同じ前処理で
+#   計算する場所だけを変える**ので、出力ベクトルは実質同一（浮動小数点の丸めの
+#   差のみ。導入時に実測で確認：F/logs/GPU化_同値確認/）。
+#   環境変数 TARO_VISION_DEVICE=cpu で強制的にCPUへ戻せる（切り分け用）。
+def _pick_device():
+    want = os.environ.get("TARO_VISION_DEVICE")
+    if want:
+        return torch.device(want)
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    return torch.device("cpu")
+
+
 @register("dinov2_vits14")
 class DINOv2VisionBackend:
     """torch.hub経由のDINOv2 ViT-S/14。両目それぞれフォビア切り出し→エンコード
@@ -166,6 +181,12 @@ class DINOv2VisionBackend:
         self._model.eval()
         for p in self._model.parameters():
             p.requires_grad_(False)
+        # 【2026-08-27・速度改善】GPUがあれば載せる（無ければCPUのまま＝従来と同一）。
+        #   正規化の定数も同じ場所へ置く（毎回のCPU→GPU転送を避ける）。
+        self._device = _pick_device()
+        self._model.to(self._device)
+        self._mean = _IMAGENET_MEAN.to(self._device)
+        self._std = _IMAGENET_STD.to(self._device)
 
     @property
     def dim(self):
@@ -180,7 +201,8 @@ class DINOv2VisionBackend:
         x = torch.nn.functional.interpolate(
             x, size=(_MODEL_INPUT_PX, _MODEL_INPUT_PX),
             mode="bilinear", align_corners=False)
-        x = (x - _IMAGENET_MEAN) / _IMAGENET_STD
+        x = x.to(self._device)
+        x = (x - self._mean) / self._std
         with torch.no_grad():
             feat = self._model(x)                     # (1, 384) CLSトークン特徴
         return feat.squeeze(0)
@@ -193,3 +215,61 @@ class DINOv2VisionBackend:
         if norm > 1e-12:
             avg = avg / norm
         return avg.cpu().numpy()
+
+
+# ---------------------------------------------------------------------------
+# "vits14_untrained"：DINOv2 ViT-S/14 と**まったく同じ形**で、重みだけランダム
+# ---------------------------------------------------------------------------
+@register("vits14_untrained")
+class UntrainedViTVisionBackend(DINOv2VisionBackend):
+    """訓練前の ViT-S/14（重みランダム）。dinov2_vits14 と器の形は同一。
+
+    【なぜ要るか】太郎は目に DINOv2（実写1.42億枚で訓練済み）を借りており、
+    これは「大人の目を借りている」という逸脱（逸脱リストその23）である。
+    訓練済み版と訓練前版は**まったく同じ形の器**なので、両者の差は
+    すべて「1.42億枚の訓練」によるものだと言い切れる。
+    訓練前でも語と物の結びつきが成立するなら、その23の逸脱が不要になる。
+
+    設計：F/docs/設計_F1-9_物差しの修復と目のアブレーション.md 第2部C節。
+
+    【実装】torch.hub の DINOv2 は重み込みでしか配布されないため、
+    重みつきで構築してから `reset_parameters()` を持つ層をすべて初期化し直す。
+    torch.hub 側の実装（層構成）は一切変えない＝形は完全に同一のまま。
+
+    【再現性】同じ seed なら同じランダム重みになるよう、初期化の直前に
+    torch の乱数状態を退避し、専用の seed で初期化してから元に戻す
+    （＝このバックエンドを使っても、走行本体の乱数列はずれない）。
+    """
+
+    name = "vits14_untrained"
+
+    def __init__(self, fovea_px=None, vision_encoder=None, seed=0, **_ignored):
+        super().__init__(fovea_px=fovea_px, vision_encoder=vision_encoder)
+        # 【2026-08-27・GPU化】ランダム重みの生成はCPUで行う。
+        #   torch.manual_seed の乱数列はデバイスごとに違うため、GPU上で
+        #   reset_parameters() を呼ぶと**過去のアブレーション実験（F1-9）と
+        #   違う重み**になり再現性が壊れる。初期化だけCPUへ戻し、終わってから
+        #   改めて計算する場所（self._device）へ載せる。
+        self._model.to("cpu")
+        state = torch.random.get_rng_state()
+        try:
+            torch.manual_seed(int(seed))
+            n_reset = 0
+            for m in self._model.modules():
+                if hasattr(m, "reset_parameters"):
+                    m.reset_parameters()
+                    n_reset += 1
+            # reset_parameters を持たない生の Parameter（位置埋め込み・CLSトークン等）
+            # も訓練の産物なので、同じ規模の正規乱数で置き換える。
+            for mod in self._model.modules():
+                for pname, p in list(mod.named_parameters(recurse=False)):
+                    if p.dim() >= 1 and not hasattr(mod, "reset_parameters"):
+                        with torch.no_grad():
+                            p.normal_(0.0, 0.02)
+            self._n_reset = n_reset
+        finally:
+            torch.random.set_rng_state(state)
+        self._model.eval()
+        for p in self._model.parameters():
+            p.requires_grad_(False)
+        self._model.to(self._device)   # 【2026-08-27】CPUで初期化した重みをGPUへ

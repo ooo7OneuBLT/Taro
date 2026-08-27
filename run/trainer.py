@@ -131,6 +131,17 @@ class Trainer:
         #   記憶＝(vec, 思い浮かべ始めた時刻)。cfg.word_attentionがNoneのままなら
         #   一度も書き込まれず参照もされない＝既定挙動不変（設計後半「部品2」）。
         self._active_assoc = None
+        # 【2026-08-24新設・作業C速度改善】cfg.profile=False（既定）のときは
+        #   self._prof_enabled=False固定で、_prof_t0/_prof_addは何もしない
+        #   （time.perf_counter()すら呼ばない）。学習の乱数消費・結果は1ビットも
+        #   変わらない（時刻計測とpsutilはどちらもMuJoCo/torch/random/numpyの
+        #   状態を読み書きしない）。実測：run/tools/check_profile_overhead.py。
+        self._prof_enabled = bool(getattr(cfg, "profile", False))
+        self._prof = {}          # {区分: 直近チェックポイント以降の累積秒数}
+        self._prof_proc = None
+        if self._prof_enabled:
+            import psutil          # 遅延import（既定OFF時は依存を増やさない）
+            self._prof_proc = psutil.Process(os.getpid())
 
     # ------------------------------------------------------------ 組み立て
     def build(self):
@@ -235,6 +246,47 @@ class Trainer:
         o = t.apply_touch_adaptation(o, is_reset=False)
         return o, term
 
+    def _vision_backend_encode(self, o):
+        """`t.vision_backend.encode()` に渡す画像を選ぶ（F1-7新設）。
+
+        中心窩カメラ（`eye_left_fovea`/`eye_right_fovea`）が観測に含まれていれば
+        そちらを、無ければ従来どおり `eye_left`/`eye_right` を渡す。
+        `body.fovea_camera` が既定False（未指定シーン含む）のときは、観測に
+        該当キーが無いため常に従来経路＝**1ビットも挙動が変わらない**。
+
+        中心窩画像は撮影時点で既に視野15度に切り出し済み（MuJoCo側のカメラfovy）
+        なので、下流バックエンド（例：dinov2_vits14）が持つ `fovea_crop` を
+        二重にかけると情報を失う。バックエンドが `fovea_px` 属性を持つ場合のみ、
+        encode()呼び出しの間だけ「crop が実質no-opになる値」へ一時的に差し替え、
+        呼び出し後に元へ戻す（vision_backends.py は触ってよいファイルの外なので、
+        ここでの一時上書きで対応する）。customバックエンドはfovea_crop自体を
+        呼ばないので、この上書きは何もしない。
+        """
+        t = self.taro
+        has_fovea = "eye_left_fovea" in o and "eye_right_fovea" in o
+        if has_fovea:
+            img_l, img_r = o["eye_left_fovea"], o["eye_right_fovea"]
+        else:
+            img_l, img_r = o["eye_left"], o["eye_right"]
+        backend = t.vision_backend
+        old_fovea_px = None
+        has_fovea_px_attr = has_fovea and hasattr(backend, "fovea_px")
+        if has_fovea_px_attr:
+            old_fovea_px = backend.fovea_px
+            backend.fovea_px = 10 ** 9   # fovea_crop側のmin(fovea_px,h)でno-op化
+        # 【作業C・2026-08-24】この時間は呼び出し元（_hear_parent_utterance＝
+        #   step_k内＝"env_step"に含まれる／_apply_word_attention・
+        #   _apply_word_production＝"produce"に含まれる）の**内訳**として重ねて足す
+        #   （他区分との合計が二重計上になる。CSV列名 t_vision_backend_sec は
+        #   「他区分の一部」であって独立区分ではないと作業記録に明記）。
+        _prof_t = self._prof_t0()
+        try:
+            return backend.encode(img_l, img_r)
+        finally:
+            if has_fovea_px_attr:
+                backend.fovea_px = old_fovea_px
+            self._prof_add("vision_backend", _prof_t)
+
     def _hear_parent_utterance(self, o, info):
         """親の発話（info["parent_utterance"]）を耳→連合器へ渡す（2026-08-18新設・F1-3）。
 
@@ -265,7 +317,11 @@ class Trainer:
         #   既定null時はcustomバックエンドがtaro.fusion.visionをそのまま呼ぶだけなので、
         #   出力は従来コード（t.fusion.vision(...).detach().cpu().tolist()）と同一
         #   （custom backendのencode()内でも同じdetach().cpu()を行う）。
-        state = t.vision_backend.encode(o["eye_left"], o["eye_right"]).tolist()
+        state = self._vision_backend_encode(o).tolist()
+        # 【F2-8・2026-08-25】「見慣れた景色」の平均を育てる（reverse_lookupの
+        #   両側引き算に使う）。語彙にも想像にも触らない純粋な足し算で、
+        #   すでに計算済みのstateを渡すだけ＝追加の計算コストはゼロ。
+        t.lexicon.observe_view(state)
         chunk = t.lexicon.observe(tokens, confidences, state=state)
         # 【なぜstateもここに置くか】word_learningプラグイン（読むだけ）が「正解物の
         #   特徴EMA」を作るのに使う（プラグインがtaro.fusionを呼び直すと二重計算に
@@ -307,13 +363,236 @@ class Trainer:
         active = self._active_assoc
         now = self.ctx.sim_sec
         if active is not None and (now - active[1]) < active_sec:
-            vec = t.vision_backend.encode(o["eye_left"], o["eye_right"])
+            vec = self._vision_backend_encode(o)
             sim = _cosine_sim(vec, active[0])
             orienting.set_recognition(max(0.0, sim))
         else:
             # 期限切れ（ACTIVE_SEC超過）。信号を明示的に0へ戻す
             #   （戻さないと反射側に前回のsimが居座り続けて保持が解除されなくなる）。
             orienting.set_recognition(0.0)
+
+    def _apply_word_production(self, o):
+        """見た物の名前を言う（F2「初語」、設計：F/docs/設計_F2_初語（見た物の名前を
+        言う）.md 第2部）。
+
+        既定（cfg.produce is None）では最初のifで即returnし、逆引き
+        （lexicon.reverse_lookup）・generate()・報酬計算等の追加計算は一切走らない
+        （既存実験の挙動もコストも1ビットも変わらない）。
+
+        トリガー＝「じっと見ていて（視線誘導反射が保持中＝サッケード中でなく
+        _should_hold()が真）、かつそれが何か分かっている（逆引きの確信度が
+        閾値以上）」（設計「いつ言うか」節）。既存の信号を読むだけで、
+        新しい仕組みは作らない（E/scripts/e_orienting_v2.py:1058 _should_hold()・
+        :1132 holdingと同じ定義）。直前に喋っていなければ（クールダウン）発声する。
+        """
+        pd = self.cfg.produce
+        self.ctx.last_produce = None
+        self.ctx.last_babble = None
+        if pd is None or not pd.get("enabled", True):
+            return
+        t = self.taro
+        if getattr(t, "produce_learner", None) is None:
+            return          # 産出の配線が無ければ何もしない
+
+        # 【F2-1・実装作業④・2026-08-23】喃語モード（mode="babble"）。
+        #   設計：F/docs/設計_F2-1_喃語で口の内部モデルを作る.md 第4部「④」。
+        #   mode未指定（既定"word"）ならこのifを一歩も通らず、以降の従来どおりの
+        #   word_mode処理（視覚トリガー・逆引き・報酬・学習）に進む＝1ビットも
+        #   変わらない。babbleモードは視覚トリガーを使わず、クールダウンだけで
+        #   自発的に発声し、逆引き・報酬・学習は一切通らない（声を出して
+        #   小脳の帳面に書くだけ）。
+        if pd.get("mode", "word") == "babble":
+            self._apply_babble(pd)
+            return
+
+        if getattr(t, "hearing", None) is None or getattr(t, "lexicon", None) is None:
+            return          # 耳/連合器の配線が無ければ何もしない
+        orienting = getattr(self.env.unwrapped, "_orienting", None)
+        if orienting is None:
+            return          # 視線誘導反射が無効なら「注視している」を判定できない
+
+        # ① 逆引き：いま見ている視覚ベクトル → 一番似ているchunk（言いたい語）。
+        vec = self._vision_backend_encode(o)
+        # 【F2-8・2026-08-25】逆引きの前に「見慣れた景色」の平均へ今の見えを足す。
+        #   ここは毎ステップ通るので、産出中は太郎が見たものすべてが平均に入る。
+        t.lexicon.observe_view(vec)
+        chunk, sim = t.lexicon.reverse_lookup(vec)
+        if chunk is None:
+            return
+        # 【Tier3・2026-08-22】閾値はorienting_reflexの認識信号REC_THRESHOLD
+        #   （e_orienting_v2.py:461＝0.80、F1-3cの保存済み画像で較正）に揃えた。
+        #   「見た物と語の一致度」を扱う信号を2種類持たせない判断（設計「残る
+        #   未決」節）。
+        threshold = float(pd.get("threshold", 0.80))
+        if sim < threshold:
+            return
+        # ② 注視が続いている（サッケード実行中でなく、いままさに同じ対象へ
+        #   留まっている）。e_orienting_v2.py _update_habituation() が保持判定に
+        #   使っているのと同じ2条件をそのまま読む（新しい仕組みは作らない）。
+        holding = orienting._sacc_remaining <= 0.0 and orienting._should_hold()
+        if not holding:
+            return
+        # ③ クールダウン（直前に喋っていない）。
+        #   【Tier3・2026-08-22・文献根拠なし】同じ語を連呼し続けないための
+        #   最小限の歯止め。値は仮（人間の平均発話間隔より長めに取っただけ）。
+        cooldown_sec = float(pd.get("cooldown_sec", 2.0))
+        now = self.ctx.sim_sec
+        if t._last_produce_sec is not None and (now - t._last_produce_sec) < cooldown_sec:
+            return
+
+        # ---- ここからトリガー成立：② generate() で実際に発声する -----------------
+        t._last_produce_sec = now
+        target_word = t.hearing.vocab.decode(list(chunk))
+        target_tokens = t.produce_vocab.encode(target_word)
+        max_length = int(pd.get("max_length", 8))
+
+        # 【F2-2・実装作業③・2026-08-23】ブローカ野で発話計画を立てる。
+        #   帳面（produce_cerebellum）に無いモーラは motor=None のまま計画に入り、
+        #   generate() 側で大脳皮質が自力で選ぶ（探索的な動き）。use_hear_fallback
+        #   は既定Falseのまま（設計第2部決定3：正解表 vocal_tract.hear() は使わない）。
+        #   設計：F/docs/設計_F2-2_見た物の名前を言う.md 第4部「③」。
+        t.produce_broca.plan(
+            target_word, t.produce_cerebellum, t.produce_vocal_tract,
+            use_hear_fallback=False)
+        plan_length = t.produce_broca.get_plan_length()
+        known_moras = sum(
+            1 for item in t.produce_broca.motor_buffer if item["motor"] is not None)
+
+        # 【F2-2・実装作業③】speech_plan を渡すと generate() 内部で
+        #   max_chars = min(計画長, stamina)（stamina未指定なのでmax_lengthが
+        #   代わりに使われる。実装作業⑦の実測：taro_core/F にはまだ肺(stamina)の
+        #   機構が移植されておらず taro に stamina属性が無いため、ここではstamina
+        #   引数を渡さない＝計画が切られることはない。詳細は作業記録参照）。
+        # 【F2-2・2026-08-23】発話時の探索ノイズ（NE）をどうするか。
+        #   NEノイズは青斑核（locus_coeruleus.py）の仕組みで、本来は
+        #   **学習のための探索**（報酬が得られていないほど色々試す）。
+        #   目標Bは発音を報酬で学習していたので探索が要ったが、
+        #   **F2-2は学習しない（帳面から引いて実行するだけ）ので探索は不要**。
+        #
+        #   さらに、ここで使われる `t.ne.get_ne_level()` は
+        #   **手足の運動学習の報酬**で上下する値（trainer.py の運動探索と共用）。
+        #   発話とは無関係な信号で口が震えることになる。
+        #
+        #   実測（2026-08-23）：ノイズを消して計画をそのまま実行すれば
+        #   「わんわん」は完璧に出るのに、実走行では27回中0回しか一致せず
+        #   「わおざあ」「らあぱん」等になっていた。
+        #   （ノイズの"隣にずらす"実装自体にも問題がある。
+        #     taro_core/src/brain/taro_brain.py の `_apply_ne_noise` の⚠を参照）
+        #
+        #   `produce.exploration_noise`（既定False＝ノイズ無し）で切り替える。
+        #   学習を有効にする（produce.learn=true）ときは探索が要るので、
+        #   そのときだけ True にすること。
+        _ne = t.ne.get_ne_level() if bool(pd.get("exploration_noise", False)) else 0.0
+        generated, log_probs, hidden = t.brain.generate(
+            hidden=None, max_length=max_length, eos_idx=2,
+            vocal_tract=t.produce_vocal_tract, ne_level=_ne,
+            cerebellum=t.produce_cerebellum, speech_plan=t.produce_broca)
+        generated_word = t.produce_vocab.decode(generated)
+
+        # 【F2-2・実装作業⑤・2026-08-23】自分の声を聞く（hidden state更新）。
+        #   _apply_babble に入れたものと同じ（B原本 B/src/environment/core_b.py:
+        #   610-615 self_babble() の移植）。学習はしない。次に発声するときの
+        #   初期hiddenには使わない（wordモードは従来どおり毎回 hidden=None、
+        #   taro_setup.py _setup_produce のコメント参照）。ここでは t._produce_hidden
+        #   を更新するだけに留める（babbleモードとの一貫性のため）。
+        if generated:
+            full_tokens = [1] + generated + [2]
+            listen_input = torch.tensor([full_tokens], device=t.brain._device())
+            with torch.no_grad():
+                _, h = t.brain.forward_hidden(listen_input)
+            t._produce_hidden = h
+
+        # 【F2-2・実装作業④・2026-08-23】報酬・学習は既定OFF（設計第2部決定1：
+        #   「学習ではなく実行」。帳面が正解を持っているので学ぶものが無い）。
+        #   produce.learn（既定False）で有効化できる形で**コードは消さずに残す**
+        #   （将来、聴覚経路(逸脱その29)や automatization(逸脱その33)に手をつける
+        #   ときにそのまま使える）。
+        reward = None
+        if bool(pd.get("learn", False)):
+            # ③ 出た音 vs 言いたかった語 の一致度を報酬にする（B原本の移植、
+            #   taro_core/src/brain/imitation_reward.py:出典コメント参照）。
+            from imitation_reward import compute_imitation_reward, compute_alignment_credit
+            reward = compute_imitation_reward(
+                target_tokens, generated, vocab=t.produce_vocab,
+                vocal_tract=t.produce_vocal_tract)
+
+            # 【12ヶ月産出実験の準備①・2026-08-23】発話まるごとに単一のδだけで
+            #   学習すると「4文字のどれが良くてどれが悪かったか」が太郎に分からない
+            #   （探索範囲 588^4 通り）。文字ごとの一致度（compute_alignment_credit、
+            #   B2-2・imitation_reward.py:出典コメント参照）を使い、良かった文字は
+            #   より強く強化・目標語にない余分な文字は抑制する（探索範囲 588×4通り）。
+            credits = compute_alignment_credit(
+                target_tokens, generated, vocab=t.produce_vocab,
+                vocal_tract=t.produce_vocal_tract)
+
+            # ④ 学習：**運動学習(taro.learner)とは別の学習器**（taro.produce_learner）で
+            #   REINFORCE（設計「⚠学習器の共有」案a。taro_setup.py _setup_produce
+            #   のコメント参照＝勾配の対象が運動系と重ならない）。
+            rpe = t.produce_dop.compute_rpe(reward)
+            pl = t.produce_learner.learn_action(log_probs, rpe, credits=credits)
+            t.produce_learner.update(0.0, pl)
+
+        self.ctx.last_produce = {
+            "target_word": target_word, "sim": float(sim),
+            "generated_word": generated_word,
+            "reward": float(reward) if reward is not None else None,
+            "plan_length": int(plan_length), "known_moras": int(known_moras)}
+
+    def _apply_babble(self, pd):
+        """喃語モード（F2-1）：視覚トリガーなし・クールダウンだけで自発的に声を出す。
+
+        設計：F/docs/設計_F2-1_喃語で口の内部モデルを作る.md 第4部「④」。
+        逆引き・報酬・学習は通らない。声を出して小脳の帳面（forward_map/
+        inverse_map）に書くだけ（決定：喃語フェーズは帳面を溜めるだけ）。
+        """
+        t = self.taro
+        cooldown_sec = float(pd.get("cooldown_sec", 2.0))
+        now = self.ctx.sim_sec
+        if t._last_produce_sec is not None and (now - t._last_produce_sec) < cooldown_sec:
+            return
+        t._last_produce_sec = now
+
+        # 【F2-1・実装作業⑤】顎のサイクル数を1〜2から一様ランダムに引く
+        # （設計第2部決定1）。実験ファイルの produce.jaw_cycles で候補を
+        # 差し替え可能（既定[1, 2]）。
+        jaw_choices = pd.get("jaw_cycles", [1, 2])
+        jaw_cycles = random.choice(jaw_choices)
+
+        generated, log_probs, hidden = t.brain.generate(
+            hidden=t._produce_hidden, max_length=int(pd.get("max_length", 8)),
+            eos_idx=2, vocal_tract=t.produce_vocal_tract, ne_level=t.ne.get_ne_level(),
+            cerebellum=t.produce_cerebellum, jaw_cycles=int(jaw_cycles))
+        generated_word = t.produce_vocab.decode(generated)
+
+        if not generated:
+            return
+
+        # 【F2-1・実装作業⑦】自分の声を聞く（hidden state更新）。学習はしない。
+        #   B原本 B/src/environment/core_b.py:610-615 self_babble() の移植。
+        #   BOS(1)/EOS(2)は Vocabulary の固定インデックス（taro_core/src/senses/
+        #   hearing.py）。次の喃語発声はこのhiddenを引き継ぐ（word モードは
+        #   従来どおり毎回 hidden=None のまま・不変）。
+        full_tokens = [1] + generated + [2]
+        listen_input = torch.tensor([full_tokens], device=t.brain._device())
+        with torch.no_grad():
+            _, h = t.brain.forward_hidden(listen_input)
+        t._produce_hidden = h
+
+        self.ctx.last_babble = {
+            "generated_word": generated_word, "jaw_cycles": int(jaw_cycles),
+            "length": len(generated)}
+
+    # ---------------------------------------------------- 作業C：処理時間の計測
+    def _prof_t0(self):
+        """区間の開始時刻。既定OFF（cfg.profile=False）なら常に0.0を返すだけ
+        （time.perf_counter()を一切呼ばない＝コストも副作用も無い）。"""
+        return time.perf_counter() if self._prof_enabled else 0.0
+
+    def _prof_add(self, key, t0):
+        """区間の終了。既定OFFなら即return（呼び出し元でif分岐しなくてよいようにする）。"""
+        if not self._prof_enabled:
+            return
+        self._prof[key] = self._prof.get(key, 0.0) + (time.perf_counter() - t0)
 
     def reset_state(self):
         self.state["obs"], _ = self.env.reset()
@@ -689,6 +968,14 @@ class Trainer:
             row["effort"] = round(float(np.mean(self._eff_accum[-200:])), 5)
         if self.cfg.cerebellum:  # 小脳の馴染み度（自動化がどれだけ効くか）
             row["cereb_err"] = round(float(t.cereb.err_ema.item()), 5)
+        # 【2026-08-24新設・作業C速度改善】cfg.profile=True のときだけ列が増える。
+        #   既定（False）ではこのifブロックに一歩も入らない＝run.csvの列は
+        #   1個も増えない（既存の全実験のCSVと1バイトも変わらない）。
+        if self._prof_enabled:
+            row["rss_mb"] = round(self._prof_proc.memory_info().rss / (1024.0 * 1024.0), 1)
+            for k, v in self._prof.items():
+                row[f"t_{k}_sec"] = round(v, 4)
+            self._prof = {}      # このチェックポイント区間ぶんを記録したのでリセット
         for p in self.plugins:
             m = p.metrics(self.ctx)
             if m:
@@ -769,6 +1056,7 @@ class Trainer:
                     self._cur_age = na
                     env = self.env            # 作り直したので持ち替える
             # ---- 感覚を受け取り、内部表現を作る -------------------------------
+            _prof_t = self._prof_t0()   # 【作業C】cfg.profile=False（既定）なら常に0.0
             obs_in = state["obs"]       # 環境を進める**前**の観測（原因追跡用に控える）
             sv = t.fusion.encode(state["obs"])
             cf = t.target_fusion.encode(state["obs"]).detach()
@@ -843,6 +1131,7 @@ class Trainer:
                 if self.reach_traj is not None:
                     self.reach_traj.reset()  # 探索に切替 → 軌道は打ち切り（reach_self）
             a, lp = t.brain.explore(mean, std)
+            self._prof_add("brain_fwd", _prof_t)   # 【作業C】fusion.encode〜explore()
             self.goal_buf.append(clp.detach())
             if len(self.goal_buf) > 2000:
                 # 注意：【逸脱・2026-07-30】先行研究は経験のカウントを**一度も捨てない**
@@ -858,8 +1147,12 @@ class Trainer:
             pred = clp + t.nat_head(torch.cat([z, a.detach()], dim=-1))
             # 拮抗筋モード：a(n_joint) → to_env_action で筋活性化へ写像。OFFなら a_env==a
             a_env = t.brain.to_env_action(a)
+            _prof_t = self._prof_t0()   # 【作業C】物理+描画+触覚（MIMo内部・env.step一式）
             state["obs"], term = self.step_k(rescale_action(a_env, env.action_space))
+            self._prof_add("env_step", _prof_t)
+            _prof_t = self._prof_t0()   # 【作業C】env.step後の脳forward（encode_target）
             nlp = t.encode_target(state["obs"])
+            self._prof_add("brain_fwd", _prof_t)
             n_gclp = t.encode_reach_goal(state["obs"]) if reach_space else None
             if cfg.closed_loop_reach and reach_goal is not None:
                 nd = mse(nlp, reach_goal).item()
@@ -879,7 +1172,13 @@ class Trainer:
             # 【2026-08-19新設・F1-4b】語から注意への読み出し回路（部品2の後半）。
             #   cfg.word_attentionがNoneなら_apply_word_attention内で即returnし、
             #   DINOv2 encode等の追加計算は一切走らない（既定挙動・コスト不変）。
+            _prof_t = self._prof_t0()   # 【作業C】語彙(DINOv2)読み出し＋発話生成
             self._apply_word_attention(state["obs"])
+            # 【2026-08-22新設・F2】見た物の名前を言う（初語）。cfg.produceがNoneなら
+            #   _apply_word_production内で即returnし、逆引き・generate()等の追加計算は
+            #   一切走らない（既定挙動・コスト不変。上のword_attentionと同じ流儀）。
+            self._apply_word_production(state["obs"])
+            self._prof_add("produce", _prof_t)
             # このステップの内部の値を「置いておく」だけ（プラグインは読むだけ）。
             #   同じシードで結果がばらつく原因を追うのに使う（落とし穴 項79）。
             #   注意：参照を入れるだけなので計算はしない＝学習の数値は変わらない。
@@ -889,9 +1188,12 @@ class Trainer:
             # 【2026-08-18新設・F1-3】この判断(K tick)ぶんの親の発話イベント（無ければ空）。
             #   ctx.last_double_touchと同じ「置いておくだけ」の流儀（プラグインは読むだけ）。
             self.ctx.last_parent_utterance = list(self._last_parent_events)
+            _prof_t = self._prof_t0()   # 【作業C】測る道具（プラグイン）
             for p in self.plugins:
                 p.on_step(self.ctx)
+            self._prof_add("plugin", _prof_t)
             # ---- 学習 --------------------------------------------------------
+            _prof_t = self._prof_t0()   # 【作業C】報酬・RPE・逆伝播（学習）
             pe = t.block_pe(pred, nlp)
             progress = t.lp.update(pe.item())
             pe_fast, pe_slow = t.lp.pe_fast, t.lp.pe_slow
@@ -1026,6 +1328,7 @@ class Trainer:
             pl = t.learner.learn_action([lp], rpe)
             hl = t.homeo.homeostatic_loss(sv); t.homeo.observe(sv)
             t.learner.update(pe + hl + kl + rc, pl)
+            self._prof_add("learn", _prof_t)
             # ---- 測る（プラグイン、rew・rpe確定後）--------------------------
             #   on_step（694行目付近）はrew・rpe確定"前"に呼ばれるため、これらを
             #   読みたいプラグインはここで新設した on_step_late を実装する
@@ -1041,8 +1344,10 @@ class Trainer:
                 "surprise_trace": t.lp._surprise_trace,
                 "progress": progress,
             }
+            _prof_t = self._prof_t0()   # 【作業C】測る道具（プラグイン、rew確定後）
             for p in self.plugins:
                 p.on_step_late(self.ctx)
+            self._prof_add("plugin", _prof_t)
             if reach_space:
                 # 手先位置の目標表現（案C）：reach_head の学習は**独立optimizer**
                 #   （設計の統合判断「決定2」）。既存の自己モデル学習（pe+hl+kl+rc）

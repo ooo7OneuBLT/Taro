@@ -31,11 +31,24 @@ benchmarkv2_scene.xml には既に freejoint の箱(test_object1)と球(test_obj
     env = ToySupineEnv(age=0, toy=True)
 """
 import os
+import sys
 
 import numpy as np
 import mujoco
 
 from d_supine_env import SupineMimoEnv
+
+# 【なぜ、2026-08-23】development.py（taro_core側・月齢→発達パラメータの一本化）を
+#   import するための sys.path 追加。呼び出し元（e_scene.py等）は既に
+#   taro_core/src/body を sys.path へ足しているが、e_toy_env.py が直接単体で
+#   import されるスクリプトも多い（require_px 等を直接呼ぶ14ファイル）ため、
+#   呼び出し側に依存せずこのファイル自身でも通す。
+_HERE_DEV = os.path.dirname(os.path.abspath(__file__))
+_ROOT_DEV = os.path.abspath(os.path.join(_HERE_DEV, os.pardir, os.pardir))
+_DEV_PATH = os.path.join(_ROOT_DEV, "taro_core", "src", "body")
+if _DEV_PATH not in sys.path:
+    sys.path.insert(0, _DEV_PATH)
+import development  # noqa: E402
 
 # --- 実測（e_reach_space.py, age=0）に基づく既定値 ---
 REACH_MAX = 0.160          # 肩→手の最大距離[m]（これを超えると物理的に届かない）
@@ -239,7 +252,19 @@ TOY_DENSITY = TOY_MASS / (2 * 0.020) ** 3    # 240.6 kg/m³。形を変えても
 #   こうした側面は生じない（Aslin & Salapatek 1975、Hunter & Richards 2003 など）。
 #   注意：視標の形・大きさの文献値そのものは未確認 [Tier3・ARBITRARY]。
 # E_TOY_SHAPE=sphere で球、E_TOY_RADIUS で大きさ[m]を変えられる。
-TOY_SHAPE = os.environ.get("E_TOY_SHAPE", "box")   # box / sphere
+TOY_SHAPE = os.environ.get("E_TOY_SHAPE", "box")   # box / sphere / cylinder / ellipsoid
+
+# 【2026-08-24追加・目標F・F2】語彙4語化のため、見分けられる形をbox/sphereの2種類から
+#   4種類（box/sphere/cylinder/ellipsoid）へ増やす。
+#   大きさの決め方 [Tier3・ARBITRARY]：文献値は無く、box/sphere と見た目の大きさが
+#   揃うように目視の代わりに寸法だけを合わせた。
+#   cylinder: 半径=TOY_RADIUS相当、半分の長さも同じ値（＝全長が直径と同じ）にして、
+#     box（一辺=2*TOY_RADIUS）・sphere（直径=2*TOY_RADIUS）と全体の見かけの大きさを揃えた。
+#   ellipsoid: 半径(a,b,c)のうち1軸だけ TOY_ELLIPSOID_ELONGATION 倍に伸ばし「たまご型」にする。
+#     倍率1.4は「卵型と分かる程度に非対称だが、他の2形状と全体サイズが極端に違わない」を
+#     目視の代わりに数値で決めただけの恣意値（根拠文献なし）。
+TOY_CYLINDER_HALF_LEN_RATIO = 1.0
+TOY_ELLIPSOID_ELONGATION = 1.4
 # 摩擦[slide, spin, roll]。**転がり続けを止めるために roll/spin を既定より上げる**。
 # 理由＝実測で「手が遠いのにおもちゃが動く(0.342mm/tick)」＝一度押されると転がり続け、
 # 「今の自分の運動」と無関係に動いて**随伴性(自分の行為→結果)が濁る**ため。
@@ -292,6 +317,13 @@ TOY2_RGBA_DEFAULT = np.array([0.9, 0.9, 0.9, 1.0])   # toy2の既定色＝白系
 # 【なぜ12度か】視野の半角30度に対し余裕を持って両方を収める値として選んだ
 # （±12度なら視野中心から12度、半角30度の40%）。文献値ではない[Tier3・ARBITRARY]。
 TOY_ANGLE_DEG_DEFAULT = 12.0
+# 【2026-08-25新設・目標F・4語テスト】toy3/toy4の既定色・既定角度。
+#   4語テストは「1個ずつ提示して見比べる」（f_wordreadout_nway.pyがrgbaのアルファを
+#   0にして透明化する）ので、既定角度は0度＝toy1と同じ方向・同じ距離で構わない
+#   （4つが重なっていても、同時に見せることは無いため実害が無い。仕様で明示的に許容）。
+TOY3_RGBA_DEFAULT = np.array([0.2, 0.4, 0.9, 1.0])   # toy3の既定色＝青系
+TOY4_RGBA_DEFAULT = np.array([0.2, 0.8, 0.3, 1.0])   # toy4の既定色＝緑系
+TOY34_ANGLE_DEG_DEFAULT = 0.0
 
 # --- 視覚 ---
 # 【重要・MIMoのバグ回避】MIMoの mimoVision は `env.camera_name` を設定して `env.render()`
@@ -317,8 +349,59 @@ VISION_MIN_DT = 0.1
 
 ACUITY_AGE = 0.5   # 視力テーブルに渡す月齢。下記のとおり 0.0 は**無効**になるので使えない
 
+# 【F1-7・2026-08-22】中心窩カメラの視野[度]。中心窩は既定OFF（body.fovea_camera=False）。
+FOVEA_FOVY = 15.0
 
-def infant_vision_params(size=VISION_RES, fovy=VISION_FOVY, acuity_age=ACUITY_AGE):
+
+def _acuity_cpd(age_months):
+    """月齢から視力[cycles/度]を求める（Mayer et al. 1995 の実測テーブル・線形補間）。
+
+    【2026-08-23・二重実装の解消】以前はここに表と補間ロジックを直接複製していた
+    （F1-7・2026-08-22時点のコメント参照）。今回、月齢→発達パラメータを一本化する
+    `taro_core/src/body/development.py` を新設したのに合わせ、canonicalな置き場所を
+    そちらへ移し、ここは委譲するだけにした（表の値・補間ロジックは1文字も変えていない。
+    出典・複製の経緯は development.py 側のコメントに引き継いだ）。
+    """
+    return development.vision_acuity_cpd(age_months)
+
+
+def required_px(age_months, fovy_deg):
+    """視力フィルタが効く上限まで画素を用意するのに必要な解像度[px]（F1-7新設）。
+
+    仕様：`F/docs/仕様_F1-7_中心窩カメラと月齢からの解像度自動化.md` 第2部(2)節。
+    【2026-08-23】実体は `development.vision_required_px` へ委譲（二重実装の解消）。
+    検算：6.0ヶ月・15度 → acuity=5.642cpd → px=194.6 → 208px（仕様書と一致・確認済み）。
+    """
+    return development.vision_required_px(age_months, fovy_deg)
+
+
+def _check_resolution_acuity_mismatch(age_months, fovy_deg, px):
+    """解像度が月齢の視力より粗くないかを機械的に検査する（F1-7・2026-08-22追加、ユーザー指摘）。
+
+    【なぜ、2026-08-22】`fovea_camera` は既定OFF。「別の実験でONにし忘れて、気づかない
+    まま粗い目で走らせる」事故は、このプロジェクトで環境変数スイッチのつけ忘れとして
+    既に複数回起きている（CLAUDE.md「同じミスが2回起きたら文書ではなく機械で防ぐ」）。
+    月齢が要求するacuity[cpd]と、実際にエンコーダへ渡る画像のナイキスト限界[cpd]
+    （=画素数/視野角/2）を比べ、不足していれば警告を出す。**エラーにはしない**
+    （過去実験の再現・意図的に粗い目で走らせる実験を壊さないため。仕様書の指定）。
+    """
+    acuity_needed = _acuity_cpd(float(age_months))
+    px_per_deg = float(px) / float(fovy_deg)
+    nyquist = px_per_deg / 2.0
+    if nyquist < acuity_needed * 0.9:
+        print("=" * 70)
+        print("[警告][F1-7] 解像度が視力(acuity)より粗い可能性があります")
+        print(f"  月齢 {float(age_months):g}ヶ月 が要求する視力 = {acuity_needed:.3f} cycles/度")
+        print(f"  実際の解像度 = {px}px / 視野{float(fovy_deg):g}度 = "
+              f"{px_per_deg:.2f}画素/度（ナイキスト限界 {nyquist:.3f} cycles/度）")
+        print("  対処：シーンの body.fovea_camera を true にすると解消します"
+              "（視野15度・月齢から自動計算した解像度の中心窩カメラが追加され、"
+              "そちらがエンコーダへ渡ります）")
+        print("=" * 70)
+
+
+def infant_vision_params(size=VISION_RES, fovy=VISION_FOVY, acuity_age=ACUITY_AGE,
+                          fovea_camera=False, develop_from_age=False):
     """新生児の視覚パラメータ。acuityに月齢を渡す（＝解像度を恣意的に決めない）。
 
     注意：【2026-07-20 修正・重大】以前は `acuity_age=0.0` を渡しており、**視力フィルタが
@@ -340,10 +423,52 @@ def infant_vision_params(size=VISION_RES, fovy=VISION_FOVY, acuity_age=ACUITY_AG
     注意：**残る逸脱**：Mayer et al.(1995) のテーブルは**1ヶ月から**しかない。新生児(0ヶ月)の実測値は
     このテーブルに存在しないため、太郎は「**1ヶ月児の視力**」で代用している。0.852 cycles/deg は
     スネレン換算でおよそ 20/700 相当＝成人(20/20)の約1/35。
+
+    fovea_camera（F1-7新設・既定False）：
+        False（既定・キー無しシーンも常にこちら）のときは**従来と1ビットも変わらない**
+        （`eye_left`/`eye_right` の2台のみを返す）。
+        True のときだけ `eye_left_fovea`/`eye_right_fovea` を追加で返す。視野は
+        `FOVEA_FOVY`(=15度)固定、解像度は `required_px(acuity_age, FOVEA_FOVY)` で
+        月齢から自動計算（`VISION_RES`のような固定値は使わない）。acuityは周辺と
+        同じ `acuity_age` をそのまま使う（同じ月齢の目である以上、周辺と中心窩で
+        視力テーブルを変える理由が無いため）。
+
+    develop_from_age（2026-08-23新設・既定False）：
+        False（既定・キー無しシーンも常にこちら）のときは**従来と1ビットも変わらない**
+        （周辺カメラの解像度は `size`（既定 `VISION_RES`=128固定）のまま）。
+        True のときだけ周辺カメラ(`eye_left`/`eye_right`)の解像度も
+        `development.vision_required_px(acuity_age, fovy)` で月齢から自動計算する
+        （引数 `size` は無視される）。
+        注意：周辺カメラは視野`fovy`（既定60度、中心窩の15度より広い）全体に
+        acuityと同じナイキスト限界を要求する式を適用するため、月齢が上がるほど
+        画素数が急増する（例：6ヶ月・60度で784px。中心窩(15度)の208pxの約3.8倍）。
+        これは計算コストに直結するので、常時ONにする前に必ずコストを実測すること
+        （このタスクでは配線のみ・コスト実測は行っていない）。
     """
+    if develop_from_age:
+        size = development.vision_required_px(acuity_age, fovy)
     eye = {"width": size, "height": size, "fovy": fovy,
            "acuity": acuity_age, "foveation": False}
-    return {"eye_left": dict(eye), "eye_right": dict(eye)}
+    params = {"eye_left": dict(eye), "eye_right": dict(eye)}
+    if fovea_camera:
+        fovea_size = required_px(acuity_age, FOVEA_FOVY)
+        # 【F1-7フォロー・2026-08-22】中心窩カメラは208px全体がそのままエンコーダへ
+        #   渡る（fovea_crop をかけない）ため、視力フィルタ(FFT)の周期境界による
+        #   折り返し（画像の片端の物体が反対端に実体のない滲みとして出る現象。
+        #   F/logs/F1-7_中心窩_2026-08-22/検証B_FFT折り返し確認.png で実測）が
+        #   そのまま学習入力に混入する。周辺カメラ(eye_left/eye_right)は128px中央
+        #   32pxしか使わず端から遠いため実害が無く、視線系（顕著性・サッケード・
+        #   remapping）が凍結中で変更禁止のため pad_acuity は付けない。
+        fovea_eye = {"width": fovea_size, "height": fovea_size, "fovy": FOVEA_FOVY,
+                     "acuity": acuity_age, "foveation": False, "pad_acuity": True}
+        params["eye_left_fovea"] = dict(fovea_eye)
+        params["eye_right_fovea"] = dict(fovea_eye)
+    # 【F1-7・2026-08-22】エンコーダが実際に使う画像（中心窩があればそちら、
+    #   無ければ周辺）の解像度が、月齢の視力より粗くないかを機械的に検査する。
+    #   run/trainer.py._vision_backend_encode() と同じ「fovea優先」の選び方。
+    _active = params["eye_left_fovea"] if fovea_camera else params["eye_left"]
+    _check_resolution_acuity_mismatch(acuity_age, _active["fovy"], _active["width"])
+    return params
 FAR_AWAY = np.array([3.0, 3.0, 0.05])   # 使わない物体の退避先
 
 # おもちゃの登場を遅らせる（ユーザーの提案 2026-07-26）
@@ -406,6 +531,31 @@ def _sphere_inertia(mass, radius):
     return np.array([i, i, i])
 
 
+def _cylinder_inertia(mass, radius, half_length):
+    """一様な円柱（半径=radius, 半分の長さ=half_length, 軸はローカルz）の慣性モーメント。
+
+    【2026-08-24追加】MuJoCoのmjGEOM_CYLINDERはローカルz軸まわりに対称。
+    I_axial(z) = (1/2) m r²、I_perp(x,y) = (1/12) m (3r² + L²)（L=全長=2*half_length）。
+    標準の剛体力学公式（一様密度の直円柱）。
+    """
+    length = 2.0 * half_length
+    i_axial = 0.5 * mass * radius ** 2
+    i_perp = mass * (3.0 * radius ** 2 + length ** 2) / 12.0
+    return np.array([i_perp, i_perp, i_axial])
+
+
+def _ellipsoid_inertia(mass, a, b, c):
+    """一様な楕円体（半径a,b,c）の慣性モーメント I_xx=(1/5)m(b²+c²) 等。
+
+    【2026-08-24追加】標準の剛体力学公式（一様密度の楕円体）。a=b=c なら球の式に一致する
+    （_sphere_inertiaの検算に使える）。
+    """
+    ix = 0.2 * mass * (b ** 2 + c ** 2)
+    iy = 0.2 * mass * (a ** 2 + c ** 2)
+    iz = 0.2 * mass * (a ** 2 + b ** 2)
+    return np.array([ix, iy, iz])
+
+
 # ============================================================================
 # 新生児体型 v2（2026-07-21 確定）
 # ----------------------------------------------------------------------------
@@ -465,6 +615,17 @@ class ToySupineEnv(SupineMimoEnv):
                  #   test_object2は従来どおり遠方退避のみ＝1ビットも挙動が変わらない。
                  toy2=None, toy2_shape=None, toy2_radius=None, toy2_rgba=None,
                  toy2_dist=None, toy_angle_deg=None,
+                 # 【2026-08-25新設・目標F・4語テスト】3個目・4個目のおもちゃ。
+                 #   toy2と同じ流儀（kwargs直渡し、既定None→False、1ビットも
+                 #   既存の挙動を変えない）。ただし test_object3/test_object4 は
+                 #   共有XML（benchmarkv2_scene.xml）には存在しない（F専用の新XML
+                 #   にだけある）。toy3/toy4=True なのに body が無いシーンでは
+                 #   __init__ 内で例外にする（黙って無視しない。落とし穴チェック
+                 #   リスト「設定が静かに無視される」対策）。
+                 toy3=None, toy3_shape=None, toy3_radius=None, toy3_rgba=None,
+                 toy3_dist=None, toy3_angle_deg=None, toy3_elev_deg=None,
+                 toy4=None, toy4_shape=None, toy4_radius=None, toy4_rgba=None,
+                 toy4_dist=None, toy4_angle_deg=None, toy4_elev_deg=None,
                  # 【2026-08-21新設・F1-4h】おもちゃの垂直方向の角度[度]。既定None→0.0。
                  #   壁の無地部分を背にする高さへ上げるためのテスト専用パラメータ。
                  #   _set_anchor参照。既定0.0はsin(0)=0で従来位置と完全一致する。
@@ -645,6 +806,37 @@ class ToySupineEnv(SupineMimoEnv):
         # 【2026-08-21新設・F1-4h】垂直方向の角度[度]。既定0.0（_set_anchor参照）。
         self._toy_elev_deg = float(0.0 if toy_elev_deg is None else toy_elev_deg)
         self._toy2_elev_deg = float(0.0 if toy2_elev_deg is None else toy2_elev_deg)
+        # 【2026-08-25新設・目標F・4語テスト】3個目・4個目のおもちゃ。toy2と全く
+        #   同じ流儀（既定None→False。既存の呼び出し元は誰も渡さないので1ビットも
+        #   挙動が変わらない）。body("test_object3"/"4")が実際に存在するかは
+        #   super().__init__()後（モデル構築後）でないと分からないため、ここでは
+        #   設定値の記録だけ行う（存在チェックは下のtest_object2ブロック直後）。
+        #
+        # 【2026-08-25改修】以前は run/scene_tools/e_scene.py の build() が
+        #   「共通ファイル扱いのため変更不可」としてtoy2までしかシーンJSONから
+        #   読まず、環境変数(F_TOY3_*/F_TOY4_*)を新設して迂回していた。今回の
+        #   指示でe_scene.pyの変更が許可されたため、toy2と同じ「シーンJSON→
+        #   build()がkwargs直渡し」の経路に統一し、環境変数の読み取りは廃止した
+        #   （このファイル内・E_SCENE_XMLも含め全数grepでF_TOY3/F_TOY4/E_SCENE_XML
+        #   の他の使用箇所が無いことを確認済み）。
+        self._toy3 = bool(toy3)
+        self._toy3_shape = str("box" if toy3_shape is None else toy3_shape)
+        self._toy3_radius = float(TOY_RADIUS if toy3_radius is None else toy3_radius)
+        self._toy3_rgba = (TOY3_RGBA_DEFAULT.copy() if toy3_rgba is None
+                           else np.array(toy3_rgba, dtype=float))
+        self._toy3_dist = float(TOY_DISTANCE if toy3_dist is None else toy3_dist)
+        self._toy3_angle_deg = float(
+            TOY34_ANGLE_DEG_DEFAULT if toy3_angle_deg is None else toy3_angle_deg)
+        self._toy3_elev_deg = float(0.0 if toy3_elev_deg is None else toy3_elev_deg)
+        self._toy4 = bool(toy4)
+        self._toy4_shape = str("sphere" if toy4_shape is None else toy4_shape)
+        self._toy4_radius = float(TOY_RADIUS if toy4_radius is None else toy4_radius)
+        self._toy4_rgba = (TOY4_RGBA_DEFAULT.copy() if toy4_rgba is None
+                           else np.array(toy4_rgba, dtype=float))
+        self._toy4_dist = float(TOY_DISTANCE if toy4_dist is None else toy4_dist)
+        self._toy4_angle_deg = float(
+            TOY34_ANGLE_DEG_DEFAULT if toy4_angle_deg is None else toy4_angle_deg)
+        self._toy4_elev_deg = float(0.0 if toy4_elev_deg is None else toy4_elev_deg)
         # 【2026-08-18新設・F1-3】toy1/toy2の左右符号。+1.0が既定（従来どおりtoy1=左・
         #   toy2=右）。ParentLabelingが5発話ごとに反転させ、_set_anchorを呼び直す
         #   （場所の丸暗記を防ぐ仕掛け。F/docs/仕様_F1-3_....md参照）。
@@ -677,6 +869,14 @@ class ToySupineEnv(SupineMimoEnv):
             _custom = body_scale_custom_from_env(kwargs["age"])
             if _custom:
                 kwargs["custom_measurements"] = _custom
+        # 【2026-08-25新設・目標F・4語テスト】ベースのXML（model_path）の差し替え。
+        #   kwargsに明示的にmodel_pathが渡されなければ何もしない＝MIMoV2DummyEnv
+        #   既定のbenchmarkv2_scene.xmlのまま（1ビットも変わらない）。
+        #   【2026-08-25改修】以前はここでE_SCENE_XML環境変数を読んでいた
+        #   （run/scene_tools/e_scene.pyのbuild()がmodel_pathを渡す手段を
+        #   持たなかったため）。今回e_scene.pyの変更が許可され、シーンJSON
+        #   （world.xml）からmodel_pathをkwargs直渡しできるようになったので、
+        #   環境変数の読み取りは廃止した（他に使用箇所が無いことを確認済み）。
         super().__init__(**kwargs)
 
         # 【2026-08-18新設・F1-3a】眼球の筋力補正。super().__init__()の後＝
@@ -712,18 +912,79 @@ class ToySupineEnv(SupineMimoEnv):
             self.model.body_mass[self._toy_bid] = self._toy_mass
             self.model.body_inertia[self._toy_bid] = _sphere_inertia(
                 self._toy_mass, self._toy_radius)
-        else:
+        elif self._toy_shape == "box":
+            # 【2026-08-24】以前はここが素の else（sphere以外は全部box扱い）だった。
+            #   未知の形名が静かにboxへフォールバックする事故を防ぐため、box を明示し、
+            #   その他はcylinder/ellipsoidの分岐か、どれにも当たらなければ例外にした
+            #   （「設定が静かに無視される」事故が通算5件＝落とし穴チェックリスト参照）。
+            #   box/sphere を指定する既存の呼び出しは、この分岐変更で1ビットも計算結果が
+            #   変わらない（式は元のelse節と同一）。
             self.model.geom_size[gadr] = [self._toy_radius] * 3
             if abs(self._toy_radius - 0.020) > 1e-9:
                 self._toy_mass = TOY_DENSITY * (2 * self._toy_radius) ** 3
             self.model.body_mass[self._toy_bid] = self._toy_mass
             self.model.body_inertia[self._toy_bid] = _box_inertia(self._toy_mass,
                                                                   self._toy_radius)
+        elif self._toy_shape == "cylinder":
+            # 【2026-08-24追加・目標F・F2】語彙4語化用の3種類目の形。
+            #   大きさの決め方はTOY_CYLINDER_HALF_LEN_RATIOのコメント参照。
+            import mujoco as _mj
+            half_len = self._toy_radius * TOY_CYLINDER_HALF_LEN_RATIO
+            self.model.geom_type[gadr] = int(_mj.mjtGeom.mjGEOM_CYLINDER)
+            self.model.geom_size[gadr] = [self._toy_radius, half_len, 0.0]
+            self._toy_mass = TOY_DENSITY * np.pi * self._toy_radius ** 2 * (2.0 * half_len)
+            self.model.body_mass[self._toy_bid] = self._toy_mass
+            self.model.body_inertia[self._toy_bid] = _cylinder_inertia(
+                self._toy_mass, self._toy_radius, half_len)
+        elif self._toy_shape == "ellipsoid":
+            # 【2026-08-24追加・目標F・F2】語彙4語化用の4種類目の形（たまご型）。
+            #   大きさの決め方はTOY_ELLIPSOID_ELONGATIONのコメント参照。
+            import mujoco as _mj
+            a = self._toy_radius
+            b = self._toy_radius
+            c = self._toy_radius * TOY_ELLIPSOID_ELONGATION
+            self.model.geom_type[gadr] = int(_mj.mjtGeom.mjGEOM_ELLIPSOID)
+            self.model.geom_size[gadr] = [a, b, c]
+            self._toy_mass = TOY_DENSITY * (4.0 / 3.0) * np.pi * a * b * c
+            self.model.body_mass[self._toy_bid] = self._toy_mass
+            self.model.body_inertia[self._toy_bid] = _ellipsoid_inertia(
+                self._toy_mass, a, b, c)
+        elif self._toy_shape.startswith("plate:"):
+            # 【F2-9C・2026-08-26】イラストの板。"plate:材質名" の形で指定する
+            #   （例 "plate:mat_f_wanwan"。材質は benchmarkv2_scene_fillust.xml の
+            #   assetで定義。シーンJSONの world.xml でそのXMLを指定すること）。
+            #   寸法は8cm角・厚さ1cm（half 0.04,0.005,0.04）＝絵本のページに相当。
+            #   薄い軸はy（法線y）＝アンカーの視線正面配置で絵が太郎を向く。
+            #   材質名の埋め込み形式にしたのは、既存の toy_shape 1本の配線
+            #   （シーンJSON→e_scene→ここ）を変えずに済ませるため。
+            import mujoco as _mj
+            mat = self._toy_shape.split(":", 1)[1]
+            half = (self._toy_radius, 0.005, self._toy_radius)
+            self.model.geom_type[gadr] = int(_mj.mjtGeom.mjGEOM_BOX)
+            self.model.geom_size[gadr] = list(half)
+            self.model.geom_matid[gadr] = int(self.model.material(mat).id)
+            self._toy_mass = TOY_DENSITY * (2*half[0]) * (2*half[1]) * (2*half[2])
+            self.model.body_mass[self._toy_bid] = self._toy_mass
+            self.model.body_inertia[self._toy_bid] = [
+                self._toy_mass / 3.0 * (half[1]**2 + half[2]**2),
+                self._toy_mass / 3.0 * (half[0]**2 + half[2]**2),
+                self._toy_mass / 3.0 * (half[0]**2 + half[1]**2)]
+        else:
+            # 【2026-08-24追加】知らない形の名前が来たら黙ってboxへフォールバックせず、
+            #   はっきりしたエラーで止める（落とし穴チェックリスト「設定が静かに無視される」対策）。
+            raise ValueError(
+                f"未知の toy_shape={self._toy_shape!r}。対応する値: "
+                f"box / sphere / cylinder / ellipsoid / plate:材質名")
         self.model.geom_friction[gadr] = TOY_FRICTION   # 転がり続けを止める（上のコメント）
         # 目視用に目立つ色（赤）。太郎の体・床と区別がつかないと動画で確認できないため。
         # 接触中は TOY_RGBA_ON（明るい黄）に切り替わる＝「触れている間だけ光る」。
         self._toy_gadr = gadr
-        self.model.geom_rgba[gadr] = self._toy_rgba_off
+        if self._toy_shape.startswith("plate:"):
+            # 【F2-9C】イラスト板は色を塗らない（rgbaはテクスチャに乗算されるため
+            #   白=素通し。赤を掛けると絵が赤茶けて潰れる）。接触発光も同じ理由でなし。
+            self.model.geom_rgba[gadr] = [1.0, 1.0, 1.0, 1.0]
+        else:
+            self.model.geom_rgba[gadr] = self._toy_rgba_off
         self.toy_lit = False          # 今光っているか（測定・記録用）
         # freejoint の qpos 先頭アドレス（位置3＋姿勢4）
         jadr = self.model.body("test_object1").jntadr[0]
@@ -743,6 +1004,53 @@ class ToySupineEnv(SupineMimoEnv):
             self._configure_toy_geom(self._obj2_bid, obj2_gadr,
                                      self._toy2_shape, self._toy2_radius,
                                      self._toy2_rgba)
+
+        # 【2026-08-25新設・目標F・4語テスト】test_object3/test_object4。
+        #   共有XML（benchmarkv2_scene.xml）には存在しないので、無ければ
+        #   静かに諦める（既存シーンは1ビットも挙動が変わらない）。
+        #   toy3/toy4=True なのに body が無いシーンだけ例外にする
+        #   （落とし穴チェックリスト「設定が静かに無視される」対策）。
+        def _find_body_id(name):
+            try:
+                return int(self.model.body(name).id)
+            except Exception:
+                return None
+
+        self._obj3_bid = _find_body_id("test_object3")
+        self._obj3_qadr = None
+        self._obj3_dadr = None
+        if self._obj3_bid is not None:
+            jadr3 = self.model.body("test_object3").jntadr[0]
+            self._obj3_qadr = self.model.jnt_qposadr[jadr3]
+            self._obj3_dadr = self.model.jnt_dofadr[jadr3]
+            if self._toy3:
+                obj3_gadr = self.model.body("test_object3").geomadr[0]
+                self._configure_toy_geom(self._obj3_bid, obj3_gadr,
+                                         self._toy3_shape, self._toy3_radius,
+                                         self._toy3_rgba)
+        elif self._toy3:
+            raise ValueError(
+                "toy3=True ですが、このシーンのXMLに test_object3 がありません。"
+                "test_object3/test_object4 を含むF専用シーン（4物体テスト用）を"
+                "使ってください（共有XMLのbenchmarkv2_scene.xmlには無い）。")
+
+        self._obj4_bid = _find_body_id("test_object4")
+        self._obj4_qadr = None
+        self._obj4_dadr = None
+        if self._obj4_bid is not None:
+            jadr4 = self.model.body("test_object4").jntadr[0]
+            self._obj4_qadr = self.model.jnt_qposadr[jadr4]
+            self._obj4_dadr = self.model.jnt_dofadr[jadr4]
+            if self._toy4:
+                obj4_gadr = self.model.body("test_object4").geomadr[0]
+                self._configure_toy_geom(self._obj4_bid, obj4_gadr,
+                                         self._toy4_shape, self._toy4_radius,
+                                         self._toy4_rgba)
+        elif self._toy4:
+            raise ValueError(
+                "toy4=True ですが、このシーンのXMLに test_object4 がありません。"
+                "test_object3/test_object4 を含むF専用シーン（4物体テスト用）を"
+                "使ってください（共有XMLのbenchmarkv2_scene.xmlには無い）。")
 
         # 【2026-08-18新設・F1-3】親のfollow-in labeling。parent_labeling未指定(None)なら
         #   ParentLabeling(enabled=False)になり、update()は毎stepNoneを返すだけ＝
@@ -1106,18 +1414,58 @@ class ToySupineEnv(SupineMimoEnv):
             self.model.geom_size[gadr] = [radius, 0.0, 0.0]
             mass = TOY_DENSITY * (4.0 / 3.0) * np.pi * radius ** 3
             self.model.body_inertia[bid] = _sphere_inertia(mass, radius)
-        else:
+        elif shape == "box":
+            # 【2026-08-24】以前はここが素の else（sphere以外は全部box扱い）だった。
+            #   box を明示し、未知の形名はエラーで止める形にした（toy1側と同じ理由）。
             self.model.geom_type[gadr] = int(mujoco.mjtGeom.mjGEOM_BOX)
             self.model.geom_size[gadr] = [radius] * 3
             mass = TOY_DENSITY * (2 * radius) ** 3
             self.model.body_inertia[bid] = _box_inertia(mass, radius)
+        elif shape == "cylinder":
+            # 【2026-08-24追加・目標F・F2】toy1側と同じ大きさの決め方（TOY_CYLINDER_HALF_LEN_RATIO）。
+            half_len = radius * TOY_CYLINDER_HALF_LEN_RATIO
+            self.model.geom_type[gadr] = int(mujoco.mjtGeom.mjGEOM_CYLINDER)
+            self.model.geom_size[gadr] = [radius, half_len, 0.0]
+            mass = TOY_DENSITY * np.pi * radius ** 2 * (2.0 * half_len)
+            self.model.body_inertia[bid] = _cylinder_inertia(mass, radius, half_len)
+        elif shape == "ellipsoid":
+            # 【2026-08-24追加・目標F・F2】toy1側と同じ大きさの決め方（TOY_ELLIPSOID_ELONGATION）。
+            a = radius
+            b = radius
+            c = radius * TOY_ELLIPSOID_ELONGATION
+            self.model.geom_type[gadr] = int(mujoco.mjtGeom.mjGEOM_ELLIPSOID)
+            self.model.geom_size[gadr] = [a, b, c]
+            mass = TOY_DENSITY * (4.0 / 3.0) * np.pi * a * b * c
+            self.model.body_inertia[bid] = _ellipsoid_inertia(mass, a, b, c)
+        elif shape.startswith("plate:"):
+            # 【F2-9C・2026-08-26】イラストの板（toy1側の分岐と同じ。あちらのコメント参照）。
+            mat = shape.split(":", 1)[1]
+            half = (radius, 0.005, radius)
+            self.model.geom_type[gadr] = int(mujoco.mjtGeom.mjGEOM_BOX)
+            self.model.geom_size[gadr] = list(half)
+            self.model.geom_matid[gadr] = int(self.model.material(mat).id)
+            mass = TOY_DENSITY * (2*half[0]) * (2*half[1]) * (2*half[2])
+            self.model.body_inertia[bid] = [
+                mass / 3.0 * (half[1]**2 + half[2]**2),
+                mass / 3.0 * (half[0]**2 + half[2]**2),
+                mass / 3.0 * (half[0]**2 + half[1]**2)]
+            rgba = [1.0, 1.0, 1.0, 1.0]     # テクスチャ素通し（toy1側のコメント参照）
+        else:
+            # 【2026-08-24追加】知らない形の名前が来たら黙ってboxへフォールバックせず、
+            #   はっきりしたエラーで止める。
+            raise ValueError(
+                f"未知の toy2_shape={shape!r}。対応する値: box / sphere / cylinder / "
+                f"ellipsoid / plate:材質名")
         self.model.body_mass[bid] = mass
         self.model.geom_friction[gadr] = TOY_FRICTION
         # 【2026-08-18】test_object2はXML側でmaterialが設定済みのため、rgbaを
         #   書くだけでは反映されない（materialが優先される・923行の罠と同じ型）。
         #   material参照を外してからrgbaを書く必要がある（実測で発覚：色が
         #   指定した白ではなくXML既定の茶系のまま描画されていた）。
-        self.model.geom_matid[gadr] = -1
+        # 【F2-9C・2026-08-26】ただしイラスト板（plate:）は材質＝絵そのものなので
+        #   剥がさない（実測で発覚：ここが分岐内で設定したmatidを-1に戻していた）。
+        if not shape.startswith("plate:"):
+            self.model.geom_matid[gadr] = -1
         self.model.geom_rgba[gadr] = rgba
 
     def _gaze_dir(self, cam="eye_left"):
@@ -1182,6 +1530,8 @@ class ToySupineEnv(SupineMimoEnv):
         #   によらず視野の中で正しく左右になる。toy2=False（既定）のときは角度0
         #   ＝従来のgとまったく同じ値になるので1ビットも変わらない。
         self._rest_pos2 = None
+        self._rest_pos3 = None
+        self._rest_pos4 = None
         if self._toy_offset is None:
             g = self._gaze_dir()
             # 【2026-08-21新設・F1-4h】up（カメラローカルの上方向）。垂直角
@@ -1212,6 +1562,25 @@ class ToySupineEnv(SupineMimoEnv):
             elev1 = np.radians(self._toy_elev_deg)
             g1 = g1 * np.cos(elev1) + up * np.sin(elev1)
             self._rest_pos = origin + g1 * self._toy_dist   # 視線の正面・距離 _toy_dist
+            # 【2026-08-25新設・目標F・4語テスト】toy3/toy4。toy1/toy2が「右」軸
+            #   （right）で左右に振り分けるのに対し、toy3/toy4は「上」軸（up）で
+            #   振り分ける（4方向を2軸に分けて衝突を減らすため）。既定角度0度
+            #   （TOY34_ANGLE_DEG_DEFAULT）なら sin(0)=0 でtoy1と同じ方向・同じ距離
+            #   になる＝4つ重なる。4語テストは1個ずつ透明化して見せるので実害は無い
+            #   （仕様で明示的に許容）。toy3/toy4=False（既定）ならこのブロックは
+            #   実行されるが self._rest_pos3/4 は使われないので無害。
+            if self._toy3:
+                ang3 = np.radians(self._toy3_angle_deg)
+                g3 = g * np.cos(ang3) + up * np.sin(ang3)
+                elev3 = np.radians(self._toy3_elev_deg)
+                g3 = g3 * np.cos(elev3) + up * np.sin(elev3)
+                self._rest_pos3 = origin + g3 * self._toy3_dist
+            if self._toy4:
+                ang4 = np.radians(self._toy4_angle_deg)
+                g4 = g * np.cos(ang4) - up * np.sin(ang4)
+                elev4 = np.radians(self._toy4_elev_deg)
+                g4 = g4 * np.cos(elev4) + up * np.sin(elev4)
+                self._rest_pos4 = origin + g4 * self._toy4_dist
         else:
             # 旧方式（アブレーション用に残す）。こちらは頭の中心からのオフセット。
             self._rest_pos = self.data.body("head").xpos.copy() + self._toy_offset
@@ -1219,6 +1588,10 @@ class ToySupineEnv(SupineMimoEnv):
                 # toy_offset方式(旧アブレーション)との組み合わせは未検証。
                 #   y方向へ一定量ずらすだけの簡易対応（視野内に収まる保証はない）。
                 self._rest_pos2 = self._rest_pos + np.array([0.0, 0.08, 0.0])
+            if self._toy3:
+                self._rest_pos3 = self._rest_pos + np.array([0.0, 0.0, 0.08])
+            if self._toy4:
+                self._rest_pos4 = self._rest_pos + np.array([0.0, 0.0, -0.08])
         # 2026-07-27：柵の内側にとどめる。人間の親は柵の外に手を出さない。
         #   新生児は仰向けで顔を横に向けているのが普通（頭位選好・右65%／Michel 1981）で、
         #   そのとき「視線の正面」は柵の外になる。実際 Viewer の初期姿勢で
@@ -1243,11 +1616,27 @@ class ToySupineEnv(SupineMimoEnv):
                                                    -FENCE_HALF_X + _mgn, FENCE_HALF_X - _mgn))
                 self._rest_pos2[1] = float(np.clip(self._rest_pos2[1],
                                                    -FENCE_HALF_Y + _mgn, FENCE_HALF_Y - _mgn))
+            if self._rest_pos3 is not None:
+                self._rest_pos3[0] = float(np.clip(self._rest_pos3[0],
+                                                   -FENCE_HALF_X + _mgn, FENCE_HALF_X - _mgn))
+                self._rest_pos3[1] = float(np.clip(self._rest_pos3[1],
+                                                   -FENCE_HALF_Y + _mgn, FENCE_HALF_Y - _mgn))
+            if self._rest_pos4 is not None:
+                self._rest_pos4[0] = float(np.clip(self._rest_pos4[0],
+                                                   -FENCE_HALF_X + _mgn, FENCE_HALF_X - _mgn))
+                self._rest_pos4[1] = float(np.clip(self._rest_pos4[1],
+                                                   -FENCE_HALF_Y + _mgn, FENCE_HALF_Y - _mgn))
         self._rest_pos[2] = float(max(self._rest_pos[2], 0.04))   # 床にめり込ませない
         if self._rest_pos2 is not None:
             self._rest_pos2[2] = float(max(self._rest_pos2[2], 0.04))
+        if self._rest_pos3 is not None:
+            self._rest_pos3[2] = float(max(self._rest_pos3[2], 0.04))
+        if self._rest_pos4 is not None:
+            self._rest_pos4[2] = float(max(self._rest_pos4[2], 0.04))
         # 【2026-08-18】toy1・toy2が近すぎて重なるとき、互いに引き離す
         #   （重なったままだと誤接触になり、toy1の「触れたら光る」演出が誤発火する）。
+        #   toy3/toy4は角度0度なら重なることが仕様で明示的に許容されているため、
+        #   _separate_toysの対象には含めない（拡張しない）。
         self._separate_toys()
         # 【2026-08-03】屈曲した手・前腕と重なるときだけ最小限ずらす（上のコメント参照）。
         #   重ならなければ無変化＝既存シーンの配置は1ビットも変わらない。
@@ -1255,6 +1644,12 @@ class ToySupineEnv(SupineMimoEnv):
         if self._rest_pos2 is not None:
             self._rest_pos2 = self._avoid_arm_collision(self._rest_pos2,
                                                          toy_radius=self._toy2_radius)
+        if self._rest_pos3 is not None:
+            self._rest_pos3 = self._avoid_arm_collision(self._rest_pos3,
+                                                         toy_radius=self._toy3_radius)
+        if self._rest_pos4 is not None:
+            self._rest_pos4 = self._avoid_arm_collision(self._rest_pos4,
+                                                         toy_radius=self._toy4_radius)
         self._anchor = self._rest_pos + np.array([0.0, 0.0, self._tether_len])
 
     def _separate_toys(self):
@@ -1476,6 +1871,26 @@ class ToySupineEnv(SupineMimoEnv):
         self.data.qvel[self._obj2_dadr:self._obj2_dadr + 6] = 0.0
         self.data.xfrc_applied[self._obj2_bid, :3] = 0.0
 
+    def _hold_toy3(self):
+        """3個目のおもちゃ(toy3)を定位置に固定する（_hold_toy2と同じ流儀）。
+
+        【2026-08-25新設・目標F・4語テスト】test_object3が存在しないシーン
+        （共有XML）では self._obj3_qadr が None のまま＝何もしない。
+        """
+        if not self._toy3 or self._rest_pos3 is None or self._obj3_qadr is None:
+            return
+        self._place(self._obj3_qadr, self._rest_pos3)
+        self.data.qvel[self._obj3_dadr:self._obj3_dadr + 6] = 0.0
+        self.data.xfrc_applied[self._obj3_bid, :3] = 0.0
+
+    def _hold_toy4(self):
+        """4個目のおもちゃ(toy4)を定位置に固定する（_hold_toy2と同じ流儀）。"""
+        if not self._toy4 or self._rest_pos4 is None or self._obj4_qadr is None:
+            return
+        self._place(self._obj4_qadr, self._rest_pos4)
+        self.data.qvel[self._obj4_dadr:self._obj4_dadr + 6] = 0.0
+        self.data.xfrc_applied[self._obj4_bid, :3] = 0.0
+
     def _spawn_toy(self):
         # おもちゃの登場を遅らせる（TOY_APPEAR_DELAY 参照）。
         #   最初は遠くに置き、太郎が落ち着いてから親が運んでくる。
@@ -1484,11 +1899,15 @@ class ToySupineEnv(SupineMimoEnv):
         self._t_since_reset = 0.0
         self._rest_pos = None          # 到着するまで置き場所は決まっていない
         self._rest_pos2 = None
+        self._rest_pos3 = None
+        self._rest_pos4 = None
         # 【2026-08-18・目標F・F1】toy1・toy2のどちらかが有効なら位置を決めておく
         #   （toy2は登場演出(carry-in)を持たず常に即座に定位置＝ここで確定させる）。
         #   toy1がdelay>0のときは、この直後に FAR_AWAY へ置き直し・anchor=None に
         #   戻すので、toy1自身の見た目は従来と変わらない。
-        if self._toy or self._toy2:
+        # 【2026-08-25追記・目標F・4語テスト】toy3/toy4も同じ条件に足す
+        #   （既存の呼び出し元はtoy3/toy4を渡さないので判定結果は変わらない）。
+        if self._toy or self._toy2 or self._toy3 or self._toy4:
             self._set_anchor()
         if self._toy and self._toy_appear_delay > 0.0:
             self._place(self._toy_qadr, FAR_AWAY)
@@ -1505,6 +1924,23 @@ class ToySupineEnv(SupineMimoEnv):
             self.data.qvel[self._obj2_dadr:self._obj2_dadr + 6] = 0.0
         else:
             self._place(self._obj2_qadr, FAR_AWAY + np.array([0.5, 0.0, 0.0]))
+        # 【2026-08-25新設・目標F・4語テスト】test_object3/4はこのシーンに存在
+        #   しないことがある（共有XML）。存在しない(_obj3_qadr is None)ときは
+        #   _place自体を呼ばない（呼ぶとmodel.jnt_qposadrがNoneでエラーになる）。
+        #   既存シーン（test_object3/4なし）はここに来た時点でobj3_qadrがNoneの
+        #   ままなので、以下の分岐はどちらも実行されず1ビットも挙動が変わらない。
+        if self._obj3_qadr is not None:
+            if self._toy3 and self._rest_pos3 is not None:
+                self._place(self._obj3_qadr, self._rest_pos3)
+                self.data.qvel[self._obj3_dadr:self._obj3_dadr + 6] = 0.0
+            else:
+                self._place(self._obj3_qadr, FAR_AWAY + np.array([1.0, 0.0, 0.0]))
+        if self._obj4_qadr is not None:
+            if self._toy4 and self._rest_pos4 is not None:
+                self._place(self._obj4_qadr, self._rest_pos4)
+                self.data.qvel[self._obj4_dadr:self._obj4_dadr + 6] = 0.0
+            else:
+                self._place(self._obj4_qadr, FAR_AWAY + np.array([1.5, 0.0, 0.0]))
         self.data.qvel[self._toy_dadr:self._toy_dadr + 6] = 0.0
         self.n_respawn += 1
         self.respawned_this_step = True
@@ -1566,7 +2002,8 @@ class ToySupineEnv(SupineMimoEnv):
             self._parent_labeling.reset()  # 【2026-08-18新設・F1-3】前エピソードの状態を持ち越さない
         if getattr(self, "_word_schedule", None) is not None:
             self._word_schedule.reset()    # 【2026-08-21新設・F1-4h】同上（試行の頭出し）
-        if self._toy:
+        if self._toy and not self._toy_shape.startswith("plate:"):
+            # 【F2-9C】イラスト板は色を塗らない（テクスチャに赤が乗算されて絵が潰れる）
             self.model.geom_rgba[self._toy_gadr] = self._toy_rgba_off
             self.toy_lit = False
         mujoco.mj_forward(self.model, self.data)
@@ -1629,6 +2066,8 @@ class ToySupineEnv(SupineMimoEnv):
         self._carry_toy()          # 親がおもちゃを運んでくる（登場を遅らせる仕組み）
         self._apply_tether()
         self._hold_toy2()          # 2個目のおもちゃ（toy2=False なら何もしない）
+        self._hold_toy3()          # 3個目のおもちゃ（2026-08-25新設・toy3=False/無しなら何もしない）
+        self._hold_toy4()          # 4個目のおもちゃ（同上）
         # 【2026-08-18新設・F1-3】親のfollow-in labeling。_hold_toy2の直後に呼ぶ
         #   ＝振っている間はここでtoy1/toy2の位置を上乗せで揺らす（_apply_shake）。
         #   parent_labeling未指定（enabled=False）なら常にNoneを返すだけ＝
@@ -1983,6 +2422,8 @@ class ToySupineEnv(SupineMimoEnv):
         """
         if not self._toy:
             return
+        if self._toy_shape.startswith("plate:"):
+            return      # 【F2-9C】イラスト板は接触発光なし（絵が赤/黄に潰れるため）
         if any(c != "world" for c in self.toy_contacts()):
             self._glow_until = float(self.data.time) + GLOW_HOLD_S
         lit = float(self.data.time) < getattr(self, "_glow_until", -1e9)

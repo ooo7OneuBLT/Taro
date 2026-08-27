@@ -955,6 +955,38 @@ def main():
                             justify="left")
     parent_label.pack(anchor="w", padx=18)
 
+    # ---- ことば（F2-9・2026-08-26新設）----------------------------------
+    # 【なぜ】親がいつ何を言ったかがViewerで見えず、共同注意の目視確認が
+    #   できなかった（ユーザー要望）。親の状態機械の今の状態と、発話の履歴
+    #   （シミュレーション時刻つき・最新6件）を表示する。
+    #   親がいないシーン（parent_labeling無効）では「親は無効」とだけ出す。
+    #   環境変数や隠しキーは使わない（run系はウィンドウ内で完結させる方針）。
+    sec_words = Section(colL, "ことば（親の発話）", True)
+    pl_state_label = tk.Label(sec_words.body, text="", font=("Consolas", 9),
+                              justify="left", fg="#046")
+    pl_state_label.pack(anchor="w", padx=10)
+    pl_log_label = tk.Label(sec_words.body, text="（まだ発話なし）",
+                            font=("Consolas", 9), justify="left")
+    pl_log_label.pack(anchor="w", padx=10, pady=(0, 4))
+    pl_log = []           # [(sim秒, 語, 的), ...]
+
+    def _update_words_panel():
+        """親の状態と発話履歴の表示を更新する（GUIループから毎フレーム呼ぶ）。"""
+        pl = getattr(env.unwrapped, "_parent_labeling", None)
+        if pl is None or not getattr(pl, "enabled", False):
+            pl_state_label.config(text="親は無効（このシーンに parent_labeling が無い）")
+            return
+        jp = {"pick": "選ぶ", "shake": "振って注意を引く", "refractory": "ひと休み"}
+        st = jp.get(pl._state, pl._state)
+        hold = f"注視 {pl._hold_t:.1f}/{pl.gaze_hold_sec:.1f}秒" \
+            if pl._state == "shake" else ""
+        pl_state_label.config(
+            text=f"親：{st}  的={pl._target or '-'}  {hold}\n"
+                 f"発話{pl.n_utterances}回  注視開始{pl.n_hold_starts}回"
+                 f"→完走{pl.n_hold_completes}回")
+        lines = [f"{t:7.1f}s  「{w}」 ({tg})" for t, w, tg in pl_log[-6:]]
+        pl_log_label.config(text="\n".join(lines) if lines else "（まだ発話なし）")
+
     # ---- 区画2：姿勢 ----------------------------------------------------
     sec_pose = Section(colL, "姿勢", op.get("pose", True))
     st_freeze = tk.BooleanVar(value=freeze0)
@@ -2817,6 +2849,13 @@ def main():
                 # env.step()の戻り値ではなく u.get_touch_obs() を使う（いつでも
                 #   今の物理状態から取り直せる。既存の駆動モード分岐・env.step()
                 #   呼び出し自体は一切変更していない）。
+                # ことばパネル用：この1tickで親が発話していれば記録する
+                #   （_parent_utteranceはstep()ごとに上書きされるので重複しない）。
+                _pu = getattr(env.unwrapped, "_parent_utterance", None)
+                if _pu:
+                    pl_log.append((float(env.unwrapped.data.time),
+                                   _pu.get("text", ""), _pu.get("target", "")))
+
                 if _ta_available:
                     # 毎tick .get() で読み、GUIの現在値をそのままインスタンスへ
                     #   代入する（fmaxスライダーと同じ配線パターン。累積させない）。
@@ -2893,6 +2932,12 @@ def main():
                     dev = float(np.hypot(rep["cx"], rep["cy"]))
                     devs.append(dev)
                 seens.append(1.0 if rep.get("pix_seen") else 0.0)
+                # ことばパネル（F2-9）：毎フレームここで表示を更新する
+                #   （この場所は物理ON/OFFに関わらず毎フレーム通る描画系の区画）。
+                try:
+                    _update_words_panel()
+                except Exception:
+                    pass    # 表示の失敗でViewerを落とさない（dashboardと同じ流儀）
 
                 j = f"①角度   {rep['angle']:5.1f}°  {'視野内' if rep['in_fov'] else '視野外'}\n"
                 j += ("②光線   遮蔽なし\n" if rep["ray_ok"]

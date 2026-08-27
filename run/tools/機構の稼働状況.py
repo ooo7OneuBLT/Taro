@@ -35,6 +35,7 @@ run/wiring_map.py の NODES に37個あり、目で全部を追って「どれ�
   このファイル自身は E/experiments/*.json を読むだけで、Taro の他のファイルは
   一切変更しない。
 """
+import glob
 import json
 import os
 import sys
@@ -50,7 +51,10 @@ if _ROOT not in sys.path:
 from run.config import Config                          # noqa: E402
 from run.wiring_map import NODES, is_on                 # noqa: E402
 
-EXPERIMENTS_DIR = os.path.join(_ROOT, "E", "experiments")
+# 実験ファイルは目標フォルダごとに置かれる（E/experiments、F/experiments …）。
+# 2026-08-23：目標Fの実験を E/experiments から F/experiments へ移したため、
+# 1フォルダ固定をやめ、すべての目標フォルダを走査する。
+EXPERIMENTS_DIRS = sorted(glob.glob(os.path.join(_ROOT, "*", "experiments")))
 
 
 def targetable_nodes():
@@ -120,18 +124,25 @@ def _tier_label(tier):
 def print_report(target_path=None):
     """一覧をテキスト表として標準出力へ書く。戻り値は終了コード。"""
     print("=" * 88)
-    print(" 機構の稼働状況 ── E/experiments/*.json を横断集計")
+    print(" 機構の稼働状況 ── 各目標フォルダの experiments/*.json を横断集計")
     print("=" * 88)
 
-    if not os.path.isdir(EXPERIMENTS_DIR):
-        print(f"\n  対象なし: {EXPERIMENTS_DIR} が存在しません")
+    if not EXPERIMENTS_DIRS:
+        print(f"\n  対象なし: {_ROOT} の下に */experiments が1つもありません")
         return 0
 
-    readable, unreadable = load_experiments(EXPERIMENTS_DIR)
+    # 目標フォルダをまたぐのでファイル名だけだと衝突しうる。"E/名前.json" の形にする。
+    readable, unreadable = [], []
+    for d in EXPERIMENTS_DIRS:
+        r, u = load_experiments(d)
+        goal = os.path.basename(os.path.dirname(d))
+        readable += [(f"{goal}/{fn}", cfg) for fn, cfg in r]
+        unreadable += [(f"{goal}/{fn}", err) for fn, err in u]
     nodes = targetable_nodes()
 
     if not readable and not unreadable:
-        print(f"\n  対象なし: {EXPERIMENTS_DIR} に *.json が1件もありません")
+        dirs = "、".join(os.path.relpath(d, _ROOT) for d in EXPERIMENTS_DIRS)
+        print(f"\n  対象なし: {dirs} に *.json が1件もありません")
         return 0
 
     print(f"\n  横断対象のファイル {len(readable)}件"

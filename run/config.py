@@ -110,6 +110,17 @@ TARO_DEFAULTS = {
     "word_attention": (None, "語→注意の読み出し回路。None=OFF（既定）。有効化する"
                        "ときは {'active_sec': 3.0, 'enabled': true} の形（辞書）で指定",
                        None),
+    # 【F2新設・2026-08-22】見た物の名前を言う（初語）。既定None＝OFF：
+    #   run/trainer.py側は設定がNoneなら逆引き(lexicon.reverse_lookup)・generate()等の
+    #   追加計算を一切しない（既存実験の挙動もコストも1ビットも変わらない）。
+    #   hearing=true かつ lexicon_mode="contrast"（protoが育つ設定）かつ
+    #   orienting_reflex=true のときだけ意味を持つ（taro_setup.py起動時に確認、
+    #   無ければValueErrorで止める）。
+    #   設計：F/docs/設計_F2_初語（見た物の名前を言う）.md
+    "produce": (None, "見た物の名前を言う（初語）。None=OFF（既定）。有効化するときは"
+               "{'threshold': 0.80, 'cooldown_sec': 2.0, 'max_length': 8, "
+               "'vocal_tract_stage': 2, 'vocal_tract_decoupled': true, 'lr': 0.005} の"
+               "形（辞書、すべて省略可）", None),
     # 座位保持の学習（2026-08-15）。層1＝姿勢制御反射（ゲート方式）、
     # 層2＝立ち直り反射（角速度ダンパー、Tier3）。
     # 設計：作業記録（非公開）
@@ -384,6 +395,12 @@ RUN_DEFAULTS = {
     "view_goal_babbling": (False, "目標指向の動きを見る", "E_VIEW_GOALBABBLE"),
     # 注意：再生では予測誤差を計算しないので学習ループと同じ切替ができない＝割合を直接指定
     "view_gb_rate": (0.5, "目標指向にする割合（学習ループとは違う近似）", "E_VIEW_GB_RATE"),
+    # 【2026-08-24・作業C速度改善】既定False＝計測コードそのものを一歩も通らない
+    #   （trainer.py _profile_checkpoint 参照）。ONにすると1チェックポイントごとに
+    #   RSS（psutil）と主要処理（物理+描画+触覚/脳forward/学習backward/語彙DINOv2）
+    #   の累積秒数をrun.csvへ追記する。学習の乱数消費・結果は変えない
+    #   （time.perf_counter()・psutilはどちらも乱数もMuJoCo状態も読み書きしない）。
+    "profile":      (False, "処理時間・メモリ(RSS)をrun.csvに記録する（既定OFF）", None),
 }
 
 # 環境変数から読むときの型変換
@@ -707,6 +724,21 @@ class Config:
                     f"word_attention は None か辞書である必要がある: "
                     f"{self.word_attention!r}\n"
                     "  例：{'active_sec': 3.0, 'enabled': true}")
+        # 見た物の名前を言う（2026-08-22新設・F2）のバリデーション。
+        #   lexicon_vision/word_attentionと同じ形式のパターンに倣う（項94の索引参照）。
+        if self.produce is not None:
+            if not isinstance(self.produce, dict):
+                raise ValueError(
+                    f"produce は None か辞書である必要がある: {self.produce!r}\n"
+                    "  例：{'threshold': 0.80, 'cooldown_sec': 2.0}")
+            if not self.hearing:
+                raise ValueError(
+                    "produce=有効 には hearing=true が要る（逆引きの元＝"
+                    "lexicon.protoは耳が無いと育たない。taro_setup.py _setup_produce）。")
+            if str(self.lexicon_mode) != "contrast":
+                raise ValueError(
+                    "produce=有効 には lexicon_mode='contrast' が要る（mode='sum'では"
+                    "lexicon.protoが育たず逆引きが常にNoneのまま＝機能しない）。")
         if self.K >= 100:
             print(f"[!] K={self.K}（{100/self.K:.0f}Hz）＝人間の最遅神経発火7Hzより遅い。"
                   f"比較・再現目的でなければ K=10 を使うこと", flush=True)

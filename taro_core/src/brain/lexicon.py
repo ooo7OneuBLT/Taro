@@ -26,6 +26,23 @@ B6-1b修正：初版は「発話内平均以上の連続run」で切っていた
 """
 
 
+def _cosine(a, b):
+    """コサイン類似度。どちらかがゼロベクトルなら0.0を返す。
+
+    【F2・2026-08-22】reverse_lookup（逆引き）専用のヘルパー。_unit()と役割は
+    近いが、_unit()は「1つのベクトルを正規化して返す」のに対しこちらは
+    「2つのベクトルの向きの近さを直接返す」。run/trainer.py の_cosine_sim()と
+    同じ規約（ゼロノルムは0.0）だが、Lexicon側の入力はPythonのlist/tupleを
+    素直に扱えるよう外部ライブラリ（numpy）に依存しない実装にした。
+    """
+    na = sum(float(x) * float(x) for x in a) ** 0.5
+    nb = sum(float(x) * float(x) for x in b) ** 0.5
+    if na <= 0.0 or nb <= 0.0:
+        return 0.0
+    dot = sum(float(x) * float(y) for x, y in zip(a, b))
+    return dot / (na * nb)
+
+
 def _unit(vec):
     """L2正規化したリストを返す（ゼロノルムならNone＝呼び出し側でスキップ）。
 
@@ -38,12 +55,33 @@ def _unit(vec):
     return [float(x) / s for x in vec]
 
 
+def _as_channels(state):
+    """入力を「チャンネル名 -> ベクトル」の辞書に正規化する。
+
+    【F2-12・2026-08-27】設計：F/docs/設計_F2-12_意味を感覚ごとに分けて持つ.md。
+    observe / observe_view / reverse_lookup の3つの入口で使う。呼び出し側
+    （run/trainer.py）は変えない＝これまでどおり生のリストを渡してくる。
+    リストが来たら {"vision": リスト} と解釈することで、将来 {"vision": [...],
+    "touch": [...]} のような辞書を渡す呼び出し側にもそのまま対応できる。
+    """
+    if state is None:
+        return {}
+    if isinstance(state, dict):
+        return state
+    return {Lexicon.DEFAULT_CHANNEL: state}
+
+
 class Lexicon:
     """
     原-辞書。聞いた発話から予測しやすい並びを切り出して頻度を数える。
 
     counts: tuple(tokens) → 出会った回数
     """
+
+    # 【F2-12・2026-08-27】意味を感覚ごとの引き出し（チャンネル）に分ける器。
+    #   いまは "vision" チャンネルしか作らないので、計算結果はこれまでと
+    #   完全に同一（設計の受け入れ条件1〜3）。
+    DEFAULT_CHANNEL = "vision"
 
     def __init__(self, min_len=2, state_dim=3, mode="sum",
                  eta_pull=0.2, eta_push=0.1):
@@ -56,7 +94,19 @@ class Lexicon:
         # 累積し、平均を「その語が結びつく状態」とする。報酬なし・共起の統計だけ。
         # F2：state_dim をコンストラクタ引数化（B原本は3固定）。視覚が無ければ
         # 内的状態、視覚があれば見えているものの特徴ベクトルなど、任意次元を渡せる。
-        self.state_dim = state_dim
+        #
+        # 【F2-12・2026-08-27】意味の入れ物を「感覚ごとの引き出し」に変えた。
+        #   state_dim/proto/view_sum/view_n は、以前は素の属性だったが、いまは
+        #   channels["vision"] を指すプロパティ（下に定義）。既存の読み出しコード
+        #   （self.lexicon.proto など）はそのまま動く。中身の数字は1個も変えない。
+        self.channels = {
+            self.DEFAULT_CHANNEL: {
+                "dim": state_dim,
+                "proto": {},
+                "view_sum": None,
+                "view_n": 0,
+            }
+        }
         self.state_sum = {}   # chunk -> [Σstate[0], ..., Σstate[state_dim-1], n]
         # 【F1-5・2026-08-21】連合器の対照学習化（設計 F/docs/設計_F1-5_連合器の
         #   対照学習化.md）。mode="sum"（既定）は上のstate_sumによる単純平均のまま
@@ -69,7 +119,57 @@ class Lexicon:
         self.mode = str(mode)
         self.eta_pull = float(eta_pull)
         self.eta_push = float(eta_push)
-        self.proto = {}       # contrast用: chunk -> [p_0..p_{state_dim-1}]（リスト）
+        # self.proto（contrast用: chunk -> [p_0..p_{state_dim-1}]）は
+        # channels["vision"]["proto"] を指すプロパティ（下に定義）。
+        # 【F2-8・2026-08-25】reverse_lookup（物→語）の両側引き算に使う
+        #   「見慣れた景色」の平均。observe_view() で見るたびに足していく累積平均。
+        #   なぜ要るか：見えのベクトルは4分の3ほどが全物体に共通で（実測：見え同士の
+        #   コサインが0.72〜0.76）、そのまま比べると共通部分が勝負を決めてしまい
+        #   「どの物を見ても同じ語」になる（実測：ぱぱの物を136回見せて正解0回）。
+        #   なぜ「これから見る物の平均」ではなく走行平均か：未来に見る物の平均を
+        #   使うのはカンニング（太郎がまだ見ていない物を知っていることになる）。
+        #   人間側対応：乳児も「いつも見えている景色」に順応し、そこからの差に
+        #   注目する[Tier2・原理レベル]。
+        # self.view_sum/self.view_n（[Σv_0..Σv_{state_dim-1}]・観測回数）も
+        # channels["vision"] を指すプロパティ（下に定義）。
+
+    # ------------------------------------------------------------------
+    # 【F2-12・2026-08-27】channels["vision"] を指すプロパティ群。
+    #   既存の読み出しコード（self.lexicon.state_dim / .proto / .view_sum /
+    #   .view_n）を1行も変えずに動かすための互換レイヤー。中身は全部
+    #   channels["vision"] という同じ辞書を見ているだけで、実体は1つ。
+    # ------------------------------------------------------------------
+    @property
+    def state_dim(self):
+        return self.channels[self.DEFAULT_CHANNEL]["dim"]
+
+    @state_dim.setter
+    def state_dim(self, value):
+        self.channels[self.DEFAULT_CHANNEL]["dim"] = value
+
+    @property
+    def proto(self):
+        return self.channels[self.DEFAULT_CHANNEL]["proto"]
+
+    @proto.setter
+    def proto(self, value):
+        self.channels[self.DEFAULT_CHANNEL]["proto"] = value
+
+    @property
+    def view_sum(self):
+        return self.channels[self.DEFAULT_CHANNEL]["view_sum"]
+
+    @view_sum.setter
+    def view_sum(self, value):
+        self.channels[self.DEFAULT_CHANNEL]["view_sum"] = value
+
+    @property
+    def view_n(self):
+        return self.channels[self.DEFAULT_CHANNEL]["view_n"]
+
+    @view_n.setter
+    def view_n(self, value):
+        self.channels[self.DEFAULT_CHANNEL]["view_n"] = value
 
     def segment(self, tokens, confidences):
         """
@@ -108,6 +208,10 @@ class Lexicon:
         F2ではstate_dim次元の任意ベクトル）。渡すと語↔状態の連合を累積する
         （報酬でなく共起の統計）。
         """
+        # 【F2-12・2026-08-27】stateがリストなら {"vision": リスト} に正規化する
+        #   （呼び出し側 run/trainer.py は変えない＝これまでどおりリストを渡す）。
+        #   いまはvisionチャンネルしか無いので、以下の処理は正規化前と完全に同じ。
+        state = _as_channels(state).get(self.DEFAULT_CHANNEL)
         chunk = self.segment(tokens, confidences)
         if chunk is not None:
             self.counts[chunk] = self.counts.get(chunk, 0) + 1
@@ -147,6 +251,26 @@ class Lexicon:
                                 q[i] -= self.eta_push * (v[i] - q[i])
         return chunk
 
+    def observe_view(self, vec):
+        """いま見えているものを「見慣れた景色」の平均へ1つ足す。
+
+        【F2-8・2026-08-25】reverse_lookup の引き算に使う平均を育てるだけで、
+        語彙(counts)にも想像(proto)にも触らない。呼ばれなければ view_n=0 のまま
+        ＝ reverse_lookup は見え側の引き算をしない（従来と同じ計算に戻る）。
+        """
+        # 【F2-12・2026-08-27】vecがリストなら {"vision": リスト} に正規化する
+        #   （呼び出し側 run/trainer.py は変えない）。いまはvisionチャンネルしか
+        #   無いので、以下の処理は正規化前と完全に同じ。
+        vec = _as_channels(vec).get(self.DEFAULT_CHANNEL)
+        if vec is None:
+            return
+        D = self.state_dim
+        if self.view_sum is None:
+            self.view_sum = [0.0] * D
+        for i in range(D):
+            self.view_sum[i] += float(vec[i])
+        self.view_n += 1
+
     def assoc(self, chunk):
         """
         B6-4：その語が結びつく状態を返す（無ければNone）。
@@ -161,6 +285,88 @@ class Lexicon:
             return None
         n = acc[self.state_dim]
         return tuple(acc[i] / n for i in range(self.state_dim))
+
+    def reverse_lookup(self, vec):
+        """物→語の逆引き（F2「見た物の名前を言う」、設計：F/docs/設計_F2_初語
+        （見た物の名前を言う）.md 第2部）。
+
+        いま見ている視覚ベクトル(vec, state_dim次元)を、self.proto の全chunk
+        （対照学習で育った「その語の想像」）と総当たりでコサイン類似度を取り、
+        最大のchunkとその類似度を返す。assoc()（語→物）のちょうど逆方向。
+
+        mode!="contrast"（protoが育たない設定）や proto が空（まだ何も
+        連合していない）ときは (None, 0.0) を返す（呼び出し側は「何も言わない」
+        に倒す規約。run/trainer.py の_apply_word_production参照）。
+
+        戻り値: (chunk, sim)。chunk は self.proto のキー（tuple）または None。
+        """
+        if self.mode != "contrast":
+            return None, 0.0
+        # 【F2-12・2026-08-27】vecがリストなら {"vision": リスト} に正規化する
+        #   （呼び出し側 run/trainer.py は変えない）。チャンネルごとに
+        #   _channel_sims でコサインを求め、束ねる。
+        #   いまはvisionチャンネルしか proto が育たないので active は常に
+        #   ["vision"] 以下＝単一チャンネル分岐しか実行されず、計算結果は
+        #   正規化前と完全に同じ（設計の受け入れ条件1〜3）。
+        channels_in = _as_channels(vec)
+        active = [name for name in channels_in
+                  if name in self.channels and self.channels[name]["proto"]]
+        if not active:
+            return None, 0.0
+        if len(active) == 1:
+            sims = self._channel_sims(active[0], channels_in[active[0]])
+        else:
+            # 複数チャンネル：暫定で「持っているチャンネルのコサインの単純平均」。
+            # 【未決・F2-12】束ね方は2つ目の感覚を足すときに設計する。
+            sums, counts = {}, {}
+            for name in active:
+                for chunk, sim in self._channel_sims(name, channels_in[name]).items():
+                    sums[chunk] = sums.get(chunk, 0.0) + sim
+                    counts[chunk] = counts.get(chunk, 0) + 1
+            sims = {c: sums[c] / counts[c] for c in sums}
+        if not sims:
+            return None, 0.0
+        best_chunk = max(sims, key=sims.get)
+        return best_chunk, sims[best_chunk]
+
+    def _channel_sims(self, name, vec):
+        """指定チャンネル1つ分の (chunk -> コサイン類似度) を返す。
+
+        【F2-12・2026-08-27】reverse_lookup の中身を、旧来のvision専用計算
+        （両側引き算＋総当たりコサイン）からチャンネル名を引数化しただけの形に
+        切り出したもの。ロジック自体は1行も変えていない。
+        """
+        ch = self.channels[name]
+        D = ch["dim"]
+        # 【F2-8・2026-08-25】両側引き算。
+        #   なぜ入れたか：ここは以前 _cosine(vec, p) を生のまま比べていたが、
+        #   見えのベクトルも語の想像も4分の3ほどが共通成分で、そのまま比べると
+        #   共通部分が勝負を決める。実測（F2-7、4語・551回の産出）では
+        #   「どの物を見せても同じ語」になり、ぱぱの物は136回中0回しか当たらなかった。
+        #   同じ4本のベクトルで引き算ありに直すと 2/4 → 3/4 になる（同日実測）。
+        #   なお語→物の向きのテスト（F/scripts/f_wordreadout_nway.py の
+        #   two_sided_scores_nway）は最初から両側引き算をしていた。同じ比較を
+        #   2か所に別々に実装し、片方だけ引き算を入れ忘れていた＝二重実装の食い違い。
+        #
+        #   ⚠ 閾値のスケールが変わる：引き算前は 0.3〜0.9 に固まっていた値が、
+        #   引き算後は −0.5〜+0.6 に広がる。実験ファイルの produce.threshold を
+        #   0.8 のままにすると**一度も発話しない**。新しいスケールに合わせること。
+        v = [float(x) for x in vec[:D]]
+        if ch["view_n"] > 0:
+            # 見え側：これまで見てきた景色の平均を引く（observe_view で育てた値）
+            v = [v[i] - ch["view_sum"][i] / ch["view_n"] for i in range(D)]
+        items = list(ch["proto"].items())
+        if len(items) >= 2:
+            # 語側：全語の想像の平均を引く（1語しか無いときは引くと零ベクトルになる）
+            n = len(items)
+            m = [sum(p[i] for _, p in items) / n for i in range(D)]
+        else:
+            m = None
+        sims = {}
+        for chunk, p in items:
+            q = p if m is None else [p[i] - m[i] for i in range(D)]
+            sims[chunk] = _cosine(v, q)
+        return sims
 
     def top(self, n=10):
         """頻度上位の語の型を返す。"""

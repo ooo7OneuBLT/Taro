@@ -1,0 +1,99 @@
+{
+  "name": "profile検証",
+  "scene": "新生児_仰向け_柵あり",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 0.0,
+    "save": "C:\\claude\\AI\\Taro\\run\\tools\\_scratch_profile_check\\m_off1.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 300,
+    "seed": 0,
+    "checkpoint": 50,
+    "profile": false,
+    "csv": "C:\\claude\\AI\\Taro\\run\\tools\\_scratch_profile_check\\c_off1.csv"
+  },
+  "tools": [],
+  "scene_note": "0ヶ月・仰向け・柵あり。運動性喃語（自発運動）の学習で使ってきた環境",
+  "world": {
+    "recline_deg": 0.0,
+    "seat_friction": 2.0,
+    "fence": true,
+    "plain": true,
+    "floor_dim": 1.0,
+    "floor_emission": 0.0,
+    "static_tex": false,
+    "no_shadow": false,
+    "word_test": null,
+    "floor_roll": null,
+    "floor_condim": null,
+    "toy": {
+      "enabled": true,
+      "shape": "box",
+      "radius": 0.02,
+      "mode": "tether",
+      "dist": 0.086,
+      "delay_sec": 1.0,
+      "approach_sec": 0.5,
+      "approach_from": "above",
+      "rgba": null,
+      "elev_deg": 0.0
+    },
+    "toy2": {
+      "enabled": false,
+      "shape": "sphere",
+      "radius": 0.02,
+      "rgba": null,
+      "dist": 0.086,
+      "angle_deg": 12.0,
+      "elev_deg": 0.0
+    },
+    "parent_intervene": false,
+    "parent_wait_sec": 2.0,
+    "parent_lost_deg": 25.0,
+    "parent_labeling": {
+      "enabled": false,
+      "shake_amp_m": 0.02,
+      "shake_hz": 1.5,
+      "gaze_deg": 10.0,
+      "gaze_margin_deg": 3.0,
+      "gaze_hold_sec": 0.3,
+      "attract_timeout_sec": 3.0,
+      "utterances": {
+        "toy1": "ぶーぶー",
+        "toy2": "わんわん"
+      },
+      "respond_prob": 1.0,
+      "refractory_sec": 1.0,
+      "shuffle_refractory_sec": 3.0,
+      "shuffle_after": 5
+    }
+  },
+  "body": {
+    "age_months": 0.0,
+    "shape": true,
+    "shape_scales": null,
+    "head_elongation": null,
+    "flexion": true,
+    "flexion_stiffness": null,
+    "joint_compliance": false,
+    "joint_compliance_groups": null,
+    "joint_compliance_joints": null,
+    "joint_compliance_params": null,
+    "limb_scale": 10.0,
+    "limb_fix": true,
+    "distal_mass": 1.0,
+    "neck_fix": true,
+    "eye_rest_vertical_deg": 0.0,
+    "eye_centering": false,
+    "eye_muscle_scale": 1.0,
+    "orienting_version": 2,
+    "orienting_hold": false,
+    "orienting_static": false,
+    "orienting_ior": false,
+    "orienting_habituation": false,
+    "fovea_camera": false,
+    "develop_from_age": false
+  }
+}

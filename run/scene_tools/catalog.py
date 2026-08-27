@@ -42,7 +42,10 @@ if _HERE not in sys.path:
 
 import e_scene  # noqa: E402
 
-EXPERIMENTS_DIR = os.path.join(_ROOT, "E", "experiments")
+# 実験ファイルは目標フォルダごとに置かれる（E/experiments、F/experiments …）。
+# 2026-08-23：目標Fの実験を E/experiments から F/experiments へ移したため、
+# 1フォルダ固定をやめ、すべての目標フォルダを走査する。
+EXPERIMENTS_GLOB = os.path.join(_ROOT, "*", "experiments", "*.json")
 
 
 def _out_path_for_scene_dir(scene_dir):
@@ -64,12 +67,12 @@ GROUP_JP = {"arm": "腕", "finger": "指", "leg": "脚", "trunk": "体幹", "hea
 
 
 def _experiments_by_scene():
-    """E/experiments 配下の各JSONの "scene" キーを見て、シーン名 → 使っている
-    実験ファイル名の一覧を集計する。読めない・"scene"キーが無いファイルは
-    例外で全体を止めずスキップする。
+    """各目標フォルダの `*/experiments` 配下のJSONの "scene" キーを見て、
+    シーン名 → 使っている実験ファイル名の一覧を集計する。読めない・
+    "scene"キーが無いファイルは例外で全体を止めずスキップする。
     """
     out = {}
-    for path in sorted(glob.glob(os.path.join(EXPERIMENTS_DIR, "*.json"))):
+    for path in sorted(glob.glob(EXPERIMENTS_GLOB)):
         try:
             with open(path, encoding="utf-8") as fp:
                 exp = json.load(fp)

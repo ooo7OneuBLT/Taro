@@ -40,6 +40,10 @@ from dopamine import Dopamine                                   # noqa: E402
 from locus_coeruleus import LocusCoeruleus                      # noqa: E402
 from developmental_clock import DevelopmentalClock              # noqa: E402
 from cerebellum_motor import MotorCerebellum                    # noqa: E402
+# 発話小脳（口の動き→音の対応の帳面）。手足用のMotorCerebellumとは別クラス
+#   （taro_core/src/brain/cerebellum.py冒頭コメント参照）。既定OFF（cfg.produce=None）
+#   では_setup_produce内で一度もCerebellum()を作らない＝乱数消費なし。
+from cerebellum import Cerebellum as SpeechCerebellum           # noqa: E402
 from learning_progress import LearningProgress                  # noqa: E402
 from homeostatic_scaling import HomeostaticScaling              # noqa: E402
 from test_phase8_motor_learning import CombinedParams, rescale_action, to_tensor  # noqa: E402
@@ -353,6 +357,169 @@ def _setup_hearing(taro, cfg, *, verbose=True):
               flush=True)
 
 
+def _setup_produce(taro, cfg, env, *, verbose=True):
+    """見た物の名前を言う（初語）の配線（2026-08-22新設・F2）。
+
+    設計：F/docs/設計_F2_初語（見た物の名前を言う）.md 第2部「実装作業」より：
+      ① 逆引き：taro.lexicon.reverse_lookup()（既存の連合器に追加したメソッド、
+         taro_core/src/brain/lexicon.py）
+      ② 産出：taro.brain.generate()（既存の調音ヘッド＋VocalTract、新規機構なし）
+      ③ 報酬：taro_core/src/brain/imitation_reward.py（B原本 instincts/imitation.py
+         からの移植）
+      ④ 学習：taro.produce_learner（**運動学習(taro.learner)とは別インスタンス**。
+         設計「⚠新たに判明したリスク：学習器の共有」案a）
+
+    既定OFF（cfg.produce=None）：taro.produce_vocab/produce_vocal_tract/
+    produce_learner/produce_dopはNoneのまま＝run/trainer.pyの
+    _apply_word_productionが最初のifで即returnし、既存実験の挙動は
+    1ビットも変わらない。
+
+    【なぜ Taro.__init__ の _load() の"後"に呼ぶか】taro.brainのembedding/
+    perception_headはvocab_size=3（PAD/BOS/EOS）で構築される（これまで
+    generate()を呼ぶ経路が無く、発声に使う文字を持たせる必要が無かったため。
+    設計「調査で確定した事実」表：Fのループにgenerate()の呼び出しが
+    そもそも無い）。_load()より前にresize_embedding()すると、_load内の
+    _match()（形が合う層だけコピー）が「保存時のembedding(3語)」と
+    「resize後のembedding(74語)」の形の違いで弾かれ、生成用に伸ばした分
+    どころか元の3語分の重み（PAD/BOS/EOS）までロードされない。先に元の形で
+    読み込み、あとから伸ばす方が安全（PAD/BOS/EOSの3行は保存値のまま、
+    伸ばした分だけ新規初期化になる。resize_embedding()自体が
+    「既存の重みを先頭にコピーし、増えた分だけ新規初期化」する実装なので
+    これで両立する）。
+    """
+    if cfg.produce is None:
+        taro.produce_vocab = None
+        taro.produce_vocal_tract = None
+        taro.produce_learner = None
+        taro.produce_dop = None
+        taro._last_produce_sec = None
+        # 【F2-1・2026-08-23】発話小脳・喃語用の持ち越しhidden。既定OFFでは
+        #   どちらもNoneのまま＝run/trainer.pyの_apply_word_productionが
+        #   最初のifで即returnし、既存実験の挙動は1ビットも変わらない。
+        taro.produce_cerebellum = None
+        taro._produce_hidden = None
+        # 【作業A・2026-08-24・修正】以前はここで無条件に
+        #   `taro._pending_produce_cerebellum = None` としていたため、_load()が
+        #   保存モデルから退避しておいた帳面（forward_map/inverse_map/
+        #   experience_count）が、produceキー無し（OFF）の実験を1回挟んだだけで
+        #   静かに捨てられていた（実測：帳面339行・68種を持つモデルをproduce無し
+        #   実験で保存すると、保存後のblobから"produce_cerebellum"キーが消滅）。
+        #   cfg.produce=Noneではproduce_cerebellumインスタンス自体は作らない
+        #   （既存の既定OFF挙動は変えない）が、_load()が退避した帳面データその
+        #   ものは保持したまま素通しし、save()（下方）でblobへ書き戻す。
+        #   cfg.modelを指定していない（=_load()が一度も呼ばれていない）新規
+        #   モデルでは self._pending_produce_cerebellum 属性自体がまだ無いので
+        #   getattrで安全にNone扱いする。
+        taro._pending_produce_cerebellum = getattr(taro, "_pending_produce_cerebellum", None)
+        # 【F2-2・実装作業②・2026-08-23】ブローカ野（発話計画）。既定OFF
+        #   （cfg.produce=None）ではNoneのまま＝run/trainer.pyの
+        #   _apply_word_productionが最初のifで即returnし、既存実験の挙動は
+        #   1ビットも変わらない。設計：F/docs/設計_F2-2_見た物の名前を言う.md 第4部②。
+        taro.produce_broca = None
+        return
+    from vocal_tract import VocalTract
+    from hearing import Vocabulary
+    pd = cfg.produce
+    vt = VocalTract()
+    # 【Tier3・工学的判断・2026-08-22】「わんわん」の「わ」(両唇+半母音)は
+    #   coupledモード（調音点→調音法が自動決定）では出せない（両唇は鼻音に
+    #   自動的に決まるため「ま」にしかならない、vocal_tract.py:165-172の
+    #   COUPLED_PLACE_TO_MANNER）。半母音(manner index6)はstage2から解禁
+    #   （vocal_tract.py:130-135のSTAGE_ALLOWED_MANNER）。
+    # 【2026-08-23・月齢連動を配線】`develop_from_age`（既定False）で切替。
+    #   False（既定・キー無し実験も常にこちら）のときは**従来と1ビットも変わらない**
+    #   （固定値 `vocal_tract_stage`、既定2）。True のときだけ
+    #   `taro_core/src/body/development.vocal_tract_stage_for_age()` で
+    #   env.age（月齢）から自動計算する（境界の根拠の強さは development.py 側の
+    #   コメント参照。6ヶ月の境界だけコード内に根拠があり、他は暫定値）。
+    #   run/config.py（共通ファイル、変更範囲外）に新しいtaroキーを追加できない
+    #   ため、既存の自由辞書 `produce` の中にキーを足す形にした
+    #   （`produce.develop_from_age`。`body.develop_from_age`＝視覚側とは別キー。
+    #   声道と視覚を必ず連動させる設計ではないため、あえて分けている）。
+    if bool(pd.get("develop_from_age", False)):
+        from development import vocal_tract_stage_for_age
+        # 【2026-08-23・バグ修正】`env` はラッパーで、月齢は `env.unwrapped.age`
+        #   にある（同じファイルの `env.unwrapped.model` と同じ事情）。
+        #   直前の実装は `getattr(env, "age", 0.0)` だったため常に既定の 0.0 を
+        #   拾い、12ヶ月と指定しても **stage0（母音のみ）** で走っていた。
+        #   実測：12ヶ月・300ステップで出た音が「あいうえお」の5種だけ
+        #   （6ヶ月・stage2では15種で子音も出ていた）。
+        #   ログには `age=12.00mo` と出るのに実効が無い型のバグ＝
+        #   `E/scripts/e_body_wiring_check.py` 冒頭に記録された2026-07-25の
+        #   3件と同型。**静かに既定値へ落ちないよう、取れなければ止める。**
+        _env_age = getattr(getattr(env, "unwrapped", env), "age", None)
+        if _env_age is None:
+            raise ValueError(
+                "produce.develop_from_age=true だが env から月齢(age)が取れない。"
+                "シーンに age_months が入っているか確認すること"
+                "（静かに stage0＝母音のみで走るのを防ぐため、ここで止める）。")
+        vt.stage = vocal_tract_stage_for_age(float(_env_age))
+    else:
+        vt.stage = int(pd.get("vocal_tract_stage", 2))
+    if pd.get("vocal_tract_decoupled", True):
+        vt.force_decouple()
+    taro.produce_vocal_tract = vt
+    pv = Vocabulary()
+    for ch in vt.get_all_chars():
+        pv.encode(ch)
+    taro.brain.resize_embedding(pv.size)
+    taro.brain.set_vocab_mapping(pv.char2idx)
+    taro.produce_vocab = pv
+    # 【設計「⚠学習器の共有」案a】運動学習(taro.learner)とは別インスタンス。
+    #   generate()が使うtaro.brainのパラメータ（embedding/gru＝音声用でmotor_gruとは
+    #   別物/head_place等の4ヘッド）は、運動系（motor_gru/motor_cortex/
+    #   forward_model_head等、taro_brain_motor.py）とは重みを共有しない別モジュール
+    #   （taro_brain_motor.py冒頭コメント「音声用GRUとは別に運動専用GRU」参照）。
+    #   したがってtaro.produce_learnerとtaro.learnerが同じtaro.brainを指していても、
+    #   それぞれのbackward()が実際に勾配を作る先は重ならない
+    #   （run/trainer.py _apply_word_production参照）。
+    taro.produce_learner = TaroLearner(taro.brain, lr=float(pd.get("lr", cfg.lr)))
+    taro.produce_dop = Dopamine()
+    taro._last_produce_sec = None
+    # 【F2-1・実装作業③・2026-08-23】発話小脳（口の動き→音の帳面）。
+    #   generate()は既に cerebellum= を受け取れる（taro_brain.py:177-179、
+    #   コード改変ゼロ）。mode に関わらず cfg.produce が有効なら常に構築する
+    #   （＝word/babbleどちらのモードでも学習経験を帳面に貯める）。
+    #   【判断を仰ぐ点・作業記録参照】forward_map/inverse_map/experience_countは
+    #   素のdictでありTaro.save()/_load()のblobには現時点で載らない
+    #   （state_dict()を持たない）。持ち越し学習（cfg.model指定）をすると
+    #   帳面は毎回空から再スタートする。保存方法は勝手に決めず報告する。
+    taro.produce_cerebellum = SpeechCerebellum()
+    # 【F2-1・作業A・2026-08-23】_load()が退避した帳面があれば、作った直後に
+    #   流し込む（_load()は_setup_produceより前に呼ばれるため、_load()の時点では
+    #   まだCerebellum()が存在せず直接復元できない。_load()のコメント参照）。
+    pending = getattr(taro, "_pending_produce_cerebellum", None)
+    if pending is not None:
+        taro.produce_cerebellum.forward_map = pending["forward_map"]
+        taro.produce_cerebellum.inverse_map = pending["inverse_map"]
+        taro.produce_cerebellum.experience_count = pending["experience_count"]
+        if verbose:
+            print(f"  [発話小脳] 復元完了：forward_map={len(pending['forward_map'])}件"
+                  f" inverse_map={len(pending['inverse_map'])}件"
+                  f" experience_count={len(pending['experience_count'])}件", flush=True)
+    taro._pending_produce_cerebellum = None
+    # 【F2-1・実装作業④⑦・2026-08-23】喃語モード用に持ち越すGRU隠れ状態。
+    #   B原本 core_b.py self_babble() の「自分の声を聞く」ループ
+    #   （610-615行）と同じく、発声のたびに自分の出力を聞かせて更新する。
+    #   word モードでは使わない（既存どおり毎回 hidden=None）。
+    taro._produce_hidden = None
+    # 【F2-2・実装作業②・2026-08-23】ブローカ野（発話計画の中枢）。
+    #   taro_core/src/brain/left_frontal_lobe/brocas_area.py（F2-1で移植済み・
+    #   plan()を呼ぶ配線は未実装だったもの）。mode に関わらず cfg.produce が
+    #   有効なら常に構築する（produce_cerebellum と同じ扱い）。plan()自体は
+    #   trainer.py _apply_word_production（wordモード）でしか呼ばない
+    #   （babbleモードは計画を立てずに探索的に発声する＝従来どおり）。
+    #   設計：F/docs/設計_F2-2_見た物の名前を言う.md 第4部「②」。
+    from left_frontal_lobe.brocas_area import BrocasArea
+    taro.produce_broca = BrocasArea()
+    mode = pd.get("mode", "word")
+    if verbose:
+        print(f"[産出] taro.produce ON（mode={mode}）：語彙={pv.size}文字"
+              f"（vocal_tract stage={vt.stage} decoupled={not vt.is_coupled()}）"
+              f" threshold={pd.get('threshold', 0.80)}"
+              f" cooldown_sec={pd.get('cooldown_sec', 2.0)}", flush=True)
+
+
 class _DoubleTouchBonusContributor:
     """taro.reward_contributors の1要素（2026-08-05・全身一般化の設計1-4節）。
 
@@ -605,6 +772,16 @@ class Taro:
         if cfg.model:
             self._load(cfg.model, verbose=verbose)
 
+        # 【2026-08-22新設・F2】見た物の名前を言う（初語）。既定OFF（cfg.produce=None）：
+        #   taro.produce_vocab/produce_vocal_tract/produce_learner/produce_dopは
+        #   Noneのまま＝run/trainer.pyのstep_k内の配線が一度も実行されない＝既存実験の
+        #   挙動は1ビットも変わらない。有効時は_load()の"後"（脳の重みを保存値から
+        #   復元した"後"）に呼ぶ：埋め込み層を伸ばす前に読み込む方が安全（下記
+        #   _setup_produceのdocstring参照）。有効時のみtorchの乱数を追加消費する
+        #   （nn.Embedding/nn.Linearの初期化）＝既存実験（produce未使用）の乱数列は
+        #   1つもずれない。
+        _setup_produce(self, cfg, env, verbose=verbose)
+
         # ---- ⑧ 努力コストの重み ---------------------------------------------
         # 筋力（最大トルク）が大きい筋ほど動かすとコストが高い（代謝の標準：活性化²×筋サイズ）。
         # 注意：体を作り直しても**更新していない**（元の実装もそうだった）。
@@ -770,14 +947,26 @@ class Taro:
                 lx = blob["lexicon"]
                 self.lexicon.counts = lx["counts"]
                 self.lexicon.state_sum = lx["state_sum"]
-                self.lexicon.state_dim = lx["state_dim"]
                 self.lexicon.min_len = lx["min_len"]
                 # 【F1-5・2026-08-21】旧blob（mode/protoキー無し）はそのまま
                 #   sumモード・proto空辞書として復元される（従来どおり）。
                 if "mode" in lx:
                     self.lexicon.mode = lx["mode"]
-                if "proto" in lx:
-                    self.lexicon.proto = lx["proto"]
+                # 【F2-12・2026-08-27】設計：F/docs/設計_F2-12_意味を感覚ごとに
+                #   分けて持つ.md。channels優先で読み、無ければ旧キー
+                #   (state_dim/proto/view_sum/view_n)からvisionチャンネルを
+                #   組み立てる（後方互換。旧形式のモデルにはchannelsキーが無い）。
+                if "channels" in lx:
+                    self.lexicon.channels = lx["channels"]
+                else:
+                    self.lexicon.channels = {
+                        "vision": {
+                            "dim": lx["state_dim"],
+                            "proto": lx.get("proto", {}),
+                            "view_sum": lx.get("view_sum"),
+                            "view_n": lx.get("view_n", 0),
+                        }
+                    }
                 if verbose:
                     print(f"  [語彙] 復元：耳={self.hearing.vocab.size}文字"
                           f" 語彙={len(self.lexicon.counts)}語", flush=True)
@@ -785,6 +974,22 @@ class Taro:
                 print("注意[load] いまの設定は耳(hearing)ありですが、保存されたモデルに"
                       "語彙(hearing_vocab/lexicon)がありません"
                       "（2026-08-19以前の保存）。語彙は空から開始します。", flush=True)
+        # 【F2-1・作業A・2026-08-23】発話小脳（口の動き→音の帳面）の復元。
+        #   _load() は Taro.__init__ の"⑦続きから学習する"（_setup_produceより前）
+        #   で呼ばれるため、この時点では self.produce_cerebellum はまだ存在しない
+        #   （_setup_produce は __init__ の"後"、_load()の"後"に呼ばれる。
+        #   taro_setup.py の _setup_produce docstring参照）。ここでは blob の中身を
+        #   一時属性へ退避するだけにして、_setup_produce が Cerebellum() を
+        #   作った直後にそこへ流し込む。
+        if "produce_cerebellum" in blob:
+            self._pending_produce_cerebellum = blob["produce_cerebellum"]
+            if verbose:
+                pc = blob["produce_cerebellum"]
+                print(f"  [発話小脳] 復元予定：forward_map={len(pc['forward_map'])}件"
+                      f" inverse_map={len(pc['inverse_map'])}件"
+                      f" experience_count={len(pc['experience_count'])}件", flush=True)
+        else:
+            self._pending_produce_cerebellum = None
 
     # -------------------------------------------------------- 体が変わったとき
     def on_body_change(self, env):
@@ -1149,9 +1354,51 @@ class Taro:
             if self.lexicon.mode == "contrast":
                 blob["lexicon"]["mode"] = self.lexicon.mode
                 blob["lexicon"]["proto"] = self.lexicon.proto
+                # 【F2-8・2026-08-25】「見慣れた景色」の平均も保存する。
+                #   これを保存しないと、続きから学習したとき逆引きの引き算が
+                #   ゼロからやり直しになる（＝最初の数十歩は引き算が効かない）。
+                #   視覚未保存・語彙未保存・帳面未保存に続く同型事故を作らない。
+                blob["lexicon"]["view_sum"] = self.lexicon.view_sum
+                blob["lexicon"]["view_n"] = self.lexicon.view_n
+                # 【F2-12・2026-08-27】設計：F/docs/設計_F2-12_意味を感覚ごとに
+                #   分けて持つ.md。旧キー(proto/view_sum/view_n)と新キー
+                #   (channels)を両方書く。旧キーは上の3行と同じ中身の別名
+                #   （channels["vision"]の中身と一致）なので、旧コードで読んでも
+                #   新コードで読んでも同じ結果になる。
+                blob["lexicon"]["channels"] = self.lexicon.channels
         assert self.hearing is None or ("hearing_vocab" in blob and "lexicon" in blob), (
             "耳(hearing)が有効なのに語彙(vocab/lexicon)がblobに入っていない。"
             "視覚未保存事件(2026-08-19発覚)・語彙未保存(同日発覚)に続く同型バグを"
             "機械で止める（このassertを消さないこと）。")
+        # 【F2-1・作業A・2026-08-23】発話小脳（口の動き→音の帳面）の保存。
+        #   produce_cerebellumがNone（既定・cfg.produce未設定）のときは1キーも
+        #   足さない＝既存モデルとバイト互換（hearing_vocab/lexiconと同じ
+        #   「既定OFFでは足さない」流儀、上のブロック参照）。
+        #   forward_map/inverse_map/experience_countは素のdict（state_dict()は
+        #   持たない）なのでそのまま入れる。
+        # 【作業A・2026-08-24】cfg.produce=OFFの実験でも、_load()で読み込んだ
+        #   モデルが帳面を持っていれば（_pending_produce_cerebellum）、それを
+        #   素通しして保存する。produce_cerebellumインスタンス自体が無い（OFF）
+        #   からといって帳面まで捨てない（作業A本体、上のOFF分岐のコメント参照）。
+        _pending_pc = getattr(self, "_pending_produce_cerebellum", None)
+        if self.produce_cerebellum is not None:
+            pc = self.produce_cerebellum
+            blob["produce_cerebellum"] = {
+                "forward_map": pc.forward_map,
+                "inverse_map": pc.inverse_map,
+                "experience_count": pc.experience_count,
+            }
+        elif _pending_pc is not None:
+            blob["produce_cerebellum"] = {
+                "forward_map": _pending_pc["forward_map"],
+                "inverse_map": _pending_pc["inverse_map"],
+                "experience_count": _pending_pc["experience_count"],
+            }
+        assert (self.produce_cerebellum is None and _pending_pc is None) or (
+            "produce_cerebellum" in blob), (
+            "発話小脳(produce_cerebellum)を持っている（有効化中、または読み込んだ"
+            "モデルが帳面を保持中）のに帳面がblobに入っていない。"
+            "視覚未保存事件(2026-08-19発覚)・語彙未保存(同日発覚)に続く同型バグ"
+            "（今回で3回目）を機械で止める（このassertを消さないこと）。")
         torch.save(blob, path)
         print(f"SAVED MODEL {path}", flush=True)
