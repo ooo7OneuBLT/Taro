@@ -1,0 +1,44 @@
+{
+  "name": "F2-11_視線つき_わんわん",
+  "note": "2026-08-27。りんご偏りの検証：わんわん板を見せて「りんご」と言った瞬間に、太郎は板を見ていたのかを確かめる。仮説＝板から視線が外れて背景しか写っていないとき、りんごの想像図が最も近く（見慣れた景色とのコサイン+0.055で4語中最大）、りんごが選ばれる。過去にv2（親なし・板が視界に入らない条件）で4条件とも「りんご」と答えた記録と整合する。",
+  "scene": "座位_12ヶ月_1イラスト_F2-9C_わんわんだけ_2026-08-26",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 12.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.0,
+    "model": "F/models/F2-11_ABAB3_B2_seed10_2026-08-27.pt",
+    "produce": {
+      "mode": "word",
+      "threshold": 0.15,
+      "cooldown_sec": 2.0,
+      "max_length": 8,
+      "develop_from_age": true,
+      "vocal_tract_decoupled": true
+    },
+    "save": "F/models/_F2-11_視線つき_わんわん.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 3000,
+    "seed": 10,
+    "K": 10,
+    "checkpoint": 3000,
+    "csv": "F/logs/F2-11_視線検証/わんわん/run.csv"
+  },
+  "plugins": {
+    "word_production": {
+      "events_out": "F/logs/F2-11_視線検証/わんわん/発話イベント.csv"
+    },
+    "gaze_probe": {
+      "angles_out": "F/logs/F2-11_視線検証/わんわん/視線角度.csv"
+    }
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "name": "F2-11_スナップ_わんわん",
+  "note": "2026-08-27。りんご偏りの究明：発話した瞬間の中心窩画像と視覚ベクトルを残す。原因の予想が2回外れた（想像図の配置・視線の外れ）ため、絵にして見る。散布図（4条件の見えを2軸に潰す）もこのベクトルから描く。",
+  "scene": "座位_12ヶ月_1イラスト_F2-9C_わんわんだけ_2026-08-26",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 12.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.0,
+    "model": "F/models/F2-11_ABAB3_B2_seed10_2026-08-27.pt",
+    "produce": {
+      "mode": "word",
+      "threshold": 0.15,
+      "cooldown_sec": 2.0,
+      "max_length": 8,
+      "develop_from_age": true,
+      "vocal_tract_decoupled": true
+    },
+    "save": "F/models/_F2-11_snap_わんわん.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 3000,
+    "seed": 10,
+    "K": 10,
+    "checkpoint": 3000,
+    "csv": "F/logs/F2-11_スナップ/わんわん/run.csv"
+  },
+  "plugins": {
+    "word_production": {
+      "events_out": "F/logs/F2-11_スナップ/わんわん/発話イベント.csv"
+    },
+    "produce_snapshot": {
+      "out_dir": "F/logs/F2-11_スナップ/わんわん/画像",
+      "max_images": 200
+    },
+    "gaze_probe": {
+      "angles_out": "F/logs/F2-11_スナップ/わんわん/視線角度.csv"
+    }
+  }
+}

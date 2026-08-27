@@ -70,6 +70,7 @@ def _register():
     from run.plugins.common.word_production import WordProduction
     from run.plugins.common.babble_probe import BabbleProbe
     from run.plugins.common.gaze_probe import GazeProbe
+    from run.plugins.common.produce_snapshot import ProduceSnapshot
     PLUGINS["toy_touch"] = ToyTouch
     PLUGINS["toy_in_view"] = ToyInView   # おもちゃが視界に入っている割合（幾何・脳不要＝measure可）
     PLUGINS["hand_in_view"] = HandInView
@@ -87,6 +88,7 @@ def _register():
     PLUGINS["word_production"] = WordProduction   # 太郎自身の発話（見た物の名前を言う、F2）
     PLUGINS["babble_probe"] = BabbleProbe   # 喃語モードの発話・帳面の成長を記録する（F2-1）
     PLUGINS["gaze_probe"] = GazeProbe   # 視線が的にどれだけ連続で留まるか（F2-9の判定設計用）
+    PLUGINS["produce_snapshot"] = ProduceSnapshot   # 発話した瞬間の中心窩画像と視覚ベクトル（F2-11のりんご偏り究明）
     # 注意：self_model / trace / reach_success / double_touch は太郎の脳が要る
     #   （run.type=train のみ）。measure（脳を通さず環境だけ進める）では使えない。
     #   reach_success・double_touch はさらに taro.goal_space="reach_self" も要る。
