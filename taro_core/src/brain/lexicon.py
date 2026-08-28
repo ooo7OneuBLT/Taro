@@ -200,6 +200,19 @@ class Lexicon:
             return None
         return tuple(tokens[s:e])
 
+    def _ensure_channel(self, name, dim):
+        """そのチャンネルが無ければ作る（2026-08-28・F2-13）。
+
+        中心窩(vision)以外の感覚を後から足せるようにするための入口。
+        既存チャンネルには一切触らないので、1チャンネルだけの走行では
+        この関数は最初の1回で何もせず戻る（計算は従来と同一）。
+        """
+        ch = self.channels.get(name)
+        if ch is None:
+            ch = {"dim": int(dim), "proto": {}, "view_sum": None, "view_n": 0}
+            self.channels[name] = ch
+        return ch
+
     def observe(self, tokens, confidences, state=None):
         """
         発話を分節し、切り出した単位を辞書に登録（頻度+1）。切り出した単位を返す。
@@ -211,10 +224,18 @@ class Lexicon:
         # 【F2-12・2026-08-27】stateがリストなら {"vision": リスト} に正規化する
         #   （呼び出し側 run/trainer.py は変えない＝これまでどおりリストを渡す）。
         #   いまはvisionチャンネルしか無いので、以下の処理は正規化前と完全に同じ。
-        state = _as_channels(state).get(self.DEFAULT_CHANNEL)
+        states = _as_channels(state)
+        state = states.get(self.DEFAULT_CHANNEL)
         chunk = self.segment(tokens, confidences)
         if chunk is not None:
             self.counts[chunk] = self.counts.get(chunk, 0) + 1
+            # 【F2-13・2026-08-28】vision 以外のチャンネル（例：周辺視）も同じ
+            #   引き寄せ／引き離しで育てる。チャンネルが1つだけの走行では
+            #   このループは空を回るだけで、計算は従来と1ビットも変わらない。
+            for _name, _vec in states.items():
+                if _name == self.DEFAULT_CHANNEL or _vec is None:
+                    continue
+                self._learn_channel(_name, chunk, _vec)
             if state is not None and len(state) >= self.state_dim:
                 # sum系の累積は contrast モードでも並行して行う（counts/segment等の
                 # 他機能の互換のため。二重帳簿だが数KBオーダーで無視できる。
@@ -251,6 +272,35 @@ class Lexicon:
                                 q[i] -= self.eta_push * (v[i] - q[i])
         return chunk
 
+    def _learn_channel(self, name, chunk, vec):
+        """vision 以外のチャンネル1つ分の引き寄せ／引き離し（2026-08-28・F2-13）。
+
+        式は vision と完全に同じ（observe 内の contrast 分岐をそのまま写した）。
+        eta_push=0 のときは引き離しが no-op になる＝F2-11の判断（引き離しは外す）
+        がそのままこのチャンネルにも効く。
+        """
+        if self.mode != "contrast":
+            return
+        ch = self._ensure_channel(name, len(vec))
+        D = ch["dim"]
+        if len(vec) < D:
+            return
+        v = _unit(list(vec)[:D])
+        if v is None:
+            return
+        proto = ch["proto"]
+        p = proto.get(chunk)
+        if p is None:
+            proto[chunk] = list(v)
+        else:
+            for i in range(D):
+                p[i] += self.eta_pull * (v[i] - p[i])
+        for other, q in proto.items():
+            if other == chunk:
+                continue
+            for i in range(D):
+                q[i] -= self.eta_push * (v[i] - q[i])
+
     def observe_view(self, vec):
         """いま見えているものを「見慣れた景色」の平均へ1つ足す。
 
@@ -261,15 +311,22 @@ class Lexicon:
         # 【F2-12・2026-08-27】vecがリストなら {"vision": リスト} に正規化する
         #   （呼び出し側 run/trainer.py は変えない）。いまはvisionチャンネルしか
         #   無いので、以下の処理は正規化前と完全に同じ。
-        vec = _as_channels(vec).get(self.DEFAULT_CHANNEL)
-        if vec is None:
-            return
-        D = self.state_dim
-        if self.view_sum is None:
-            self.view_sum = [0.0] * D
-        for i in range(D):
-            self.view_sum[i] += float(vec[i])
-        self.view_n += 1
+        vecs = _as_channels(vec)
+        for name, v in vecs.items():
+            if v is None:
+                continue
+            # 【F2-13・2026-08-28】チャンネルごとに「見慣れた景色」を持つ。
+            #   vision だけの走行では従来と完全に同じ1本を育てる。
+            ch = self._ensure_channel(name, len(v))
+            D = ch["dim"]
+            if len(v) < D:
+                continue
+            if ch["view_sum"] is None:
+                ch["view_sum"] = [0.0] * D
+            acc = ch["view_sum"]
+            for i in range(D):
+                acc[i] += float(v[i])
+            ch["view_n"] = ch.get("view_n", 0) + 1
 
     def assoc(self, chunk):
         """

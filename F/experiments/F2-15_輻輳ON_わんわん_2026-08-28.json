@@ -1,0 +1,49 @@
+{
+  "name": "F2-15_輻輳ON_わんわん",
+  "note": "2026-08-28。輻輳反射ONで、左右の中心窩に同じ部位が写るかを見る（設計の受け入れ条件2）。OFF版は F/logs/F2-12_視界確認 と比較。",
+  "scene": "座位_12ヶ月_1イラスト_輻輳ON_2026-08-28",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 12.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.0,
+    "model": "F/models/F2-11_ABAB3_B2_seed10_2026-08-27.pt",
+    "produce": {
+      "mode": "word",
+      "threshold": 0.15,
+      "cooldown_sec": 2.0,
+      "max_length": 8,
+      "develop_from_age": true,
+      "vocal_tract_decoupled": true
+    },
+    "save": "F/models/_F2-15_輻輳ON.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 600,
+    "seed": 10,
+    "K": 10,
+    "checkpoint": 600,
+    "csv": "F/logs/F2-15_輻輳ON/run.csv"
+  },
+  "plugins": {
+    "word_production": {
+      "events_out": "F/logs/F2-15_輻輳ON/発話イベント.csv"
+    },
+    "produce_snapshot": {
+      "out_dir": "F/logs/F2-15_輻輳ON/中心窩",
+      "full_dir": "F/logs/F2-15_輻輳ON/両目",
+      "max_images": 40
+    },
+    "gaze_probe": {
+      "angles_out": "F/logs/F2-15_輻輳ON/視線角度.csv"
+    }
+  }
+}

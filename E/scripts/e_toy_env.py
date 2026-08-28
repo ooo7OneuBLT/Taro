@@ -643,7 +643,10 @@ class ToySupineEnv(SupineMimoEnv):
                  #   `world.word_test`（辞書）をkwargs直渡しする。
                  word_test=None,
                  eye_rest_vertical_deg=None, eye_centering=None,
-                 eye_muscle_scale=None, **kwargs):
+                 eye_muscle_scale=None,
+                 # F2-15新設・輻輳反射。既定None→False相当（E_VERGENCE=0）で
+                 #   1ビットも既存の挙動を変えない（e_vergence.py参照）。
+                 vergence=None, **kwargs):
         # VOR（前庭動眼反射）。眼球を方策から切り離し、頭の動きを打ち消して視線を安定させる。
         # E_VOR=0 でOFF（アブレーション）。根拠と簡略化は e_vor.py 参照。
         if vor is None:
@@ -656,6 +659,13 @@ class ToySupineEnv(SupineMimoEnv):
             orient = os.environ.get("E_ORIENT", "0") == "1"
         self._use_orient = orient
         self._orienting = None
+        # F2-15新設：輻輳反射（両眼視差から目をどれだけ寄せるかを決める）。
+        # E_VERGENCE=1 でON。既定OFF＝インスタンスも作らない（視差計算のコストも払わない）。
+        # 根拠と簡略化は e_vergence.py 参照。
+        if vergence is None:
+            vergence = os.environ.get("E_VERGENCE", "0") == "1"
+        self._use_vergence = vergence
+        self._vergence = None
         # 既定は環境変数から（E_NECK=0 / E_LIMBS=0 でアブレーション）。引数指定が優先。
         if newborn_neck is None:
             newborn_neck = os.environ.get("E_NECK", "1") == "1"
@@ -1104,6 +1114,11 @@ class ToySupineEnv(SupineMimoEnv):
                   f"hold={self._orienting_hold} static_salience={getattr(self._orienting, 'static_salience', None)} "
                   f"ior={getattr(self._orienting, 'ior', None)} "
                   f"habituation={getattr(self._orienting, 'habituation', None)}")
+        if self._use_vergence:
+            from e_vergence import VergenceReflex
+            self._vergence = VergenceReflex(self.model, self.data)
+            print(f"[vergence] enabled: gain={self._vergence.gain} "
+                  f"max_speed={self._vergence.max_speed_deg}deg/s range=+/-{self._vergence.range_deg}deg")
 
     # ------------------------------------------------------------------
     def _make_visually_plain(self, spec):
@@ -1998,6 +2013,8 @@ class ToySupineEnv(SupineMimoEnv):
         self._vision_cache = None          # data.time が巻き戻るのでキャッシュを捨てる
         if self._orienting is not None:
             self._orienting.reset()        # 前エピソードの画像を持ち越さない
+        if self._vergence is not None:
+            self._vergence.reset()         # F2-15：前エピソードの目標輻輳角を持ち越さない
         if getattr(self, "_parent_labeling", None) is not None:
             self._parent_labeling.reset()  # 【2026-08-18新設・F1-3】前エピソードの状態を持ち越さない
         if getattr(self, "_word_schedule", None) is not None:
@@ -2086,6 +2103,10 @@ class ToySupineEnv(SupineMimoEnv):
         if self._orienting is not None:
             # 前回描画された画像から計算済みの方向を、首・（VOR後の）目に加算する
             action = self._orienting.apply(action)
+        if self._vergence is not None:
+            # F2-15：輻輳反射（設計「1. 全体の構成」）。定位反射の共同運動成分を
+            #   上書きせず、左右差だけを加算する（additive）。
+            action = self._vergence.apply(action)
         # 【2026-08-15・座位保持の学習】層1（姿勢制御反射）・層2（立ち直り反射）。
         #   env.taro は run/taro_setup.py の _setup_postural_gate/_setup_righting_damper
         #   がposture_reflex/righting_reflexのどちらかTrueのときだけ配線する
@@ -2410,6 +2431,10 @@ class ToySupineEnv(SupineMimoEnv):
             #     左目の視野の中心は顔の正中より左にあるため、右側が構造的に不利。
             #     単眼処理の帰結であり、逸脱リストに記録する。
             self._orienting.update(imgs["eye_left"])
+        if self._vergence is not None and "eye_left" in imgs and "eye_right" in imgs:
+            # F2-15：定位反射と同じ場所で、両目の画像が新しく描画された時だけ呼ぶ
+            #   （設計「5. 環境への配線」）。
+            self._vergence.update(imgs["eye_left"], imgs["eye_right"])
         return imgs
 
     def _update_glow(self):

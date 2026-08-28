@@ -116,6 +116,12 @@ def default_scene(name="無題"):
             #   既定OFF＝眼球は筋入力ゼロのとき可動域の壁まで転がり落ちる、従来通りの挙動
             #   （実測・根拠は infant_body.py の EYE_CENTERING 直前のコメント参照）。
             "eye_centering": False,
+            # 【F2-15新設・2026-08-28】輻輳反射（寄り目と開散）。既定OFF。
+            #   実体は E/scripts/e_vergence.py。左右の周辺カメラ画像の水平ズレ
+            #   （両眼視差）から、左右の目を逆向きに動かす量を決める。
+            #   人間は生後5〜10週で視差だけを手がかりに寄り目ができる（文献調査①）。
+            #   設計＝F/docs/設計_F2-15_焦点を合わせる（輻輳反射）.md
+            "vergence": False,
             # 【2026-08-18新設・F1-3a】眼球6関節の筋アクチュエータ出力の倍率（既定1.0＝無補正）。
             #   実体は taro_core の infant_body.apply_eye_muscle_scale。
             #   eye_centering=True の中央復帰バネ(k=0.03)に、素の筋力（scale=1.0）では
@@ -574,6 +580,10 @@ def build(scene, orient=None, vor=True, seed=0, verbose=False, actuation_model=N
         os.environ["E_FLOOR_CONDIM"] = str(w["floor_condim"])
     os.environ["E_EYE_REST_V"] = str(b["eye_rest_vertical_deg"])
     os.environ["E_EYE_CENTERING"] = "1" if b.get("eye_centering") else "0"
+    # 【F2-15・2026-08-28】輻輳反射。シーンJSONの body.vergence で切り替える
+    #   （run系の操作は編集ウィンドウで完結させる方針。環境変数を直接いじらせない）。
+    #   既定 false ＝ 生成もしない＝視差計算のコストも払わない。
+    os.environ["E_VERGENCE"] = "1" if b.get("vergence") else "0"
     os.environ["E_ORIENT_V"] = str(b["orienting_version"])
     os.environ["E_NECK"] = "1" if b["neck_fix"] else "0"
     os.environ["E_LIMBS"] = "1" if b["limb_fix"] else "0"

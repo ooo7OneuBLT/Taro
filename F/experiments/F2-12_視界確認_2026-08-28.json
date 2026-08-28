@@ -1,0 +1,49 @@
+{
+  "name": "F2-12_視界確認_わんわん",
+  "note": "2026-08-28。太郎の視界の全体を見る。中心窩32pxの枠を重ねて、板が画面のどれだけを占めているかを確かめる。遠ざけるか中心窩を広げるかの判断材料。",
+  "scene": "座位_12ヶ月_1イラスト_F2-9C_わんわんだけ_2026-08-26",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 12.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.0,
+    "model": "F/models/F2-11_ABAB3_B2_seed10_2026-08-27.pt",
+    "produce": {
+      "mode": "word",
+      "threshold": 0.15,
+      "cooldown_sec": 2.0,
+      "max_length": 8,
+      "develop_from_age": true,
+      "vocal_tract_decoupled": true
+    },
+    "save": "F/models/_F2-12_視界確認.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 600,
+    "seed": 10,
+    "K": 10,
+    "checkpoint": 600,
+    "csv": "F/logs/F2-12_視界確認/run.csv"
+  },
+  "plugins": {
+    "word_production": {
+      "events_out": "F/logs/F2-12_視界確認/発話イベント.csv"
+    },
+    "produce_snapshot": {
+      "out_dir": "F/logs/F2-12_視界確認/中心窩",
+      "full_dir": "F/logs/F2-12_視界確認/視界全体",
+      "max_images": 30
+    },
+    "gaze_probe": {
+      "angles_out": "F/logs/F2-11_スナップ/わんわん/視線角度.csv"
+    }
+  }
+}

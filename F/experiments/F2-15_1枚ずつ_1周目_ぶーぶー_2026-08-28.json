@@ -1,0 +1,33 @@
+{
+  "name": "F2-15_1枚ずつ_1周目_ぶーぶー",
+  "note": "2026-08-28。板を1枚ずつ順番に見せる学習（ABAB版との比較）。ABAB（2枚同時）は親の仕組みがtoy1/toy2の2つまでという実装制約で始まったもので、学習効果を比べた記録は無い。人間の1歳児が語を覚える場面の大半は物を1つ見せて名前を言う形であり、2枚のうちどちらの名前かを解く相互排他性は16〜17ヶ月から。板30cm・輻輳ON。学習量は ABAB 版と同じ 3000ステップ×12本。",
+  "scene": "座位_12ヶ月_1イラスト_F2-15_1枚ずつ_ぶーぶー_学習_2026-08-28",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 12.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.0,
+    "save": "F/models/F2-15_1枚ずつ_1周目_ぶーぶー_seed10_2026-08-28.pt",
+    "model": "F/models/F2-15_1枚ずつ_1周目_わんわん_seed10_2026-08-28.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 3000,
+    "seed": 10,
+    "K": 10,
+    "checkpoint": 3000,
+    "csv": "F/logs/F2-15_1枚ずつ_本学習/1周目_ぶーぶー/run.csv"
+  },
+  "plugins": {
+    "word_learning": {
+      "events_out": "F/logs/F2-11_本学習/ABAB_A1/発話イベント.csv"
+    }
+  }
+}

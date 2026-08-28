@@ -1,0 +1,33 @@
+{
+  "name": "F2-15_30cm_ABAB2_B1",
+  "note": "2026-08-28。輻輳ON・板0.30mでの本学習。F2-11（板0.086m・輻輳なし）のやり直し。左右の目が同じ場所を見た状態で語を覚える。",
+  "scene": "座位_12ヶ月_イラスト2枚_F2-15_30cm_B_2026-08-28",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 12.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.0,
+    "save": "F/models/F2-15_30cm_ABAB2_B1_seed10_2026-08-28.pt",
+    "model": "F/models/F2-15_30cm_ABAB2_A1_seed10_2026-08-28.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 3000,
+    "seed": 10,
+    "K": 10,
+    "checkpoint": 3000,
+    "csv": "F/logs/F2-15_30cm_本学習/ABAB2_B1/run.csv"
+  },
+  "plugins": {
+    "word_learning": {
+      "events_out": "F/logs/F2-11_本学習/ABAB2_B1/発話イベント.csv"
+    }
+  }
+}

@@ -704,7 +704,17 @@ class OrientingReflexV2:
         self.n_actuator = int(model.nu)
         # 目・首アクチュエータのインデックス（現行 e_orienting.py と同じ）
         self.neck_idx = {}
-        self.eye_idx = {"h": [], "v": []}
+        # 【2026-08-28】水平の眼球だけ左右で回転軸の符号が逆
+        #   （MIMo_modelv2.xml:334 axis="0 0 1" / :344 axis="0 0 -1"）。
+        #   そのため世界座標では
+        #     共同運動（両目が同じ方向を向く）＝ 関節角の【差】
+        #     輻輳・開散（両目が逆方向へ動く）  ＝ 関節角の【和】
+        #   になる。従来は左右へ同じ値を書き、平均を読んでいたので、
+        #   この反射は共同運動ではなく**輻輳を動かしていた**（実測：左目だけが
+        #   対象を向き、右目は反対へ外れる＝太郎が「常に寄り目」だった原因）。
+        #   左右を分けて持ち、共同運動は差として制御する（_version_h_deg /
+        #   _write_eye_h）。垂直は左右とも axis="0 -1 0" で同符号なので分けない。
+        self.eye_idx = {"h": [], "v": [], "h_left": [], "h_right": []}
         for i in range(model.nu):
             name = model.actuator(i).name
             if name == "act:head_swivel":
@@ -713,6 +723,7 @@ class OrientingReflexV2:
                 self.neck_idx["v"] = i
             elif "eye" in name and "horizontal" in name:
                 self.eye_idx["h"].append(i)
+                self.eye_idx["h_left" if "left" in name else "h_right"].append(i)
             elif "eye" in name and "vertical" in name:
                 self.eye_idx["v"].append(i)
         # 各アクチュエータが動かす関節の qpos アドレス（今の角度を読むため）
@@ -854,6 +865,52 @@ class OrientingReflexV2:
             return float(np.degrees(np.mean([self.data.qpos[a] for a in adrs])))
         return float(np.degrees(self.data.qpos[adrs]))
 
+    def _version_h_deg(self):
+        """水平の共同運動角[度]（＝両目が世界のどちらを向いているか）。
+
+        左右の水平関節は回転軸の符号が逆なので、世界座標での「両目が同じ方向を
+        向いている量」は関節角の**差の半分**になる。従来ここで使っていた平均
+        (left+right)/2 は輻輳成分そのもので、この反射が輻輳を動かしていた。
+        差だけを読み書きすれば和（輻輳）には一切影響しない＝輻輳反射
+        （e_vergence.py）と数学的に直交し、綱引きが起きない。
+        左右が揃っていない古いモデルでも落ちないよう、片方しか無ければ
+        従来の平均へ落とす。
+        """
+        if (self.data is None or not self.eye_qadr.get("h_left")
+                or not self.eye_qadr.get("h_right")):
+            return self._angle_deg(self.eye_qadr["h"])
+        l = float(self.data.qpos[self.eye_qadr["h_left"][0]])
+        r = float(self.data.qpos[self.eye_qadr["h_right"][0]])
+        return float(np.degrees(l - r) / 2.0)
+
+    def _version_h_vel_deg(self):
+        """水平の共同運動の角速度[度/秒]。_version_h_deg と同じ理由で差の半分。"""
+        if (self.data is None or not self.eye_dadr.get("h_left")
+                or not self.eye_dadr.get("h_right")):
+            return self._angle_vel_deg(self.eye_dadr["h"])
+        l = float(self.data.qvel[self.eye_dadr["h_left"][0]])
+        r = float(self.data.qvel[self.eye_dadr["h_right"][0]])
+        return float(np.degrees(l - r) / 2.0)
+
+    def _write_eye_h(self, out, cmd):
+        """水平の眼球へ共同運動の指令を書く。左右で回転軸が逆なので**逆符号**。
+
+        こう書くと関節角の和（＝輻輳）は動かず、差（＝共同運動）だけが動く。
+        左右の分割が無いモデルでは従来どおり両方へ同符号で書く。
+        """
+        c = float(np.clip(cmd, -1, 1))
+        if not self.eye_idx.get("h_left") or not self.eye_idx.get("h_right"):
+            for i in self.eye_idx["h"]:
+                _write_joint_command(out, i, c, self.n_actuator,
+                                     co_activation=0.0, additive=True)
+            return
+        for i in self.eye_idx["h_left"]:
+            _write_joint_command(out, i, +c, self.n_actuator,
+                                 co_activation=0.0, additive=True)
+        for i in self.eye_idx["h_right"]:
+            _write_joint_command(out, i, -c, self.n_actuator,
+                                 co_activation=0.0, additive=True)
+
     def apply(self, action, dt=None):
         """action に階段状サッケードを加算して返す（ステップ4）。
 
@@ -955,7 +1012,7 @@ class OrientingReflexV2:
             half = VISION_FOVY_DEG / 2.0
             dh = EYE_SIGN_H * SACCADE_FRAC * self._sacc_h * half
             dv = EYE_SIGN_V * SACCADE_FRAC * self._sacc_v * half
-            self._tgt["eye_h"] = self._angle_deg(self.eye_qadr["h"]) + EYE_SHARE * dh
+            self._tgt["eye_h"] = self._version_h_deg() + EYE_SHARE * dh
             self._tgt["eye_v"] = self._angle_deg(self.eye_qadr["v"]) + EYE_SHARE * dv
             if "h" in self.neck_qadr:
                 self._tgt["neck_h"] = self._angle_deg(self.neck_qadr["h"]) + NECK_SHARE * dh
@@ -968,13 +1025,11 @@ class OrientingReflexV2:
 
         if self.data is not None:
             errs = []
-            eh = self._tgt["eye_h"] - self._angle_deg(self.eye_qadr["h"])
+            eh = self._tgt["eye_h"] - self._version_h_deg()
             ev = self._tgt["eye_v"] - self._angle_deg(self.eye_qadr["v"])
             errs += [eh, ev]
             self.last_eye_cmd = float(np.clip(EYE_FB_GAIN * eh, -1, 1))  # 観察用
-            for i in self.eye_idx["h"]:
-                _write_joint_command(out, i, float(np.clip(EYE_FB_GAIN * eh, -1, 1)),
-                                     self.n_actuator, co_activation=0.0, additive=True)
+            self._write_eye_h(out, EYE_FB_GAIN * eh)
             for i in self.eye_idx["v"]:
                 _write_joint_command(out, i, float(np.clip(EYE_FB_GAIN * ev, -1, 1)),
                                      self.n_actuator, co_activation=0.0, additive=True)
@@ -1044,9 +1099,7 @@ class OrientingReflexV2:
                 d = h if key == "h" else v
                 _write_joint_command(out, self.neck_idx[key], gain * d,
                                      self.n_actuator, co_activation=0.0, additive=True)
-        for i in self.eye_idx["h"]:
-            _write_joint_command(out, i, EYE_GAIN * h, self.n_actuator,
-                                 co_activation=0.0, additive=True)
+        self._write_eye_h(out, EYE_GAIN * h)
         for i in self.eye_idx["v"]:
             _write_joint_command(out, i, EYE_GAIN * v, self.n_actuator,
                                  co_activation=0.0, additive=True)
@@ -1092,7 +1145,7 @@ class OrientingReflexV2:
         """
         if self.data is None:
             return
-        cur_h = self._angle_deg(self.eye_qadr["h"])
+        cur_h = self._version_h_deg()
         cur_v = self._angle_deg(self.eye_qadr["v"])
         if self._fix_locus_h is None:
             # 最初の呼び出し：今の視線位置をそのまま固視の場所として採用する。
@@ -1333,15 +1386,13 @@ class OrientingReflexV2:
             cmd = HOLD_FB_GAIN * 位置誤差[度] − HOLD_DAMP_GAIN * 角速度[度/秒]
         """
         out = np.array(action, dtype=float).copy()
-        eh = self._tgt["eye_h"] - self._angle_deg(self.eye_qadr["h"])
+        eh = self._tgt["eye_h"] - self._version_h_deg()
         ev = self._tgt["eye_v"] - self._angle_deg(self.eye_qadr["v"])
-        vh = self._angle_vel_deg(self.eye_dadr["h"])
+        vh = self._version_h_vel_deg()
         vv = self._angle_vel_deg(self.eye_dadr["v"])
         cmd_h = HOLD_FB_GAIN * eh - HOLD_DAMP_GAIN * vh
         cmd_v = HOLD_FB_GAIN * ev - HOLD_DAMP_GAIN * vv
-        for i in self.eye_idx["h"]:
-            _write_joint_command(out, i, float(np.clip(cmd_h, -1, 1)),
-                                 self.n_actuator, co_activation=0.0, additive=True)
+        self._write_eye_h(out, cmd_h)
         for i in self.eye_idx["v"]:
             _write_joint_command(out, i, float(np.clip(cmd_v, -1, 1)),
                                  self.n_actuator, co_activation=0.0, additive=True)

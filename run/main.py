@@ -71,6 +71,7 @@ def _register():
     from run.plugins.common.babble_probe import BabbleProbe
     from run.plugins.common.gaze_probe import GazeProbe
     from run.plugins.common.produce_snapshot import ProduceSnapshot
+    from run.plugins.common.vergence_probe import VergenceProbe
     PLUGINS["toy_touch"] = ToyTouch
     PLUGINS["toy_in_view"] = ToyInView   # おもちゃが視界に入っている割合（幾何・脳不要＝measure可）
     PLUGINS["hand_in_view"] = HandInView
@@ -89,6 +90,7 @@ def _register():
     PLUGINS["babble_probe"] = BabbleProbe   # 喃語モードの発話・帳面の成長を記録する（F2-1）
     PLUGINS["gaze_probe"] = GazeProbe   # 視線が的にどれだけ連続で留まるか（F2-9の判定設計用）
     PLUGINS["produce_snapshot"] = ProduceSnapshot   # 発話した瞬間の中心窩画像と視覚ベクトル（F2-11のりんご偏り究明）
+    PLUGINS["vergence_probe"] = VergenceProbe   # 輻輳角の目標と実測（F2-15の切り分け）
     # 注意：self_model / trace / reach_success / double_touch は太郎の脳が要る
     #   （run.type=train のみ）。measure（脳を通さず環境だけ進める）では使えない。
     #   reach_success・double_touch はさらに taro.goal_space="reach_self" も要る。
@@ -198,6 +200,7 @@ def run(spec, *, steps_override=None, verbose=False):
         print("-" * 74)
         for k, v in out.items():
             print(f"  {k}: {json.dumps(v, ensure_ascii=False)}")
+        _check_learning_happened(spec, out)
         return out
 
     # --- view：等倍速で太郎を見る（run/viewer.py）----------------------------
@@ -316,7 +319,119 @@ def run(spec, *, steps_override=None, verbose=False):
     # 注意：閉じ損ねると MuJoCo の描画コンテキストが残り、次の実行が不安定になる
     from run.trainer import close_env
     close_env(env)
+    _check_learning_happened(spec, out)
     return out
+
+
+# ---- 起動時ガード：テクスチャの解像度 ---------------------------------------
+# 【2026-08-28・なぜ機械で止めるか】8/27に「テクスチャ512px化でメモリが3757→1524MBに
+#   減る」と実測したのに、**適用せず忘れたまま1日走らせ続けた**。1プロセス3178MBのうち
+#   2485MBがMuJoCoモデルで、その中身は顔2500x2500などのテクスチャ1025MB。太郎の目は
+#   周辺128px・中心窩208pxなので20倍の過剰だった。
+#   CLAUDE.md「同じミスが2回起きたら、文書ではなく機械で防ぐ」に従い、注意書きではなく
+#   **起動を止める**。原本は MIMo/mimoEnv/assets/tex_original_2500px/ に退避してある。
+#   画像のヘッダだけを読むので、この検査自体は数ミリ秒しかかからない。
+TEXTURE_MAX_PX = 512
+TEXTURE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                           "MIMo", "mimoEnv", "assets", "tex")
+
+
+def _check_texture_resolution():
+    """テクスチャが上限を超えていたら、走らせずに止める。"""
+    import glob
+    try:
+        from PIL import Image
+    except ImportError:
+        return   # PILが無い環境では検査を諦める（走行そのものは止めない）
+    bad = []
+    for f in sorted(glob.glob(os.path.join(TEXTURE_DIR, "*.png"))
+                    + glob.glob(os.path.join(TEXTURE_DIR, "*.jpg"))):
+        try:
+            with Image.open(f) as im:
+                w, h = im.size
+        except Exception:
+            continue
+        if max(w, h) > TEXTURE_MAX_PX:
+            bad.append((os.path.basename(f), w, h))
+    if not bad:
+        return
+    lines = ["", "=" * 74,
+             "  起動を中止：テクスチャの解像度が上限（%dpx）を超えています" % TEXTURE_MAX_PX,
+             "=" * 74, ""]
+    for nm, w, h in bad[:8]:
+        lines.append("   %5d x %-5d  %s" % (w, h, nm))
+    if len(bad) > 8:
+        lines.append("   ほか %d枚" % (len(bad) - 8))
+    lines += ["",
+              "  高解像度のまま走らせるとメモリを1プロセスあたり2.3GB余分に食います",
+              "  （実測：モデルの読み込みが 2486MB → 142MB）。太郎の目は周辺128px・",
+              "  中心窩208pxなので、512pxでも十分に細かい絵です。",
+              "",
+              "  直し方： %s の画像を512px以下に縮小してください。" % TEXTURE_DIR,
+              "  （2500px の原本は MIMo/mimoEnv/assets/tex_original_2500px/ にあります）",
+              "=" * 74, ""]
+    raise SystemExit(chr(10).join(lines))
+
+
+
+def _check_learning_happened(spec, out):
+    """親が名前を言うはずの学習で、1回も言えていなければ**その場で止める**。
+
+    【2026-08-28・なぜ機械で止めるか】板を顔から0.086m→0.30mへ離したところ、
+    親が名前を言う条件（視線10度以内を3秒連続）を一度も満たせなくなり、
+    **24本・約1時間40分ぶんの学習がまるごとゼロ**になった。しかも鎖の最後まで
+    走り切ってから気づいた。1本目の終了時点で分かる情報だったのに、次の本へ
+    そのまま進んでしまった。原因は親の手の速さ follow_speed が距離によらず
+    0.5m/s 固定で、板が太郎の視線に追いつけなかったこと（実測：0.5で0回／
+    1.75で8回）。CLAUDE.md「同じミスが2回起きたら文書ではなく機械で防ぐ」に従う。
+
+    判定は「親がラベリングするはずの設定なのに語彙イベントが0」だけ。
+    喃語フェーズ（親なし＝parent_labeling が無効か respond_prob=0）は対象外なので、
+    既存の実験の挙動は1つも変わらない。
+    """
+    rep = (out or {}).get("word_learning")
+    if not isinstance(rep, dict):
+        return
+    scene = {}
+    try:
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        sp = os.path.join(root, "run", "scenes", str(spec.get("scene")) + ".json")
+        with open(sp, encoding="utf-8") as fp:
+            scene = json.load(fp)
+    except Exception:
+        return   # シーンが読めないときは黙って通す（この検査のために止めない）
+    pl = ((scene.get("world") or {}).get("parent_labeling")) or {}
+    if not pl.get("enabled", True):
+        return
+    if float(pl.get("respond_prob", 1.0)) <= 0.0:
+        return
+    n = 0
+    for k in ("label_count_toy1", "label_count_toy2"):
+        try:
+            n += int(rep.get(k) or 0)
+        except (TypeError, ValueError):
+            pass
+    if n > 0:
+        return
+    lines = ["", "=" * 74,
+             "  中止：親が一度も名前を言っていません（学習が成立していない）",
+             "=" * 74, "",
+             "   実験    %s" % spec.get("name", "(無名)"),
+             "   シーン  %s" % (scene.get("name") or spec.get("scene")),
+             "   語彙イベント 0件（label_count_toy1=0 / toy2=0）", "",
+             "  このまま次へ進めても、学習していないモデルを渡すだけです。",
+             "  よくある原因（2026-08-28に実際に踏んだもの）：",
+             "",
+             "   ・板の距離 follow_dist を変えたのに 親の手の速さ follow_speed が既定0.5のまま",
+             "     → 板が太郎の視線に追いつかず、視線角度が悪化して注視条件を満たせない",
+             "     （0.086m:0.5 の比を保つ。0.30m なら 1.75）",
+             "   ・gaze_hold_sec（何秒連続で見たら名前を言うか）に注視が届いていない",
+             "   ・板が視界に入っていない（シーンの配置・姿勢）",
+             "",
+             "  確かめ方：同じシーンで --steps 600 を1本だけ回し、",
+             "  label_count が0でないことを見てから本走行に入ってください。",
+             "=" * 74, ""]
+    raise SystemExit(chr(10).join(lines))
 
 
 def main():
@@ -325,6 +440,7 @@ def main():
     ap.add_argument("--steps", type=int, default=None, help="ステップ数を上書きする")
     ap.add_argument("--verbose", action="store_true", help="環境構築のログも出す")
     a = ap.parse_args()
+    _check_texture_resolution()
     _register()
     spec = load_spec(a.spec)
     run(spec, steps_override=a.steps, verbose=a.verbose)

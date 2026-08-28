@@ -287,6 +287,46 @@ class Trainer:
                 backend.fovea_px = old_fovea_px
             self._prof_add("vision_backend", _prof_t)
 
+    def _vision_channels(self, o):
+        """語の意味に渡す視覚を、感覚チャンネルの辞書で返す（2026-08-28・F2-13）。
+
+        `cfg.lexicon_peripheral` が False（既定）なら**リストを1本返すだけ**で、
+        従来と1ビットも変わらない（周辺視の推論も行わない＝コストも同じ）。
+
+        True のときは2チャンネルを返す：
+          "vision"     … 中心窩カメラ（視野15度）。細部。従来と同じ値・同じ名前
+                         （既存モデルの channels キーが "vision" なので変えない）
+          "peripheral" … 周辺カメラ（視野60度）。全体の配置・輪郭
+
+        【なぜ要るか】人間は中心窩（細部）と周辺視（全体）の両方で物を見分ける。
+        太郎は中心窩1枚だけで判断しており、板の見かけ49.8度に対し中心窩は15度＝
+        犬の首輪のあたりしか写らず、**形ではなく色で語を選んでいた**
+        （2026-08-28実測。図＝F/logs/F2-12_視界確認/図_視界全体と中心窩.png）。
+
+        周辺カメラには `fovea_crop` をかけない（かけると中央32pxだけになり
+        中心窩とほぼ同じ絵になってしまう）。本体 `_vision_backend_encode` が
+        中心窩カメラに対して行っているのと同じ一時上書きで no-op 化する。
+        """
+        base = self._vision_backend_encode(o)
+        if not getattr(self.cfg, "lexicon_peripheral", False):
+            return base
+        fovea = base.tolist() if hasattr(base, "tolist") else list(base)
+        if "eye_left" not in o or "eye_right" not in o:
+            return {"vision": fovea}
+        backend = self.taro.vision_backend
+        old = getattr(backend, "fovea_px", None)
+        if old is not None:
+            backend.fovea_px = 10 ** 9      # 切り出さず視野60度の全体を使う
+        _prof_t = self._prof_t0()
+        try:
+            per = backend.encode(o["eye_left"], o["eye_right"])
+        finally:
+            if old is not None:
+                backend.fovea_px = old
+            self._prof_add("vision_backend", _prof_t)
+        return {"vision": fovea,
+                "peripheral": per.tolist() if hasattr(per, "tolist") else list(per)}
+
     def _hear_parent_utterance(self, o, info):
         """親の発話（info["parent_utterance"]）を耳→連合器へ渡す（2026-08-18新設・F1-3）。
 
@@ -317,7 +357,10 @@ class Trainer:
         #   既定null時はcustomバックエンドがtaro.fusion.visionをそのまま呼ぶだけなので、
         #   出力は従来コード（t.fusion.vision(...).detach().cpu().tolist()）と同一
         #   （custom backendのencode()内でも同じdetach().cpu()を行う）。
-        state = self._vision_backend_encode(o).tolist()
+        # 【F2-13・2026-08-28】lexicon_peripheral=False（既定）なら
+        #   従来と同じリストが返る＝1ビットも変わらない。
+        _st = self._vision_channels(o)
+        state = _st if isinstance(_st, dict) else _st.tolist()
         # 【F2-8・2026-08-25】「見慣れた景色」の平均を育てる（reverse_lookupの
         #   両側引き算に使う）。語彙にも想像にも触らない純粋な足し算で、
         #   すでに計算済みのstateを渡すだけ＝追加の計算コストはゼロ。
@@ -412,7 +455,9 @@ class Trainer:
             return          # 視線誘導反射が無効なら「注視している」を判定できない
 
         # ① 逆引き：いま見ている視覚ベクトル → 一番似ているchunk（言いたい語）。
-        vec = self._vision_backend_encode(o)
+        # 【F2-13・2026-08-28】lexicon_peripheral=True なら中心窩＋周辺視の
+        #   2チャンネルになる。既定Falseでは従来と同じ1本のベクトルが返る。
+        vec = self._vision_channels(o)
         # 【F2-8・2026-08-25】逆引きの前に「見慣れた景色」の平均へ今の見えを足す。
         #   ここは毎ステップ通るので、産出中は太郎が見たものすべてが平均に入る。
         t.lexicon.observe_view(vec)

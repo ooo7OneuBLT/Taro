@@ -1,0 +1,44 @@
+{
+  "name": "F2-15_輻輳診断_OFF",
+  "note": "2026-08-28。輻輳角の目標・実測・視差を記録して、効いていない原因を切り分ける。",
+  "scene": "座位_12ヶ月_1イラスト_F2-9C_わんわんだけ_2026-08-26",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 12.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.0,
+    "model": "F/models/F2-11_ABAB3_B2_seed10_2026-08-27.pt",
+    "produce": {
+      "mode": "word",
+      "threshold": 0.15,
+      "cooldown_sec": 2.0,
+      "max_length": 8,
+      "develop_from_age": true,
+      "vocal_tract_decoupled": true
+    },
+    "save": "F/models/_F2-15_診断_OFF.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 300,
+    "seed": 10,
+    "K": 10,
+    "checkpoint": 300,
+    "csv": "F/logs/F2-15_診断/OFF/run.csv"
+  },
+  "plugins": {
+    "word_production": {
+      "events_out": "F/logs/F2-15_診断/OFF/発話イベント.csv"
+    },
+    "vergence_probe": {
+      "out": "F/logs/F2-15_診断/OFF/輻輳.csv"
+    }
+  }
+}

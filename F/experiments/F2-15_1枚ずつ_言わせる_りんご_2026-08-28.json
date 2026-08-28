@@ -1,0 +1,52 @@
+{
+  "name": "F2-15_1枚ずつ_言わせる_りんご",
+  "note": "2026-08-28。1枚ずつ学習した太郎に言わせる（ABAB版と同条件のテスト）。",
+  "scene": "座位_12ヶ月_1イラスト_F2-15_30cm_りんごだけ_2026-08-28",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 12.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.0,
+    "model": "F/models/F2-15_1枚ずつ_3周目_くつ_seed10_2026-08-28.pt",
+    "produce": {
+      "mode": "word",
+      "threshold": 0.15,
+      "cooldown_sec": 2.0,
+      "max_length": 8,
+      "develop_from_age": true,
+      "vocal_tract_decoupled": true
+    },
+    "save": "F/models/_F2-15_1枚ずつ_test_りんご.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 3000,
+    "seed": 10,
+    "K": 10,
+    "checkpoint": 3000,
+    "csv": "F/logs/F2-15_1枚ずつ_産出/りんご/run.csv"
+  },
+  "plugins": {
+    "word_production": {
+      "events_out": "F/logs/F2-15_1枚ずつ_産出/りんご/発話イベント.csv"
+    },
+    "produce_snapshot": {
+      "out_dir": "F/logs/F2-15_1枚ずつ_産出/りんご/中心窩",
+      "full_dir": "F/logs/F2-15_1枚ずつ_産出/りんご/両目",
+      "max_images": 60
+    },
+    "gaze_probe": {
+      "angles_out": "F/logs/F2-15_1枚ずつ_産出/りんご/視線角度.csv"
+    },
+    "vergence_probe": {
+      "out": "F/logs/F2-15_1枚ずつ_産出/りんご/輻輳.csv"
+    }
+  }
+}
