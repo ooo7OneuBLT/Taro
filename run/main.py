@@ -434,6 +434,51 @@ def _check_learning_happened(spec, out):
     raise SystemExit(chr(10).join(lines))
 
 
+
+def _check_toy_distance(spec):
+    """板・おもちゃの距離が、文献で棄却された近さになっていたら**警告**する。
+
+    【2026-08-28・なぜ入れるか】`doc/参考文献リスト.md` の「結論②：おもちゃ8cmは棄却／
+    推奨25cm前後」は2026-07-20の調査で出ていたのに、実装に反映されないまま**1ヶ月以上
+    0.086m で走らせ続けた**。8cmは成人の輻輳近点(8-10cm)相当で、調節要求12.5D（乳児の
+    実力は1.0〜3.0D）、5cm角の玩具が視野の34.7%を占める。実際、両目が別々の場所を見て
+    語の意味が混ざる原因になっていた（F2-15）。
+
+    止めずに警告にとどめるのは、**近距離を意図的に試す実験がありうる**ため
+    （触覚が届く距離での実験など）。研究上の選択は残し、うっかりだけを拾う。
+    """
+    try:
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        sp = os.path.join(root, "run", "scenes", str(spec.get("scene")) + ".json")
+        with open(sp, encoding="utf-8") as fp:
+            scene = json.load(fp)
+    except Exception:
+        return
+    world = scene.get("world") or {}
+    pl = world.get("parent_labeling") or {}
+    checks = []
+    if pl.get("follow_gaze") and pl.get("follow_dist") is not None:
+        checks.append(("follow_dist（親が差し出す距離）", float(pl["follow_dist"])))
+    for key in ("toy", "toy2"):
+        t = world.get(key) or {}
+        if t.get("enabled") and t.get("dist") is not None:
+            checks.append(("%s.dist" % key, float(t["dist"])))
+    near = [(n, v) for n, v in checks if v < 0.15]
+    if not near:
+        return
+    print("")
+    print("  " + "!" * 68)
+    print("  注意：板・おもちゃが文献で棄却された近さです")
+    for n, v in near:
+        print("     %-28s %.3f m" % (n, v))
+    print("     doc/参考文献リスト.md「結論②：おもちゃ8cmは棄却／推奨25cm前後」")
+    print("     8cmは成人の輻輳近点(8-10cm)相当。調節要求12.5D（乳児の実力1.0〜3.0D）。")
+    print("     両目が別々の場所を見て、語の意味が混ざる原因になります（F2-15で実測）。")
+    print("     意図した近距離実験ならこのまま進めて構いません。")
+    print("  " + "!" * 68)
+    print("")
+
+
 def main():
     ap = argparse.ArgumentParser(description="シミュレーションシステムの入口")
     ap.add_argument("spec", help="実験ファイル（JSON）のパス")
@@ -443,6 +488,7 @@ def main():
     _check_texture_resolution()
     _register()
     spec = load_spec(a.spec)
+    _check_toy_distance(spec)
     run(spec, steps_override=a.steps, verbose=a.verbose)
     return 0
 
