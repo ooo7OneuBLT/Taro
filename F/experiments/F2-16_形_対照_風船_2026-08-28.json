@@ -1,0 +1,46 @@
+{
+  "name": "F2-16_形_対照_風船",
+  "note": "2026-08-28 般化テスト（形を変えた板／対照）。学習なし。 ステップ数は1000（約50発話。般化の判定には十分）。",
+  "scene": "座位_12ヶ月_1イラスト_F2-16_形_対照_風船_2026-08-28",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 12.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.0,
+    "model": "F/models/F2-15_30cm_ABAB3_B2_seed10_2026-08-28.pt",
+    "produce": {
+      "mode": "word",
+      "threshold": 0.15,
+      "cooldown_sec": 2.0,
+      "max_length": 8,
+      "develop_from_age": true,
+      "vocal_tract_decoupled": true
+    },
+    "save": "F/models/_F2-16_形_対照_風船.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 1000,
+    "seed": 10,
+    "K": 10,
+    "checkpoint": 1000,
+    "csv": "F/logs/F2-16_般化/形_対照_風船/run.csv"
+  },
+  "plugins": {
+    "word_production": {
+      "events_out": "F/logs/F2-16_般化/形_対照_風船/発話イベント.csv"
+    },
+    "produce_snapshot": {
+      "out_dir": "F/logs/F2-16_般化/形_対照_風船/中心窩",
+      "full_dir": "F/logs/F2-16_般化/形_対照_風船/両目",
+      "max_images": 30
+    }
+  }
+}
