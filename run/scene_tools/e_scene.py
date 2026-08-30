@@ -637,9 +637,18 @@ def build(scene, orient=None, vor=True, seed=0, verbose=False, actuation_model=N
             #   （約977MB）を単色化する。目標B/C/Dは既にこの経路に乗っていたが、
             #   目標Eだけ常に非Noneを渡していたため発動していなかった
             #   （測定の実測：作業記録（非公開） 24節）。
+            # 【F2-18・2026-08-30】視野をシーンから指定できるようにした。
+            #   body.vision_fovy   周辺カメラの視野[度]（未指定＝従来の60度）
+            #   body.fovea_fovy    中心窩カメラの視野[度]（未指定＝従来の15度）
+            #   どちらも未指定なら1ビットも変わらない。
+            #   「人間の視覚に近づける」方針（2026-08-30・ユーザー判断）の入口。
+            #   人間の片目の水平視野は約150度、中心窩(fovea)は約5度。
+            #   太郎の60度/15度は、視野が狭く中心窩が広すぎる。
             vision_params=(TE.infant_vision_params(
                                acuity_age=b["age_months"],
+                               fovy=float(b.get("vision_fovy", TE.VISION_FOVY)),
                                fovea_camera=bool(b.get("fovea_camera", False)),
+                               fovea_fovy=b.get("fovea_fovy"),
                                develop_from_age=bool(b.get("develop_from_age", False)))
                            if vision else None),
             age=float(b["age_months"]),

@@ -401,7 +401,8 @@ def _check_resolution_acuity_mismatch(age_months, fovy_deg, px):
 
 
 def infant_vision_params(size=VISION_RES, fovy=VISION_FOVY, acuity_age=ACUITY_AGE,
-                          fovea_camera=False, develop_from_age=False):
+                          fovea_camera=False, develop_from_age=False,
+                          fovea_fovy=None):
     """新生児の視覚パラメータ。acuityに月齢を渡す（＝解像度を恣意的に決めない）。
 
     注意：【2026-07-20 修正・重大】以前は `acuity_age=0.0` を渡しており、**視力フィルタが
@@ -451,7 +452,12 @@ def infant_vision_params(size=VISION_RES, fovy=VISION_FOVY, acuity_age=ACUITY_AG
            "acuity": acuity_age, "foveation": False}
     params = {"eye_left": dict(eye), "eye_right": dict(eye)}
     if fovea_camera:
-        fovea_size = required_px(acuity_age, FOVEA_FOVY)
+        # 【F2-18・2026-08-30】中心窩の視野をシーンから指定できるようにした
+        #   （既定 None は従来の FOVEA_FOVY=15度＝1ビットも変わらない）。
+        #   人間の中心窩(fovea)は視角およそ5度で、15度は perifovea（周辺窩）相当。
+        #   「人間の視覚に近づける」方針（2026-08-30・ユーザー判断）のための入口。
+        _ffovy = float(FOVEA_FOVY if fovea_fovy is None else fovea_fovy)
+        fovea_size = required_px(acuity_age, _ffovy)
         # 【F1-7フォロー・2026-08-22】中心窩カメラは208px全体がそのままエンコーダへ
         #   渡る（fovea_crop をかけない）ため、視力フィルタ(FFT)の周期境界による
         #   折り返し（画像の片端の物体が反対端に実体のない滲みとして出る現象。
@@ -459,7 +465,7 @@ def infant_vision_params(size=VISION_RES, fovy=VISION_FOVY, acuity_age=ACUITY_AG
         #   そのまま学習入力に混入する。周辺カメラ(eye_left/eye_right)は128px中央
         #   32pxしか使わず端から遠いため実害が無く、視線系（顕著性・サッケード・
         #   remapping）が凍結中で変更禁止のため pad_acuity は付けない。
-        fovea_eye = {"width": fovea_size, "height": fovea_size, "fovy": FOVEA_FOVY,
+        fovea_eye = {"width": fovea_size, "height": fovea_size, "fovy": _ffovy,
                      "acuity": acuity_age, "foveation": False, "pad_acuity": True}
         params["eye_left_fovea"] = dict(fovea_eye)
         params["eye_right_fovea"] = dict(fovea_eye)
@@ -911,7 +917,17 @@ class ToySupineEnv(SupineMimoEnv):
         # --- おもちゃ(箱)の大きさ・質量・慣性を新生児向けに作り替える ---
         self._toy_bid = self.model.body("test_object1").id
         gadr = self.model.body("test_object1").geomadr[0]
-        if self._toy_shape == "sphere":
+        if self._toy_shape == "asis":
+            # 【F2-17・2026-08-30】シーンXMLに書かれた形をそのまま使う。
+            #   ここまでの分岐は「test_object1 の geom を1つだけ書き換える」作りなので、
+            #   基本図形を何個も組み合わせた物体（犬・車・くつ等）を置けなかった。
+            #   asis のときは形・大きさ・色を一切書き換えず、XMLで定義した複数geomを
+            #   そのまま残す。質量・慣性は MuJoCo が geom から自動計算した値を使う。
+            #   なぜ必要か：般化テストのために「同じカテゴリの別個体」を大量に用意する
+            #   必要があり、既製の画像・3Dモデルは権利か統制で使えなかった
+            #   （現在地.md「素材の選択肢」）。基本図形で自作するのが唯一の道だった。
+            self._toy_mass = float(self.model.body_mass[self._toy_bid])
+        elif self._toy_shape == "sphere":
             # 球（定位の測定用）。どの向きから見ても見え方が同じなので、
             #   立方体で起きる「中心側の側面だけが強く光る」非対称が生じない。
             import mujoco as _mj
@@ -984,7 +1000,7 @@ class ToySupineEnv(SupineMimoEnv):
             #   はっきりしたエラーで止める（落とし穴チェックリスト「設定が静かに無視される」対策）。
             raise ValueError(
                 f"未知の toy_shape={self._toy_shape!r}。対応する値: "
-                f"box / sphere / cylinder / ellipsoid / plate:材質名")
+                f"box / sphere / cylinder / ellipsoid / plate:材質名 / asis")
         self.model.geom_friction[gadr] = TOY_FRICTION   # 転がり続けを止める（上のコメント）
         # 目視用に目立つ色（赤）。太郎の体・床と区別がつかないと動画で確認できないため。
         # 接触中は TOY_RGBA_ON（明るい黄）に切り替わる＝「触れている間だけ光る」。
@@ -993,6 +1009,9 @@ class ToySupineEnv(SupineMimoEnv):
             # 【F2-9C】イラスト板は色を塗らない（rgbaはテクスチャに乗算されるため
             #   白=素通し。赤を掛けると絵が赤茶けて潰れる）。接触発光も同じ理由でなし。
             self.model.geom_rgba[gadr] = [1.0, 1.0, 1.0, 1.0]
+        elif self._toy_shape == "asis":
+            # 【F2-17】XMLで個体ごとに色を決めているので上書きしない（接触発光もなし）
+            pass
         else:
             self.model.geom_rgba[gadr] = self._toy_rgba_off
         self.toy_lit = False          # 今光っているか（測定・記録用）
