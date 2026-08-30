@@ -1,26 +1,11 @@
-# --- コピー元: Taro (github.com/ooo7OneuBLT/Taro) commit 3b976fc ---
-# --- 元パス: B/src/taro/brain/instincts/dopamine.py （unificationMIMoでは無編集） ---
+# -*- coding: utf-8 -*-
+"""【転送のみ】このファイルの中身は neuromodulator/dopamine.py へ移した（2026-08-30の整理）。
 
+既存の `from dopamine import ...` を壊さないために、ここに転送だけを残している。
+新しく書くコードは移動先を直接 import すること。
+整理の全体像は `doc/脳の地図.md`。
 """
-ドーパミン（報酬予測誤差） — 学習を駆動するごほうび信号
+from neuromodulator.dopamine import *          # noqa: F401,F403
+from neuromodulator import dopamine as _m   # noqa: E402
 
-【人間模倣＝既存AI研究】
-ドーパミンニューロンは「もらえた報酬 − 予想した報酬」を発火する
-（Schultz, 1997）。強化学習のTD誤差と数式上一致。
-"""
-
-
-class Dopamine:
-
-    def __init__(self, momentum=0.95):
-        self.momentum = momentum
-        self.baseline = 0.0
-
-    def compute_rpe(self, reward):
-        """報酬予測誤差δを計算し、baselineを更新する。"""
-        delta = reward - self.baseline
-        self.baseline = self.momentum * self.baseline + (1 - self.momentum) * reward
-        return delta
-
-    def get_baseline(self):
-        return self.baseline
+globals().update({k: v for k, v in vars(_m).items() if not k.startswith("__")})

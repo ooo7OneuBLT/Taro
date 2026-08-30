@@ -1,0 +1,34 @@
+{
+  "name": "F2-19_複数個体_3周目_りんご",
+  "note": "2026-08-30 F2-19。複数個体で学習して般化が強まるかを見る。3周目は りんご3 を見せる。",
+  "scene": "座位_12ヶ月_F2-19_複数個体_りんご3_2026-08-30",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 12.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32,
+      "eye": "left"
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.0,
+    "save": "F/models/F2-19_複数個体_3周目_りんご_seed10_2026-08-30.pt",
+    "model": "F/models/F2-19_複数個体_3周目_ぶーぶー_seed10_2026-08-30.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 3000,
+    "seed": 10,
+    "K": 10,
+    "checkpoint": 3000,
+    "csv": "F/logs/F2-19_複数個体_本学習/3周目_りんご/run.csv"
+  },
+  "plugins": {
+    "word_learning": {
+      "events_out": "F/logs/F2-11_本学習/ABAB_A1/発話イベント.csv"
+    }
+  }
+}

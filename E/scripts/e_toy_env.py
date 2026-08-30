@@ -402,7 +402,7 @@ def _check_resolution_acuity_mismatch(age_months, fovy_deg, px):
 
 def infant_vision_params(size=VISION_RES, fovy=VISION_FOVY, acuity_age=ACUITY_AGE,
                           fovea_camera=False, develop_from_age=False,
-                          fovea_fovy=None):
+                          fovea_fovy=None, acuity_filter=True):
     """新生児の視覚パラメータ。acuityに月齢を渡す（＝解像度を恣意的に決めない）。
 
     注意：【2026-07-20 修正・重大】以前は `acuity_age=0.0` を渡しており、**視力フィルタが
@@ -448,8 +448,18 @@ def infant_vision_params(size=VISION_RES, fovy=VISION_FOVY, acuity_age=ACUITY_AG
     """
     if develop_from_age:
         size = development.vision_required_px(acuity_age, fovy)
+    # 【F2-18・2026-08-30】視力フィルタ（FFTで高周波を落とす処理）を外せるようにした。
+    #   MIMo は camera_parameters[camera]["acuity"] が Falsy だとフィルタを作らない
+    #   （vision.py L103 の if 判定）。0.0 を渡すことで無効にする。
+    #   【なぜ外すか・実測 2026-08-30】基本図形20個体で、フィルタあり/なし・
+    #   解像度336/208/112px の6条件すべてでカテゴリの分離が 0.521〜0.542 に収まり、
+    #   差は誤差の範囲だった。中心窩では成分の98.4%を捨てるのに 7.19ms かけていた。
+    #   人間の乳児では低視力に学習上の意味がある可能性があるが（粗いものから学ぶ）、
+    #   太郎の視覚は DINOv2 で固定＝視覚の回路が育たないため、その効果は生じない。
+    #   将来、実物スキャンなど細部のある素材に移るときは測り直すこと。
+    _acuity = acuity_age if acuity_filter else 0.0
     eye = {"width": size, "height": size, "fovy": fovy,
-           "acuity": acuity_age, "foveation": False}
+           "acuity": _acuity, "foveation": False}
     params = {"eye_left": dict(eye), "eye_right": dict(eye)}
     if fovea_camera:
         # 【F2-18・2026-08-30】中心窩の視野をシーンから指定できるようにした
@@ -457,7 +467,7 @@ def infant_vision_params(size=VISION_RES, fovy=VISION_FOVY, acuity_age=ACUITY_AG
         #   人間の中心窩(fovea)は視角およそ5度で、15度は perifovea（周辺窩）相当。
         #   「人間の視覚に近づける」方針（2026-08-30・ユーザー判断）のための入口。
         _ffovy = float(FOVEA_FOVY if fovea_fovy is None else fovea_fovy)
-        fovea_size = required_px(acuity_age, _ffovy)
+        fovea_size = required_px(acuity_age, _ffovy)   # 解像度は視力から決めたまま
         # 【F1-7フォロー・2026-08-22】中心窩カメラは208px全体がそのままエンコーダへ
         #   渡る（fovea_crop をかけない）ため、視力フィルタ(FFT)の周期境界による
         #   折り返し（画像の片端の物体が反対端に実体のない滲みとして出る現象。
@@ -466,7 +476,7 @@ def infant_vision_params(size=VISION_RES, fovy=VISION_FOVY, acuity_age=ACUITY_AG
         #   32pxしか使わず端から遠いため実害が無く、視線系（顕著性・サッケード・
         #   remapping）が凍結中で変更禁止のため pad_acuity は付けない。
         fovea_eye = {"width": fovea_size, "height": fovea_size, "fovy": _ffovy,
-                     "acuity": acuity_age, "foveation": False, "pad_acuity": True}
+                     "acuity": _acuity, "foveation": False, "pad_acuity": True}
         params["eye_left_fovea"] = dict(fovea_eye)
         params["eye_right_fovea"] = dict(fovea_eye)
     # 【F1-7・2026-08-22】エンコーダが実際に使う画像（中心窩があればそちら、

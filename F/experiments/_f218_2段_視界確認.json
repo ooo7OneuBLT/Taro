@@ -1,0 +1,46 @@
+{
+  "name": "_f218_2段_視界確認",
+  "note": "2026-08-30 F2-18 視界確認（使い捨て）。2段構成で両目に何が見えるか。",
+  "scene": "_f218_2段_犬1",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 12.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.0,
+    "model": "F/models/F2-15_30cm_ABAB3_B2_seed10_2026-08-28.pt",
+    "produce": {
+      "mode": "word",
+      "threshold": 0.15,
+      "cooldown_sec": 2.0,
+      "max_length": 8,
+      "develop_from_age": true,
+      "vocal_tract_decoupled": true
+    },
+    "save": "F/models/__f218b.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 300,
+    "seed": 10,
+    "K": 10,
+    "checkpoint": 300,
+    "csv": "F/logs/F2-18_人間の視覚/2段/run.csv"
+  },
+  "plugins": {
+    "word_production": {
+      "events_out": "F/logs/F2-18_人間の視覚/2段/発話イベント.csv"
+    },
+    "produce_snapshot": {
+      "out_dir": "F/logs/F2-18_人間の視覚/2段/中心窩",
+      "full_dir": "F/logs/F2-18_人間の視覚/2段/両目",
+      "max_images": 10
+    }
+  }
+}

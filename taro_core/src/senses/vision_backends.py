@@ -163,9 +163,25 @@ class DINOv2VisionBackend:
     """
     name = "dinov2_vits14"
 
-    def __init__(self, fovea_px=None, vision_encoder=None, **_ignored):
+    def __init__(self, fovea_px=None, vision_encoder=None, eye="both", **_ignored):
         # vision_encoder（taro.fusion.vision）はcustomバックエンド専用の引数だが、
         #   get_backend()が全バックエンド共通で渡すため、ここでは無視するだけ。
+        # 【F2-18・2026-08-30】eye で「認識に使う目」を選べるようにした。
+        #   "both"（既定）＝従来どおり左右を平均。1ビットも変わらない。
+        #   "left" / "right" ＝片目だけを使う。DINOv2の推論が半分になる
+        #   （走行時間の65%をこの推論が占めているので効果が大きい）。
+        #
+        #   【なぜ片目を選べるようにしたか・2026-08-30 ユーザー判断】
+        #   左右を平均する統合は、人間（V1で統合してから認識）とも
+        #   ロボティクスの主流（視差から奥行きを作る）とも違う弱い近似で、
+        #   両目を持ちながら奥行きを一切作れていなかった（逸脱リスト その38）。
+        #   当面の目標（語と物の結びつき）に奥行きは要らないので、
+        #   **カメラは両目のまま残し、認識だけ片目にする**方針にした。
+        #   将来リーチング等で奥行きが要るときは、右目の画像は撮ってあるので
+        #   視差を計算する経路を足せばよい（撮り直しや再学習が最小限で済む）。
+        if eye not in ("both", "left", "right"):
+            raise ValueError("eye は both / left / right のどれか（受け取った値: %r）" % (eye,))
+        self.eye = eye
         self.fovea_px = fovea_px
         self._dim = 384
         os.makedirs(MODELS_CACHE_DIR, exist_ok=True)
@@ -208,9 +224,14 @@ class DINOv2VisionBackend:
         return feat.squeeze(0)
 
     def encode(self, img_left, img_right):
-        left_vec = self._encode_one_eye(img_left)
-        right_vec = self._encode_one_eye(img_right)
-        avg = (left_vec + right_vec) / 2.0
+        if self.eye == "left":
+            avg = self._encode_one_eye(img_left)
+        elif self.eye == "right":
+            avg = self._encode_one_eye(img_right)
+        else:
+            left_vec = self._encode_one_eye(img_left)
+            right_vec = self._encode_one_eye(img_right)
+            avg = (left_vec + right_vec) / 2.0
         norm = torch.linalg.norm(avg)
         if norm > 1e-12:
             avg = avg / norm

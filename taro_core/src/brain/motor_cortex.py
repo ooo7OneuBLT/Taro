@@ -1,27 +1,11 @@
-"""運動野（motor cortex）相当のモジュール。
+# -*- coding: utf-8 -*-
+"""【転送のみ】このファイルの中身は cerebral_cortex/frontal_lobe/motor_cortex.py へ移した（2026-08-30の整理）。
 
-【解剖学的位置づけ、2026-07-23】感覚フィードバックを見て精密な運動指令を計算する部分。
-新生児期は皮質脊髄路が未髄鞘化でこの精密制御がほぼ機能しないため、太郎のB-min
-（`d_c5_motor_quality.py`のE_WMEAN=0経路）ではここの出力を退け、脊髄CPG
-（spinal_cord/cpg.py）を主役にする。生後2-5ヶ月にかけて皮質脊髄路が成熟し、
-そわそわ運動への移行とともにここの寄与が戻っていく想定（研究日誌続き16）。
-
-内訳：
-  motor_gru   : 運動専用のGRU（音声用self.gruとは別、重み共有なし）
-  pc_latent   : 確率的な潜在変数の推論（PredictiveCodingLatent、PV-RNNに着想）
-  motor_head  : 潜在変数zから関節指令を計算する最終層
+既存の `from motor_cortex import ...` を壊さないために、ここに転送だけを残している。
+新しく書くコードは移動先を直接 import すること。
+整理の全体像は `doc/脳の地図.md`。
 """
-import torch.nn as nn
-from predictive_coding_latent import PredictiveCodingLatent
+from cerebral_cortex.frontal_lobe.motor_cortex import *          # noqa: F401,F403
+from cerebral_cortex.frontal_lobe import motor_cortex as _m   # noqa: E402
 
-
-class MotorCortex(nn.Module):
-    def __init__(self, embedding_dim, hidden_dim, num_layers, latent_dim, sensory_dim, n_actuators,
-                 latent_deterministic=False):
-        super().__init__()
-        self.motor_gru = nn.GRU(embedding_dim, hidden_dim, num_layers, batch_first=True)
-        # latent_deterministic: 【なぜ、2026-08-16】既定False＝現状不変。詳細は
-        #   predictive_coding_latent.py の PredictiveCodingLatent.__init__ を参照。
-        self.pc_latent = PredictiveCodingLatent(hidden_dim, sensory_dim, latent_dim=latent_dim,
-                                                 latent_deterministic=latent_deterministic)
-        self.motor_head = nn.Linear(latent_dim, n_actuators)
+globals().update({k: v for k, v in vars(_m).items() if not k.startswith("__")})
