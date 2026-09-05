@@ -30,9 +30,18 @@ ObjectFileSystem）に渡して追跡を更新する、**本番の走行で初�
     points_per_side : None  # MobileSAMの自動マスク生成の点の密度。Noneなら load_mobilesam の既定。速度が足りなければ下げる
 
 【events_out CSVの列】
-    step, sim_time, n_dets, n_files, file_id, x, y, area, event
-    物体ファイル1つにつき1行。event は matched/created/lost のいずれか。
+    step, sim_time, n_dets, n_files, file_id, x, y, area, event,
+    misses, since_seen, app_cos_created
+    物体ファイル1つにつき1行。event は matched/created/lost/unmatched のいずれか。
     物体ゼロ（このステップで検出も既存の追跡イベントも無い）のときは file_id 空で1行だけ書く。
+
+【なぜ、2026-09-05・M1.5持続確認】以前は matched/created/lost の3種しか行が出ず、
+    「対応がつかず、まだ削除されていない」物体ファイル（隠されている間の状態そのもの）が
+    ログに1行も残らなかった。仕様：F/docs/二語文/仕様_M1.5_物体ファイルの持続確認_
+    2026-09-05.md。追加した3列と `unmatched` イベントはロジックを一切変えず、
+    ObjectFileSystemが既に持っている値（misses・since_seen）と、プラグイン側で
+    新たに保持する「作成時のappearance」との比較（app_cos_created）を読むだけ。
+    既存の列順は変えない（末尾に追加）ので、F2-67系の解析道具はそのまま読める。
 """
 import csv
 import os
@@ -89,6 +98,9 @@ class ObjectFiles(Plugin):
 
         self._last_t = float("-inf")
         self.rows = []
+        # 【M1.5・2026-09-05】ファイルごとの「作成時のappearance」。created の瞬間に
+        #   保存し、lost で捨てる（仕様書「1.」）。app_cos_created の分母に使う。
+        self._created_appearance = {}
         self._detect_ms_sum = 0.0
         self._detect_n = 0
         self._seg_n_files = []
@@ -145,29 +157,63 @@ class ObjectFiles(Plugin):
             return
 
         cur_by_id = {f.id: f for f in self.ofs.files}
+        matched_ids = set(file_id for file_id, _det_idx, _residual in res["matched"])
+        created_ids = set(res["created"])
+
+        def _app_cos(file_id, appearance):
+            """現在appearanceと作成時appearanceのコサイン類似度。作成時appearance
+            が無ければ空文字（本来起きない：createdの瞬間に必ず保存するため）。"""
+            created = self._created_appearance.get(file_id)
+            if created is None or appearance is None:
+                return ""
+            a = np.asarray(appearance, dtype=np.float64)
+            b = np.asarray(created, dtype=np.float64)
+            denom = (np.linalg.norm(a) * np.linalg.norm(b)) + 1e-9
+            return round(float(a @ b / denom), 6)
+
         events = []
         for file_id, det_idx, residual in res["matched"]:
             f = cur_by_id.get(file_id)
             if f is not None:
-                events.append((file_id, f.pos[0], f.pos[1], f.area, "matched"))
+                events.append((file_id, f.pos[0], f.pos[1], f.area, "matched",
+                               f.misses, f.since_seen, _app_cos(file_id, f.appearance)))
         for file_id in res["created"]:
             f = cur_by_id.get(file_id)
             if f is not None:
-                events.append((file_id, f.pos[0], f.pos[1], f.area, "created"))
+                # 【M1.5】作成の瞬間のappearanceを保存する（このファイルのapp_cos_createdの基準点）。
+                self._created_appearance[file_id] = np.array(f.appearance, dtype=np.float64, copy=True)
+                events.append((file_id, f.pos[0], f.pos[1], f.area, "created",
+                               f.misses, f.since_seen, _app_cos(file_id, f.appearance)))
+        # 【M1.5・新イベント unmatched】このコマで対応がつかず、まだ削除されていない
+        #   ファイル全部（＝matched でも created でもない、いま self.ofs.files に
+        #   残っているファイル）。x/y/area は predict() 後の予測値
+        #   （ObjectFile.pos が返すのはその値。step()冒頭で毎ファイルpredict()済み）。
+        for f in self.ofs.files:
+            if f.id in matched_ids or f.id in created_ids:
+                continue
+            events.append((f.id, f.pos[0], f.pos[1], f.area, "unmatched",
+                           f.misses, f.since_seen, _app_cos(f.id, f.appearance)))
         for file_id in res["lost"]:
+            # prev_by_id は同じObjectFileインスタンスへの参照なので、この一連の
+            # step()内でのmisses/since_seenの増加（削除直前の値）がそのまま読める
+            # （オブジェクトは self.ofs.files から外れただけで、参照自体は生きている）。
             f = prev_by_id.get(file_id)
             if f is not None:
-                events.append((file_id, f.pos[0], f.pos[1], f.area, "lost"))
+                events.append((file_id, f.pos[0], f.pos[1], f.area, "lost",
+                               f.misses, f.since_seen, _app_cos(file_id, f.appearance)))
             else:
-                events.append((file_id, "", "", "", "lost"))
+                events.append((file_id, "", "", "", "lost", "", "", ""))
+            self._created_appearance.pop(file_id, None)
         if not events:
-            events.append(("", "", "", "", ""))
+            events.append(("", "", "", "", "", "", "", ""))
 
-        for file_id, x, y, area, event in events:
+        for file_id, x, y, area, event, misses, since_seen, app_cos_created in events:
             self.rows.append({
                 "step": ctx.step, "sim_time": round(t, 3),
                 "n_dets": n_dets, "n_files": n_files,
                 "file_id": file_id, "x": x, "y": y, "area": area, "event": event,
+                "misses": misses, "since_seen": since_seen,
+                "app_cos_created": app_cos_created,
             })
 
     def metrics(self, ctx):
@@ -191,10 +237,12 @@ class ObjectFiles(Plugin):
             with open(self.events_out, "w", newline="", encoding="utf-8") as fp:
                 w = csv.writer(fp)
                 w.writerow(["step", "sim_time", "n_dets", "n_files",
-                           "file_id", "x", "y", "area", "event"])
+                           "file_id", "x", "y", "area", "event",
+                           "misses", "since_seen", "app_cos_created"])
                 for r in self.rows:
                     w.writerow([r["step"], r["sim_time"], r["n_dets"], r["n_files"],
-                               r["file_id"], r["x"], r["y"], r["area"], r["event"]])
+                               r["file_id"], r["x"], r["y"], r["area"], r["event"],
+                               r["misses"], r["since_seen"], r["app_cos_created"]])
         return {
             "検出回数": self._detect_n,
             "処理ms_平均": (round(self._detect_ms_sum / self._detect_n, 2)
