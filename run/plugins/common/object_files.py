@@ -35,6 +35,15 @@ ObjectFileSystem）に渡して追跡を更新する、**本番の走行で初�
     物体ファイル1つにつき1行。event は matched/created/lost/unmatched のいずれか。
     物体ゼロ（このステップで検出も既存の追跡イベントも無い）のときは file_id 空で1行だけ書く。
 
+【frames_out（config、任意。既定None＝描画しない）】
+    設定すると、検出を行った各コマ（interval_sごと）で `img224`（検出器に渡した
+    224x224画像）の上に検出（黄丸）と物体ファイル（色つき四角＋文字）を重ねて
+    PNGへ保存する（`frame_<step:05d>.png`）。目視用（動画は
+    `F/scripts/f73b_stitch_detection_frames.py` で作る）。既存のCSV・検出・
+    対応づけロジックには一切触れない（描画は読むだけ）。
+    仕様：`F/docs/二語文/仕様_M1.5b_視界動画_検出と物体ファイルの重ね描き_2026-09-05.md`。
+    色：matched=緑、unmatched=灰、created=青、lost=赤。
+
 【なぜ、2026-09-05・M1.5持続確認】以前は matched/created/lost の3種しか行が出ず、
     「対応がつかず、まだ削除されていない」物体ファイル（隠されている間の状態そのもの）が
     ログに1行も残らなかった。仕様：F/docs/二語文/仕様_M1.5_物体ファイルの持続確認_
@@ -69,6 +78,11 @@ class ObjectFiles(Plugin):
         self.events_out = _abs_path(events_out) if events_out else None
         self.device = self.config.get("device")
         self.points_per_side = self.config.get("points_per_side")
+        frames_out = self.config.get("frames_out")
+        self.frames_out = _abs_path(frames_out) if frames_out else None
+        self._frame_font = None
+        if self.frames_out:
+            os.makedirs(self.frames_out, exist_ok=True)
 
         self._lazy_import()
 
@@ -145,6 +159,9 @@ class ObjectFiles(Plugin):
         res = self.ofs.step(dets)
         dt_ms = (time.perf_counter() - t0) * 1000.0
 
+        if self.frames_out:
+            self._save_detection_frame(ctx, t, img224, dets, res, prev_by_id)
+
         self._detect_ms_sum += dt_ms
         self._detect_n += 1
         n_files = len(self.ofs.files)
@@ -215,6 +232,44 @@ class ObjectFiles(Plugin):
                 "misses": misses, "since_seen": since_seen,
                 "app_cos_created": app_cos_created,
             })
+
+    def _save_detection_frame(self, ctx, sim_time, img224, dets, res, prev_by_id):
+        """目視用：検出（黄丸）と物体ファイル（色つき四角）をimg224へ重ねてPNG保存する。
+        検出・対応づけ・既存CSVには一切触れない（読むだけ）。"""
+        import math
+        import numpy as np
+        from PIL import Image, ImageDraw, ImageFont
+        if self._frame_font is None:
+            from run.plugins.common.view_video import _FONT_PATH
+            self._frame_font = ImageFont.truetype(_FONT_PATH, 12)
+        img = Image.fromarray(np.clip(img224, 0, 255).astype(np.uint8)).convert("RGB")
+        dr = ImageDraw.Draw(img)
+        for d in dets:
+            cx, cy = d["pos"]
+            r = math.sqrt(d["area"] * 224 * 224 / math.pi)
+            dr.ellipse([cx - r, cy - r, cx + r, cy + r], outline=(255, 255, 0))
+        matched_ids = set(file_id for file_id, _det_idx, _residual in res["matched"])
+        created_ids = set(res["created"])
+        for f in self.ofs.files:
+            if f.id in matched_ids:
+                color = (0, 200, 0)       # matched=緑
+            elif f.id in created_ids:
+                color = (60, 60, 255)     # created=青
+            else:
+                color = (160, 160, 160)   # unmatched=灰
+            self._draw_file_box(dr, f, color)
+        for file_id in res["lost"]:
+            f = prev_by_id.get(file_id)
+            if f is not None:
+                self._draw_file_box(dr, f, (255, 0, 0))   # lost=赤
+        dr.text((4, 2), "t=%.1fs dets=%d files=%d" % (sim_time, len(dets), len(self.ofs.files)),
+                 fill=(255, 255, 255), font=self._frame_font)
+        img.save(os.path.join(self.frames_out, "frame_%05d.png" % ctx.step))
+
+    def _draw_file_box(self, dr, f, color):
+        x, y = f.pos
+        dr.rectangle([x - 8, y - 8, x + 8, y + 8], outline=color)
+        dr.text((x + 9, y - 9), "#%s m%s" % (f.id, f.misses), fill=color, font=self._frame_font)
 
     def metrics(self, ctx):
         if not self._seg_n_files:

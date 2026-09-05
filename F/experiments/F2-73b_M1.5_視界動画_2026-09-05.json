@@ -1,0 +1,69 @@
+{
+  "name": "F2-73b_M1.5_視界動画",
+  "note": "2026-09-05 M1.5b 目視用の視界動画。F2-73（M1.5物体ファイルの持続確認）と同じ走行を、視界動画＋検出/物体ファイルの重ね描きフレームつきでもう一度やる。仕様：F/docs/二語文/仕様_M1.5b_視界動画_検出と物体ファイルの重ね描き_2026-09-05.md。",
+  "scene": "座位_12ヶ月_F2-49_実物8択_r1_個体1_2026-09-03",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 12.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32,
+      "eye": "left",
+      "source": "wide"
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.0,
+    "model": "F/models/F2-50_r8_seed98_2026-09-03.pt",
+    "save": "F/logs/F2-73b_M1.5_視界動画/model.pt",
+    "produce": {
+      "mode": "word",
+      "threshold": 0.5,
+      "cooldown_sec": 2.0,
+      "max_length": 8,
+      "develop_from_age": true,
+      "vocal_tract_decoupled": true,
+      "context": true,
+      "listen_learn": false,
+      "context_lambda": 0.0,
+      "vision_context": true,
+      "listen_lr": 0.001,
+      "hippocampus": {
+        "capacity": 512,
+        "decay": 0.5,
+        "replay_passes": 1,
+        "recent_ratio": 0.7,
+        "sleep_lr": 0.005
+      },
+      "word_choice": "gru_hippo",
+      "hippo_gain": 1.0,
+      "listen_self": false,
+      "listen_eos": true,
+      "segment_mode": "end_prob"
+    }
+  },
+  "run": {
+    "type": "train",
+    "steps": 600,
+    "seed": 91,
+    "K": 10,
+    "checkpoint": 100,
+    "csv": "F/logs/F2-73b_M1.5_視界動画/run.csv"
+  },
+  "plugins": {
+    "word_production": {
+      "events_out": "F/logs/F2-73b_M1.5_視界動画/太郎の発話.csv"
+    },
+    "object_files": {
+      "events_out": "F/logs/F2-73b_M1.5_視界動画/物体ファイル.csv",
+      "points_per_side": 16,
+      "frames_out": "F/logs/F2-73b_M1.5_視界動画/検出フレーム"
+    },
+    "view_video": {
+      "out": "F/logs/F2-73b_M1.5_視界動画/動画_視界.mp4",
+      "until": 600
+    }
+  }
+}
