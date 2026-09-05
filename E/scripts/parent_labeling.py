@@ -57,6 +57,9 @@ class ParentLabeling:
     _PICK = "pick"
     _SHAKE = "shake"
     _REFRACTORY = "refractory"
+    # 【消失発話・2026-09-05・仕様_M2】机が空のまま「○○ないね」を1回言う状態。
+    #   _PICKで次の的を選ぶ前に、旧的があればここを経由する（vanish_utterance時のみ）。
+    _VANISH = "vanish"
 
     def __init__(self, enabled=False, shake_amp_m=0.02, shake_hz=1.5,
                  respond_to_voice=False, voice_respond_prob=0.4,
@@ -73,7 +76,9 @@ class ParentLabeling:
                  present_angles=None,
                  cycle_pick=False,
                  solo_presentation=False, shake_pause_sec=2.0,
-                 follow_gaze=False, follow_dist=0.086, follow_speed=0.5):
+                 follow_gaze=False, follow_dist=0.086, follow_speed=0.5,
+                 vanish_utterance=False, vanish_template="{word}ないね",
+                 vanish_gap_before_sec=1.0, vanish_gap_after_sec=1.5):
         self.enabled = bool(enabled)
         self.shake_amp_m = float(shake_amp_m)
         self.shake_hz = float(shake_hz)
@@ -162,6 +167,14 @@ class ParentLabeling:
         self.follow_gaze = bool(follow_gaze)
         self.follow_dist = float(follow_dist)
         self.follow_speed = float(follow_speed)
+        # 【消失発話・2026-09-05・仕様_M2_消えた瞬間に親が「○○ないね」と言う】
+        #   既定False＝従来どおり_PICKで即座に次の的を選ぶ（1ビットも変わらない）。
+        #   Trueなら、旧的を隠したまま before 秒待って「○○ないね」を1回言い、
+        #   さらに after 秒待ってから次の的を選ぶ（_VANISH状態。update()参照）。
+        self.vanish_utterance = bool(vanish_utterance)
+        self.vanish_template = str(vanish_template)
+        self.vanish_gap_before_sec = float(vanish_gap_before_sec)
+        self.vanish_gap_after_sec = float(vanish_gap_after_sec)
         self.reset()
 
     def reset(self):
@@ -189,6 +202,9 @@ class ParentLabeling:
         self.n_hold_starts = 0
         self.n_hold_completes = 0
         self._holding_prev = False
+        # 【消失発話・2026-09-05】_VANISH状態の経過秒／発話済みか。
+        self._vanish_t = 0.0
+        self._vanish_spoken = False
 
     # ------------------------------------------------------------------
     def update(self, env):
@@ -261,8 +277,10 @@ class ParentLabeling:
         #   （ユーザー報告）。人間側でも、親は次のおもちゃに持ち替えるまで
         #   今の1個を持ち続けるのが自然。的（_target）が次の試行で替わった瞬間に
         #   見える物が入れ替わる＝持ち替えに相当。
-        if self.solo_presentation and self._target is not None:
-            # 透明化の復元→隠し直し（毎step。状態を持たない流儀）
+        if self.solo_presentation and self._target is not None and self._state != self._VANISH:
+            # 透明化の復元→隠し直し（毎step。状態を持たない流儀）。
+            # 【消失発話】_VANISH中は下の専用ブロックが復元→全隠しをやるので、
+            #   ここでは「旧的だけ見える」形にしない（二重処理を避ける）。
             for g, a0 in getattr(env, "_toy_alpha_backup", {}).items():
                 env.model.geom_rgba[g, 3] = a0
             self._hide_other(env)
@@ -302,7 +320,24 @@ class ParentLabeling:
                 self._holding_prev = False
                 self._repeat_attempt = True
             else:
+                self._enter_pick()
+
+        if self._state == self._VANISH:
+            # 【消失発話・2026-09-05】机が空のまま「○○ないね」を1回言う（仕様書 前半）。
+            #   毎step：透明化の復元→全スロットを隠し直す（状態を持たない流儀、
+            #   solo_presentationブロックと同じ形。的の有無に関わらず全部隠す）。
+            for g, a0 in getattr(env, "_toy_alpha_backup", {}).items():
+                env.model.geom_rgba[g, 3] = a0
+            self._hide_all(env)
+            self._vanish_t += dt
+            if not self._vanish_spoken and self._vanish_t >= self.vanish_gap_before_sec:
+                self._vanish_spoken = True
+                word = self._single_word(self._target)
+                text = self.vanish_template.format(word=word)
+                return {"text": text, "target": self._target, "cause": "vanish"}
+            if self._vanish_t >= self.vanish_gap_before_sec + self.vanish_gap_after_sec:
                 self._state = self._PICK
+            return None
 
         if self._state == self._PICK:
             # 【10択・2026-08-31】候補＝セリフ(utterances)が定義されていて、かつ
@@ -346,13 +381,13 @@ class ParentLabeling:
             if self._shake_t >= self.repeat_timeout_sec:
                 self._repeats_left = 0
                 self._repeat_attempt = False
-                self._state = self._PICK   # 呼び戻せなければ諦めて持ち替える
+                self._enter_pick()   # 呼び戻せなければ諦めて持ち替える
             return None
         if self._hold_t >= self.gaze_hold_sec:
             self.n_hold_completes += 1
             return self._speak(env)
         if self._shake_t >= self.attract_timeout_sec:
-            self._state = self._PICK   # 諦めて黙って次の試行へ（前半の設計意図どおり）
+            self._enter_pick()   # 諦めて黙って次の試行へ（前半の設計意図どおり）
         return None
 
     # ------------------------------------------------------------------ 内部
@@ -560,6 +595,41 @@ class ParentLabeling:
         #   暗い影として見えていた（図_提示の問題.png③）。透明化を併用する。
         #   復元は update() 冒頭で毎step全geomのαを戻してから隠し直す方式
         #   ＝状態を持たないので取りこぼしが無い。
+
+    def _hide_all(self, env):
+        """全スロットを視界外へ退避させる（_VANISH専用。「的が無い」状態を作る）。
+
+        【消失発話・2026-09-05】_hide_other は「的以外」を隠す＝的自体は見える形。
+        _VANISH中は的も含めて全部隠す必要があるため、_others の絞り込みを外した
+        だけの別メソッドにした（_hide_otherの流儀・退避先はそのまま踏襲）。
+        """
+        from e_toy_env import FAR_AWAY
+        _slots = self._slots(env)
+        if not hasattr(env, "_toy_alpha_backup"):
+            env._toy_alpha_backup = {}
+        for _i, (_k, _v) in enumerate(_slots.items()):
+            env._place(_v["qadr"], FAR_AWAY + np.array([1.0 + 0.5 * _i, 0.0, -2.0]))
+            env.data.qvel[_v["dadr"]:_v["dadr"] + 6] = 0.0
+            _adr = env.model.body_geomadr[_v["bid"]]
+            _num = env.model.body_geomnum[_v["bid"]]
+            for _g in range(_adr, _adr + _num):
+                if _g not in env._toy_alpha_backup:
+                    env._toy_alpha_backup[_g] = float(env.model.geom_rgba[_g, 3])
+                env.model.geom_rgba[_g, 3] = 0.0
+
+    def _enter_pick(self):
+        """次の的を選ぶ（_PICK）前に、旧的があれば_VANISHを挟む。
+
+        【消失発話・2026-09-05・仕様_M2】vanish_utteranceが真かつ旧的
+        （self._target）があるときだけ_VANISHへ。既定False・初回提示（旧的なし）
+        では従来どおり_PICKへ直行（1ビットも変わらない）。
+        """
+        if self.vanish_utterance and self._target is not None:
+            self._state = self._VANISH
+            self._vanish_t = 0.0
+            self._vanish_spoken = False
+        else:
+            self._state = self._PICK
 
     def _single_word(self, tgt):
         """【親の言い直し・2026-09-03】正誤判定用の単独形。utterances[tgt]が
