@@ -1,0 +1,58 @@
+{
+  "name": "_verify_word_similarity_map",
+  "note": "2026-09-05 word_similarity_mapプラグインの動作検証用（F2-49c_r3の複製・短縮）。F2-49c_r3_seed93の学習済みモデルを読み込み、checkpoint 0で語彙地図が出ることを見る。研究の実験ではない（検証用の使い捨て）。",
+  "scene": "座位_12ヶ月_F2-49_実物8択_r3_個体3_2026-09-03",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 12.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32,
+      "eye": "left",
+      "source": "wide"
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.0,
+    "save": "F/models/_verify_word_similarity_map_2026-09-05.pt",
+    "model": "F/models/F2-49c_r3_seed93_2026-09-03.pt",
+    "produce": {
+      "mode": "word",
+      "threshold": 0.5,
+      "cooldown_sec": 2.0,
+      "max_length": 8,
+      "develop_from_age": true,
+      "vocal_tract_decoupled": true,
+      "context": true,
+      "listen_learn": true,
+      "context_lambda": 0.0,
+      "vision_context": true,
+      "listen_lr": 0.001,
+      "hippocampus": {
+        "capacity": 512,
+        "decay": 0.5,
+        "replay_passes": 1,
+        "recent_ratio": 0.7,
+        "sleep_lr": 0.005
+      },
+      "word_choice": "gru_hippo",
+      "hippo_gain": 1.0,
+      "listen_self": false
+    }
+  },
+  "run": {
+    "type": "train",
+    "steps": 50,
+    "seed": 93,
+    "K": 10,
+    "checkpoint": 50,
+    "csv": "F/logs/_verify_word_similarity_map/run.csv"
+  },
+  "plugins": {
+    "word_similarity_map": {
+      "out_dir": "F/logs/_verify_word_similarity_map/語彙地図"
+    }
+  }
+}

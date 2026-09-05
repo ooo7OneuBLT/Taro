@@ -1,0 +1,47 @@
+{
+  "name": "F2-30_10択wide2倍_3本目",
+  "note": "2026-08-31 F2-30。案A＋学習2倍（4本×6000歩・個体1/2を2周ずつ）。",
+  "scene": "座位_12ヶ月_F2-27_10択_1周目_2026-08-31",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 12.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32,
+      "eye": "left",
+      "source": "wide"
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.0,
+    "save": "F/models/F2-30_10択wide2倍_3本目_seed10_2026-08-31.pt",
+    "model": "F/models/F2-30_10択wide2倍_2本目_seed10_2026-08-31.pt",
+    "produce": {
+      "mode": "word",
+      "threshold": 0.15,
+      "cooldown_sec": 2.0,
+      "max_length": 8,
+      "develop_from_age": true,
+      "vocal_tract_decoupled": true,
+      "context": true,
+      "listen_learn": true,
+      "context_lambda": 0.0,
+      "vision_context": true
+    }
+  },
+  "run": {
+    "type": "train",
+    "steps": 6000,
+    "seed": 10,
+    "K": 10,
+    "checkpoint": 6000,
+    "csv": "F/logs/F2-30_10択wide2倍/3本目/run.csv"
+  },
+  "plugins": {
+    "word_learning": {
+      "events_out": "F/logs/F2-11_本学習/ABAB_A1/発話イベント.csv"
+    }
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "name": "F2-25_B3_r2_にゃんにゃん",
+  "note": "2026-08-31 F2-25 B3（同期4回×300歩）",
+  "scene": "座位_12ヶ月_F2-20_10語_猫1_2026-08-30",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 12.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32,
+      "eye": "left"
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.0,
+    "save": "F/models/F2-25_B3_r2_にゃんにゃん.pt",
+    "model": "F/models/F2-25_B3_merged_r1.pt",
+    "produce": {
+      "mode": "word",
+      "threshold": 0.15,
+      "cooldown_sec": 2.0,
+      "max_length": 8,
+      "develop_from_age": true,
+      "vocal_tract_decoupled": true,
+      "context": true,
+      "listen_learn": true,
+      "context_lambda": 0.0
+    }
+  },
+  "run": {
+    "type": "train",
+    "steps": 300,
+    "seed": 10,
+    "K": 10,
+    "checkpoint": 300,
+    "csv": "F/logs/F2-25_並列AB/B3/r2_にゃんにゃん/run.csv"
+  },
+  "plugins": {
+    "word_learning": {
+      "events_out": "F/logs/F2-11_本学習/ABAB_A1/発話イベント.csv"
+    }
+  }
+}

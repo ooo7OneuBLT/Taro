@@ -64,10 +64,17 @@ class WordLearning(Plugin):
         for ev in events:
             target = ev.get("target")
             if target not in self.label_count:
-                continue          # 知らないtarget（設定ミス等）は無視する
+                # 【2026-09-01修理・F2-33①】従来ここで toy1/toy2 以外を捨てていた
+                #   ため、10択の世界では8枠ぶんの名づけがイベントCSVにも件数にも
+                #   残らなかった（提示バランスの検証が不可能だった）。全枠を数える。
+                self.label_count[target] = 0
+                self.feat_ema[target] = None
             self.label_count[target] += 1
+            # 【親の言い直し・2026-09-03】cause/correctがあれば記録。無い行は空欄。
             self.rows.append({"step": ctx.step, "sim_sec": round(ctx.sim_sec, 3),
-                              "text": ev.get("text"), "target": target})
+                              "text": ev.get("text"), "target": target,
+                              "cause": ev.get("cause") or "", "correct": ev.get("correct")
+                              if ev.get("correct") is not None else ""})
             state = ev.get("state")
             if not state:
                 continue
@@ -119,9 +126,11 @@ class WordLearning(Plugin):
             os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
             with open(path, "w", newline="", encoding="utf-8") as fp:
                 w = csv.writer(fp)
-                w.writerow(["step", "sim_sec", "text", "target"])
+                # 【親の言い直し・2026-09-03】cause/correct列を追加（従来行は空欄）。
+                w.writerow(["step", "sim_sec", "text", "target", "cause", "correct"])
                 for r in self.rows:
-                    w.writerow([r["step"], r["sim_sec"], r["text"], r["target"]])
+                    w.writerow([r["step"], r["sim_sec"], r["text"], r["target"],
+                               r.get("cause", ""), r.get("correct", "")])
         return {"発話イベント数": len(self.rows),
                 "label_count_toy1": self.label_count["toy1"],
                 "label_count_toy2": self.label_count["toy2"],

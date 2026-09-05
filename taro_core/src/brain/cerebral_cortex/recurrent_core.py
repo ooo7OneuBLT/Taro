@@ -143,13 +143,19 @@ class TaroBrain(nn.Module):
             self._mask_cache[key] = m
         return m
 
-    def forward_hidden(self, x, hidden=None, body_state=None):
+    def forward_hidden(self, x, hidden=None, body_state=None, prefix_vec=None):
         """
         入力トークンを処理して隠れ状態を更新する。
 
         body_state: 内部状態ベクトル（島皮質経由）。NoneならモデルA互換。
+        prefix_vec: 【V1・2026-08-31】視覚トークン（embedding次元のベクトル1個）。
+          渡すとトークン列の頭に1トークンぶんとして連結する（設計_視覚とGRUの
+          統合.md）。Noneなら従来と1ビットも変わらない。出力の系列長は+1になる
+          ので、損失を取る呼び出し側は先頭位置を読み飛ばすこと。
         """
         emb = self.embedding(x)
+        if prefix_vec is not None:
+            emb = torch.cat([prefix_vec.view(1, 1, -1).to(emb.dtype), emb], dim=1)
         if self.insula is not None:
             if body_state is not None:
                 body_vec = self.insula(body_state)
@@ -165,6 +171,74 @@ class TaroBrain(nn.Module):
         out, hidden = self.forward_hidden(x, hidden, body_state=body_state)
         logits = self.perception_head(out)
         return logits, hidden
+
+    def sequence_prob(self, token_ids, hidden=None):
+        """トークン列の「文脈から見た言いやすさ」を返す（2026-08-30・文脈設計の決定4）。
+
+        文脈（hidden）から始めて、BOS→列の各トークンを知覚ヘッドで予測したときの
+        1音あたりの平均確率（logの平均のexp＝幾何平均）。0〜1のスケールなので、
+        語彙のコサイン類似度とそのまま足し合わせられる。長さで正規化してあるため
+        長い語が不利にならない。学習はしない（no_gradの読み出し専用）。
+
+        token_ids が空なら None（採点不能。呼び出し側はコサインだけで判断する）。
+        """
+        if not token_ids:
+            return None
+        import torch.nn.functional as F
+        dev = self._device()
+        seq = [1] + list(token_ids)          # BOS から予測を始める
+        x = torch.tensor([seq], dtype=torch.long, device=dev)
+        with torch.no_grad():
+            logits, _ = self.forward_perception(x, hidden=hidden)
+            logp = F.log_softmax(logits[0, :-1, :], dim=-1)
+            tgt = torch.tensor(seq[1:], dtype=torch.long, device=dev)
+            picked = logp.gather(1, tgt.unsqueeze(1)).squeeze(1)
+        return float(picked.mean().exp())
+
+    def token_probs(self, token_ids, hidden=None):
+        """列の各トークンを「直前までからどれだけ予測できたか」を返す（2026-08-31・二語文）。
+
+        lexicon の統計的分節（自信度の谷で切る）へ渡す本物の自信度。
+        BOS から始め、位置iの確率 = p(token_i | BOS, token_0..i-1, 文脈hidden)。
+        読み出し専用（no_grad）。token_ids が空なら空リスト。
+        """
+        if not token_ids:
+            return []
+        import torch.nn.functional as F
+        dev = self._device()
+        seq = [1] + list(token_ids)
+        x = torch.tensor([seq], dtype=torch.long, device=dev)
+        with torch.no_grad():
+            logits, _ = self.forward_perception(x, hidden=hidden)
+            probs = F.softmax(logits[0, :-1, :], dim=-1)
+            tgt = torch.tensor(seq[1:], dtype=torch.long, device=dev)
+            picked = probs.gather(1, tgt.unsqueeze(1)).squeeze(1)
+        return [float(v) for v in picked]
+
+    def end_probs(self, token_ids, hidden=None, start=1):
+        """列の各位置で「ここで発話が終わる確率」を返す（分節第2案・2026-09-03）。
+
+        【分節第2案・2026-09-03】設計_分節（語の切れ目の発見）.md 第2案 第2部
+        「end_probs」節。listen_eos（EOS=2を末尾に足す聞く学習）で育った
+        p(EOS|文脈) を読み出す。token_probs と同じ枠組みで、gatherする対象を
+        「実際に来たトークン」ではなく「固定インデックス2（EOS）」に変えただけ。
+
+        token_ids を start（既定BOS=1。話者トークンを渡せば聞く学習と同じ頭になる）
+        から forward_perception に通し、位置i（token_iを聞き終えた直後）の
+        softmax(logits)[...,2] をリストで返す（長さ = len(token_ids)）。
+        読み出し専用（no_grad）。token_ids が空なら空リスト。
+        """
+        if not token_ids:
+            return []
+        import torch.nn.functional as F
+        dev = self._device()
+        seq = [start] + list(token_ids)
+        x = torch.tensor([seq], dtype=torch.long, device=dev)
+        with torch.no_grad():
+            logits, _ = self.forward_perception(x, hidden=hidden)
+            probs = F.softmax(logits[0, 1:, :], dim=-1)
+            picked = probs[:, 2]
+        return [float(v) for v in picked]
 
     def forward_articulation(self, gru_output):
         return (

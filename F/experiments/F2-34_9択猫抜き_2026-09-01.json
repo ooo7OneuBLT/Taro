@@ -1,0 +1,50 @@
+{
+  "name": "F2-34_9択猫抜き",
+  "note": "2026-09-01 F2-34。猫を提示の輪から外した9択（F2-33bと同一条件・猫だけ不在）。犬猫のシーソー（変化の逆相関-0.77）が振動の主犯なら、犬の振動が収まるはず。",
+  "scene": "座位_12ヶ月_F2-34_9択猫抜き_2026-09-01",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 12.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32,
+      "eye": "left",
+      "source": "wide"
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.0,
+    "save": "F/models/F2-34_9択猫抜き_seed10_2026-09-01.pt",
+    "model": "F/models/F2-29_10択wide_2周目_seed10_2026-08-31.pt",
+    "produce": {
+      "mode": "word",
+      "threshold": 0.15,
+      "cooldown_sec": 2.0,
+      "max_length": 8,
+      "develop_from_age": true,
+      "vocal_tract_decoupled": true,
+      "context": true,
+      "listen_learn": true,
+      "context_lambda": 0.0,
+      "vision_context": true
+    }
+  },
+  "run": {
+    "type": "train",
+    "steps": 6000,
+    "seed": 10,
+    "K": 10,
+    "checkpoint": 500,
+    "csv": "F/logs/F2-34_9択猫抜き/run.csv"
+  },
+  "plugins": {
+    "word_learning": {
+      "events_out": "F/logs/F2-34_9択猫抜き/発話イベント.csv"
+    },
+    "model_snapshots": {
+      "out_dir": "F/logs/F2-34_9択猫抜き/snapshots"
+    }
+  }
+}

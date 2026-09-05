@@ -1,0 +1,50 @@
+{
+  "name": "F2-32_決定性5連_3",
+  "note": "2026-09-01 F2-32。学習の決定性検証。同一設定・同一シードを単独逐次で2本走らせ重みを比較する（手順1）。",
+  "scene": "座位_12ヶ月_F2-31_10択_3周目_2026-08-31",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 12.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32,
+      "eye": "left",
+      "source": "wide"
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.0,
+    "save": "F/models/F2-32_決定性5連_3_seed10_2026-09-01.pt",
+    "model": "F/models/F2-29_10択wide_2周目_seed10_2026-08-31.pt",
+    "produce": {
+      "mode": "word",
+      "threshold": 0.15,
+      "cooldown_sec": 2.0,
+      "max_length": 8,
+      "develop_from_age": true,
+      "vocal_tract_decoupled": true,
+      "context": true,
+      "listen_learn": true,
+      "context_lambda": 0.0,
+      "vision_context": true
+    }
+  },
+  "run": {
+    "type": "train",
+    "steps": 600,
+    "seed": 10,
+    "K": 10,
+    "checkpoint": 600,
+    "csv": "F/logs/F2-32_決定性/5連/3/run.csv"
+  },
+  "plugins": {
+    "word_learning": {
+      "events_out": "F/logs/F2-32_決定性/5連/3/発話イベント.csv"
+    },
+    "trace": {
+      "out": "F/logs/F2-32_決定性/5連/trace_3.csv"
+    }
+  }
+}

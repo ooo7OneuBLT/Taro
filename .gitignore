@@ -114,3 +114,6 @@ F/logs/
 
 # 視覚バックエンドの重みキャッシュ（DINOv2等、初回ダウンロードの生成物。F1-3b）
 .models_cache/
+F/assets/gso/
+F/assets/ycb/
+F/assets/user_photos/

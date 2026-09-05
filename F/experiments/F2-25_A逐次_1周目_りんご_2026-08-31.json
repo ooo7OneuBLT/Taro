@@ -1,0 +1,45 @@
+{
+  "name": "F2-25_A逐次_1周目_りんご",
+  "note": "2026-08-31 F2-25 並列化A/B（A逐次）。総学習量はA=B。",
+  "scene": "座位_12ヶ月_F2-20_10語_りんご1_2026-08-30",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 12.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32,
+      "eye": "left"
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.0,
+    "save": "F/models/F2-25_A逐次_1周目_りんご.pt",
+    "model": "F/models/F2-25_A逐次_1周目_でんしゃ.pt",
+    "produce": {
+      "mode": "word",
+      "threshold": 0.15,
+      "cooldown_sec": 2.0,
+      "max_length": 8,
+      "develop_from_age": true,
+      "vocal_tract_decoupled": true,
+      "context": true,
+      "listen_learn": true,
+      "context_lambda": 0.0
+    }
+  },
+  "run": {
+    "type": "train",
+    "steps": 600,
+    "seed": 10,
+    "K": 10,
+    "checkpoint": 600,
+    "csv": "F/logs/F2-25_並列AB/A逐次/1周目_りんご/run.csv"
+  },
+  "plugins": {
+    "word_learning": {
+      "events_out": "F/logs/F2-11_本学習/ABAB_A1/発話イベント.csv"
+    }
+  }
+}

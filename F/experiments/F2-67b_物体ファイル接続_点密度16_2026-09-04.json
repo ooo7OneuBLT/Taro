@@ -1,0 +1,64 @@
+{
+  "name": "F2-67b_物体ファイル接続_点密度16",
+  "note": "2026-09-04 F2-67で処理ms平均3033msと1000msを超えたため、MobileSAMの点密度points_per_sideを16（既定32の半分）に下げて再測定する検証用。仕様：F/docs/物体ファイルと注意/仕様_物体ファイルプラグイン接続_2026-09-04.md「処理時間が1回あたり1000msを超える場合はpoints_per_side=16で再測定」。",
+  "scene": "座位_12ヶ月_F2-49_実物8択_r1_個体1_2026-09-03",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 12.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32,
+      "eye": "left",
+      "source": "wide"
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.0,
+    "model": "F/models/F2-50_r8_seed98_2026-09-03.pt",
+    "save": "F/logs/F2-67b_物体ファイル接続_点密度16/model.pt",
+    "produce": {
+      "mode": "word",
+      "threshold": 0.5,
+      "cooldown_sec": 2.0,
+      "max_length": 8,
+      "develop_from_age": true,
+      "vocal_tract_decoupled": true,
+      "context": true,
+      "listen_learn": false,
+      "context_lambda": 0.0,
+      "vision_context": true,
+      "listen_lr": 0.001,
+      "hippocampus": {
+        "capacity": 512,
+        "decay": 0.5,
+        "replay_passes": 1,
+        "recent_ratio": 0.7,
+        "sleep_lr": 0.005
+      },
+      "word_choice": "gru_hippo",
+      "hippo_gain": 1.0,
+      "listen_self": false,
+      "listen_eos": true,
+      "segment_mode": "end_prob"
+    }
+  },
+  "run": {
+    "type": "train",
+    "steps": 30,
+    "seed": 91,
+    "K": 10,
+    "checkpoint": 10,
+    "csv": "F/logs/F2-67b_物体ファイル接続_点密度16/run.csv"
+  },
+  "plugins": {
+    "word_production": {
+      "events_out": "F/logs/F2-67b_物体ファイル接続_点密度16/太郎の発話.csv"
+    },
+    "object_files": {
+      "events_out": "F/logs/F2-67b_物体ファイル接続_点密度16/物体ファイル.csv",
+      "points_per_side": 16
+    }
+  }
+}

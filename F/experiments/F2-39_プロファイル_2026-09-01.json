@@ -1,0 +1,56 @@
+{
+  "name": "F2-39_プロファイル",
+  "note": "2026-09-01 F2-39。走行時間の内訳測定（600歩・profile on）。",
+  "scene": "座位_12ヶ月_F2-31_10択_3周目_2026-08-31",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 12.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32,
+      "eye": "left",
+      "source": "wide"
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.0,
+    "save": "F/models/_F2-39_プロファイル_使い捨て.pt",
+    "model": "F/models/F2-29_10択wide_2周目_seed10_2026-08-31.pt",
+    "produce": {
+      "mode": "word",
+      "threshold": 0.15,
+      "cooldown_sec": 2.0,
+      "max_length": 8,
+      "develop_from_age": true,
+      "vocal_tract_decoupled": true,
+      "context": true,
+      "listen_learn": true,
+      "context_lambda": 0.0,
+      "vision_context": true,
+      "listen_lr": 0.001,
+      "hippocampus": {
+        "capacity": 512,
+        "decay": 0.5,
+        "replay_passes": 1,
+        "recent_ratio": 0.7,
+        "sleep_lr": 0.005
+      }
+    }
+  },
+  "run": {
+    "type": "train",
+    "steps": 600,
+    "seed": 10,
+    "K": 10,
+    "checkpoint": 300,
+    "csv": "F/logs/F2-39_速度/profile600.csv",
+    "profile": true
+  },
+  "plugins": {
+    "word_learning": {
+      "events_out": "F/logs/F2-39_速度/発話イベント.csv"
+    }
+  }
+}

@@ -59,9 +59,19 @@ class ParentLabeling:
     _REFRACTORY = "refractory"
 
     def __init__(self, enabled=False, shake_amp_m=0.02, shake_hz=1.5,
+                 respond_to_voice=False, voice_respond_prob=0.4,
+                 voice_delay_range=(0.135, 1.408),
+                 # 【親の言い直し・2026-09-03】4つともNoneが既定＝従来どおり
+                 #   voice_respond_prob・_pick_textを使う（1ビットも変えない）。
+                 voice_respond_prob_correct=None, voice_respond_prob_error=None,
+                 voice_text_correct=None, voice_text_error=None,
                  gaze_deg=10.0, gaze_margin_deg=3.0, gaze_hold_sec=3.0,
                  attract_timeout_sec=12.0, utterances=None, respond_prob=1.0,
                  refractory_sec=1.0, shuffle_refractory_sec=3.0, shuffle_after=5,
+                 repeat_labels=0, repeat_gap_sec=2.0, repeat_timeout_sec=4.0,
+                 spin_period_sec=8.0, fixed_yaw_deg=0.0,
+                 present_angles=None,
+                 cycle_pick=False,
                  solo_presentation=False, shake_pause_sec=2.0,
                  follow_gaze=False, follow_dist=0.086, follow_speed=0.5):
         self.enabled = bool(enabled)
@@ -84,8 +94,53 @@ class ParentLabeling:
                 f"({self.attract_timeout_sec})。この設定では親が一度も発話できない")
         self.utterances = dict(utterances or {"toy1": "ぶーぶー", "toy2": "わんわん"})
         self.respond_prob = float(respond_prob)
+        # 【発話の動機・2026-08-31・設計_発話の動機.md 決定B'】太郎の声への反応。
+        #   既定OFF（respond_to_voice=False）＝既存シーンは1ビットも変わらない。
+        #   反応率0.4＝親は乳児の声の3〜5割に反応（Gros-Louis et al. 2006系・Tier2）。
+        #   遅れ0.135〜1.408秒＝母親の応答潜時の中央値の範囲（Hilbrink, Gattis &
+        #   Levinson 2015・一次確認）。分布の形が取れないため範囲から一様に引く。
+        #   親は正誤を判定しない：声が聞こえたら「いま見せている物の名前」を言う
+        #   だけ（正解なら承認、間違いなら言い直しが、判定ゼロで結果的に生まれる）。
+        self.respond_to_voice = bool(respond_to_voice)
+        self.voice_respond_prob = float(voice_respond_prob)
+        self.voice_delay_range = tuple(float(x) for x in voice_delay_range)
+        # 【親の言い直し・2026-09-03】設計_親の言い直し.md 第2部。Noneなら
+        #   従来どおり voice_respond_prob 1本・_pick_text を使う。
+        self.voice_respond_prob_correct = (
+            None if voice_respond_prob_correct is None else float(voice_respond_prob_correct))
+        self.voice_respond_prob_error = (
+            None if voice_respond_prob_error is None else float(voice_respond_prob_error))
+        self.voice_text_correct = voice_text_correct
+        self.voice_text_error = voice_text_error
+        self._voice_timer = None       # None=予約なし／秒=満了で返事
+        self._voice_correct = None     # 予約時点の正誤判定（満了時まで固定）
+        self.n_voice_responses = 0
         self.refractory_sec = float(refractory_sec)
         self.shuffle_refractory_sec = float(shuffle_refractory_sec)
+        # 【連呼・2026-09-02・F2-40】最初の名づけの後、太郎が注視を続けている間に
+        #   repeat_gap_sec おきに最大 repeat_labels 回、同じ的を言い直す。
+        #   人間の親は1回の提示で同じ語を繰り返す（育児語の反復【Tier2】・
+        #   Gogate 2000 の同期）。既定0＝従来どおり1提示1発話＝挙動不変。
+        #   見るのをやめたら打ち切る（follow-inの原則を維持）。
+        self.repeat_labels = int(repeat_labels)
+        self.repeat_gap_sec = float(repeat_gap_sec)
+        self.repeat_timeout_sec = float(repeat_timeout_sec)
+        # 【回転の切替・2026-09-02・F2-42】提示中の回転周期[秒]。0以下なら回さず
+        #   fixed_yaw_deg の向きで固定（傾き25度は共通）。既定8.0＝従来どおり。
+        self.spin_period_sec = float(spin_period_sec)
+        self.fixed_yaw_deg = float(fixed_yaw_deg)
+        # 【F2-49・2026-09-03・ユーザー指摘】物ごとに「それらしく見える」角度で見せる。
+        #   {"toy6": {"yaw": 30, "tilt": 65}, ...}。無い物は fixed_yaw_deg／傾き25度（従来）。
+        #   人間の親は皿なら面を、靴なら横顔を子に向ける（物ごとの定番の見せ方）。
+        self.present_angles = {str(k): dict(v) for k, v in dict(present_angles or {}).items()}
+        # 【一巡シャッフル・2026-09-02・ユーザー承認】cycle_pick=True なら候補を
+        #   シャッフルして順に全部見せ、使い切ったらまたシャッフル（1巡の中で回数が均等）。
+        #   人間の親は手元のおもちゃを満遍なく見せる。既定False＝従来の毎回一様乱数。
+        self.cycle_pick = bool(cycle_pick)
+        self._deck = []
+        self._repeat_attempt = False     # いまのSHAKEが同じ的の呼び戻しか
+        self._repeats_left = 0
+        self.n_repeats = 0
         self.shuffle_after = int(shuffle_after)
         self.solo_presentation = bool(solo_presentation)
         # 【F2-9・2026-08-26】振りのバースト化（motionese）。人間の親は乳児相手だと
@@ -114,6 +169,11 @@ class ParentLabeling:
         self._state = self._PICK
         self._target = None
         self._shake_t = 0.0
+        self._voice_timer = None       # 声への返事の予約もエピソード境界で消す
+        # 【親の言い直し・2026-09-03】予約時の正誤判定・的もエピソード境界で消す。
+        self._voice_correct = None
+        self._voice_target = None
+        self.n_voice_responses = 0
         self._hold_t = 0.0
         self._silent_t = 0.0
         self._silent_until = 0.0
@@ -139,6 +199,53 @@ class ParentLabeling:
         """
         if not self.enabled:
             return None
+        # 【発話の動機・2026-08-31】太郎の声への反応。状態機械（PICK/SHAKE/
+        #   REFRACTORY）とは独立のタイマーで動く。trainer が発話時に
+        #   env._taro_voice_signal を立てる約束（設計_発話の動機.md 技術付録）。
+        if self.respond_to_voice:
+            if getattr(env, "_taro_voice_signal", False):
+                env._taro_voice_signal = False
+                if self._voice_timer is None:
+                    # 【親の言い直し・2026-09-03】正誤の判定はここ（タイマー予約時）で
+                    #   固定する。満了までに的(_target)が変わっても、予約時の判定を使う
+                    #   （設計_親の言い直し.md 第2部「同じブロック」）。
+                    tgt = self._target or "toy1"
+                    taro_text = getattr(env, "_taro_voice_text", "") or ""
+                    word = self._single_word(tgt)
+                    correct = bool(word) and (
+                        taro_text.startswith(word)
+                        or taro_text.startswith(word.replace("ー", "")))
+                    if (self.voice_respond_prob_correct is None
+                            and self.voice_respond_prob_error is None):
+                        prob = self.voice_respond_prob
+                    else:
+                        prob = (self.voice_respond_prob_correct if correct
+                                else self.voice_respond_prob_error)
+                        if prob is None:
+                            prob = self.voice_respond_prob
+                    if env.np_random.random() < prob:
+                        lo, hi = self.voice_delay_range
+                        self._voice_timer = lo + (hi - lo) * float(env.np_random.random())
+                        self._voice_correct = correct
+                        self._voice_target = tgt
+            if self._voice_timer is not None:
+                self._voice_timer -= float(env.dt)
+                if self._voice_timer <= 0.0:
+                    self._voice_timer = None
+                    tgt = getattr(self, "_voice_target", None) or self._target or "toy1"
+                    correct = bool(self._voice_correct)
+                    if self.voice_text_correct is None and self.voice_text_error is None:
+                        text = self._pick_text(env, tgt)
+                    else:
+                        word = self._single_word(tgt)
+                        template = self.voice_text_correct if correct else self.voice_text_error
+                        text = template.format(X=word) if template else self._pick_text(env, tgt)
+                    self._voice_correct = None
+                    if text:
+                        self.n_voice_responses += 1
+                        self.n_utterances += 1
+                        return {"text": text, "target": tgt, "cause": "voice",
+                                "correct": correct}
         if not getattr(env, "_toy", False):
             return None      # おもちゃが1つも無ければ成立しない
         if not getattr(env, "_toy2", False) and not self.follow_gaze:
@@ -155,6 +262,9 @@ class ParentLabeling:
         #   今の1個を持ち続けるのが自然。的（_target）が次の試行で替わった瞬間に
         #   見える物が入れ替わる＝持ち替えに相当。
         if self.solo_presentation and self._target is not None:
+            # 透明化の復元→隠し直し（毎step。状態を持たない流儀）
+            for g, a0 in getattr(env, "_toy_alpha_backup", {}).items():
+                env.model.geom_rgba[g, 3] = a0
             self._hide_other(env)
 
         if self._state == self._REFRACTORY:
@@ -164,21 +274,57 @@ class ParentLabeling:
                 self._apply_shake(env)
                 self._shake_t += dt
                 self._speech_burst_t -= dt
+            elif self.follow_gaze and self._follow_pos is not None and                     self._target in getattr(env, "_present_slots", {}):
+                # 【10択・2026-08-31・目視で発覚】差し出しスロットは環境の毎step退避
+                #   に上書きされるため、不応期に地下へ消えて世界が空になっていた
+                #   （旧toy1/toy2はアンカー保持があるので見え続ける＝非一貫）。
+                #   不応期も親は手に持ったまま＝最後の提示位置に置き続ける。
+                _sl = self._slots(env).get(self._target)
+                if _sl is not None:
+                    env._place(_sl["qadr"], np.array(self._follow_pos, dtype=float))
+                    env.data.qpos[_sl["qadr"] + 3:_sl["qadr"] + 7] =                         self._present_quat(env, _sl["shape"])
+                    env.data.qvel[_sl["dadr"]:_sl["dadr"] + 6] = 0.0
             self._silent_t += dt
+            # 【連呼】間隔が来たら、まだ見ていれば言い直す。見ていなければ打ち切り
+            if self._repeats_left > 0 and self._silent_t >= self.repeat_gap_sec:
+                _ok = self._gaze_on_target(env)
+                if _ok:
+                    return self._speak_repeat(env)
+                # 見ていなければここでは諦めず、不応期の終わりに呼び戻し（振り直し）へ
             if self._silent_t < self._silent_until:
                 return None
-            self._state = self._PICK
+            if self._repeats_left > 0:
+                # 【連呼・呼び戻し】目をそらしていても持ち替えず、同じ的を振り直して
+                #   見返した瞬間に言い直す（人間の親は同じ物を見せ続けて繰り返す）。
+                self._state = self._SHAKE
+                self._shake_t = 0.0
+                self._hold_t = 0.0
+                self._holding_prev = False
+                self._repeat_attempt = True
+            else:
+                self._state = self._PICK
 
         if self._state == self._PICK:
-            if not getattr(env, "_toy2", False):
-                self._target = "toy1"      # 【F2-9C】1個だけのときは常にtoy1
+            # 【10択・2026-08-31】候補＝セリフ(utterances)が定義されていて、かつ
+            #   スロットが実在するもの全員からランダム。従来シーン（toy1/toy2の
+            #   2択・または1個）では候補が同じなので挙動は変わらない。
+            _cand = [k for k in sorted(self.utterances) if k in self._slots(env)]
+            if not _cand:
+                _cand = ["toy1"]
+            if self.cycle_pick:
+                if not self._deck or any(k not in _cand for k in self._deck):
+                    self._deck = list(_cand)
+                    perm = env.np_random.permutation(len(self._deck))
+                    self._deck = [self._deck[int(i)] for i in perm]
+                self._target = self._deck.pop(0)
             else:
-                self._target = "toy1" if env.np_random.random() < 0.5 else "toy2"
+                self._target = _cand[int(env.np_random.integers(len(_cand)))]
             self._state = self._SHAKE
             self._shake_t = 0.0
             self._hold_t = 0.0
             self._holding_prev = False   # 試行ごとに注視開始を数え直す（F2-9観測用）
             self._follow_pos = None      # 新しい的は今の視線の先から差し出し直す
+            self._repeat_attempt = False
 
         # ここに来るのは常に SHAKE 状態（振っている最中）
         self._apply_shake(env)
@@ -194,6 +340,14 @@ class ParentLabeling:
         self._holding_prev = holding
         self._shake_t += dt
 
+        if self._repeat_attempt:
+            if self._hold_t >= min(1.0, self.gaze_hold_sec):
+                return self._speak_repeat(env)
+            if self._shake_t >= self.repeat_timeout_sec:
+                self._repeats_left = 0
+                self._repeat_attempt = False
+                self._state = self._PICK   # 呼び戻せなければ諦めて持ち替える
+            return None
         if self._hold_t >= self.gaze_hold_sec:
             self.n_hold_completes += 1
             return self._speak(env)
@@ -202,21 +356,43 @@ class ParentLabeling:
         return None
 
     # ------------------------------------------------------------------ 内部
+    def _slots(self, env):
+        """提示できるスロットの表（10択・2026-08-31）。
+
+        {"toy1": {"qadr","dadr","bid","body","shape"}, ...}。
+        toy1/toy2は既存の属性から、toy5以降は env._present_slots から組む。
+        """
+        d = {"toy1": {"qadr": env._toy_qadr, "dadr": env._toy_dadr,
+                      "bid": env._toy_bid, "body": "test_object1",
+                      "shape": getattr(env, "_toy_shape", "")}}
+        if getattr(env, "_toy2", False):
+            d["toy2"] = {"qadr": env._obj2_qadr, "dadr": env._obj2_dadr,
+                         "bid": env._obj2_bid, "body": "test_object2",
+                         "shape": getattr(env, "_toy2_shape", "")}
+        for k, sl in getattr(env, "_present_slots", {}).items():
+            d[k] = {"qadr": sl["qadr"], "dadr": sl["dadr"], "bid": sl["bid"],
+                    "body": sl["body"], "shape": "asis"}
+        return d
+
     def _gaze_on_target(self, env):
         """今の視線が self._target を「見ている」と判定できるか。
 
         判定：近い方のおもちゃであり、かつ他方との角度差が gaze_margin_deg 以上
         （2おもちゃの間隔24度に対する曖昧域対策。docstring冒頭の導出参照）。
         """
-        body = "test_object1" if self._target == "toy1" else "test_object2"
-        other = "test_object2" if self._target == "toy1" else "test_object1"
-        a_t = env._gaze_angle_to(body)
+        slots = self._slots(env)
+        sl = slots.get(self._target)
+        if sl is None:
+            return False
+        a_t = env._gaze_angle_to(sl["body"])
         if a_t is None:
             return False
-        if not getattr(env, "_toy2", False):
-            # 【F2-9C・2026-08-26】おもちゃが1個だけのとき（産出テスト）は
-            #   「近い方」の比較相手が居ないので角度だけで判定する。
+        # 【10択・2026-08-31】1個提示（solo）・スロット3個以上・おもちゃ1個の
+        #   ときは角度のみで判定（他は退避・透明なので「近い方」の比較は無意味）。
+        #   従来の2個並べ（solo無し）だけ margin 判定を残す（後方互換）。
+        if self.solo_presentation or len(slots) != 2 or not getattr(env, "_toy2", False):
             return a_t <= self.gaze_deg
+        other = "test_object2" if self._target == "toy1" else "test_object1"
         a_o = env._gaze_angle_to(other)
         if a_o is None:
             return False
@@ -270,6 +446,45 @@ class ParentLabeling:
         _mj.mju_mat2Quat(q, np.stack([ex, ey, ez], axis=1).ravel())
         return q
 
+    def _present_quat(self, env, shape):
+        """提示中のおもちゃの向き。板は絵の面を太郎へ（_face_quat）、
+        3D物体(asis)は**直立のまま顔（ローカル+x）だけ太郎へ**回す。
+
+        【V1b・2026-08-31・実測で発覚】_face_quat は板のUV補正でローカルzを
+        下に向けるため、z-up で組んだ3D物体（犬等）が**逆さま**に提示されていた
+        （F/logs/V1bプローブ/図_提示の問題.png。F2-19以降の全走行に影響）。
+        人間の親はおもちゃを立てて、顔を子に向けて見せる——その形にする。
+        """
+        if shape != "asis":
+            return self._face_quat(env)
+        import mujoco as _mj
+        cid = int(env.model.camera("eye_left").id)
+        fwd = -np.array(env.data.cam_xmat[cid], dtype=float).reshape(3, 3)[:, 2]
+        ex = -fwd
+        ex[2] = 0.0                       # 水平成分だけ＝直立を保つ（ヨー回転のみ）
+        n = np.linalg.norm(ex)
+        ex = ex / n if n > 1e-9 else np.array([1.0, 0.0, 0.0])
+        ez = np.array([0.0, 0.0, 1.0])
+        ey = np.cross(ez, ex)
+        # 【2026-08-31・ユーザー指摘】1アングル固定をやめる。人間の親は物を回して
+        #   いろんな面を見せる（ぼうし等は正面固定だと縁の線にしか見えない）。
+        #   提示中はゆっくり回し（1周約8秒）、やや手前に傾けて上面も見せる（25度）。
+        _ang = self.present_angles.get(str(self._target), {})
+        _yaw_deg = float(_ang.get("yaw", self.fixed_yaw_deg))
+        _tilt_deg = float(_ang.get("tilt", 25.0))
+        _spin = (2.0 * np.pi * float(env.data.time) / self.spin_period_sec
+                 if self.spin_period_sec > 0.0 else np.radians(_yaw_deg))
+        _c, _s = np.cos(_spin), np.sin(_spin)
+        ex2 = _c * ex + _s * ey
+        ey2 = -_s * ex + _c * ey
+        _tilt = np.radians(_tilt_deg)
+        _ct, _st = np.cos(_tilt), np.sin(_tilt)
+        ex3 = _ct * ex2 + _st * ez
+        ez3 = -_st * ex2 + _ct * ez
+        q = np.empty(4)
+        _mj.mju_mat2Quat(q, np.stack([ex3, ey2, ez3], axis=1).ravel())
+        return q
+
     def _apply_shake(self, env):
         """今振っているおもちゃの位置に、正弦波の揺れを加える（F1-3aの決定的検証と同条件）。
 
@@ -302,18 +517,14 @@ class ParentLabeling:
             base = getattr(env, "_rest_pos2", None)
         if base is None:
             return
-        if self._target == "toy1":
-            env._place(env._toy_qadr, np.array(base, dtype=float) + wob)
-            if self.follow_gaze:
-                env.data.qpos[env._toy_qadr + 3:env._toy_qadr + 7] = \
-                    self._face_quat(env)
-            env.data.qvel[env._toy_dadr:env._toy_dadr + 6] = 0.0
-        else:
-            env._place(env._obj2_qadr, np.array(base, dtype=float) + wob)
-            if self.follow_gaze:
-                env.data.qpos[env._obj2_qadr + 3:env._obj2_qadr + 7] = \
-                    self._face_quat(env)
-            env.data.qvel[env._obj2_dadr:env._obj2_dadr + 6] = 0.0
+        # 【10択・2026-08-31】書き込み先をスロット表から引く（toy1/toy2/toy5〜共通）
+        _sl = self._slots(env).get(self._target)
+        if _sl is None:
+            return
+        env._place(_sl["qadr"], np.array(base, dtype=float) + wob)
+        if self.follow_gaze:
+            env.data.qpos[_sl["qadr"] + 3:_sl["qadr"] + 7] = self._present_quat(env, _sl["shape"])
+        env.data.qvel[_sl["dadr"]:_sl["dadr"] + 6] = 0.0
 
     def _hide_other(self, env):
         """名指ししていない方のおもちゃを視界外へ退避させる（solo_presentation時のみ）。
@@ -327,16 +538,60 @@ class ParentLabeling:
         from e_toy_env import FAR_AWAY   # 循環import回避のため関数内で読む
         #   （e_toy_env側の `from parent_labeling import ...` と同じ素の名前で読む
         #    ＝E/scripts がsys.path上にある前提。読み込み済みの同一モジュールを指す）
-        if self._target == "toy1":
-            qadr, dadr = env._obj2_qadr, env._obj2_dadr
-        else:
-            qadr, dadr = env._toy_qadr, env._toy_dadr
+        # 【10択・2026-08-31】的以外の**全スロット**を退避＋透明化する
+        _slots = self._slots(env)
+        _others = [(k, v) for k, v in _slots.items() if k != self._target]
         # 【F2-9・2026-08-26】退避先を地面の下2mへ。以前の FAR_AWAY+[1,0,0]（地上5m先）
         #   は第三者視点のViewerで画角に映り込み、「2個同時に見える」ように見えた
         #   （ユーザーの目視報告→ヘッドレス録画で再現→geomダンプで特定）。
         #   太郎の視界からは元々消えていたので学習への影響はない（見た目だけの修正）。
-        env._place(qadr, FAR_AWAY + np.array([1.0, 0.0, -2.0]))
-        env.data.qvel[dadr:dadr + 6] = 0.0
+        if not hasattr(env, "_toy_alpha_backup"):
+            env._toy_alpha_backup = {}
+        for _i, (_k, _v) in enumerate(_others):
+            env._place(_v["qadr"], FAR_AWAY + np.array([1.0 + 0.5 * _i, 0.0, -2.0]))
+            env.data.qvel[_v["dadr"]:_v["dadr"] + 6] = 0.0
+            _adr = env.model.body_geomadr[_v["bid"]]
+            _num = env.model.body_geomnum[_v["bid"]]
+            for _g in range(_adr, _adr + _num):
+                if _g not in env._toy_alpha_backup:
+                    env._toy_alpha_backup[_g] = float(env.model.geom_rgba[_g, 3])
+                env.model.geom_rgba[_g, 3] = 0.0
+        # 【V1b・2026-08-31・実測で発覚】地下2mでも、床が視覚的に遮らない場面では
+        #   暗い影として見えていた（図_提示の問題.png③）。透明化を併用する。
+        #   復元は update() 冒頭で毎step全geomのαを戻してから隠し直す方式
+        #   ＝状態を持たないので取りこぼしが無い。
+
+    def _single_word(self, tgt):
+        """【親の言い直し・2026-09-03】正誤判定用の単独形。utterances[tgt]が
+        [[text, weight], ...] のリストなら最短のtext、文字列ならそのまま
+        （設計_親の言い直し.md 第2部の規約）。
+        """
+        u = self.utterances.get(tgt)
+        if isinstance(u, (list, tuple)):
+            if not u:
+                return ""
+            return min((str(text) for text, _ in u), key=len)
+        return u or ""
+
+    def _pick_text(self, env, tgt):
+        """セリフを1つ選ぶ（2026-08-31・二語文）。
+
+        utterances の値が文字列なら従来どおりそのまま。
+        [[セリフ, 重み], ...] のリストなら重みで1つ引く（毎回変わる）。
+        実測の裏付け：日本の親は「名詞+動詞（助詞省略）」「名詞+だよ」が典型で、
+        裸の名詞単独は18.4%（小椋・浜辺2021ほか、
+        F/docs/二語文/文献調査/2026-08-31_日本語の親の語りかけ.md）。
+        """
+        u = self.utterances.get(tgt)
+        if isinstance(u, (list, tuple)):
+            total = sum(float(w) for _, w in u)
+            r = float(env.np_random.random()) * total
+            for text, w in u:
+                r -= float(w)
+                if r <= 0.0:
+                    return text
+            return u[-1][0]
+        return u
 
     def _speak(self, env):
         """注視が確認できた瞬間。respond_probで実際に言うかを決め、言えば不応期へ入る。
@@ -348,7 +603,7 @@ class ParentLabeling:
             # 応えないと決めた回（既定respond_prob=1.0では起きない）＝黙って次の試行へ。
             self._state = self._PICK
             return None
-        text = self.utterances.get(self._target)
+        text = self._pick_text(env, self._target)
         result = {"text": text, "target": self._target}
         # 【F2-9・2026-08-26】発話バースト：言う瞬間に振りの位相を0へ戻し、
         #   1往復ぶん（1/shake_hz秒）だけ不応期に食い込んで振り続ける。
@@ -368,7 +623,25 @@ class ParentLabeling:
             self._silent_until = self.refractory_sec
         self._state = self._REFRACTORY
         self._silent_t = 0.0
+        self._repeats_left = self.repeat_labels
+        if self._repeats_left > 0:
+            self._silent_until = max(self._silent_until, self.repeat_gap_sec)
         return result
+
+    def _speak_repeat(self, env):
+        """【連呼】注視が続いているときの言い直し。言い回しは混合から引き直す。"""
+        text = self._pick_text(env, self._target)
+        self._shake_t = 0.0
+        self._speech_burst_t = 1.0 / self.shake_hz
+        self.n_utterances += 1
+        self.n_repeats += 1
+        self._repeats_left -= 1
+        self._silent_t = 0.0
+        self._silent_until = (self.repeat_gap_sec if self._repeats_left > 0
+                              else self.refractory_sec)
+        self._state = self._REFRACTORY
+        self._repeat_attempt = False
+        return {"text": text, "target": self._target, "cause": "repeat"}
 
 
 class WordSchedule:

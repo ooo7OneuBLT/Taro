@@ -263,14 +263,20 @@ class Trainer:
         呼ばないので、この上書きは何もしない。
         """
         t = self.taro
-        has_fovea = "eye_left_fovea" in o and "eye_right_fovea" in o
+        # 【案A・2026-08-31・設計やり直し（ユーザー指示）】lexicon_vision.source=
+        #   "wide" なら、認識には**周辺60度の画像まるごと1枚**を使う（中心窩カメラは
+        #   使わない・切り出しもしない）。人間の「1枚の網膜像・周辺込み・1本の処理」
+        #   に構造を合わせ、DINOの実行も1回で済む。既定（キー無し）は従来どおり。
+        _lv = getattr(self.cfg, "lexicon_vision", None) or {}
+        _wide = (_lv.get("source") == "wide") if isinstance(_lv, dict) else False
+        has_fovea = (not _wide) and "eye_left_fovea" in o and "eye_right_fovea" in o
         if has_fovea:
             img_l, img_r = o["eye_left_fovea"], o["eye_right_fovea"]
         else:
             img_l, img_r = o["eye_left"], o["eye_right"]
         backend = t.vision_backend
         old_fovea_px = None
-        has_fovea_px_attr = has_fovea and hasattr(backend, "fovea_px")
+        has_fovea_px_attr = (has_fovea or _wide) and hasattr(backend, "fovea_px")
         if has_fovea_px_attr:
             old_fovea_px = backend.fovea_px
             backend.fovea_px = 10 ** 9   # fovea_crop側のmin(fovea_px,h)でno-op化
@@ -327,6 +333,132 @@ class Trainer:
         return {"vision": fovea,
                 "peripheral": per.tolist() if hasattr(per, "tolist") else list(per)}
 
+    def _context_feed(self, speaker, token_ids, vision_vec=None):
+        """文脈（GRUの隠れ状態）へ発話を1本流す（2026-08-30・設計_文脈（コンテキスト）.md）。
+
+        speaker: "parent" か "self"。話者の印（決定3）を列の頭に付けて
+        forward_hidden に通し、持続する文脈 taro._context_hidden を更新する。
+        読み出し専用（no_grad）＝学習は1ビットも変えない。
+        produce.context=false（既定）では何もしない。
+        """
+        t = self.taro
+        if not getattr(t, "_context_enabled", False):
+            return
+        # 【範囲ガード・2026-08-30】produce_vocab.encode() は実行中に未知の文字
+        #   （「ゃ」等の拗音）へ新IDを動的に割り振るが、embedding は起動時の
+        #   サイズのまま伸びない。従来はそのIDが脳に入る経路が無く無害だったが、
+        #   文脈経路は脳へ直接食わせるので、口より大きいIDは門前で捨てる
+        #   （実測：「にゃんにゃん」の「ゃ」= id78 が embedding 78個で範囲外）。
+        _cap = t.brain.embedding.num_embeddings
+        ids = [t._context_speaker_ids[speaker]] + [int(i) for i in token_ids
+                                                   if int(i) < _cap]
+        # 【分節第2案・2026-09-03】設計_分節（語の切れ目の発見）.md 第2案 第2部
+        #   「EOSを足す」節。既定listen_eos=False では通らない＝1ビットも変わらない。
+        #   自己発話（speaker=="self"）は既に別経路でEOS付きのため対象外。
+        if speaker != "self" and getattr(t, "_listen_eos", False):
+            ids = ids + [2]
+        if ids[0] >= _cap:
+            return
+        x = torch.tensor([ids], dtype=torch.long, device=t.brain._device())
+        # 【V1・2026-08-31】視覚トークン：そのとき目に映っているものの要約を
+        #   変換層で64次元に翻訳し、列の頭に1トークンぶん添える
+        #   （設計_視覚とGRUの統合.md。vision_context無効なら常にNone＝従来どおり）。
+        _vin = None
+        if vision_vec is not None and getattr(t, "_visual_projection", None) is not None:
+            _vin = torch.tensor(list(vision_vec), dtype=torch.float32,
+                                device=t.brain._device())
+        # 【聞く学習・2026-08-31】発話を文脈に足す前に、その発話で1回学習する
+        #   （次トークン予測・誤差逆伝搬。形は目標Bの learn_perception と同じ、
+        #   違いは hidden=文脈 から始める点だけ＝発話をまたぐ依存を学べる）。
+        #   既定OFF（listen_learn無し）ではこのifを通らない＝挙動不変。
+        # 【2026-09-02・F2-46】listen_self=false なら太郎自身の発話では聞く学習を回さない
+        #   （F2-45で自己発話1,183回の半分が誤りで本体を汚染した疑い）。文脈への投入は従来どおり。
+        if (getattr(t, "_listen_learn", False) and len(ids) >= 2
+                and (speaker != "self" or getattr(t, "_listen_self", True))):
+            import torch.nn.functional as F
+            xin = torch.tensor([ids[:-1]], dtype=torch.long, device=t.brain._device())
+            tgt = torch.tensor([ids[1:]], dtype=torch.long, device=t.brain._device())
+            # 視覚トークンは勾配つきで作る（変換層も一緒に育つ）。
+            _pfx = t._visual_projection(_vin) if _vin is not None else None
+            out, _ = t.brain.forward_hidden(xin, hidden=t._context_hidden,
+                                            prefix_vec=_pfx)
+            if _pfx is not None:
+                out = out[:, 1:, :]      # 先頭＝視覚トークン位置の出力は損失に使わない
+            loss = F.cross_entropy(t.brain.perception_head(out)[0], tgt[0])
+            t._listen_optimizer.zero_grad()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(
+                (p_ for g in t._listen_optimizer.param_groups for p_ in g["params"]),
+                t._listen_grad_clip)
+            t._listen_optimizer.step()
+            # 【言語海馬・段階1・2026-09-01・設計_言語海馬と睡眠リプレイ.md】
+            #   聞いた瞬間、海馬に1回で焼き付ける（人間の海馬の性質）。
+            #   key_visは聞く学習ブロックがprefix_vecに使っている入力そのもの
+            #   （_pfx＝visual_projection後の64次元）を再利用する。新たな描画・
+            #   DINO呼び出しは追加しない。vision_context無効（_pfxがNone）の
+            #   ときは視覚キーが無いのでzerosで代用する（書き込み自体は行う。
+            #   speakerで語を分けたいだけの用途もあるため）。
+            #   既定OFF（language_hippocampus無し）ではこのifを通らない＝挙動不変。
+            #   【段階1の追加制約・2026-09-01】書き込むのは**親の発話だけ**。
+            #   実測で太郎自身の喃語・言い間違い（「にいんにうん」等）が44件中30件
+            #   書き込まれており、睡眠で再生すると誤りの自己増幅になるため。
+            #   自分の声のリハーサルは段階2以降で別途設計する（設計に追記済み）。
+            _is_parent = (getattr(t, "produce_vocab", None) is not None and
+                          ids[0] == t.produce_vocab.char2idx.get("<PARENT>", -1))
+            if getattr(t, "language_hippocampus", None) is not None and _is_parent:
+                _kv = (_pfx.detach().cpu().numpy() if _pfx is not None
+                       else np.zeros(t.brain.embedding.embedding_dim, dtype=np.float32))
+                # written_atは診断専用（recall等の測定用）。学習ループ本体の
+                # step変数はここまで届かないので、trainer側で持つ単純な連番でよい。
+                _wa = getattr(self, "_lang_hippo_step", 0)
+                t.language_hippocampus.write(_kv, ids[0], ids[1:], _wa)
+                self._lang_hippo_step = _wa + 1
+        with torch.no_grad():
+            _pfx2 = t._visual_projection(_vin) if _vin is not None else None
+            _, h = t.brain.forward_hidden(x, hidden=t._context_hidden,
+                                          prefix_vec=_pfx2)
+        t._context_hidden = h.detach()
+
+    def _ensure_brain_capacity(self):
+        """脳の名簿が入力口（embedding）を追い越していたら、入力口を伸ばす。
+
+        【なぜ・2026-08-31】新しい音を聞いた瞬間に名簿は増えるが、embedding は
+        起動時サイズのままだった。従来は「口に無い音は捨てる」ガードで凌いでいたが、
+        それは「にゃんにゃん」を「にんにん」に静かに変換していた（実測で発覚）。
+        人間は言えない音でも聞き分けられる（知覚＞産出）ので、聞いた音は全部
+        脳のトークンにし、入力口の側を伸ばす。既存の重みは resize_embedding が
+        先頭にコピーして保つ。伸びたら listen 学習の optimizer は古いパラメータを
+        掴んだままなので作り直す（掴み直さないと学習が静かに空振りする）。
+        """
+        t = self.taro
+        pv = t.produce_vocab
+        if pv.size <= t.brain.embedding.num_embeddings:
+            return
+        t.brain.resize_embedding(pv.size)
+        t.brain.set_vocab_mapping(pv.char2idx)
+        if getattr(t, "_listen_optimizer", None) is not None:
+            import itertools
+            _extra = (list(t._visual_projection.parameters())
+                      if getattr(t, "_visual_projection", None) is not None else [])
+            _params = itertools.chain(t.brain.embedding.parameters(),
+                                      t.brain.gru.parameters(),
+                                      t.brain.perception_head.parameters(),
+                                      _extra)
+            lr = t._listen_optimizer.param_groups[0]["lr"]
+            t._listen_optimizer = torch.optim.Adam(_params, lr=lr)
+
+    def _to_produce_ids(self, text):
+        """発話テキストを脳の語彙のID列にする（文脈・聞く学習用）。
+
+        【⓪・2026-08-31】以前は脳の語彙に無い文字（「ゃ」・カタカナ等）を捨てて
+        いたが、聞いた音は名簿に登録して入力口を伸ばす方式に変えた（知覚＞産出）。
+        長音の展開は耳と同じ規則。
+        """
+        from hearing import expand_long_vowel
+        ids = self.taro.produce_vocab.encode(expand_long_vowel(text))
+        self._ensure_brain_capacity()
+        return ids
+
     def _hear_parent_utterance(self, o, info):
         """親の発話（info["parent_utterance"]）を耳→連合器へ渡す（2026-08-18新設・F1-3）。
 
@@ -351,6 +483,17 @@ class Trainer:
         text = pu.get("text")
         tokens = t.hearing.hear(text)
         confidences = [1.0] * len(tokens)
+        # 【二語文・2026-08-31】分節の自信度を本物にする（produce.real_confidence、
+        #   既定false＝従来の1.0決め打ちのまま1ビットも変わらない）。
+        #   GRUの予測確率（文脈つき）を渡すと、語の境目で自信が谷になり
+        #   lexicon が発話を複数の単位に切り出せる（統計的分節・Saffran 1996）。
+        _pd = self.cfg.produce or {}
+        if bool(_pd.get("real_confidence", False)) and                 getattr(t, "produce_vocab", None) is not None:
+            _ids = self._to_produce_ids(text)
+            if len(_ids) == len(tokens):
+                _ps = t.brain.token_probs(_ids, hidden=t._context_hidden)
+                if len(_ps) == len(tokens):
+                    confidences = _ps
         # detach＝この統計（共起の平均）は学習の逆伝播に使わない値であるため
         #   （Lexiconは純Pythonの累積平均。計算グラフを持ち越さない）。
         # 【2026-08-19・F1-3b】視覚表現の作り方はt.vision_backend経由（差し替え可能）。
@@ -365,13 +508,60 @@ class Trainer:
         #   両側引き算に使う）。語彙にも想像にも触らない純粋な足し算で、
         #   すでに計算済みのstateを渡すだけ＝追加の計算コストはゼロ。
         t.lexicon.observe_view(state)
-        chunk = t.lexicon.observe(tokens, confidences, state=state)
+        # 【分節第2案・2026-09-03】設計_分節（語の切れ目の発見）.md 第2案 第2部
+        #   「切り出しの差し替え」節。既定segment_mode="valley"では_end_probsが
+        #   Noneのまま＝下のobserve呼び出しは従来と同じ2引数呼び出しになり
+        #   1ビットも変わらない。
+        _end_probs = None
+        if (getattr(t, "_segment_mode", "valley") == "end_prob"
+                and getattr(t, "produce_vocab", None) is not None
+                and getattr(t, "_context_speaker_ids", None) is not None):
+            _ids_ep = self._to_produce_ids(text)
+            if len(_ids_ep) == len(tokens):
+                _parent_id = t._context_speaker_ids.get("parent")
+                if _parent_id is not None:
+                    _ps_ep = t.brain.end_probs(_ids_ep, hidden=t._context_hidden,
+                                               start=_parent_id)
+                    if len(_ps_ep) == len(tokens):
+                        _end_probs = _ps_ep
+        if _end_probs is not None:
+            chunk = t.lexicon.observe(tokens, confidences, state=state,
+                                      end_probs=_end_probs, mode="end_prob")
+        else:
+            chunk = t.lexicon.observe(tokens, confidences, state=state)
         # 【なぜstateもここに置くか】word_learningプラグイン（読むだけ）が「正解物の
         #   特徴EMA」を作るのに使う（プラグインがtaro.fusionを呼び直すと二重計算に
         #   なるうえ、この瞬間のobs（o）はstep_kのK tick内の値でctx.last["obs_out"]
         #   より新しい＝取り直すと精度が落ちる）。
+        # 【親の言い直し・2026-09-03】設計の表には無いが、pu の cause/correct を
+        #   ここで落とすと word_learning.py の発話イベントCSVに載らなくなる
+        #   （検証で発覚）。pu に無ければ従来どおり None＝挙動不変。
         self._last_parent_events.append(
-            {"text": text, "target": pu.get("target"), "state": state})
+            {"text": text, "target": pu.get("target"), "state": state,
+             "cause": pu.get("cause"), "correct": pu.get("correct")})
+        # 【文脈・2026-08-30・設計_文脈（コンテキスト）.md 決定1〜3】親の発話を
+        #   文脈へ流す。親が見せる物（target）が変わったら場面の切り替わりと
+        #   みなして文脈をリセットする（決定1「場面ごと」）。既定OFFでは
+        #   _context_feed が最初のifで即returnし、1ビットも変わらない。
+        if getattr(t, "_context_enabled", False) and getattr(t, "produce_vocab", None) is not None:
+            _tgt = pu.get("target")
+            if t._context_last_target is not None and _tgt != t._context_last_target:
+                t._context_hidden = None
+            t._context_last_target = _tgt
+            # 【V1】聞く側にだけ視覚を添える（設計の分岐A＝案2。言う側はV3で）。
+            #   state は lexicon 用に計算済みの DINOv2 ベクトル（再計算なし）。
+            _vv = state.get("vision") if isinstance(state, dict) else state
+            self._context_feed("parent", self._to_produce_ids(text), vision_vec=_vv)
+        # 【発話の動機・2026-08-31】随伴の判定：自分が言った後、窓内に親の声が
+        #   来たら報酬1（正誤は見ない＝設計B'）。言わなかった決定は窓切れ（上のA）
+        #   で報酬0になる。social未設定なら不実行。
+        _sg = getattr(t, "_speech_gate", None)
+        if _sg is not None and getattr(t, "_social_pending", None) is not None:
+            _act, _t0 = t._social_pending
+            if _act and (self.ctx.sim_sec - _t0) <= float(
+                    t._social_cfg.get("window_sec", 2.0)):
+                _sg.resolve(True, 1.0, sim_sec=self.ctx.sim_sec)
+                t._social_pending = None
         # 【2026-08-19新設・F1-4b】語から注意への読み出し回路（設計：
         #   F/docs/設計_F1-4b_語から注意への読み出し回路.md 後半「部品2」）。
         #   cfg.word_attentionがNoneのままなら、この行自体を実行しない
@@ -453,6 +643,14 @@ class Trainer:
         orienting = getattr(self.env.unwrapped, "_orienting", None)
         if orienting is None:
             return          # 視線誘導反射が無効なら「注視している」を判定できない
+        # 【発話の動機・2026-08-31・設計_発話の動機.md】窓が切れた決定を報酬0で
+        #   締める（毎ステップ通るここで行う）。social未設定なら sg=None で不実行。
+        _sg = getattr(t, "_speech_gate", None)
+        if _sg is not None and t._social_pending is not None:
+            _act, _t0 = t._social_pending
+            if self.ctx.sim_sec - _t0 > float(t._social_cfg.get("window_sec", 2.0)):
+                _sg.resolve(_act, 0.0, sim_sec=self.ctx.sim_sec)
+                t._social_pending = None
 
         # ① 逆引き：いま見ている視覚ベクトル → 一番似ているchunk（言いたい語）。
         # 【F2-13・2026-08-28】lexicon_peripheral=True なら中心窩＋周辺視の
@@ -462,6 +660,79 @@ class Trainer:
         #   ここは毎ステップ通るので、産出中は太郎が見たものすべてが平均に入る。
         t.lexicon.observe_view(vec)
         chunk, sim = t.lexicon.reverse_lookup(vec)
+        # 【文脈・2026-08-30・設計_文脈（コンテキスト）.md 決定4】語の選択に
+        #   文脈の「言いやすさ」を足す：点数 = コサイン + λ × 幾何平均確率。
+        #   λ（produce.context_lambda・既定0.0）が0なら一切通らない＝従来どおり。
+        #   閾値の判定は選ばれた語の**コサイン側**で行う（0.80の較正を保つ）。
+        # 【2026-09-04・混乱防止】word_choice="gru_hippo"のときはこのブロックの
+        #   結果（chunk, sim）が直後の段階2ブロックで丸ごと上書きされ、λは
+        #   一切効かない（起動時に_setup_produceが組み合わせを検証して止める・
+        #   taro_setup.py参照）。無駄な計算を避けるためここでも通らないようにする。
+        _wc = pd.get("word_choice", "lexicon")
+        _lam = float(pd.get("context_lambda", 0.0))
+        if (_wc != "gru_hippo" and _lam > 0.0
+                and getattr(t, "_context_enabled", False)
+                and t._context_hidden is not None):
+            _scores = t.lexicon.reverse_scores(vec)
+            _best, _bestv = None, None
+            for _c, _cos in _scores.items():
+                _ids = self._to_produce_ids(t.hearing.vocab.decode(list(_c)))
+                _p = t.brain.sequence_prob(_ids, hidden=t._context_hidden)
+                _v = _cos + _lam * _p if _p is not None else _cos
+                if _bestv is None or _v > _bestv:
+                    _best, _bestv = _c, _v
+            if _best is not None:
+                chunk, sim = _best, _scores[_best]
+        # 【段階2・海馬の即答・2026-09-02・設計_言語海馬と睡眠リプレイ.md 段階2】
+        #   produce.word_choice="gru_hippo" のとき、語の選択を表（lexicon逆引き）から
+        #   「本体（GRU）自力 vs 海馬の想起」の2候補比較へ切り替える（既定"lexicon"＝従来不変）。
+        #     本体：視覚トークン＋<PARENT>から1音ずつ最尤に手繰った語。自信＝先頭音の確率
+        #     海馬：いまの視覚に最も似た記憶の語。自信＝似ている度×記憶の強さ×hippo_gain
+        #   自信の高い方を言う（人間側：定着語は皮質・新語は海馬。H.M.型）。
+        #   選ばれた自信を sim に入れ、以降の閾値判定（produce.threshold）はそのまま使う。
+        # 【2026-09-04・文脈の配線】これまでこの生成は常に hidden=None（ゼロ）から
+        #   始まり、聞く学習で育てた「文脈を使う能力」が発話時には一度も使われて
+        #   いなかった（コード精読で発覚。設計の誤りではなく配線の欠落）。
+        #   hidden=t._context_hidden を渡すことで、直前までの会話を出発点にする。
+        #   context無効（既定）では t._context_hidden は常にNoneのままなので、
+        #   この変更は文脈OFFの実験には1ビットも影響しない。
+        if (_wc == "gru_hippo" and vec is not None
+                and getattr(t, "_visual_projection", None) is not None
+                and getattr(t, "produce_vocab", None) is not None):
+            _pv = t.produce_vocab
+            _par = _pv.char2idx.get("<PARENT>")
+            _dev = t.brain._device()
+            _vin = torch.tensor(list(vec), dtype=torch.float32, device=_dev)
+            with torch.no_grad():
+                _key = t._visual_projection(_vin)
+                _out, _hh = t.brain.forward_hidden(
+                    torch.tensor([[_par]], dtype=torch.long, device=_dev),
+                    hidden=t._context_hidden, prefix_vec=_key)
+                _logits = t.brain.perception_head(_out)[0, -1]
+                _conf_g = float(torch.softmax(_logits, dim=-1).max())
+                _seq = []
+                for _ in range(int(pd.get("max_length", 8))):
+                    _tk = int(torch.argmax(_logits))
+                    if _tk == 2:
+                        break
+                    _seq.append(_tk)
+                    _out, _hh = t.brain.forward_hidden(
+                        torch.tensor([[_tk]], dtype=torch.long, device=_dev), hidden=_hh)
+                    _logits = t.brain.perception_head(_out)[0, -1]
+            _word_g = _pv.decode(_seq) if _seq else ""
+            _word_h, _conf_h = "", 0.0
+            _hip = getattr(t, "language_hippocampus", None)
+            if _hip is not None and len(_hip) > 0:
+                _toks, _simh, _str = _hip.recall_with_conf(_key.detach().cpu().numpy())
+                _word_h = _pv.decode(list(_toks)) if _toks else ""
+                _conf_h = float(pd.get("hippo_gain", 1.0)) * float(_simh) * float(_str)
+            if _word_h and _conf_h > _conf_g:
+                _word, sim, _src = _word_h, _conf_h, "hippo"
+            else:
+                _word, sim, _src = _word_g, _conf_g, "gru"
+            chunk = tuple(t.hearing.vocab.encode(_word)) if _word else None
+            self._last_choice = {"gru": [_word_g, round(_conf_g, 3)],
+                                 "hippo": [_word_h, round(_conf_h, 3)], "chosen": _src}
         if chunk is None:
             return
         # 【Tier3・2026-08-22】閾値はorienting_reflexの認識信号REC_THRESHOLD
@@ -485,10 +756,22 @@ class Trainer:
         if t._last_produce_sec is not None and (now - t._last_produce_sec) < cooldown_sec:
             return
 
+        # 【発話の動機・2026-08-31】言うかどうかの門。social未設定なら素通り
+        #   ＝従来どおり必ず言う。決定は（言った/言わなかった とも）記録し、
+        #   窓の結果（親の反応の有無）で学習する。
+        if _sg is not None:
+            if t._social_pending is not None:
+                return          # 直前の決定の結果待ち
+            _spoke = _sg.decide(self.env.unwrapped.np_random)
+            t._social_pending = (_spoke, now)
+            if not _spoke:
+                return
+
         # ---- ここからトリガー成立：② generate() で実際に発声する -----------------
         t._last_produce_sec = now
         target_word = t.hearing.vocab.decode(list(chunk))
         target_tokens = t.produce_vocab.encode(target_word)
+        self._ensure_brain_capacity()   # 【⓪】encodeで名簿が伸びたら入力口も伸ばす
         max_length = int(pd.get("max_length", 8))
 
         # 【F2-2・実装作業③・2026-08-23】ブローカ野で発話計画を立てる。
@@ -528,8 +811,10 @@ class Trainer:
         #   学習を有効にする（produce.learn=true）ときは探索が要るので、
         #   そのときだけ True にすること。
         _ne = t.ne.get_ne_level() if bool(pd.get("exploration_noise", False)) else 0.0
+        # 【2026-09-04・文脈の配線】gru_hippo経路と同じ理由でhidden=Noneを
+        #   t._context_hidden に変更（context無効なら常にNone＝挙動不変）。
         generated, log_probs, hidden = t.brain.generate(
-            hidden=None, max_length=max_length, eos_idx=2,
+            hidden=t._context_hidden, max_length=max_length, eos_idx=2,
             vocal_tract=t.produce_vocal_tract, ne_level=_ne,
             cerebellum=t.produce_cerebellum, speech_plan=t.produce_broca)
         generated_word = t.produce_vocab.decode(generated)
@@ -546,6 +831,15 @@ class Trainer:
             with torch.no_grad():
                 _, h = t.brain.forward_hidden(listen_input)
             t._produce_hidden = h
+            # 【文脈・2026-08-30・決定2・3】自分の発話も話者の印つきで文脈へ。
+            self._context_feed("self", generated)
+            # 【発話の動機・2026-08-31】声が出たことを世界（親）へ合図する。
+            #   親側は parent_labeling.update() がこれを拾って返事を予約する。
+            # 【親の言い直し・2026-09-03】合図は門（produce.social）の有無に関係なく立てる。
+            #   親側が respond_to_voice=False（既定）なら合図は読まれず、挙動は従来と同じ。
+            #   門の学習（応答で発話率が変わる）は言い直しとは別の機構なので分けて試す。
+            self.env.unwrapped._taro_voice_signal = True
+            self.env.unwrapped._taro_voice_text = generated_word   # 親の正誤判定用
 
         # 【F2-2・実装作業④・2026-08-23】報酬・学習は既定OFF（設計第2部決定1：
         #   「学習ではなく実行」。帳面が正解を持っているので学ぶものが無い）。
@@ -580,6 +874,7 @@ class Trainer:
         self.ctx.last_produce = {
             "target_word": target_word, "sim": float(sim),
             "generated_word": generated_word,
+            "choice": getattr(self, "_last_choice", None),
             "reward": float(reward) if reward is not None else None,
             "plan_length": int(plan_length), "known_moras": int(known_moras)}
 
@@ -797,10 +1092,58 @@ class Trainer:
         if cfg.goal_babbling and cfg.goal_space == "reach_self":
             self.taro.home_reach_goal = self.taro.encode_reach_goal(self.state["obs"]).detach()
 
+    # ------------------------------------------------------------ 睡眠（言語）
+    def _consolidate_language(self):
+        """言語海馬のリプレイ（段階1・2026-09-01・設計_言語海馬と睡眠リプレイ.md）。
+
+        海馬が無ければ何もしない＝既定OFF（produce.hippocampus無し）では
+        1行も実行されず挙動は不変。乱数は torch の既定Generatorのみを使う
+        （env.np_random は触らない＝決定性を壊さないため。設計「決定性の注意」）。
+        既存の聞く学習（_context_feed内、368〜385行相当）と同一の損失を、
+        エピソード単位でreplay_passes周まわす。lrは睡眠中だけsleep_lrに
+        差し替え、終わったら必ず元へ戻す。
+        """
+        t = self.taro
+        hippo = getattr(t, "language_hippocampus", None)
+        if hippo is None or len(hippo) == 0 or getattr(t, "_listen_optimizer", None) is None:
+            return
+        import torch.nn.functional as F
+        dev = t.brain._device()
+        opt = t._listen_optimizer
+        orig_lrs = [g["lr"] for g in opt.param_groups]
+        for g in opt.param_groups:
+            g["lr"] = hippo.sleep_lr
+        try:
+            for _ in range(hippo.replay_passes):
+                eps = hippo.sample(torch.default_generator, len(hippo))
+                perm = torch.randperm(len(eps)).tolist()
+                eps = [eps[i] for i in perm]
+                for ep in eps:
+                    ids = [ep["speaker"]] + list(ep["tokens"])
+                    if len(ids) < 2:
+                        continue
+                    xin = torch.tensor([ids[:-1]], dtype=torch.long, device=dev)
+                    tgt = torch.tensor([ids[1:]], dtype=torch.long, device=dev)
+                    pfx = torch.tensor(ep["key_vis"], dtype=torch.float32, device=dev)
+                    out, _ = t.brain.forward_hidden(xin, hidden=None, prefix_vec=pfx)
+                    out = out[:, 1:, :]      # 先頭＝視覚トークン位置は損失に使わない
+                    loss = F.cross_entropy(t.brain.perception_head(out)[0], tgt[0])
+                    opt.zero_grad()
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(
+                        (p_ for grp in opt.param_groups for p_ in grp["params"]),
+                        t._listen_grad_clip)
+                    opt.step()
+        finally:
+            for g, lr in zip(opt.param_groups, orig_lrs):
+                g["lr"] = lr
+        hippo.decay()
+
     # ------------------------------------------------------------ 睡眠
     def consolidate(self, n_batches=200, bs=128):
         """睡眠中の記憶定着：貯めた経験をバッチで再生し、予測経路を復習で固める。"""
         t = self.taro
+        self._consolidate_language()
         eps = t.hippo.replay()
         N = len(eps)
         if N < bs:

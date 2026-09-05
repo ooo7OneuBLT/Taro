@@ -646,6 +646,11 @@ class ToySupineEnv(SupineMimoEnv):
                  #   壁の無地部分を背にする高さへ上げるためのテスト専用パラメータ。
                  #   _set_anchor参照。既定0.0はsin(0)=0で従来位置と完全一致する。
                  toy_elev_deg=None, toy2_elev_deg=None,
+                 # 【10択・2026-08-31・設計_視覚とGRUの統合.md V1b】差し出し専用の
+                 #   軽量スロット。値はXML内のbody名のリスト（例：["test_object5",...]）。
+                 #   保持・アンカー・形状設定は持たない（常に退避・親が見せる瞬間だけ
+                 #   位置と向きを書かれる）。None（既定）なら1ビットも挙動が変わらない。
+                 present_slots=None,
                  toy_appear_delay=None, toy_approach_sec=None, toy_approach_from=None,
                  parent_intervene=None, parent_wait_sec=None, parent_lost_deg=None,
                  plain=None, static_tex=None, orient_v=None, orienting_hold=None,
@@ -1091,6 +1096,20 @@ class ToySupineEnv(SupineMimoEnv):
                 "test_object3/test_object4 を含むF専用シーン（4物体テスト用）を"
                 "使ってください（共有XMLのbenchmarkv2_scene.xmlには無い）。")
 
+        # 【10択・2026-08-31】差し出し専用スロットの登録（既定None＝空dict）。
+        self._present_slots = {}
+        for _k, _bname in enumerate(list(present_slots or [])):
+            _bid = _find_body_id(_bname)
+            if _bid is None:
+                raise ValueError(
+                    "present_slots に %r が指定されましたが、このシーンのXMLに"
+                    "そのbodyがありません（10択用XMLを使うこと）" % _bname)
+            _jadr = self.model.body(_bname).jntadr[0]
+            self._present_slots["toy%d" % (5 + _k)] = {
+                "bid": int(_bid), "body": _bname,
+                "qadr": int(self.model.jnt_qposadr[_jadr]),
+                "dadr": int(self.model.jnt_dofadr[_jadr])}
+
         # 【2026-08-18新設・F1-3】親のfollow-in labeling。parent_labeling未指定(None)なら
         #   ParentLabeling(enabled=False)になり、update()は毎stepNoneを返すだけ＝
         #   1ビットも既存の挙動を変えない。E/scripts/parent_labeling.py の本体を参照。
@@ -1453,6 +1472,11 @@ class ToySupineEnv(SupineMimoEnv):
         体積から出し直す点も同じ。toy1と違い、質量を個別指定する引数(toy_mass相当)は
         持たない＝「並べて見せる」用途で今のところ重さを効かせる実験が無いため。
         """
+        if shape == "asis":
+            # 【V1b・2026-08-31】XMLの形をそのまま使う（toy1のasisと同じ趣旨・
+            #   F/docs/設計_視覚とGRUの統合（表の卒業）.md V1b）。
+            #   形・大きさ・色・質量・慣性を一切書き換えない。
+            return
         if shape == "sphere":
             self.model.geom_type[gadr] = int(mujoco.mjtGeom.mjGEOM_SPHERE)
             self.model.geom_size[gadr] = [radius, 0.0, 0.0]
@@ -1915,6 +1939,16 @@ class ToySupineEnv(SupineMimoEnv):
         self.data.qvel[self._obj2_dadr:self._obj2_dadr + 6] = 0.0
         self.data.xfrc_applied[self._obj2_bid, :3] = 0.0
 
+    def _hold_present_slots(self):
+        """差し出しスロットを毎step退避位置へ置く（10択・2026-08-31）。
+
+        _hold_toy2 と同じ「毎step置き、親のupdate()が見せている1個だけを
+        上書きする」流儀。スロットが無ければ何もしない＝既存実験は不変。
+        """
+        for _k, _sl in enumerate(getattr(self, "_present_slots", {}).values()):
+            self._place(_sl["qadr"], FAR_AWAY + np.array([2.0 + 0.5 * _k, 0.0, -2.0]))
+            self.data.qvel[_sl["dadr"]:_sl["dadr"] + 6] = 0.0
+
     def _hold_toy3(self):
         """3個目のおもちゃ(toy3)を定位置に固定する（_hold_toy2と同じ流儀）。
 
@@ -1985,6 +2019,10 @@ class ToySupineEnv(SupineMimoEnv):
                 self.data.qvel[self._obj4_dadr:self._obj4_dadr + 6] = 0.0
             else:
                 self._place(self._obj4_qadr, FAR_AWAY + np.array([1.5, 0.0, 0.0]))
+        # 【10択・2026-08-31】差し出しスロットは常に退避から始める
+        for _k, _sl in enumerate(getattr(self, "_present_slots", {}).values()):
+            self._place(_sl["qadr"], FAR_AWAY + np.array([2.0 + 0.5 * _k, 0.0, -2.0]))
+            self.data.qvel[_sl["dadr"]:_sl["dadr"] + 6] = 0.0
         self.data.qvel[self._toy_dadr:self._toy_dadr + 6] = 0.0
         self.n_respawn += 1
         self.respawned_this_step = True
@@ -2048,8 +2086,11 @@ class ToySupineEnv(SupineMimoEnv):
             self._parent_labeling.reset()  # 【2026-08-18新設・F1-3】前エピソードの状態を持ち越さない
         if getattr(self, "_word_schedule", None) is not None:
             self._word_schedule.reset()    # 【2026-08-21新設・F1-4h】同上（試行の頭出し）
-        if self._toy and not self._toy_shape.startswith("plate:"):
+        if self._toy and not self._toy_shape.startswith("plate:") and self._toy_shape != "asis":
             # 【F2-9C】イラスト板は色を塗らない（テクスチャに赤が乗算されて絵が潰れる）
+            # 【2026-09-03・F2-49で発覚】asis（XMLで色・テクスチャを持つ物）も塗らない。
+            #   起動時（上）は除外していたが reset では除外が抜けており、枠toy1の実物
+            #   スキャン（靴）が毎エピソード赤に染まっていた（F2-19以降の全走行に影響）。
             self.model.geom_rgba[self._toy_gadr] = self._toy_rgba_off
             self.toy_lit = False
         mujoco.mj_forward(self.model, self.data)
@@ -2112,6 +2153,7 @@ class ToySupineEnv(SupineMimoEnv):
         self._carry_toy()          # 親がおもちゃを運んでくる（登場を遅らせる仕組み）
         self._apply_tether()
         self._hold_toy2()          # 2個目のおもちゃ（toy2=False なら何もしない）
+        self._hold_present_slots()  # 【10択】差し出しスロット（無ければ何もしない）
         self._hold_toy3()          # 3個目のおもちゃ（2026-08-25新設・toy3=False/無しなら何もしない）
         self._hold_toy4()          # 4個目のおもちゃ（同上）
         # 【2026-08-18新設・F1-3】親のfollow-in labeling。_hold_toy2の直後に呼ぶ
@@ -2476,8 +2518,8 @@ class ToySupineEnv(SupineMimoEnv):
         """
         if not self._toy:
             return
-        if self._toy_shape.startswith("plate:"):
-            return      # 【F2-9C】イラスト板は接触発光なし（絵が赤/黄に潰れるため）
+        if self._toy_shape.startswith("plate:") or self._toy_shape == "asis":
+            return      # 【F2-9C】イラスト板は接触発光なし（絵が赤/黄に潰れるため）。asis も同じ（2026-09-03）
         if any(c != "world" for c in self.toy_contacts()):
             self._glow_until = float(self.data.time) + GLOW_HOLD_S
         lit = float(self.data.time) < getattr(self, "_glow_until", -1e9)

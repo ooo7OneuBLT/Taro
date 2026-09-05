@@ -70,6 +70,10 @@ class WordProduction(Plugin):
             "toy": toy if toy is not None else "",
             "target_word": ev["target_word"], "sim": round(ev["sim"], 4),
             "generated_word": ev["generated_word"],
+            # 【段階2・2026-09-02】語の選択の内訳（gru_hippo方式のときだけ入る）
+            "choice_gru": (ev.get("choice") or {}).get("gru"),
+            "choice_hippo": (ev.get("choice") or {}).get("hippo"),
+            "chosen": (ev.get("choice") or {}).get("chosen"),
             "reward": round(reward, 4) if reward is not None else "",
             "plan_length": plan_length if plan_length is not None else "",
             "known_moras": known_moras if known_moras is not None else "",
@@ -97,11 +101,13 @@ class WordProduction(Plugin):
                 w = csv.writer(fp)
                 w.writerow(["step", "sim_sec", "toy", "target_word", "sim",
                            "generated_word", "reward", "plan_length",
-                           "known_moras", "exact_match"])
+                           "known_moras", "exact_match",
+                           "choice_gru", "choice_hippo", "chosen"])
                 for r in self.rows:
                     w.writerow([r["step"], r["sim_sec"], r["toy"], r["target_word"],
                                r["sim"], r["generated_word"], r["reward"],
-                               r["plan_length"], r["known_moras"], r["exact_match"]])
+                               r["plan_length"], r["known_moras"], r["exact_match"],
+                               r.get("choice_gru"), r.get("choice_hippo"), r.get("chosen")])
         exact = [r for r in self.rows if r["exact_match"]]
         return {
             "発話回数": len(self.rows),

@@ -416,6 +416,16 @@ def _setup_produce(taro, cfg, env, *, verbose=True):
         #   _apply_word_productionが最初のifで即returnし、既存実験の挙動は
         #   1ビットも変わらない。設計：F/docs/設計_F2-2_見た物の名前を言う.md 第4部②。
         taro.produce_broca = None
+        # 【文脈・2026-08-30】既定OFFでは文脈も無し（設計_文脈（コンテキスト）.md）。
+        taro._context_enabled = False
+        taro._context_hidden = None
+        taro._context_last_target = None
+        taro._context_speaker_ids = None
+        taro._speech_gate = None
+        taro._social_cfg = None
+        taro._social_pending = None
+        taro._visual_projection = None
+        taro.language_hippocampus = None
         return
     from vocal_tract import VocalTract
     from hearing import Vocabulary
@@ -460,10 +470,101 @@ def _setup_produce(taro, cfg, env, *, verbose=True):
         vt.force_decouple()
     taro.produce_vocal_tract = vt
     pv = Vocabulary()
+    # 【⓪・2026-08-31・設計_二語文へ】保存済みの脳の名簿があれば**同じ番号で**復元
+    #   する（embedding の行と番号の対応がずれると学習済みの重みが壊れるため）。
+    #   その上で口の音を足す（復元済みなら全部 no-op）。聞いた音は今後、実行中に
+    #   動的に足される（trainer の _ensure_brain_capacity）。
+    _pbv = getattr(taro, "_pending_brain_vocab", None)
+    if _pbv is not None:
+        pv.char2idx = dict(_pbv["char2idx"])
+        pv.idx2char = {int(i): c for c, i in pv.char2idx.items()}
+        pv.size = max(pv.idx2char) + 1
     for ch in vt.get_all_chars():
         pv.encode(ch)
+    # 【文脈・2026-08-30・設計_文脈（コンテキスト）.md 決定3】話者の印。
+    #   produce.context=true のときだけ語彙に2トークン足す。既定falseでは
+    #   語彙サイズが変わらない＝embeddingも知覚ヘッドも従来と同じ形＝
+    #   generate()のsoftmaxの分母も変わらず、既存実験は1ビットも変わらない。
+    #   （常に足すと、使わなくてもlogitが2本増えて全産出の確率が微妙に動く）
+    taro._context_enabled = bool(pd.get("context", False))
+    taro._context_hidden = None
+    taro._context_last_target = None
+    taro._context_speaker_ids = None
+    if taro._context_enabled:
+        taro._context_speaker_ids = {"parent": pv.add_special("<PARENT>"),
+                                     "self": pv.add_special("<SELF>")}
     taro.brain.resize_embedding(pv.size)
     taro.brain.set_vocab_mapping(pv.char2idx)
+    # 【聞く学習・2026-08-31・設計_文脈（コンテキスト）.md 追補】聞いた発話の
+    #   次トークン予測でGRUを学習する。学習率・クリップ・損失の形は目標Bの実績値
+    #   （B/src/taro/brain/basal_ganglia.py:23-49, lr既定0.005）をそのまま借りる。
+    #   更新するのは embedding・GRU・知覚ヘッドだけ（調音ヘッドには触れない＝
+    #   喃語で作った発話回路を直接は動かさない。共有GRU経由の間接影響は
+    #   産出テストの完全一致率で監視する）。
+    #   既定OFF（produce.listen_learn 無し）では optimizer も作らない＝挙動不変。
+    #   optimizer は resize_embedding の**後**に作ること（resizeはモジュールを
+    #   丸ごと差し替えるので、先に作ると古いパラメータを掴んで学習が空振りする）。
+    # 【V1・2026-08-31・設計_視覚とGRUの統合.md】視覚トークンの変換層。
+    #   produce.vision_context=true のときだけ作る（既定false＝1ビットも変わらない）。
+    #   listen optimizer より先に作ること（学習対象に入れるため）。
+    taro._visual_projection = None
+    if bool(pd.get("vision_context", False)):
+        from cerebral_cortex.visual_projection import VisualProjection
+        taro._visual_projection = VisualProjection(
+            in_dim=384, out_dim=taro.brain.embedding.embedding_dim)
+        _pvp = getattr(taro, "_pending_visual_projection", None)
+        if _pvp is not None:
+            taro._visual_projection.load_state_dict(_pvp)
+    # 【2026-09-04・混乱防止】word_choice="gru_hippo"では、λブレンド（決定4）の
+    #   結果は段階2ブロックに丸ごと上書きされ、context_lambdaは一切効かない
+    #   （run/trainer.py _apply_word_production参照）。効かない値を設定したまま
+    #   気づかない「設定が静かに無視される」事故（過去5件目相当）を防ぐため、
+    #   起動時に組み合わせを検証して止める。
+    if (str(pd.get("word_choice", "lexicon")) == "gru_hippo"
+            and float(pd.get("context_lambda", 0.0)) != 0.0):
+        raise ValueError(
+            "produce.word_choice='gru_hippo' のとき produce.context_lambda は"
+            "効きません（段階2の選択がλブレンドの結果を上書きするため）。"
+            "context_lambdaを0にするか、word_choiceを'lexicon'にすること。")
+    taro._listen_learn = bool(pd.get("listen_learn", False))
+    # 【分節第2案・2026-09-03】設計_分節（語の切れ目の発見）.md 第2案 第2部
+    #   「listen_eos」節。既定False＝聞く学習の列にEOSを足さない＝1ビットも変わらない。
+    taro._listen_eos = bool(pd.get("listen_eos", False))
+    # 【分節第2案・2026-09-03】同上「segment_mode」節。既定"valley"＝従来の
+    #   real_confidence の谷のまま（"end_prob"にすると第2案の切り出しに変わる）。
+    taro._segment_mode = str(pd.get("segment_mode", "valley"))
+    taro._listen_optimizer = None
+    taro._listen_grad_clip = float(pd.get("listen_grad_clip", 1.0))
+    taro._listen_self = bool(pd.get("listen_self", True))   # 既定True＝従来どおり自己発話でも学ぶ
+    if taro._listen_learn:
+        if not taro._context_enabled:
+            raise ValueError(
+                "produce.listen_learn=true には produce.context=true が必要"
+                "（聞く学習は文脈のhiddenから予測を始める設計。設計追補参照）。")
+        import itertools
+        _extra = (list(taro._visual_projection.parameters())
+                  if taro._visual_projection is not None else [])
+        _params = itertools.chain(taro.brain.embedding.parameters(),
+                                  taro.brain.gru.parameters(),
+                                  taro.brain.perception_head.parameters(),
+                                  _extra)
+        taro._listen_optimizer = torch.optim.Adam(
+            _params, lr=float(pd.get("listen_lr", 0.005)))
+    # 【言語海馬・段階1・2026-09-01・設計_言語海馬と睡眠リプレイ.md】
+    #   produce.hippocampus が無ければ None＝run/trainer.pyの新しい分岐は
+    #   一度も実行されない＝既存実験の挙動は1ビットも変わらない。
+    taro.language_hippocampus = None
+    if pd.get("hippocampus") is not None:
+        # 【なぜこのパス、2026-09-01】brain/hippocampus.py（MotorHippocampus、
+        #   recurrent_core_motor.pyがfrom hippocampus importで参照）と同名の
+        #   パッケージ brain/hippocampus/ を作ると、sys.pathでbrain直下がフラット
+        #   import対象になっているため既存importを覆い隠して壊す（実測で発覚）。
+        #   衝突を避け brain/language_hippocampus/ に置いた。
+        from language_hippocampus.language_hippocampus import LanguageHippocampus
+        taro.language_hippocampus = LanguageHippocampus(pd.get("hippocampus"))
+        _plh = getattr(taro, "_pending_language_hippocampus", None)
+        if _plh is not None:
+            taro.language_hippocampus.load_state_dict(_plh)
     taro.produce_vocab = pv
     # 【設計「⚠学習器の共有」案a】運動学習(taro.learner)とは別インスタンス。
     #   generate()が使うtaro.brainのパラメータ（embedding/gru＝音声用でmotor_gruとは
@@ -475,6 +576,23 @@ def _setup_produce(taro, cfg, env, *, verbose=True):
     #   （run/trainer.py _apply_word_production参照）。
     taro.produce_learner = TaroLearner(taro.brain, lr=float(pd.get("lr", cfg.lr)))
     taro.produce_dop = Dopamine()
+    # 【発話の動機・2026-08-31・設計_発話の動機.md】言う確率πの門。
+    #   produce.social が無ければ None＝trainer の新経路は1行も実行されない。
+    #   保存済みモデルに門があれば（_pending_speech_gate）復元する。
+    taro._social_cfg = pd.get("social")
+    taro._speech_gate = None
+    taro._social_pending = None
+    if taro._social_cfg is not None:
+        from subcortical_nuclei.speech_gate import SpeechGate
+        sc = taro._social_cfg
+        taro._speech_gate = SpeechGate(
+            init_prob=float(sc.get("init_prob", 0.9)),
+            lr=float(sc.get("gate_lr", 0.5)),
+            dopamine=Dopamine(),
+            speak_cost=float(sc.get("speak_cost", 0.1)))
+        _pending_sg = getattr(taro, "_pending_speech_gate", None)
+        if _pending_sg is not None:
+            taro._speech_gate.load_state(_pending_sg)
     taro._last_produce_sec = None
     # 【F2-1・実装作業③・2026-08-23】発話小脳（口の動き→音の帳面）。
     #   generate()は既に cerebellum= を受け取れる（taro_brain.py:177-179、
@@ -627,6 +745,14 @@ class Taro:
         if cfg.vision:
             from e_toy_env import VISION_RES
             vres = VISION_RES
+            # 【2026-09-02・F2-44】シーンの body.vision_px で目の解像度を変えたとき、
+            #   体側の視覚エンコーダ（VisionEncoder）は画像サイズ依存なので、定数でなく
+            #   実際の眼球カメラの一辺から組む（従来128なら同値＝挙動不変）。
+            _vp = getattr(getattr(env, 'unwrapped', env), 'vision_params', None) or {}
+            if isinstance(_vp.get('eye_left'), dict) and _vp['eye_left'].get('width'):
+                vres = int(_vp['eye_left']['width'])
+                if verbose and vres != VISION_RES:
+                    print(f'[vision] 眼球カメラ {vres}px に合わせて視覚エンコーダを構築（既定{VISION_RES}）', flush=True)
 
         # ---- 体性感覚系（触覚ONのときだけ）----------------------------------
         touch_map = None
@@ -892,7 +1018,16 @@ class Taro:
         blob = torch.load(path, map_location="cpu", weights_only=False)
         if verbose:
             print(f"続きから学習：{os.path.basename(path)} を読み込み", flush=True)
+        # 【⓪・2026-08-31】聞く学習で育った embedding（78〜80行以上）は、構築時の
+        #   3行と形が合わず _match で**静かにスキップ**されていた（触覚の読み戻し
+        #   忘れ 2026-07-30 と同型。F2-21の鎖30本で毎回白紙に戻っていたのを実測で
+        #   発見）。保存時のサイズへ先に伸ばしてから読む。
+        _bemb = blob["brain"].get("embedding.weight")
+        if _bemb is not None and _bemb.shape[0] > self.brain.embedding.num_embeddings:
+            self.brain.resize_embedding(int(_bemb.shape[0]))
         _match(self.brain, blob["brain"], "脳")
+        # 【⓪】脳の名簿（トークン↔番号）も退避（_setup_produce が同じ番号で再現する）
+        self._pending_brain_vocab = blob.get("brain_vocab")
         self.fusion.insula.load_state_dict(blob["fusion_insula"])
         self.fusion.proprio.load_state_dict(blob["fusion_proprio"])
         self.fusion.vestibular.load_state_dict(blob["fusion_vestibular"])
@@ -948,6 +1083,11 @@ class Taro:
                 self.lexicon.counts = lx["counts"]
                 self.lexicon.state_sum = lx["state_sum"]
                 self.lexicon.min_len = lx["min_len"]
+                # 【分節第2案・2026-09-03】設計_分節（語の切れ目の発見）.md 第2案
+                #   第2部「発話まるごとの記録」節。旧保存にはキーが無いので空辞書。
+                self.lexicon.utterance_counts = lx.get("utterance_counts", {})
+                self.lexicon.end_prob_sum = float(lx.get("end_prob_sum", 0.0))   # 【分節第2案】走行平均も引き継ぐ
+                self.lexicon.end_prob_n = int(lx.get("end_prob_n", 0))
                 # 【F1-5・2026-08-21】旧blob（mode/protoキー無し）はそのまま
                 #   sumモード・proto空辞書として復元される（従来どおり）。
                 if "mode" in lx:
@@ -981,6 +1121,12 @@ class Taro:
         #   taro_setup.py の _setup_produce docstring参照）。ここでは blob の中身を
         #   一時属性へ退避するだけにして、_setup_produce が Cerebellum() を
         #   作った直後にそこへ流し込む。
+        # 【発話の動機・2026-08-31】門の退避（_setup_produce が作った直後に流し込む）
+        self._pending_speech_gate = blob.get("speech_gate")
+        self._pending_visual_projection = blob.get("visual_projection")
+        # 【言語海馬・段階1・2026-09-01】visual_projectionと同じ流儀
+        #   （_setup_produceがLanguageHippocampusを作った直後に流し込む）。
+        self._pending_language_hippocampus = blob.get("language_hippocampus")
         if "produce_cerebellum" in blob:
             self._pending_produce_cerebellum = blob["produce_cerebellum"]
             if verbose:
@@ -1347,7 +1493,12 @@ class Taro:
             blob["lexicon"] = {"counts": self.lexicon.counts,
                                 "state_sum": self.lexicon.state_sum,
                                 "state_dim": self.lexicon.state_dim,
-                                "min_len": self.lexicon.min_len}
+                                "min_len": self.lexicon.min_len,
+                                # 【分節第2案・2026-09-03】設計_分節（語の切れ目の
+                                #   発見）.md 第2案 第2部「発話まるごとの記録」節。
+                                "utterance_counts": self.lexicon.utterance_counts,
+                                "end_prob_sum": float(getattr(self.lexicon, "end_prob_sum", 0.0)),
+                                "end_prob_n": int(getattr(self.lexicon, "end_prob_n", 0))}
             # 【F1-5・2026-08-21】mode/protoは既定sumモードでは追加しない
             #   （旧blobとバイト互換を維持する。落とし穴メモリ「新キーは条件付きで」
             #   と同じ流儀。設計：F/docs/設計_F1-5_連合器の対照学習化.md）。
@@ -1380,6 +1531,29 @@ class Taro:
         #   モデルが帳面を持っていれば（_pending_produce_cerebellum）、それを
         #   素通しして保存する。produce_cerebellumインスタンス自体が無い（OFF）
         #   からといって帳面まで捨てない（作業A本体、上のOFF分岐のコメント参照）。
+        # 【発話の動機・2026-08-31】門の保存。無ければ1キーも足さない
+        #   （発話小脳と同じ流儀）。読み込んだモデルが門を持ち、今回OFFでも素通し。
+        # 【⓪・2026-08-31】脳の名簿の保存（produce有効時のみ。無ければキーを足さない）
+        if getattr(self, "produce_vocab", None) is not None:
+            blob["brain_vocab"] = {"char2idx": dict(self.produce_vocab.char2idx)}
+        # 【V1】視覚投射の保存（無ければキーを足さない流儀）
+        _pending_vp = getattr(self, "_pending_visual_projection", None)
+        if getattr(self, "_visual_projection", None) is not None:
+            blob["visual_projection"] = self._visual_projection.state_dict()
+        elif _pending_vp is not None:
+            blob["visual_projection"] = _pending_vp
+        # 【言語海馬・段階1・2026-09-01】無ければキーを足さない流儀
+        #   （visual_projectionと同じ。既定OFFではblobはバイト互換のまま）。
+        _pending_lh = getattr(self, "_pending_language_hippocampus", None)
+        if getattr(self, "language_hippocampus", None) is not None:
+            blob["language_hippocampus"] = self.language_hippocampus.state_dict()
+        elif _pending_lh is not None:
+            blob["language_hippocampus"] = _pending_lh
+        _pending_sg = getattr(self, "_pending_speech_gate", None)
+        if getattr(self, "_speech_gate", None) is not None:
+            blob["speech_gate"] = self._speech_gate.state()
+        elif _pending_sg is not None:
+            blob["speech_gate"] = _pending_sg
         _pending_pc = getattr(self, "_pending_produce_cerebellum", None)
         if self.produce_cerebellum is not None:
             pc = self.produce_cerebellum

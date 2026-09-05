@@ -1,0 +1,47 @@
+{
+  "name": "F2-20_10語_テスト_りんご4",
+  "note": "2026-08-30 F2-20 テスト。学習に使っていない りんご4 で言わせる。",
+  "scene": "座位_12ヶ月_F2-20_10語_りんご4_2026-08-30",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 12.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32,
+      "eye": "left"
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.0,
+    "model": "F/models/F2-20_10語_3周目_ぼうし_seed10_2026-08-30.pt",
+    "produce": {
+      "mode": "word",
+      "threshold": 0.15,
+      "cooldown_sec": 2.0,
+      "max_length": 8,
+      "develop_from_age": true,
+      "vocal_tract_decoupled": true
+    },
+    "save": "F/models/_F2-20_10語_test_apple4.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 1000,
+    "seed": 10,
+    "K": 10,
+    "checkpoint": 1000,
+    "csv": "F/logs/F2-20_10語_テスト/りんご4/run.csv"
+  },
+  "plugins": {
+    "word_production": {
+      "events_out": "F/logs/F2-20_10語_テスト/りんご4/発話イベント.csv"
+    },
+    "produce_snapshot": {
+      "out_dir": "F/logs/F2-20_10語_テスト/りんご4/中心窩",
+      "full_dir": "F/logs/F2-20_10語_テスト/りんご4/両目",
+      "max_images": 20
+    }
+  }
+}

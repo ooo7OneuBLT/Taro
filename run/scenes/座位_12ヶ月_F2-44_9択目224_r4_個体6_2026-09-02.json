@@ -1,0 +1,461 @@
+{
+ "name": "座位_12ヶ月_F2-44_9択目224_r4_個体6_2026-09-02",
+ "note": "2026-09-02 F2-44 ラウンド4。F2-43（回転なし＋一巡）＋目の解像度128→224画素・中心窩カメラOFF（案A・DINO内部は元々224）。",
+ "created": "2026-08-24",
+ "schema": 1,
+ "body": {
+  "age_months": 12.0,
+  "shape": true,
+  "shape_scales": null,
+  "head_elongation": null,
+  "flexion": true,
+  "flexion_stiffness": null,
+  "joint_compliance": false,
+  "joint_compliance_groups": null,
+  "joint_compliance_joints": null,
+  "joint_compliance_params": null,
+  "limb_scale": 10.0,
+  "limb_fix": true,
+  "distal_mass": 1.0,
+  "neck_fix": true,
+  "eye_rest_vertical_deg": 0.0,
+  "eye_centering": true,
+  "orienting_version": 2,
+  "orienting_hold": true,
+  "eye_muscle_scale": 3.0,
+  "fovea_camera": false,
+  "vergence": true,
+  "acuity_filter": false,
+  "vision_px": 224
+ },
+ "world": {
+  "recline_deg": 0.0,
+  "seat_friction": 2.0,
+  "fence": false,
+  "plain": true,
+  "floor_dim": 1.0,
+  "static_tex": false,
+  "floor_roll": null,
+  "floor_condim": null,
+  "toy": {
+   "enabled": true,
+   "shape": "asis",
+   "radius": 0.04,
+   "mode": "hold",
+   "dist": 0.3,
+   "delay_sec": 0.0,
+   "approach_sec": 0.5,
+   "approach_from": "above"
+  },
+  "toy2": {
+   "enabled": false,
+   "shape": "asis",
+   "radius": 0.04,
+   "dist": 0.3,
+   "angle_deg": 0.0
+  },
+  "parent_intervene": true,
+  "parent_wait_sec": 2.0,
+  "parent_lost_deg": 25.0,
+  "parent_labeling": {
+   "enabled": true,
+   "shake_amp_m": 0.01,
+   "shake_hz": 3.0,
+   "gaze_deg": 10.0,
+   "gaze_margin_deg": 3.0,
+   "gaze_hold_sec": 3.0,
+   "attract_timeout_sec": 12.0,
+   "utterances": {
+    "toy1": [
+     [
+      "わんわんだね",
+      0.2733333333333334
+     ],
+     [
+      "わんわんだよ",
+      0.2733333333333334
+     ],
+     [
+      "わんわんいるね",
+      0.2733333333333334
+     ],
+     [
+      "わんわん",
+      0.18
+     ]
+    ],
+    "toy5": [
+     [
+      "ぶーぶーだね",
+      0.41000000000000003
+     ],
+     [
+      "ぶーぶーだよ",
+      0.41000000000000003
+     ],
+     [
+      "ぶーぶー",
+      0.18
+     ]
+    ],
+    "toy6": [
+     [
+      "でんしゃだね",
+      0.41000000000000003
+     ],
+     [
+      "でんしゃだよ",
+      0.41000000000000003
+     ],
+     [
+      "でんしゃ",
+      0.18
+     ]
+    ],
+    "toy7": [
+     [
+      "りんごだね",
+      0.41000000000000003
+     ],
+     [
+      "りんごだよ",
+      0.41000000000000003
+     ],
+     [
+      "りんご",
+      0.18
+     ]
+    ],
+    "toy8": [
+     [
+      "ボールだね",
+      0.41000000000000003
+     ],
+     [
+      "ボールだよ",
+      0.41000000000000003
+     ],
+     [
+      "ボール",
+      0.18
+     ]
+    ],
+    "toy9": [
+     [
+      "くつだね",
+      0.41000000000000003
+     ],
+     [
+      "くつだよ",
+      0.41000000000000003
+     ],
+     [
+      "くつ",
+      0.18
+     ]
+    ],
+    "toy10": [
+     [
+      "ばななだね",
+      0.41000000000000003
+     ],
+     [
+      "ばななだよ",
+      0.41000000000000003
+     ],
+     [
+      "ばなな",
+      0.18
+     ]
+    ],
+    "toy11": [
+     [
+      "コップだね",
+      0.41000000000000003
+     ],
+     [
+      "コップだよ",
+      0.41000000000000003
+     ],
+     [
+      "コップ",
+      0.18
+     ]
+    ],
+    "toy12": [
+     [
+      "ぼうしだね",
+      0.41000000000000003
+     ],
+     [
+      "ぼうしだよ",
+      0.41000000000000003
+     ],
+     [
+      "ぼうし",
+      0.18
+     ]
+    ]
+   },
+   "respond_prob": 1.0,
+   "refractory_sec": 1.0,
+   "shuffle_refractory_sec": 3.0,
+   "shuffle_after": 5,
+   "solo_presentation": true,
+   "shake_pause_sec": 2.0,
+   "follow_gaze": true,
+   "follow_dist": 0.3,
+   "follow_speed": 1.75,
+   "repeat_labels": 2,
+   "repeat_gap_sec": 1.0,
+   "spin_period_sec": 0.0,
+   "fixed_yaw_deg": 30.0,
+   "cycle_pick": true
+  },
+  "xml": "MIMo/mimoEnv/assets/f40_10way_r4.xml",
+  "present_slots": [
+   "test_object5",
+   "test_object6",
+   "test_object7",
+   "test_object8",
+   "test_object9",
+   "test_object10",
+   "test_object11",
+   "test_object12"
+  ]
+ },
+ "setup": {
+  "neck_tone": {
+   "target_deg": -45.0,
+   "stiffness": 0.4
+  },
+  "limb_tone": {
+   "hold_deg": 20.0,
+   "groups": [
+    "arm",
+    "leg"
+   ]
+  },
+  "head_hold": null,
+  "body_support": {
+   "stiffness": 200,
+   "free": [],
+   "pin_joints": true,
+   "pin_root": true
+  }
+ },
+ "state": {
+  "qpos": [
+   -0.5660573056977782,
+   -0.033650301587863043,
+   0.39998239965488736,
+   1.0,
+   0.0,
+   0.0,
+   0.0,
+   -0.5664998667378878,
+   0.04949072920512238,
+   0.39804938982626403,
+   1.0,
+   0.0,
+   0.0,
+   0.0,
+   -0.07585371867784985,
+   0.0038353156558825663,
+   -0.0017603738652945677,
+   0.7786972886827315,
+   0.00435638118535918,
+   -0.627374882235239,
+   -0.0035088005715799577,
+   0.017453292519943295,
+   0.0,
+   0.12217304763960307,
+   0.017453292519943295,
+   0.0,
+   0.33161255787892263,
+   0.0,
+   -0.017453292519943295,
+   0.5934119456780721,
+   0.5934119456780721,
+   0.47123889803846897,
+   -1.1344640137963142,
+   0.017453292519943295,
+   0.0,
+   0.017453292519943295,
+   -0.2829552068422761,
+   0.8105231933083714,
+   0.8451874738190739,
+   1.3963256615108386,
+   -0.43634760484334184,
+   0.47710160352018577,
+   1.3368610473293703,
+   1.3847993063706634,
+   -0.39674926851648934,
+   0.41034050331892874,
+   1.5832122100431187,
+   1.2181198964425572,
+   0.3550644364198063,
+   -0.3659689576918524,
+   -0.34903759125938777,
+   1.7453406801904847,
+   1.396274438075507,
+   1.3213660435129433,
+   2.3398090738181043e-05,
+   0.050948545446165706,
+   1.3498167314357594,
+   0.0954823009594068,
+   0.5934119456780721,
+   0.5934119456780721,
+   0.47123889803846897,
+   -1.1344640137963142,
+   0.017453292519943295,
+   0.0,
+   0.017453292519943295,
+   0.28049535289698996,
+   0.34759178220908715,
+   1.2905458670406216,
+   1.396267056825906,
+   0.43640040028455823,
+   0.3953532890125315,
+   1.7457117150735193,
+   1.118007158286637,
+   0.3998445139444917,
+   0.411789614182859,
+   1.2186703985646634,
+   1.3963248123915102,
+   0.6983148272230569,
+   0.17801478214235822,
+   -0.08547128991290559,
+   1.7456968228305223,
+   1.328045686400005,
+   0.43674383558562996,
+   -0.5168026121897779,
+   -0.10503880025932608,
+   0.9653277747732688,
+   1.0146602002942806,
+   0.0,
+   -0.3490658503988659,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   -2.321287905152458,
+   -0.8901179185171081,
+   0.7155849933176751,
+   -2.129301687433082,
+   0.29670597283903605,
+   0.017453292519943295,
+   0.0,
+   1.2401310215141802e-16,
+   0.01745329251994342,
+   -2.321287905152458,
+   -0.8901179185171081,
+   0.7155849933176751,
+   -2.129301687433082,
+   0.29670597283903605,
+   0.0,
+   0.0,
+   1.2401310215141802e-16,
+   1.2401310215141802e-16
+  ],
+  "joints_readable": {
+   "hip_lean1": 1.0,
+   "hip_rot1": 0.0,
+   "hip_bend1": 7.0,
+   "hip_lean2": 1.0,
+   "hip_rot2": 0.0,
+   "hip_bend2": 19.0,
+   "chest_lean": 0.0,
+   "chest_rot": -1.0,
+   "right_shoulder_horizontal": 34.0,
+   "right_shoulder_ad_ab": 34.0,
+   "right_shoulder_rotation": 27.0,
+   "right_elbow": -65.0,
+   "right_hand1": 1.0,
+   "right_hand2": 0.0,
+   "right_hand3": 1.0,
+   "right_ff_side": -16.21,
+   "right_ff_knuckle": 46.44,
+   "right_ff_middle": 48.43,
+   "right_ff_distal": 80.0,
+   "right_mf_side": -25.0,
+   "right_mf_knuckle": 27.34,
+   "right_mf_middle": 76.6,
+   "right_mf_distal": 79.34,
+   "right_rf_side": -22.73,
+   "right_rf_knuckle": 23.51,
+   "right_rf_middle": 90.71,
+   "right_rf_distal": 69.79,
+   "right_lf_meta": 20.34,
+   "right_lf_side": -20.97,
+   "right_lf_knuckle": -20.0,
+   "right_lf_middle": 100.0,
+   "right_lf_distal": 80.0,
+   "right_th_swivel": 75.71,
+   "right_th_adduction": 0.0,
+   "right_th_pivot": 2.92,
+   "right_th_middle": 77.34,
+   "right_th_distal": 5.47,
+   "left_shoulder_horizontal": 34.0,
+   "left_shoulder_ad_ab": 34.0,
+   "left_shoulder_rotation": 27.0,
+   "left_elbow": -65.0,
+   "left_hand1": 1.0,
+   "left_hand2": 0.0,
+   "left_hand3": 1.0,
+   "left_ff_side": 16.07,
+   "left_ff_knuckle": 19.92,
+   "left_ff_middle": 73.94,
+   "left_ff_distal": 80.0,
+   "left_mf_side": 25.0,
+   "left_mf_knuckle": 22.65,
+   "left_mf_middle": 100.02,
+   "left_mf_distal": 64.06,
+   "left_rf_side": 22.91,
+   "left_rf_knuckle": 23.59,
+   "left_rf_middle": 69.82,
+   "left_rf_distal": 80.0,
+   "left_lf_meta": 40.01,
+   "left_lf_side": 10.2,
+   "left_lf_knuckle": -4.9,
+   "left_lf_middle": 100.02,
+   "left_lf_distal": 76.09,
+   "left_th_swivel": 25.02,
+   "left_th_adduction": -29.61,
+   "left_th_pivot": -6.02,
+   "left_th_middle": 55.31,
+   "left_th_distal": 58.14,
+   "head_swivel": 0.0,
+   "head_tilt": -20.0,
+   "head_tilt_side": 0.0,
+   "right_hip1": -133.0,
+   "right_hip2": -51.0,
+   "right_hip3": 41.0,
+   "right_knee": -122.0,
+   "right_foot1": 17.0,
+   "right_foot2": 1.0,
+   "right_foot3": 0.0,
+   "right_big_toe": 0.0,
+   "right_toes": 1.0,
+   "left_hip1": -133.0,
+   "left_hip2": -51.0,
+   "left_hip3": 41.0,
+   "left_knee": -122.0,
+   "left_foot1": 17.0,
+   "left_foot2": 0.0,
+   "left_foot3": 0.0,
+   "left_toes": 0.0,
+   "left_big_toe": 0.0
+  },
+  "toy_pos": [
+   -0.5660573056977782,
+   -0.033650301587863043,
+   0.39998239965488736
+  ]
+ },
+ "fingerprint": null,
+ "noise_mode": "white"
+}

@@ -67,11 +67,15 @@ def _register():
     from run.plugins.common.posture_probe import PostureProbe
     from run.plugins.common.toy_in_view import ToyInView
     from run.plugins.common.word_learning import WordLearning
+    from run.plugins.common.model_snapshots import ModelSnapshots
+    from run.plugins.common.view_video import ViewVideo
     from run.plugins.common.word_production import WordProduction
     from run.plugins.common.babble_probe import BabbleProbe
     from run.plugins.common.gaze_probe import GazeProbe
     from run.plugins.common.produce_snapshot import ProduceSnapshot
     from run.plugins.common.vergence_probe import VergenceProbe
+    from run.plugins.common.object_files import ObjectFiles
+    from run.plugins.common.word_similarity_map import WordSimilarityMap
     PLUGINS["toy_touch"] = ToyTouch
     PLUGINS["toy_in_view"] = ToyInView   # おもちゃが視界に入っている割合（幾何・脳不要＝measure可）
     PLUGINS["hand_in_view"] = HandInView
@@ -86,11 +90,15 @@ def _register():
     PLUGINS["trace"] = Trace           # 内部の値の指紋を残す（原因追跡用）
     PLUGINS["dashboard"] = Dashboard   # 学習の様子の絵を自動で作り直す
     PLUGINS["word_learning"] = WordLearning   # 親のfollow-in labelingで語彙が育っているか（F1-3）
+    PLUGINS["view_video"] = ViewVideo         # 太郎の視界＋第三者視点を走行中に動画へ（目視承認用・2026-09-03）
+    PLUGINS["model_snapshots"] = ModelSnapshots   # checkpointごとに脳を途中保存（走行後にオフライン測定する用・F2-33）
     PLUGINS["word_production"] = WordProduction   # 太郎自身の発話（見た物の名前を言う、F2）
     PLUGINS["babble_probe"] = BabbleProbe   # 喃語モードの発話・帳面の成長を記録する（F2-1）
     PLUGINS["gaze_probe"] = GazeProbe   # 視線が的にどれだけ連続で留まるか（F2-9の判定設計用）
     PLUGINS["produce_snapshot"] = ProduceSnapshot   # 発話した瞬間の中心窩画像と視覚ベクトル（F2-11のりんご偏り究明）
     PLUGINS["vergence_probe"] = VergenceProbe   # 輻輳角の目標と実測（F2-15の切り分け）
+    PLUGINS["object_files"] = ObjectFiles   # MobileSAM+物体ファイルを本番の走行で動かす（F2-67）
+    PLUGINS["word_similarity_map"] = WordSimilarityMap   # 語彙地図：語同士の見た目の近さをcheckpointごとに図・数値で残す（2026-09-04）
     # 注意：self_model / trace / reach_success / double_touch は太郎の脳が要る
     #   （run.type=train のみ）。measure（脳を通さず環境だけ進める）では使えない。
     #   reach_success・double_touch はさらに taro.goal_space="reach_self" も要る。

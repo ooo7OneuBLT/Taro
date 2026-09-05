@@ -676,6 +676,8 @@ def build(scene, orient=None, vor=True, seed=0, verbose=False, actuation_model=N
             # 【2026-08-25新設・目標F・4語テスト】3個目・4個目のおもちゃ。
             #   toy3/toy4.enabled=False（既定）なら1ビットも挙動が変わらない
             #   （e_toy_env.ToySupineEnv側の対応する引数のコメント参照）。
+            # 【10択・2026-08-31】差し出し専用スロット（無ければNone＝挙動不変）
+            present_slots=w.get("present_slots"),
             toy3=bool(toy3["enabled"]),
             toy3_shape=str(toy3["shape"]),
             toy3_radius=float(toy3["radius"]),
@@ -775,6 +777,13 @@ def build(scene, orient=None, vor=True, seed=0, verbose=False, actuation_model=N
     #   計算済みの値をenv属性として渡す（taro_core側からe_scene.pyをimportしない、
     #   実装ノウハウ2026-08-15項の必須要件）。
     env.unwrapped._pinned_groups = summary["pinned_groups"]
+    # 【逸脱/工学近似・2026-09-01・F2-32】影（シャドウマップ）を無効化する。
+    #   影の輪郭の画素がGPU描画のたびに±1階調揺れ、同一シードの学習が再現しない
+    #   根本原因だった（最小再現：影あり=2000tick中最大809回不一致、影なし=0回。
+    #   doc/検証の落とし穴チェックリスト 2026-08-31項）。人間の視環境には影がある
+    #   ので逸脱。太郎の視覚入力から影の手がかりが消える。逸脱リスト登録済み。
+    env.unwrapped.model.light_castshadow[:] = 0
+    print("[render] 影を無効化（同一シード再現性のため・2026-09-01 F2-32）")
     print(f"[scene] 「{scene['name']}」 固定={summary['pinned_groups']} "
           f"自由={summary['free_groups']} root_pinned={summary['root_pinned']} "
           f"おもちゃ={'あり' if summary['toy_enabled'] else 'なし'}")
@@ -1129,6 +1138,14 @@ def apply_state(env, state):
     u = env.unwrapped
     m, d = u.model, u.data
     q = np.asarray(state["qpos"], dtype=float)
+    _slots_ = getattr(u, "_present_slots", {})
+    # 【10択・2026-08-31・限定緩和】差し出しスロットは worldbody 末尾の自由関節
+    #   なので qpos の末尾に7値×個数だけ増える。増分がちょうど一致するときだけ
+    #   記録を前半へ適用（スロット初期位置はXML既定＝遠方地下のまま）。
+    if _slots_ and m.nq - q.shape[0] == 7 * len(_slots_):
+        d.qpos[:q.shape[0]] = q
+        d.qpos[q.shape[0]:] = np.asarray(m.qpos0[q.shape[0]:])
+        q = d.qpos.copy()
     if q.shape[0] != m.nq:
         raise ValueError(
             f"姿勢の長さが合わない（記録 {q.shape[0]} ≠ 今のモデル {m.nq}）。\n"

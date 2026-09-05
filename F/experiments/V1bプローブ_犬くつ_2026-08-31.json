@@ -1,0 +1,51 @@
+{
+  "name": "V1bプローブ_犬くつ",
+  "note": "2026-08-31 V1bの前提プローブ。学習の本走行ではない。",
+  "scene": "座位_12ヶ月_V1bプローブ_犬くつ_2026-08-31",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 12.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32,
+      "eye": "left"
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.0,
+    "save": "F/logs/V1bプローブ/model.pt",
+    "model": "F/models/F2-6_P1_喃語900s_12ヶ月_seed10_2026-08-24.pt",
+    "produce": {
+      "mode": "word",
+      "threshold": 0.15,
+      "cooldown_sec": 2.0,
+      "max_length": 8,
+      "develop_from_age": true,
+      "vocal_tract_decoupled": true,
+      "context": true,
+      "listen_learn": true,
+      "context_lambda": 0.0,
+      "vision_context": true
+    }
+  },
+  "run": {
+    "type": "train",
+    "steps": 800,
+    "seed": 10,
+    "K": 10,
+    "checkpoint": 800,
+    "csv": "F/logs/V1bプローブ/run.csv"
+  },
+  "plugins": {
+    "word_production": {
+      "events_out": "F/logs/V1bプローブ/発話イベント.csv"
+    },
+    "produce_snapshot": {
+      "out_dir": "F/logs/V1bプローブ/中心窩",
+      "full_dir": "F/logs/V1bプローブ/両目",
+      "max_images": 30
+    }
+  }
+}

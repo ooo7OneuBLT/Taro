@@ -1,0 +1,47 @@
+{
+  "name": "F2-33_多様性追加_再走行",
+  "note": "2026-09-01 F2-33。F2-31のやり直し。影無効化で同一シード再現性を復元した世界で、F2-29から個体3セット6000歩の追加学習（設定はF2-31と同一）。",
+  "scene": "座位_12ヶ月_F2-31_10択_3周目_2026-08-31",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 12.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32,
+      "eye": "left",
+      "source": "wide"
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.0,
+    "save": "F/models/F2-33_多様性追加_seed10_2026-09-01.pt",
+    "model": "F/models/F2-29_10択wide_2周目_seed10_2026-08-31.pt",
+    "produce": {
+      "mode": "word",
+      "threshold": 0.15,
+      "cooldown_sec": 2.0,
+      "max_length": 8,
+      "develop_from_age": true,
+      "vocal_tract_decoupled": true,
+      "context": true,
+      "listen_learn": true,
+      "context_lambda": 0.0,
+      "vision_context": true
+    }
+  },
+  "run": {
+    "type": "train",
+    "steps": 6000,
+    "seed": 10,
+    "K": 10,
+    "checkpoint": 6000,
+    "csv": "F/logs/F2-33_多様性追加/run.csv"
+  },
+  "plugins": {
+    "word_learning": {
+      "events_out": "F/logs/F2-33_多様性追加/発話イベント.csv"
+    }
+  }
+}

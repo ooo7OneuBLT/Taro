@@ -1,0 +1,64 @@
+{
+  "name": "F2-49c_r4",
+  "note": "2026-09-03 F2-49c ラウンド4/8。F2-49と同一設定・同一シード（90+r）。枠toy1の赤染めバグ修正後の回し直し。",
+  "scene": "座位_12ヶ月_F2-49_実物8択_r4_個体1_2026-09-03",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 12.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32,
+      "eye": "left",
+      "source": "wide"
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.0,
+    "save": "F/models/F2-49c_r4_seed94_2026-09-03.pt",
+    "model": "F/models/F2-49c_r3_seed93_2026-09-03.pt",
+    "produce": {
+      "mode": "word",
+      "threshold": 0.5,
+      "cooldown_sec": 2.0,
+      "max_length": 8,
+      "develop_from_age": true,
+      "vocal_tract_decoupled": true,
+      "context": true,
+      "listen_learn": true,
+      "context_lambda": 0.0,
+      "vision_context": true,
+      "listen_lr": 0.001,
+      "hippocampus": {
+        "capacity": 512,
+        "decay": 0.5,
+        "replay_passes": 1,
+        "recent_ratio": 0.7,
+        "sleep_lr": 0.005
+      },
+      "word_choice": "gru_hippo",
+      "hippo_gain": 1.0,
+      "listen_self": false
+    }
+  },
+  "run": {
+    "type": "train",
+    "steps": 3000,
+    "seed": 94,
+    "K": 10,
+    "checkpoint": 500,
+    "csv": "F/logs/F2-49c_赤染め修正/r4/run.csv"
+  },
+  "plugins": {
+    "word_learning": {
+      "events_out": "F/logs/F2-49c_赤染め修正/r4/発話イベント.csv"
+    },
+    "model_snapshots": {
+      "out_dir": "F/logs/F2-49c_赤染め修正/r4/snapshots"
+    },
+    "word_production": {
+      "events_out": "F/logs/F2-49c_赤染め修正/r4/太郎の発話.csv"
+    }
+  }
+}

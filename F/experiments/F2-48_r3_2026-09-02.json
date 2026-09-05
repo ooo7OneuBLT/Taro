@@ -1,0 +1,64 @@
+{
+  "name": "F2-48_r3",
+  "note": "2026-09-02 F2-48 ラウンド3/8。F2-46の終点から続けて+8ラウンド（通算4.8万歩）。設定同一・seed80+r。「長くして伸びるか」の検証。",
+  "scene": "座位_12ヶ月_F2-44_9択目224_r3_個体3_2026-09-02",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 12.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32,
+      "eye": "left",
+      "source": "wide"
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.0,
+    "save": "F/models/F2-48_r3_seed83_2026-09-02.pt",
+    "model": "F/models/F2-48_r2_seed82_2026-09-02.pt",
+    "produce": {
+      "mode": "word",
+      "threshold": 0.5,
+      "cooldown_sec": 2.0,
+      "max_length": 8,
+      "develop_from_age": true,
+      "vocal_tract_decoupled": true,
+      "context": true,
+      "listen_learn": true,
+      "context_lambda": 0.0,
+      "vision_context": true,
+      "listen_lr": 0.001,
+      "hippocampus": {
+        "capacity": 512,
+        "decay": 0.5,
+        "replay_passes": 1,
+        "recent_ratio": 0.7,
+        "sleep_lr": 0.005
+      },
+      "word_choice": "gru_hippo",
+      "hippo_gain": 1.0,
+      "listen_self": false
+    }
+  },
+  "run": {
+    "type": "train",
+    "steps": 3000,
+    "seed": 83,
+    "K": 10,
+    "checkpoint": 500,
+    "csv": "F/logs/F2-48_46続き/r3/run.csv"
+  },
+  "plugins": {
+    "word_learning": {
+      "events_out": "F/logs/F2-48_46続き/r3/発話イベント.csv"
+    },
+    "model_snapshots": {
+      "out_dir": "F/logs/F2-48_46続き/r3/snapshots"
+    },
+    "word_production": {
+      "events_out": "F/logs/F2-48_46続き/r3/太郎の発話.csv"
+    }
+  }
+}

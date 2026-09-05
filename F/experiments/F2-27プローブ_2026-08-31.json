@@ -1,0 +1,51 @@
+{
+  "name": "F2-27プローブ",
+  "note": "2026-08-31 F2-27。10択×視覚トークン。接地の圧力の本命条件。",
+  "scene": "座位_12ヶ月_F2-27_10択_1周目_2026-08-31",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 12.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32,
+      "eye": "left"
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.0,
+    "save": "F/logs/F2-27_10択/プローブ/model.pt",
+    "model": "F/models/F2-6_P1_喃語900s_12ヶ月_seed10_2026-08-24.pt",
+    "produce": {
+      "mode": "word",
+      "threshold": 0.15,
+      "cooldown_sec": 2.0,
+      "max_length": 8,
+      "develop_from_age": true,
+      "vocal_tract_decoupled": true,
+      "context": true,
+      "listen_learn": true,
+      "context_lambda": 0.0,
+      "vision_context": true
+    }
+  },
+  "run": {
+    "type": "train",
+    "steps": 1500,
+    "seed": 10,
+    "K": 10,
+    "checkpoint": 1500,
+    "csv": "F/logs/F2-27_10択/プローブ/run.csv"
+  },
+  "plugins": {
+    "word_production": {
+      "events_out": "F/logs/F2-27_10択/プローブ/発話イベント.csv"
+    },
+    "produce_snapshot": {
+      "out_dir": "F/logs/F2-27_10択/プローブ/中心窩",
+      "full_dir": "F/logs/F2-27_10択/プローブ/両目",
+      "max_images": 40
+    }
+  }
+}

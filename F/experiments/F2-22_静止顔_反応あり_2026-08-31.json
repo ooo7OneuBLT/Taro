@@ -1,0 +1,53 @@
+{
+  "name": "F2-22_静止顔_反応あり",
+  "note": "2026-08-31 F2-22 静止顔実験。親の返事の有無だけが違う2条件比較。",
+  "scene": "座位_12ヶ月_F2-22_静止顔_親反応あり_2026-08-31",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 12.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32,
+      "eye": "left"
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.0,
+    "model": "F/models/F2-21_聞く学習_3周目_ぼうし_seed10_2026-08-31.pt",
+    "produce": {
+      "mode": "word",
+      "threshold": 0.15,
+      "cooldown_sec": 2.0,
+      "max_length": 8,
+      "develop_from_age": true,
+      "vocal_tract_decoupled": true,
+      "context": true,
+      "listen_learn": false,
+      "context_lambda": 0.0,
+      "social": {
+        "enabled": true
+      }
+    },
+    "save": "F/models/_F2-22_静止顔_反応あり.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 2000,
+    "seed": 10,
+    "K": 10,
+    "checkpoint": 2000,
+    "csv": "F/logs/F2-22_静止顔/反応あり/run.csv"
+  },
+  "plugins": {
+    "word_production": {
+      "events_out": "F/logs/F2-22_静止顔/反応あり/発話イベント.csv"
+    },
+    "produce_snapshot": {
+      "out_dir": "F/logs/F2-22_静止顔/反応あり/中心窩",
+      "full_dir": "F/logs/F2-22_静止顔/反応あり/両目",
+      "max_images": 20
+    }
+  }
+}

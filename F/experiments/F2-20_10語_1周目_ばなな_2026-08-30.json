@@ -1,0 +1,34 @@
+{
+  "name": "F2-20_10語_1周目_ばなな",
+  "note": "2026-08-30 F2-20。10語学習の1周目、ばなな1 を見せて「ばなな」を学ぶ。1000ステップ（F2-19の3分の1）に削減、根拠は f_gen_10words.py。",
+  "scene": "座位_12ヶ月_F2-20_10語_ばなな1_2026-08-30",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 12.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32,
+      "eye": "left"
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.0,
+    "save": "F/models/F2-20_10語_1周目_ばなな_seed10_2026-08-30.pt",
+    "model": "F/models/F2-20_10語_1周目_くつ_seed10_2026-08-30.pt"
+  },
+  "run": {
+    "type": "train",
+    "steps": 1000,
+    "seed": 10,
+    "K": 10,
+    "checkpoint": 1000,
+    "csv": "F/logs/F2-20_10語_本学習/1周目_ばなな/run.csv"
+  },
+  "plugins": {
+    "word_learning": {
+      "events_out": "F/logs/F2-11_本学習/ABAB_A1/発話イベント.csv"
+    }
+  }
+}

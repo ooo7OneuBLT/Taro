@@ -55,6 +55,13 @@ class Trace(Plugin):
         self.out = self.config.get("out")
         self.rows = []
         self.keys = None
+        # 指紋だけでは「どこが違うか」まで分からないときの生保存（2026-09-01追加）。
+        #   dump_dir を指定すると、dump_keys の生配列を dump_until ステップまで npy で残す
+        self.dump_dir = self.config.get("dump_dir")
+        self.dump_keys = self.config.get("dump_keys", [])
+        self.dump_until = int(self.config.get("dump_until", 0))
+        if self.dump_dir:
+            os.makedirs(self.dump_dir, exist_ok=True)
 
     def on_step(self, ctx):
         last = getattr(ctx, "last", None)
@@ -70,6 +77,31 @@ class Trace(Plugin):
                     row[f"{nm}.{k}"] = _fp(o[k])
         for k in VEC_KEYS:
             row[k] = _fp(last.get(k))
+        if self.dump_dir and ctx.step <= self.dump_until:
+            # 全身＋全物体＋目の生の物理状態。指紋のobsは体の一部しか覆っていない
+            env = getattr(ctx, "env", None)
+            if env is not None:
+                dd = env.unwrapped.data
+                np.save(os.path.join(self.dump_dir, "step%04d_qpos.npy" % ctx.step),
+                        np.array(dd.qpos, dtype=np.float64))
+                np.save(os.path.join(self.dump_dir, "step%04d_ctrl.npy" % ctx.step),
+                        np.array(dd.ctrl, dtype=np.float64))
+                mm = env.unwrapped.model
+                for nm, arr in (("xpos", dd.xpos), ("cam_xpos", dd.cam_xpos),
+                                ("cam_xmat", dd.cam_xmat), ("mocap_pos", dd.mocap_pos),
+                                ("geom_rgba", mm.geom_rgba), ("qvel", dd.qvel),
+                                ("act", dd.act)):
+                    np.save(os.path.join(self.dump_dir,
+                                         "step%04d_%s.npy" % (ctx.step, nm)),
+                            np.array(arr, dtype=np.float64))
+            for full in self.dump_keys:
+                nm, _, k = full.partition(".")
+                o = last.get(nm)
+                v = o.get(k) if isinstance(o, dict) else None
+                if v is not None:
+                    a = v.detach().numpy() if hasattr(v, "detach") else np.asarray(v)
+                    np.save(os.path.join(self.dump_dir,
+                                         "step%04d_%s.npy" % (ctx.step, full)), a)
         # 脳の重みは全部の合計で見る（毎ステップ全パラメータのハッシュを取るのは重い）。
         #   合計が一致していても中身が違う可能性は残るが、**違えば確実に違う**ので
         #   「どこで分岐したか」を絞る用途には足りる。

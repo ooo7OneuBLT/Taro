@@ -89,6 +89,14 @@ class Lexicon:
         # 注意：構造的な下限であって調整用の恣意的定数ではない（1にすると全単音が語になる）。
         self.min_len = min_len
         self.counts = {}
+        # 【分節第2案・2026-09-03】設計_分節（語の切れ目の発見）.md 第2案 第2部
+        #   「発話まるごとの記録」節。単独で聞いたことのある発話全体を記録する
+        #   （既知語を足がかりに切り出す segment_end_prob 専用。従来の counts/segment
+        #   系には一切参照されない新設の器なので、ここに1行足すだけでは既存挙動は
+        #   1ビットも変わらない）。
+        self.utterance_counts = {}
+        self.end_prob_sum = 0.0      # 【分節第2案】終わり確率の走行平均（発話末尾を除く全位置）
+        self.end_prob_n = 0
         # B6-4：語↔内的状態の連合（cross-situational statistical learning, Smith & Yu）。
         # その語を聞いた時の状態ベクトル（B原本は[空腹,眠気,不快]の3次元固定）を語ごとに
         # 累積し、平均を「その語が結びつく状態」とする。報酬なし・共起の統計だけ。
@@ -200,6 +208,96 @@ class Lexicon:
             return None
         return tuple(tokens[s:e])
 
+    def segment_all(self, tokens, confidences):
+        """発話を分節し、min_len以上の**全単位**をリストで返す（2026-08-31・二語文）。
+
+        segment() は最長の1単位だけを返す（B6-1bの判断＝ノイズの谷で出る断片を
+        捨てるため）。二語文への道では「わんわんいた」から「わんわん」と「いた」の
+        **両方**を拾いたいので、全単位を返す入口を足した。
+        自信度が全て同値（従来の1.0決め打ち）のときは谷が1つもできず単位は
+        発話全体の1つだけ＝segment()と完全に同じ結果になる（後方互換）。
+        """
+        n = len(tokens)
+        if n < self.min_len or len(confidences) != n:
+            return []
+        boundaries = {0, n}
+        for j in range(1, n - 1):
+            if confidences[j] < confidences[j - 1] and confidences[j] < confidences[j + 1]:
+                boundaries.add(j)
+        bs = sorted(boundaries)
+        out = []
+        for i in range(len(bs) - 1):
+            s_, e_ = bs[i], bs[i + 1]
+            if e_ - s_ >= self.min_len:
+                out.append(tuple(tokens[s_:e_]))
+        return out
+
+    def segment_end_prob(self, tokens, confidences, end_probs):
+        """発話を分節し、min_len以上の全単位をリストで返す（分節第2案・2026-09-03）。
+
+        設計_分節（語の切れ目の発見）.md 第2案 第2部「segment_end_prob」節。
+        谷の深さの閾値（第1案）は使わない。境界＝{0,n}
+        ∪ 既知語（utterance_counts に単独発話として記録済みの列。長い順に、
+          重ならないように探し、両端を境界にする）
+        ∪ 終わり確率の切れ目（その発話の平均より高い位置。Christiansen 1998と同じ規準）。
+        """
+        n = len(tokens)
+        if n < self.min_len:
+            return []
+        boundaries = {0, n}
+        # 足がかり：既知語（長い順）を、重ならないように tokens の中で探す。
+        # 【なぜ len(k) < n のときだけ、2026-09-03】observe() はこの関数を呼ぶ
+        #   "前"に今回の発話まるごとを utterance_counts へ足す（設計の指定順）。
+        #   そのため候補に自分自身（長さn）が必ず混ざる。自分自身は{0,n}という
+        #   何も足さない境界しか作らないのに、長い順マッチで真っ先に採用されると
+        #   tokens全域を「使用済み」にしてしまい、本来見つかるはずの短い既知語
+        #   （「おわん」等）を覆い隠してしまう（実装時に机上で発覚）。境界の集合には
+        #   影響しない自明な一致なので、footingの探索対象からは除く。
+        known = sorted((k for k in self.utterance_counts
+                        if self.min_len <= len(k) < n),
+                       key=len, reverse=True)
+        used = [False] * n
+        for k in known:
+            klen = len(k)
+            for s in range(0, n - klen + 1):
+                if any(used[s:s + klen]):
+                    continue
+                if tuple(tokens[s:s + klen]) == k:
+                    for i in range(s, s + klen):
+                        used[i] = True
+                    boundaries.add(s)
+                    boundaries.add(s + klen)
+        # 終わり確率の切れ目（Christiansen, Allen & Seidenberg 1998と同じ規準：
+        #   固定閾値ではなく、**これまで聞いた全位置の平均**より高い位置）。
+        # 【2026-09-03・机上確認で修正】「その発話の平均」だと、単独発話（「がおー」）
+        #   の内側で値がすべて微小でも最大値が平均を超えて切れ、断片（がお・コッ）が
+        #   単独発話の回数ぶん出た。原法どおりコーパス平均（発話末尾を除く全位置の
+        #   走行平均）と比べる。学習前は全位置 0 なので何も切れない。
+        if end_probs and len(end_probs) == n:
+            inner = end_probs[:-1]   # 最後のトークン直後（発話の末尾そのもの）は除く
+            if inner:
+                self.end_prob_sum += float(sum(inner))
+                self.end_prob_n += len(inner)
+                m = self.end_prob_sum / self.end_prob_n
+                for i, p in enumerate(inner):
+                    b = i + 1
+                    # 【2026-09-03・F2-50bで発覚】知っている塊の内側では統計の切れ目を
+                    #   使わない（足がかりの本来の意味＝既知の塊は丸ごと読む。CLASSIC-UB／
+                    #   手がかり階層：語彙の知識＞音の統計・Mattys et al. 2005）。
+                    #   「がおー」が「お」で終わるため「おさら」の頭の「お」の後で
+                    #   終わり確率が上がり「お｜さら」と割れていた。両端は既に境界。
+                    if used[b - 1] and used[b] and b not in boundaries:
+                        continue
+                    if p > m and p > 0:
+                        boundaries.add(b)
+        bs = sorted(boundaries)
+        out = []
+        for i in range(len(bs) - 1):
+            s_, e_ = bs[i], bs[i + 1]
+            if e_ - s_ >= self.min_len:
+                out.append(tuple(tokens[s_:e_]))
+        return out
+
     def _ensure_channel(self, name, dim):
         """そのチャンネルが無ければ作る（2026-08-28・F2-13）。
 
@@ -213,20 +311,46 @@ class Lexicon:
             self.channels[name] = ch
         return ch
 
-    def observe(self, tokens, confidences, state=None):
+    def observe(self, tokens, confidences, state=None, end_probs=None, mode="valley"):
         """
         発話を分節し、切り出した単位を辞書に登録（頻度+1）。切り出した単位を返す。
 
         state: その語を聞いた時の状態ベクトル（B原本は[空腹,眠気,不快]の3次元。
         F2ではstate_dim次元の任意ベクトル）。渡すと語↔状態の連合を累積する
         （報酬でなく共起の統計）。
+
+        【分節第2案・2026-09-03】設計_分節（語の切れ目の発見）.md 第2案 第2部
+        「observe の拡張」節。end_probs/mode は既定値（None/"valley"）のままなら
+        下の分岐で必ず従来の segment_all が呼ばれる＝1ビットも変わらない。
         """
+        # 【分節第2案・2026-09-03】発話まるごとの記録（同節「発話まるごとの記録」）。
+        #   utterance_counts は segment_end_prob 専用の新設の器で、従来の
+        #   counts/segment系からは一切参照されないため、この1行だけでは
+        #   既存挙動は変わらない。
+        _utok = tuple(tokens)
+        self.utterance_counts[_utok] = self.utterance_counts.get(_utok, 0) + 1
         # 【F2-12・2026-08-27】stateがリストなら {"vision": リスト} に正規化する
         #   （呼び出し側 run/trainer.py は変えない＝これまでどおりリストを渡す）。
         #   いまはvisionチャンネルしか無いので、以下の処理は正規化前と完全に同じ。
         states = _as_channels(state)
         state = states.get(self.DEFAULT_CHANNEL)
-        chunk = self.segment(tokens, confidences)
+        # 【二語文・2026-08-31】最長の1つだけでなく全単位を登録する。
+        #   自信度が全て同値（1.0決め打ち）なら単位は1つだけ＝従来と同一。
+        #   返り値は従来どおり最長の単位（word_attention 等の互換のため）。
+        # 【分節第2案・2026-09-03】mode=="end_prob" かつ end_probs が有効な長さの
+        #   ときだけ新しい切り出し（segment_end_prob）を使う。それ以外（既定
+        #   mode="valley"）は従来の segment_all のまま。
+        if mode == "end_prob" and end_probs is not None and len(end_probs) == len(tokens):
+            chunks = self.segment_end_prob(tokens, confidences, end_probs)
+        else:
+            chunks = self.segment_all(tokens, confidences)
+        chunk = max(chunks, key=len) if chunks else None
+        for chunk_ in chunks:
+            self._register(chunk_, states, state)
+        return chunk
+
+    def _register(self, chunk, states, state):
+        """切り出した1単位を辞書へ登録し、連合を1回ぶん学習する（observeの中身の切り出し）。"""
         if chunk is not None:
             self.counts[chunk] = self.counts.get(chunk, 0) + 1
             # 【F2-13・2026-08-28】vision 以外のチャンネル（例：周辺視）も同じ
@@ -270,7 +394,6 @@ class Lexicon:
                                 continue
                             for i in range(self.state_dim):
                                 q[i] -= self.eta_push * (v[i] - q[i])
-        return chunk
 
     def _learn_channel(self, name, chunk, vec):
         """vision 以外のチャンネル1つ分の引き寄せ／引き離し（2026-08-28・F2-13）。
@@ -385,6 +508,30 @@ class Lexicon:
             return None, 0.0
         best_chunk = max(sims, key=sims.get)
         return best_chunk, sims[best_chunk]
+
+    def reverse_scores(self, vec):
+        """逆引きの全候補の点数（chunk → コサイン）を返す（2026-08-30・文脈設計）。
+
+        reverse_lookup と同じ計算で、1位だけでなく全chunkの点数を返す。
+        文脈（GRU）の予測を点数に足し込むとき（設計_文脈（コンテキスト）.md 決定4）、
+        呼び出し側が全候補を採点し直せるようにするための読み出し口。
+        辞書が空・contrastモードでないときは空辞書。
+        """
+        if self.mode != "contrast":
+            return {}
+        channels_in = _as_channels(vec)
+        active = [name for name in channels_in
+                  if name in self.channels and self.channels[name]["proto"]]
+        if not active:
+            return {}
+        if len(active) == 1:
+            return dict(self._channel_sims(active[0], channels_in[active[0]]))
+        sums, counts = {}, {}
+        for name in active:
+            for chunk, sim in self._channel_sims(name, channels_in[name]).items():
+                sums[chunk] = sums.get(chunk, 0.0) + sim
+                counts[chunk] = counts.get(chunk, 0) + 1
+        return {c: sums[c] / counts[c] for c in sums}
 
     def _channel_sims(self, name, vec):
         """指定チャンネル1つ分の (chunk -> コサイン類似度) を返す。

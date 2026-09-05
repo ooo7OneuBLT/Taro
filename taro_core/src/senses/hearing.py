@@ -75,6 +75,19 @@ class Vocabulary:
             indices.append(self.char2idx[ch])
         return indices
 
+    def add_special(self, token):
+        """複数文字の特殊トークン（"<PARENT>" 等）を1つのIDとして登録する
+        （2026-08-30・文脈設計の決定3「話者の印」）。
+
+        encode() は文字単位に分解するので特殊トークンには使えない。
+        既に登録済みなら何もしないでそのIDを返す。
+        """
+        if token not in self.char2idx:
+            self.char2idx[token] = self.size
+            self.idx2char[self.size] = token
+            self.size += 1
+        return self.char2idx[token]
+
     def decode(self, indices):
         chars = []
         for idx in indices:

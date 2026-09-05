@@ -1,0 +1,46 @@
+{
+  "name": "F2-26_視覚統合V1_1周目_ぶーぶー",
+  "note": "2026-08-31 F2-26 V1。聞く側に視覚トークン。設計_視覚とGRUの統合.md",
+  "scene": "座位_12ヶ月_F2-20_10語_車1_2026-08-30",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 12.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32,
+      "eye": "left"
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.0,
+    "save": "F/models/F2-26_視覚統合V1_1周目_ぶーぶー.pt",
+    "model": "F/models/F2-26_視覚統合V1_1周目_にゃんにゃん.pt",
+    "produce": {
+      "mode": "word",
+      "threshold": 0.15,
+      "cooldown_sec": 2.0,
+      "max_length": 8,
+      "develop_from_age": true,
+      "vocal_tract_decoupled": true,
+      "context": true,
+      "listen_learn": true,
+      "context_lambda": 0.0,
+      "vision_context": true
+    }
+  },
+  "run": {
+    "type": "train",
+    "steps": 600,
+    "seed": 10,
+    "K": 10,
+    "checkpoint": 600,
+    "csv": "F/logs/F2-26_視覚統合V1/1周目_ぶーぶー/run.csv"
+  },
+  "plugins": {
+    "word_learning": {
+      "events_out": "F/logs/F2-11_本学習/ABAB_A1/発話イベント.csv"
+    }
+  }
+}

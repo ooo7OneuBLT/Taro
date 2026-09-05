@@ -1,0 +1,46 @@
+{
+  "name": "F2-23_分節_1周目_ぼうし",
+  "note": "2026-08-31 F2-23。統計的分節の再現。2026-08-31 F2-21。F2-20と同一条件＋聞く学習（context/listen_learn）。2026-08-30 F2-20。10語学習の1周目、ぼうし1 を見せて「ぼうし」を学ぶ。1000ステップ（F2-19の3分の1）に削減、根拠は f_gen_10words.py。",
+  "scene": "座位_12ヶ月_F2-23_分節_ぼうし1_2026-08-30",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 12.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32,
+      "eye": "left"
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.0,
+    "save": "F/models/F2-23_分節_1周目_ぼうし_seed10_2026-08-31.pt",
+    "model": "F/models/F2-23_分節_1周目_コップ_seed10_2026-08-31.pt",
+    "produce": {
+      "mode": "word",
+      "threshold": 0.15,
+      "cooldown_sec": 2.0,
+      "max_length": 8,
+      "develop_from_age": true,
+      "vocal_tract_decoupled": true,
+      "context": true,
+      "listen_learn": true,
+      "context_lambda": 0.0,
+      "real_confidence": true
+    }
+  },
+  "run": {
+    "type": "train",
+    "steps": 1000,
+    "seed": 10,
+    "K": 10,
+    "checkpoint": 1000,
+    "csv": "F/logs/F2-23_分節_本学習/1周目_ぼうし/run.csv"
+  },
+  "plugins": {
+    "word_learning": {
+      "events_out": "F/logs/F2-11_本学習/ABAB_A1/発話イベント.csv"
+    }
+  }
+}
