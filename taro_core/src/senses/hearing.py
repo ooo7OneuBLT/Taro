@@ -54,6 +54,16 @@ def expand_long_vowel(text):
     return u"".join(out)
 
 
+def to_hiragana(text):
+    """カタカナ（ァ U+30A1 〜 ヶ U+30F6）をひらがなに写す。「ー」はそのまま残す（次段で母音に展開）。"""
+    return u"".join(chr(ord(c) - 0x60) if u"ァ" <= c <= u"ヶ" else c for c in text)
+
+
+def normalize_kana(text):
+    """耳に届く文字列の正規化＝カタカナ→ひらがな→長音展開。"""
+    return expand_long_vowel(to_hiragana(text))
+
+
 class Vocabulary:
     """見た文字から動的に語彙を構築する。
 
@@ -113,5 +123,7 @@ class Hearing:
         【2026-08-27・F2-10】長音「ー」はここで直前の母音に展開する
         （"ぶーぶー" → "ぶうぶう"）。理由はこのファイル上部の
         expand_long_vowel のコメントを参照。
+        【2026-09-06】カタカナ→ひらがなの正規化も合わせて行う
+        （normalize_kana。仕様：F/docs/二語文/仕様_ひらがな化してM4をやり直す_2026-09-06.md）。
         """
-        return self.vocab.encode(expand_long_vowel(text))
+        return self.vocab.encode(normalize_kana(text))

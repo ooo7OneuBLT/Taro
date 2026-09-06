@@ -23,8 +23,11 @@
 import csv
 import json
 import os
+import sys
 
-LOG_DIR = os.path.join("F", "logs", "F2-76b_M4_テスト")
+# 【2026-09-06】LOG_DIR を引数で差し替え可能にする（既定は不変）。
+#   仕様：F/docs/二語文/仕様_ひらがな化してM4をやり直す_2026-09-06.md「4. f79 の引数化」。
+LOG_DIR = sys.argv[1] if len(sys.argv) > 1 else os.path.join("F", "logs", "F2-76b_M4_テスト")
 UTTER_CSV = os.path.join(LOG_DIR, "太郎の発話.csv")
 EVENTS_CSV = os.path.join(LOG_DIR, "発話イベント.csv")
 ATTEND_CSV = os.path.join(LOG_DIR, "注意.csv")

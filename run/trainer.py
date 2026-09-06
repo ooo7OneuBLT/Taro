@@ -462,8 +462,8 @@ class Trainer:
         いたが、聞いた音は名簿に登録して入力口を伸ばす方式に変えた（知覚＞産出）。
         長音の展開は耳と同じ規則。
         """
-        from hearing import expand_long_vowel
-        ids = self.taro.produce_vocab.encode(expand_long_vowel(text))
+        from hearing import normalize_kana
+        ids = self.taro.produce_vocab.encode(normalize_kana(text))
         self._ensure_brain_capacity()
         return ids
 
