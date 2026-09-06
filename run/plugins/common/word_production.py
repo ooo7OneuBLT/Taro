@@ -89,6 +89,10 @@ class WordProduction(Plugin):
             "gate": ev.get("gate", "ok"),
             "gone": ev.get("gone", 0),
             "attended_id": ev.get("attended_id", ""),
+            # 【M4d・2026-09-06・仕様_M4d_あるの印】gone列と同じ流儀で末尾に追加。
+            #   here_input無効時は last_produce が常に here=0 を持つ（trainer.py）
+            #   ので、行の中身は従来と変わらない。
+            "here": ev.get("here", 0),
         })
 
     def metrics(self, ctx):
@@ -114,13 +118,14 @@ class WordProduction(Plugin):
                            "generated_word", "reward", "plan_length",
                            "known_moras", "exact_match",
                            "choice_gru", "choice_hippo", "chosen",
-                           "gate", "gone", "attended_id"])
+                           "gate", "gone", "attended_id", "here"])
                 for r in self.rows:
                     w.writerow([r["step"], r["sim_sec"], r["toy"], r["target_word"],
                                r["sim"], r["generated_word"], r["reward"],
                                r["plan_length"], r["known_moras"], r["exact_match"],
                                r.get("choice_gru"), r.get("choice_hippo"), r.get("chosen"),
-                               r.get("gate", "ok"), r.get("gone", 0), r.get("attended_id", "")])
+                               r.get("gate", "ok"), r.get("gone", 0), r.get("attended_id", ""),
+                               r.get("here", 0)])
         exact = [r for r in self.rows if r["exact_match"]]
         return {
             "発話回数": len(self.rows),

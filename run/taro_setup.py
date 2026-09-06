@@ -431,6 +431,10 @@ def _setup_produce(taro, cfg, env, *, verbose=True):
         #   run/trainer.pyのvanish_input分岐は getattr(t, "_gone_id", None) が
         #   Noneのまま＝一切通らない。
         taro._gone_id = None
+        # 【M4d・2026-09-06・仕様_M4d_あるの印】既定OFF（cfg.produce=None）では
+        #   HEREトークンも登録されない＝run/trainer.pyのhere_input分岐は
+        #   getattr(t, "_here_id", None) がNoneのまま＝一切通らない。
+        taro._here_id = None
         return
     from vocal_tract import VocalTract
     from hearing import Vocabulary
@@ -515,6 +519,20 @@ def _setup_produce(taro, cfg, env, *, verbose=True):
                 "produce.vanish_input=true には produce.context=true が必要"
                 "（<GONE>はGRUの文脈入力へ流す仕組みで、文脈が無いと意味を持たない）。")
         taro._gone_id = pv.add_special("<GONE>")
+    # 【M4d・2026-09-06・仕様_M4d_あるの印】「あるの印」を「消えたの印」と同じ
+    #   仕組みで足す。注意中の物体ファイルが見えている（消えていない）とき、
+    #   話者の印の直後に入れる特殊トークン（口には出さない・生成列から除いて
+    #   復号する。逸脱・Tier3：ある/ないを離散2値で言語に渡す。提案2で連続値へ
+    #   移行予定。doc\人間模倣からの逸脱リスト.md その46に登録済み）。
+    #   here_input=true は vanish_input=true を前提にする（あるの印は消えたの印
+    #   と対で初めて意味を持つ＝gru_hippoとλの共存禁止と同じ流儀）。
+    taro._here_id = None
+    if bool(pd.get("here_input", False)):
+        if not bool(pd.get("vanish_input", False)):
+            raise ValueError(
+                "produce.here_input=true には produce.vanish_input=true が必要"
+                "（<HERE>は<GONE>と対で初めて意味を持つ）。")
+        taro._here_id = pv.add_special("<HERE>")
     taro.brain.resize_embedding(pv.size)
     taro.brain.set_vocab_mapping(pv.char2idx)
     # 【聞く学習・2026-08-31・設計_文脈（コンテキスト）.md 追補】聞いた発話の

@@ -78,7 +78,9 @@ class ParentLabeling:
                  solo_presentation=False, shake_pause_sec=2.0,
                  follow_gaze=False, follow_dist=0.086, follow_speed=0.5,
                  vanish_utterance=False, vanish_template="{word}ないね",
-                 vanish_gap_before_sec=1.0, vanish_gap_after_sec=1.5):
+                 vanish_gap_before_sec=1.0, vanish_gap_after_sec=1.5,
+                 vanish_wait_notice=False, vanish_notice_delay_sec=0.5,
+                 vanish_notice_max_sec=3.0):
         self.enabled = bool(enabled)
         self.shake_amp_m = float(shake_amp_m)
         self.shake_hz = float(shake_hz)
@@ -175,6 +177,16 @@ class ParentLabeling:
         self.vanish_template = str(vanish_template)
         self.vanish_gap_before_sec = float(vanish_gap_before_sec)
         self.vanish_gap_after_sec = float(vanish_gap_after_sec)
+        # 【M4c・2026-09-06・仕様_M4c_親は太郎が気づいてから「ないね」と言う】
+        #   既定False＝従来どおり vanish_gap_before_sec 固定待ちで言う
+        #   （1ビットも変わらない）。Trueなら、太郎の物体ファイルが「消えた」を
+        #   立てた合図（object_files.py の env._taro_noticed_gone_time）から
+        #   vanish_notice_delay_sec 秒後に言う。気づき待ちが
+        #   vanish_notice_max_sec 秒を超えたら（合図が来なくても）諦めて言う
+        #   （cause="vanish_timeout"。前半「決めたこと2」）。
+        self.vanish_wait_notice = bool(vanish_wait_notice)
+        self.vanish_notice_delay_sec = float(vanish_notice_delay_sec)
+        self.vanish_notice_max_sec = float(vanish_notice_max_sec)
         self.reset()
 
     def reset(self):
@@ -205,6 +217,10 @@ class ParentLabeling:
         # 【消失発話・2026-09-05】_VANISH状態の経過秒／発話済みか。
         self._vanish_t = 0.0
         self._vanish_spoken = False
+        self._vanish_spoken_t = 0.0
+        # 【M4c・2026-09-06】隠した sim 時刻（気づき待ちの経過判定には self._vanish_t
+        #   をそのまま使うので、これは記録用途。_enter_pick で更新される）。
+        self._vanish_hide_t = 0.0
 
     # ------------------------------------------------------------------
     def update(self, env):
@@ -320,7 +336,7 @@ class ParentLabeling:
                 self._holding_prev = False
                 self._repeat_attempt = True
             else:
-                self._enter_pick()
+                self._enter_pick(env)
 
         if self._state == self._VANISH:
             # 【消失発話・2026-09-05】机が空のまま「○○ないね」を1回言う（仕様書 前半）。
@@ -330,12 +346,42 @@ class ParentLabeling:
                 env.model.geom_rgba[g, 3] = a0
             self._hide_all(env)
             self._vanish_t += dt
-            if not self._vanish_spoken and self._vanish_t >= self.vanish_gap_before_sec:
-                self._vanish_spoken = True
-                word = self._single_word(self._target)
-                text = self.vanish_template.format(word=word)
-                return {"text": text, "target": self._target, "cause": "vanish"}
-            if self._vanish_t >= self.vanish_gap_before_sec + self.vanish_gap_after_sec:
+            # 【M4c・2026-09-06】仕様_M4c 後半「2. 親」。wait_noticeが偽なら
+            #   従来どおり固定待ち（vanish_gap_before_sec）で言う（1ビットも
+            #   変わらない）。真なら、太郎の物体ファイルの「気づいた」合図
+            #   （object_files.py が立てる env.unwrapped._taro_noticed_gone_time）
+            #   から vanish_notice_delay_sec 秒後に言う。合図が
+            #   vanish_notice_max_sec 秒たっても来なければ、気づき待ちの時間切れ
+            #   として諦めて言う（cause="vanish_timeout"）。
+            if not self._vanish_spoken:
+                should_speak = False
+                cause = "vanish"
+                if not self.vanish_wait_notice:
+                    should_speak = self._vanish_t >= self.vanish_gap_before_sec
+                else:
+                    u = getattr(env, "unwrapped", env)
+                    noticed = getattr(u, "_taro_noticed_gone_time", None)
+                    now = float(env.data.time)
+                    if noticed is not None and now >= noticed + self.vanish_notice_delay_sec:
+                        should_speak = True
+                        cause = "vanish"
+                    elif self._vanish_t >= self.vanish_notice_max_sec:
+                        should_speak = True
+                        cause = "vanish_timeout"
+                if should_speak:
+                    self._vanish_spoken = True
+                    # 【既定不変】wait_notice=偽では従来どおり厳密に
+                    #   vanish_gap_before_sec を基準にする（self._vanish_t の
+                    #   実際値は dt刻みでこれをわずかに超え得るため、基準に
+                    #   使うと after 判定の閾値が従来と1ビットずれてしまう）。
+                    self._vanish_spoken_t = (self.vanish_gap_before_sec
+                                              if not self.vanish_wait_notice
+                                              else self._vanish_t)
+                    word = self._single_word(self._target)
+                    text = self.vanish_template.format(word=word)
+                    return {"text": text, "target": self._target, "cause": cause}
+            if self._vanish_spoken and (
+                    self._vanish_t >= self._vanish_spoken_t + self.vanish_gap_after_sec):
                 self._state = self._PICK
             return None
 
@@ -381,13 +427,13 @@ class ParentLabeling:
             if self._shake_t >= self.repeat_timeout_sec:
                 self._repeats_left = 0
                 self._repeat_attempt = False
-                self._enter_pick()   # 呼び戻せなければ諦めて持ち替える
+                self._enter_pick(env)   # 呼び戻せなければ諦めて持ち替える
             return None
         if self._hold_t >= self.gaze_hold_sec:
             self.n_hold_completes += 1
             return self._speak(env)
         if self._shake_t >= self.attract_timeout_sec:
-            self._enter_pick()   # 諦めて黙って次の試行へ（前半の設計意図どおり）
+            self._enter_pick(env)   # 諦めて黙って次の試行へ（前半の設計意図どおり）
         return None
 
     # ------------------------------------------------------------------ 内部
@@ -617,17 +663,25 @@ class ParentLabeling:
                     env._toy_alpha_backup[_g] = float(env.model.geom_rgba[_g, 3])
                 env.model.geom_rgba[_g, 3] = 0.0
 
-    def _enter_pick(self):
+    def _enter_pick(self, env=None):
         """次の的を選ぶ（_PICK）前に、旧的があれば_VANISHを挟む。
 
         【消失発話・2026-09-05・仕様_M2】vanish_utteranceが真かつ旧的
         （self._target）があるときだけ_VANISHへ。既定False・初回提示（旧的なし）
         では従来どおり_PICKへ直行（1ビットも変わらない）。
+        【M4c・2026-09-06】vanish_wait_notice が真のときだけ、太郎の「気づいた」
+        合図(env.unwrapped._taro_noticed_gone_time)を隠す直前にNoneへ初期化し、
+        隠した sim 時刻を self._vanish_hide_t に控える（気づき待ちの判定に使う）。
+        env が渡されない呼び出し元（過去のテスト等）を壊さないよう env=None を許容。
         """
         if self.vanish_utterance and self._target is not None:
             self._state = self._VANISH
             self._vanish_t = 0.0
             self._vanish_spoken = False
+            if self.vanish_wait_notice and env is not None:
+                u = getattr(env, "unwrapped", env)
+                u._taro_noticed_gone_time = None
+                self._vanish_hide_t = float(env.data.time)
         else:
             self._state = self._PICK
 

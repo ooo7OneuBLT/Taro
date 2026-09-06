@@ -465,8 +465,20 @@ class ObjectFiles(Plugin):
                 ctx.attended_object["last_seen_time"] = self._attended_last_seen_time
 
         # ---- 決めたこと3の前段：消失信号 -------------------------------------
+        _prev_vanished = self._last_vanished
         vanished = attended_f is not None and attended_f.misses >= self.vanish_misses
         self._last_vanished = bool(vanished)
+        # 【M4c・2026-09-06】vanished が偽→真に変わった瞬間だけ、世界（親）へ
+        #   合図する。声の合図（run/trainer.py:934 _taro_voice_signal）と同じ
+        #   流儀。仕様：F/docs/二語文/仕様_M4c_親は太郎が気づいてから
+        #   「ないね」と言う_2026-09-06.md。人間の親は子の頭の中を直接読めない
+        #   （視線や探す動きから推し量る）ので、これは人間模倣からの逸脱
+        #   （世界が太郎の内部状態を読む）。doc/人間模倣からの逸脱リスト.md
+        #   「その45」に登録済み。
+        if vanished and not _prev_vanished:
+            _u = getattr(getattr(ctx, "env", None), "unwrapped", None)
+            if _u is not None:
+                _u._taro_noticed_gone_time = float(ctx.data.time)
 
         # ---- nearest_word（描画・CSV両方で使うのでここで一度だけ計算） --------
         if self._attended_last_seen_vec is not None:
