@@ -52,6 +52,10 @@ class ParentLabeling:
                              なって連合が分かれない（目視で確認）。実際の親も1個だけ
                              目の前に持ってきて名づけるので、人間模倣としても自然。
                              不応期には両方が戻る（親が持ち替える動作に相当）。
+        vanish_silent_targets  既定空集合。ここに載った的（例："toy5"）は消失時に
+                             「○○ないね」を言わない（親は黙る。仕様_短期B）。
+                             発話イベント.csvには記録が残らない（採点は注意.csv
+                             のvanished立ち上がりで行う。仕様書「後半」参照）。
     """
 
     _PICK = "pick"
@@ -80,7 +84,7 @@ class ParentLabeling:
                  vanish_utterance=False, vanish_template="{word}ないね",
                  vanish_gap_before_sec=1.0, vanish_gap_after_sec=1.5,
                  vanish_wait_notice=False, vanish_notice_delay_sec=0.5,
-                 vanish_notice_max_sec=3.0):
+                 vanish_notice_max_sec=3.0, vanish_silent_targets=()):
         self.enabled = bool(enabled)
         self.shake_amp_m = float(shake_amp_m)
         self.shake_hz = float(shake_hz)
@@ -187,6 +191,12 @@ class ParentLabeling:
         self.vanish_wait_notice = bool(vanish_wait_notice)
         self.vanish_notice_delay_sec = float(vanish_notice_delay_sec)
         self.vanish_notice_max_sec = float(vanish_notice_max_sec)
+        # 【短期B・2026-09-06・仕様_短期B】消えたとき「○○ないね」を黙る的の集合。
+        #   既定は空集合＝従来どおり全ての的で発話する（1ビットも変わらない）。
+        #   ここに載った的は_VANISH状態でshould_speakが真になっても発話を返さず、
+        #   代わりにenv.unwrapped._parent_silent_vanishへ(時刻,的)を置く（採点用の
+        #   目印。読む側は無い。発話イベント.csvへの記録は無い＝仕様書の指示どおり）。
+        self.vanish_silent_targets = set(vanish_silent_targets)
         self.reset()
 
     def reset(self):
@@ -377,6 +387,15 @@ class ParentLabeling:
                     self._vanish_spoken_t = (self.vanish_gap_before_sec
                                               if not self.vanish_wait_notice
                                               else self._vanish_t)
+                    # 【短期B・2026-09-06】黙る的なら発話を返さない。時間の進み方
+                    #   （_vanish_spoken=True・_vanish_spoken_t確定）は上と同じに
+                    #   保ち、次の_PICKへ移るタイミングだけ従来どおりにする。
+                    #   代わりにenv.unwrapped._parent_silent_vanishへ目印を置く
+                    #   （採点用。発話イベント.csvへの記録は無い＝プラグイン非経由）。
+                    if self._target in self.vanish_silent_targets:
+                        u = getattr(env, "unwrapped", env)
+                        u._parent_silent_vanish = (float(env.data.time), self._target)
+                        return None
                     word = self._single_word(self._target)
                     text = self.vanish_template.format(word=word)
                     return {"text": text, "target": self._target, "cause": cause}
