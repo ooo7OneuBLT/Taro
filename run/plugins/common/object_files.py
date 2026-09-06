@@ -192,24 +192,11 @@ class ObjectFiles(Plugin):
             #   「目標→語」の表だけは毎tick更新する（読むだけ・attend=Falseでは
             #   一切呼ばれない）。
             self._track_parent_target(ctx)
-            # 【M4・2026-09-06・仕様_M4_消えた物について「○○ないね」と言う(0)】
-            #   言語（記憶と発話）が読む見た目を「注意している物体ファイルが
-            #   保っている見た目」にするための本体。検出コマでなくても、注意中の
-            #   ファイルが（直近の検出コマで）可視の間は毎tick、その瞬間に脳が
-            #   使った視覚(ctx.last_vision_vec、trainer._apply_word_productionが
-            #   このtick内で先に置く)でlast_seen_vecを上書きする。不可視の間は
-            #   何もしない＝前回可視だったときの見た目を保つ（M1.5で確認した
-            #   物体ファイルの持続性と同じ形）。条件分岐は言語側でなくここに置く
-            #   （仕様書「空の机問題の解き方」節・2026-09-06追記の改訂）。
-            if self._attended_id is not None and self._attended_visible:
-                _lv = getattr(ctx, "last_vision_vec", None)
-                if _lv is not None:
-                    import numpy as np
-                    self._attended_last_seen_vec = np.array(_lv, dtype=np.float64, copy=True)
-                    self._attended_last_seen_time = float(ctx.data.time)
-                    if getattr(ctx, "attended_object", None) is not None:
-                        ctx.attended_object["last_seen_vec"] = self._attended_last_seen_vec
-                        ctx.attended_object["last_seen_time"] = self._attended_last_seen_time
+            # 【M4b・2026-09-06】M4(0)の毎tick上書き（旧195-212行）はここにあった。
+            #   引っ込め中（検出コマとコマの間）に空の机の視覚で上書きしてしまい、
+            #   GRUが「空の机＝消えた」を学習した（f81実測）。検出コマの処理
+            #   （_process_attention、self.ofs.step直後）でだけ控えるように変更し、
+            #   このtick単位の分岐は削除した。
         t = float(ctx.data.time)
         if t - self._last_t < self.interval_s:
             return
@@ -465,11 +452,17 @@ class ObjectFiles(Plugin):
         self._attended_visible = attended_f is not None and attended_f.misses == 0
 
         # ---- 決めたこと2：「消えた物の見た目」の控え ---------------------------
-        if attended_f is not None and attended_f.misses == 0:
-            vec = getattr(ctx, "last_vision_vec", None)
-            if vec is not None:
-                self._attended_last_seen_vec = np.array(vec, dtype=np.float64, copy=True)
-                self._attended_last_seen_time = t
+        # 【M4b：検出コマで一致した瞬間だけ控える（毎tickだと引っ込め中に
+        #   空の机で上書きされる。f81で実測）】確認して実際にその物が見つかった
+        #   瞬間（self._attended_visible、検出コマ内）だけ控えを更新する。
+        #   確認と確認の間は控えを触らない。
+        if self._attended_visible and ctx.last_vision_vec is not None:
+            self._attended_last_seen_vec = np.array(
+                ctx.last_vision_vec, dtype=np.float64, copy=True)
+            self._attended_last_seen_time = t
+            if getattr(ctx, "attended_object", None) is not None:
+                ctx.attended_object["last_seen_vec"] = self._attended_last_seen_vec
+                ctx.attended_object["last_seen_time"] = self._attended_last_seen_time
 
         # ---- 決めたこと3の前段：消失信号 -------------------------------------
         vanished = attended_f is not None and attended_f.misses >= self.vanish_misses
