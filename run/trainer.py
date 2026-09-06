@@ -621,6 +621,12 @@ class Trainer:
         pd = self.cfg.produce
         self.ctx.last_produce = None
         self.ctx.last_babble = None
+        # 【M3・2026-09-06・仕様_M3_注意中の物体ファイルと消失信号】このtickで
+        #   脳が実際に使った視覚ベクトルの置き場。既定Noneにしておき、下で
+        #   _vision_channels(o) を計算した直後に実値を入れる（早期returnした
+        #   tickでは前回値を持ち越さずNoneのまま＝object_files.py側の「見えて
+        #   いる間だけ控える」判定を誤らせないため）。
+        self.ctx.last_vision_vec = None
         if pd is None or not pd.get("enabled", True):
             return
         t = self.taro
@@ -656,6 +662,10 @@ class Trainer:
         # 【F2-13・2026-08-28】lexicon_peripheral=True なら中心窩＋周辺視の
         #   2チャンネルになる。既定Falseでは従来と同じ1本のベクトルが返る。
         vec = self._vision_channels(o)
+        # 【M3・2026-09-06】脳が実際に語の選択に使った視覚ベクトルをそのまま控える
+        #   （object_files.py が「注意中の物の見た目」として使う。仕様書決定2：
+        #   物体ファイル自身のappearanceとは別物なのでここでしか取れない）。
+        self.ctx.last_vision_vec = vec
         # 【F2-8・2026-08-25】逆引きの前に「見慣れた景色」の平均へ今の見えを足す。
         #   ここは毎ステップ通るので、産出中は太郎が見たものすべてが平均に入る。
         t.lexicon.observe_view(vec)

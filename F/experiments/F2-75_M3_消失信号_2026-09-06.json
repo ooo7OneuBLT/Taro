@@ -1,0 +1,75 @@
+{
+  "name": "F2-75_M3_消失信号",
+  "note": "2026-09-06 M3 太郎の側に「バスが消えた」という状態を作る区切りの確認。F2-74_M2_消失発話を複製し、object_filesにattend=true・interval_s=0.5・attend_outを追加、出力先をF2-75へ変更、run.steps=300は不変（run.steps自体は仕様書「4.走行」により変えない）。仕様：F/docs/二語文/仕様_M3_注意中の物体ファイルと消失信号_2026-09-06.md。",
+  "scene": "座位_12ヶ月_F2-49_実物8択_r1_個体1_消失発話_2026-09-05",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 12.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32,
+      "eye": "left",
+      "source": "wide"
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.0,
+    "model": "F/models/F2-50_r8_seed98_2026-09-03.pt",
+    "save": "F/logs/F2-75_M3_消失信号/model.pt",
+    "produce": {
+      "mode": "word",
+      "threshold": 0.5,
+      "cooldown_sec": 2.0,
+      "max_length": 8,
+      "develop_from_age": true,
+      "vocal_tract_decoupled": true,
+      "context": true,
+      "listen_learn": false,
+      "context_lambda": 0.0,
+      "vision_context": true,
+      "listen_lr": 0.001,
+      "hippocampus": {
+        "capacity": 512,
+        "decay": 0.5,
+        "replay_passes": 1,
+        "recent_ratio": 0.7,
+        "sleep_lr": 0.005
+      },
+      "word_choice": "gru_hippo",
+      "hippo_gain": 1.0,
+      "listen_self": false,
+      "listen_eos": true,
+      "segment_mode": "end_prob"
+    }
+  },
+  "run": {
+    "type": "train",
+    "steps": 300,
+    "seed": 91,
+    "K": 10,
+    "checkpoint": 100,
+    "csv": "F/logs/F2-75_M3_消失信号/run.csv"
+  },
+  "plugins": {
+    "word_production": {
+      "events_out": "F/logs/F2-75_M3_消失信号/太郎の発話.csv"
+    },
+    "word_learning": {
+      "events_out": "F/logs/F2-75_M3_消失信号/発話イベント.csv"
+    },
+    "object_files": {
+      "events_out": "F/logs/F2-75_M3_消失信号/物体ファイル.csv",
+      "points_per_side": 16,
+      "frames_out": "F/logs/F2-75_M3_消失信号/検出フレーム",
+      "interval_s": 0.5,
+      "attend": true,
+      "attend_out": "F/logs/F2-75_M3_消失信号/注意.csv"
+    },
+    "view_video": {
+      "out": "F/logs/F2-75_M3_消失信号/動画_視界.mp4",
+      "until": 300
+    }
+  }
+}
