@@ -78,6 +78,17 @@ class WordProduction(Plugin):
             "plan_length": plan_length if plan_length is not None else "",
             "known_moras": known_moras if known_moras is not None else "",
             "exact_match": int(ev["generated_word"] == ev["target_word"]),
+            # 【M4・2026-09-06・仕様_M4_消えた物について「○○ないね」と言う(d)】
+            #   末尾に追加（既存列順は不変）。run/trainer.py _apply_word_production の
+            #   last_produce が常にこの3キーを持つ（vanish_input無効時は
+            #   gate="ok"/gone=0/attended_id=""＝行の中身は従来と変わらない）ので、
+            #   ここは素通しするだけ。このファイルは「触ってよいファイル」に明記
+            #   されていないが、太郎の発話.csv を書く唯一の場所であり、仕様書(d)
+            #   （gate/gone/attended_id列の追加）が要求する出力先そのものなので
+            #   最小限（末尾に3列足すだけ）で変更した。判断は作業記録に記載。
+            "gate": ev.get("gate", "ok"),
+            "gone": ev.get("gone", 0),
+            "attended_id": ev.get("attended_id", ""),
         })
 
     def metrics(self, ctx):
@@ -102,12 +113,14 @@ class WordProduction(Plugin):
                 w.writerow(["step", "sim_sec", "toy", "target_word", "sim",
                            "generated_word", "reward", "plan_length",
                            "known_moras", "exact_match",
-                           "choice_gru", "choice_hippo", "chosen"])
+                           "choice_gru", "choice_hippo", "chosen",
+                           "gate", "gone", "attended_id"])
                 for r in self.rows:
                     w.writerow([r["step"], r["sim_sec"], r["toy"], r["target_word"],
                                r["sim"], r["generated_word"], r["reward"],
                                r["plan_length"], r["known_moras"], r["exact_match"],
-                               r.get("choice_gru"), r.get("choice_hippo"), r.get("chosen")])
+                               r.get("choice_gru"), r.get("choice_hippo"), r.get("chosen"),
+                               r.get("gate", "ok"), r.get("gone", 0), r.get("attended_id", "")])
         exact = [r for r in self.rows if r["exact_match"]]
         return {
             "発話回数": len(self.rows),

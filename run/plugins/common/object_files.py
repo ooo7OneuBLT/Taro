@@ -145,6 +145,11 @@ class ObjectFiles(Plugin):
         self._attended_id = None
         self._attended_last_seen_vec = None
         self._attended_last_seen_time = None
+        # 【M4・2026-09-06・仕様_M4_消えた物について「○○ないね」と言う(0)】
+        #   直近の検出コマで注意中のファイルが可視だったか。on_step冒頭の
+        #   毎tick更新（検出コマでなくても）で使う。既定Falseでは一切参照されない
+        #   （attend=Falseならon_step冒頭のifを通らない）。
+        self._attended_visible = False
         self._last_nearest_word = ""
         self._last_vanished = False
         # 親の発話履歴から「目標(target id)→語」を引くための表（決めたこと3の
@@ -187,6 +192,24 @@ class ObjectFiles(Plugin):
             #   「目標→語」の表だけは毎tick更新する（読むだけ・attend=Falseでは
             #   一切呼ばれない）。
             self._track_parent_target(ctx)
+            # 【M4・2026-09-06・仕様_M4_消えた物について「○○ないね」と言う(0)】
+            #   言語（記憶と発話）が読む見た目を「注意している物体ファイルが
+            #   保っている見た目」にするための本体。検出コマでなくても、注意中の
+            #   ファイルが（直近の検出コマで）可視の間は毎tick、その瞬間に脳が
+            #   使った視覚(ctx.last_vision_vec、trainer._apply_word_productionが
+            #   このtick内で先に置く)でlast_seen_vecを上書きする。不可視の間は
+            #   何もしない＝前回可視だったときの見た目を保つ（M1.5で確認した
+            #   物体ファイルの持続性と同じ形）。条件分岐は言語側でなくここに置く
+            #   （仕様書「空の机問題の解き方」節・2026-09-06追記の改訂）。
+            if self._attended_id is not None and self._attended_visible:
+                _lv = getattr(ctx, "last_vision_vec", None)
+                if _lv is not None:
+                    import numpy as np
+                    self._attended_last_seen_vec = np.array(_lv, dtype=np.float64, copy=True)
+                    self._attended_last_seen_time = float(ctx.data.time)
+                    if getattr(ctx, "attended_object", None) is not None:
+                        ctx.attended_object["last_seen_vec"] = self._attended_last_seen_vec
+                        ctx.attended_object["last_seen_time"] = self._attended_last_seen_time
         t = float(ctx.data.time)
         if t - self._last_t < self.interval_s:
             return
@@ -433,9 +456,13 @@ class ObjectFiles(Plugin):
             self._attended_id = None
             self._attended_last_seen_vec = None
             self._attended_last_seen_time = None
+            self._attended_visible = False
 
         attended_f = (cur_by_id.get(self._attended_id)
                       if self._attended_id is not None else None)
+        # 【M4・2026-09-06(0)】次の検出コマまでの毎tick更新（on_step冒頭）が
+        #   使う「直近の検出コマで可視だったか」をここで確定させる。
+        self._attended_visible = attended_f is not None and attended_f.misses == 0
 
         # ---- 決めたこと2：「消えた物の見た目」の控え ---------------------------
         if attended_f is not None and attended_f.misses == 0:

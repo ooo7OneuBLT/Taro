@@ -333,13 +333,19 @@ class Trainer:
         return {"vision": fovea,
                 "peripheral": per.tolist() if hasattr(per, "tolist") else list(per)}
 
-    def _context_feed(self, speaker, token_ids, vision_vec=None):
+    def _context_feed(self, speaker, token_ids, vision_vec=None, gone=False):
         """文脈（GRUの隠れ状態）へ発話を1本流す（2026-08-30・設計_文脈（コンテキスト）.md）。
 
         speaker: "parent" か "self"。話者の印（決定3）を列の頭に付けて
         forward_hidden に通し、持続する文脈 taro._context_hidden を更新する。
         読み出し専用（no_grad）＝学習は1ビットも変えない。
         produce.context=false（既定）では何もしない。
+
+        gone: 【M4・2026-09-06・仕様_M4_消えた物について「○○ないね」と言う】
+          Trueなら話者トークンの直後に<GONE>を挟む（＝「[親][消えた]バスないね」の
+          形にする）。既定False（呼び出し元が渡さない）では従来と1ビットも
+          変わらない。taro._gone_idがNone（produce.vanish_input無し）のときも
+          何もしない（安全側）。
         """
         t = self.taro
         if not getattr(t, "_context_enabled", False):
@@ -352,6 +358,8 @@ class Trainer:
         _cap = t.brain.embedding.num_embeddings
         ids = [t._context_speaker_ids[speaker]] + [int(i) for i in token_ids
                                                    if int(i) < _cap]
+        if gone and getattr(t, "_gone_id", None) is not None:
+            ids = [ids[0], t._gone_id] + ids[1:]
         # 【分節第2案・2026-09-03】設計_分節（語の切れ目の発見）.md 第2案 第2部
         #   「EOSを足す」節。既定listen_eos=False では通らない＝1ビットも変わらない。
         #   自己発話（speaker=="self"）は既に別経路でEOS付きのため対象外。
@@ -551,7 +559,24 @@ class Trainer:
             # 【V1】聞く側にだけ視覚を添える（設計の分岐A＝案2。言う側はV3で）。
             #   state は lexicon 用に計算済みの DINOv2 ベクトル（再計算なし）。
             _vv = state.get("vision") if isinstance(state, dict) else state
-            self._context_feed("parent", self._to_produce_ids(text), vision_vec=_vv)
+            # 【M4・2026-09-06・仕様_M4_消えた物について「○○ないね」と言う】
+            #   （2026-09-06改訂：条件分岐を言語側から物体ファイル側へ移した後の形）
+            #   言語は常に「注意している物体ファイルが保っている見た目」を読む。
+            #   attended_objectが有れば、vanishedの真偽によらずvision_vecを
+            #   last_seen_vecにする（見えている間は毎tick更新＝今までと同じ、
+            #   消えた後は自然にバスの見た目が残る。仕様書「空の机問題の解き方」節）。
+            #   vanishedが真のときだけ話者トークンの直後に<GONE>を挟む
+            #   （「だね」と「ないね」の区別節）。既定False（produce.vanish_input無し）・
+            #   attended_objectが無い・last_seen_vecがまだ無い（一度も見えていない）
+            #   ときは従来どおり（網膜の生の像をそのまま使う）。
+            _gone = False
+            if bool((self.cfg.produce or {}).get("vanish_input", False)):
+                _att = getattr(self.ctx, "attended_object", None)
+                if _att is not None and _att.get("last_seen_vec") is not None:
+                    _vv = _att["last_seen_vec"]
+                    _gone = bool(_att.get("vanished"))
+            self._context_feed("parent", self._to_produce_ids(text),
+                               vision_vec=_vv, gone=_gone)
         # 【発話の動機・2026-08-31】随伴の判定：自分が言った後、窓内に親の声が
         #   来たら報酬1（正誤は見ない＝設計B'）。言わなかった決定は窓切れ（上のA）
         #   で報酬0になる。social未設定なら不実行。
@@ -669,6 +694,31 @@ class Trainer:
         # 【F2-8・2026-08-25】逆引きの前に「見慣れた景色」の平均へ今の見えを足す。
         #   ここは毎ステップ通るので、産出中は太郎が見たものすべてが平均に入る。
         t.lexicon.observe_view(vec)
+
+        # 【M4・2026-09-06・仕様_M4_消えた物について「○○ないね」と言う】
+        #   黙る門：注意している物が無いとき（走行の最初や、記録が消えた後）は
+        #   発話しない（M2で見つかった「空の視界で『くつだね』」の対策）。
+        #   ctx.attended_objectはobject_files.py（プラグイン）が前tickに置いた値
+        #   （プラグインは_apply_word_productionの後に走るため。事前確認4）。
+        #   既定False（produce.vanish_input無し）ではこの分岐を一歩も通らず、
+        #   従来どおり逆引きへ進む＝1ビットも変わらない。
+        _vanish_input = bool(pd.get("vanish_input", False))
+        _att = getattr(self.ctx, "attended_object", None) if _vanish_input else None
+        if _vanish_input and _att is None:
+            self.ctx.last_produce = {
+                "target_word": "", "sim": 0.0, "generated_word": "",
+                "choice": None, "reward": None, "plan_length": 0, "known_moras": 0,
+                "gate": "no_object", "gone": 0, "attended_id": "",
+            }
+            return
+        _vanished = bool(_att.get("vanished")) if _att is not None else False
+        _attended_id = _att.get("file_id", "") if _att is not None else ""
+        # 【M4】自己回帰へ渡す実際の視覚（vanished時はlast_seen_vecに差し替える。
+        #   last_seen_vecがまだ無い（一度も見えていない物に注意している異常系）
+        #   ときは無理に差し替えず、フラグだけFalseに落として従来どおり素通り。
+        _gone_now = False
+        if _vanish_input and _vanished and _att.get("last_seen_vec") is not None:
+            _gone_now = True
         chunk, sim = t.lexicon.reverse_lookup(vec)
         # 【文脈・2026-08-30・設計_文脈（コンテキスト）.md 決定4】語の選択に
         #   文脈の「言いやすさ」を足す：点数 = コサイン + λ × 幾何平均確率。
@@ -712,13 +762,31 @@ class Trainer:
             _pv = t.produce_vocab
             _par = _pv.char2idx.get("<PARENT>")
             _dev = t.brain._device()
-            _vin = torch.tensor(list(vec), dtype=torch.float32, device=_dev)
+            _gone_id_v = getattr(t, "_gone_id", None)
+            # 【M4・2026-09-06改訂】言語は常に注意中の物体ファイルの見た目を読む。
+            #   attended_objectがありlast_seen_vecがあれば、vanishedの真偽に
+            #   かかわらずvecをそれに差し替える（常に。仕様書(b)）。見えている間は
+            #   last_seen_vecが毎tick更新されるので中身は今までのvecと同じになる。
+            #   vanish_input無効、またはlast_seen_vecがまだ無い（一度も見えていない）
+            #   ときは従来のvecのまま＝1ビットも変わらない。
+            _vec_for_key = vec
+            if _vanish_input and _att is not None and _att.get("last_seen_vec") is not None:
+                _vec_for_key = _att["last_seen_vec"]
+            _vin = torch.tensor(list(_vec_for_key), dtype=torch.float32, device=_dev)
             with torch.no_grad():
                 _key = t._visual_projection(_vin)
                 _out, _hh = t.brain.forward_hidden(
                     torch.tensor([[_par]], dtype=torch.long, device=_dev),
                     hidden=t._context_hidden, prefix_vec=_key)
                 _logits = t.brain.perception_head(_out)[0, -1]
+                # 【M4】本体の自己回帰は、開始トークン(<PARENT>)の直後に<GONE>を
+                #   強制してから続きを手繰る（仕様書(b)）。自信(_conf_g)は
+                #   <GONE>強制後の最初の実文字への確信度で測る。
+                if _gone_now and _gone_id_v is not None:
+                    _out, _hh = t.brain.forward_hidden(
+                        torch.tensor([[_gone_id_v]], dtype=torch.long, device=_dev),
+                        hidden=_hh)
+                    _logits = t.brain.perception_head(_out)[0, -1]
                 _conf_g = float(torch.softmax(_logits, dim=-1).max())
                 _seq = []
                 for _ in range(int(pd.get("max_length", 8))):
@@ -729,12 +797,27 @@ class Trainer:
                     _out, _hh = t.brain.forward_hidden(
                         torch.tensor([[_tk]], dtype=torch.long, device=_dev), hidden=_hh)
                     _logits = t.brain.perception_head(_out)[0, -1]
-            _word_g = _pv.decode(_seq) if _seq else ""
+            # 【M4】デコードでは<GONE>を表示しない（採点用の別列gone=1で残す）。
+            _seq_clean = ([tk for tk in _seq if tk != _gone_id_v]
+                          if _gone_id_v is not None else _seq)
+            _word_g = _pv.decode(_seq_clean) if _seq_clean else ""
             _word_h, _conf_h = "", 0.0
             _hip = getattr(t, "language_hippocampus", None)
             if _hip is not None and len(_hip) > 0:
-                _toks, _simh, _str = _hip.recall_with_conf(_key.detach().cpu().numpy())
-                _word_h = _pv.decode(list(_toks)) if _toks else ""
+                if _vanish_input and _gone_id_v is not None:
+                    # 【M4】海馬側は、vanished時はtokens[0]==<GONE>の記憶だけ、
+                    #   通常時はtokens[0]!=<GONE>の記憶だけを候補にする（仕様書(b)）。
+                    #   language_hippocampus.pyは変更禁止のため、recall_with_confと
+                    #   同じコサイン最近傍探索を、候補を絞った上でここで行う
+                    #   （_hippo_recall_filtered、taro_core側は一切変更しない）。
+                    _toks, _simh, _str = self._hippo_recall_filtered(
+                        _hip, _key.detach().cpu().numpy(),
+                        want_gone=_gone_now, gone_id=_gone_id_v)
+                else:
+                    _toks, _simh, _str = _hip.recall_with_conf(_key.detach().cpu().numpy())
+                _toks_clean = ([tk for tk in _toks if tk != _gone_id_v]
+                              if _gone_id_v is not None else _toks)
+                _word_h = _pv.decode(_toks_clean) if _toks_clean else ""
                 _conf_h = float(pd.get("hippo_gain", 1.0)) * float(_simh) * float(_str)
             if _word_h and _conf_h > _conf_g:
                 _word, sim, _src = _word_h, _conf_h, "hippo"
@@ -886,7 +969,10 @@ class Trainer:
             "generated_word": generated_word,
             "choice": getattr(self, "_last_choice", None),
             "reward": float(reward) if reward is not None else None,
-            "plan_length": int(plan_length), "known_moras": int(known_moras)}
+            "plan_length": int(plan_length), "known_moras": int(known_moras),
+            # 【M4・2026-09-06】vanish_input無効なら常にgate="ok"/gone=0/attended_id=""
+            #   （既存実験のCSV読み手が新列を無視すれば1ビットも変わらない）。
+            "gate": "ok", "gone": int(_gone_now), "attended_id": _attended_id}
 
     def _apply_babble(self, pd):
         """喃語モード（F2-1）：視覚トリガーなし・クールダウンだけで自発的に声を出す。
@@ -1101,6 +1187,35 @@ class Trainer:
         #   固定すると成長後に古い基準のまま目標を作ることになる）。
         if cfg.goal_babbling and cfg.goal_space == "reach_self":
             self.taro.home_reach_goal = self.taro.encode_reach_goal(self.state["obs"]).detach()
+
+    @staticmethod
+    def _hippo_recall_filtered(hip, key_vis, want_gone, gone_id):
+        """language_hippocampus.LanguageHippocampus.recall_with_confと同じ
+        コサイン最近傍探索を、候補をtokens[0]の種類で絞った上で行う
+        （2026-09-06・仕様_M4_消えた物について「○○ないね」と言う(b)）。
+
+        taro_core/src/brain/language_hippocampus/language_hippocampus.pyは
+        変更禁止（recall_with_confに絞り込み引数を足せない）ため、公開属性
+        hip.episodes（list[dict]）を読むだけでここに複製する。
+        アルゴリズム自体はrecall_with_confの実装を1文字も変えず、
+        「tokens[0]==gone_id」がwant_goneと一致するエピソードだけを対象にする点のみ追加。
+
+        候補が無ければ([], 0.0, 0.0)。
+        """
+        import numpy as np
+        eps = [ep for ep in hip.episodes
+               if bool(ep["tokens"]) and (ep["tokens"][0] == gone_id) == bool(want_gone)]
+        if not eps:
+            return [], 0.0, 0.0
+        q = np.asarray(key_vis, dtype=np.float32)
+        qn = np.linalg.norm(q) + 1e-8
+        best, best_sim = None, -1e9
+        for ep in eps:
+            k = ep["key_vis"]
+            sim = float(np.dot(q, k) / (qn * (np.linalg.norm(k) + 1e-8)))
+            if sim > best_sim:
+                best_sim, best = sim, ep
+        return list(best["tokens"]), best_sim, float(best["strength"])
 
     # ------------------------------------------------------------ 睡眠（言語）
     def _consolidate_language(self):

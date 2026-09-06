@@ -426,6 +426,11 @@ def _setup_produce(taro, cfg, env, *, verbose=True):
         taro._social_pending = None
         taro._visual_projection = None
         taro.language_hippocampus = None
+        # 【M4・2026-09-06・仕様_M4_消えた物について「○○ないね」と言う】
+        #   既定OFF（cfg.produce=None）ではGONEトークンも登録されず、
+        #   run/trainer.pyのvanish_input分岐は getattr(t, "_gone_id", None) が
+        #   Noneのまま＝一切通らない。
+        taro._gone_id = None
         return
     from vocal_tract import VocalTract
     from hearing import Vocabulary
@@ -493,6 +498,23 @@ def _setup_produce(taro, cfg, env, *, verbose=True):
     if taro._context_enabled:
         taro._context_speaker_ids = {"parent": pv.add_special("<PARENT>"),
                                      "self": pv.add_special("<SELF>")}
+    # 【M4・2026-09-06・仕様_M4_消えた物について「○○ないね」と言う】
+    #   「消えた」を、話者の印(<PARENT>/<SELF>)と同じ仕組みの離散トークンとして
+    #   1つ足す（逸脱・Tier3：内側の状態を離散の印にする。仕様書「『だね』と
+    #   『ないね』の区別」節・doc\人間模倣からの逸脱リスト.md に登録済み）。
+    #   既定False（produce.vanish_input無し）ではtaro._gone_idはNoneのまま＝
+    #   語彙サイズも変わらず1ビットも変わらない。話者トークンと同じ手順
+    #   （Vocabulary.add_special＋resize_embeddingでの埋め込み拡張）を踏むことで、
+    #   既存の .pt を読んでも壊れない（resize_embeddingは旧重みを先頭へコピーし、
+    #   増えた行だけ新規初期化する。taro_core/src/brain/cerebral_cortex/
+    #   recurrent_core.py resize_embedding参照）。
+    taro._gone_id = None
+    if bool(pd.get("vanish_input", False)):
+        if not taro._context_enabled:
+            raise ValueError(
+                "produce.vanish_input=true には produce.context=true が必要"
+                "（<GONE>はGRUの文脈入力へ流す仕組みで、文脈が無いと意味を持たない）。")
+        taro._gone_id = pv.add_special("<GONE>")
     taro.brain.resize_embedding(pv.size)
     taro.brain.set_vocab_mapping(pv.char2idx)
     # 【聞く学習・2026-08-31・設計_文脈（コンテキスト）.md 追補】聞いた発話の

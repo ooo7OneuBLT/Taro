@@ -1,0 +1,77 @@
+{
+ "name": "F2-76_M4_消失発話学習",
+ "note": "2026-09-06 M4 消えた物について「○○ないね」と言う。F2-75_M3_消失信号を複製し、scene を vanish_gap_before_sec=1.5 の新シーンへ、object_files を interval_s=0.5・attend=true・vanish_misses=2 へ、taro.produce.vanish_input=true・hippocampus.replay_passes=10 へ、run.steps=4000 へ変更。仕様：F/docs/二語文/仕様_M4_消えた物について「○○ないね」と言う_2026-09-06.md。【実装担当の判断・逸脱では無いが要報告】listen_learn は仕様書に明記が無いためF2-75から継承してfalseのままにすると、run/trainer.py _context_feed内のlanguage_hippocampus.writeがlisten_learnブロックの内側にありconsolidate_languageも_listen_optimizerがNoneだと即returnするため、hippocampusへの書き込み・睡眠リプレイが一度も起きない（机上確認②で実測：100stepでbase model由来の78エピソードのまま増減なし）。仕様書の学習の量節がF2-70(listen_learn=true)を根拠に「書き込み5回×復習10周」を前提にしているため、listen_learn=trueに設定した（推奨・作業記録に記載）。",
+ "scene": "座位_12ヶ月_F2-49_実物8択_r1_個体1_消失発話1.5s_2026-09-06",
+ "taro": {
+  "actuation": "muscle",
+  "age_months": 12.0,
+  "orienting_reflex": true,
+  "hearing": true,
+  "lexicon_vision": {
+   "backend": "dinov2_vits14",
+   "fovea_px": 32,
+   "eye": "left",
+   "source": "wide"
+  },
+  "lexicon_mode": "contrast",
+  "lexicon_eta_pull": 0.05,
+  "lexicon_eta_push": 0.0,
+  "model": "F/models/F2-50_r8_seed98_2026-09-03.pt",
+  "save": "F/logs/F2-76_M4_消失発話学習/model.pt",
+  "produce": {
+   "mode": "word",
+   "threshold": 0.5,
+   "cooldown_sec": 2.0,
+   "max_length": 8,
+   "develop_from_age": true,
+   "vocal_tract_decoupled": true,
+   "context": true,
+   "listen_learn": true,
+   "context_lambda": 0.0,
+   "vision_context": true,
+   "listen_lr": 0.001,
+   "hippocampus": {
+    "capacity": 512,
+    "decay": 0.5,
+    "replay_passes": 10,
+    "recent_ratio": 0.7,
+    "sleep_lr": 0.005
+   },
+   "word_choice": "gru_hippo",
+   "hippo_gain": 1.0,
+   "listen_self": false,
+   "listen_eos": true,
+   "segment_mode": "end_prob",
+   "vanish_input": true
+  }
+ },
+ "run": {
+  "type": "train",
+  "steps": 4000,
+  "seed": 91,
+  "K": 10,
+  "checkpoint": 100,
+  "csv": "F/logs/F2-76_M4_消失発話学習/run.csv"
+ },
+ "plugins": {
+  "word_production": {
+   "events_out": "F/logs/F2-76_M4_消失発話学習/太郎の発話.csv"
+  },
+  "word_learning": {
+   "events_out": "F/logs/F2-76_M4_消失発話学習/発話イベント.csv"
+  },
+  "object_files": {
+   "events_out": "F/logs/F2-76_M4_消失発話学習/物体ファイル.csv",
+   "points_per_side": 16,
+   "frames_out": "F/logs/F2-76_M4_消失発話学習/検出フレーム",
+   "interval_s": 0.5,
+   "attend": true,
+   "attend_out": "F/logs/F2-76_M4_消失発話学習/注意.csv",
+   "vanish_misses": 2
+  },
+  "view_video": {
+   "out": "F/logs/F2-76_M4_消失発話学習/動画_視界.mp4",
+   "until": 600
+  }
+ }
+}
