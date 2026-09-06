@@ -1,0 +1,78 @@
+{
+ "name": "F2-82c_短期B_テスト長め",
+ "note": "2026-09-06 F2-82b と同じ設定で run.steps を 1800 に延ばし、黙る側3語の消失イベント数を増やす（F2-82b は2件のみ）。view_video も全区間。",
+ "scene": "座位_12ヶ月_F2-49_実物8択_r1_個体1_消失発話_気づき待ち_3語黙る_2026-09-06",
+ "taro": {
+  "actuation": "muscle",
+  "age_months": 12.0,
+  "orienting_reflex": true,
+  "hearing": true,
+  "lexicon_vision": {
+   "backend": "dinov2_vits14",
+   "fovea_px": 32,
+   "eye": "left",
+   "source": "wide"
+  },
+  "lexicon_mode": "contrast",
+  "lexicon_eta_pull": 0.05,
+  "lexicon_eta_push": 0.0,
+  "model": "F/logs/F2-82_短期B_学習/model.pt",
+  "save": "F/logs/F2-82c_短期B_テスト長め/model.pt",
+  "produce": {
+   "mode": "word",
+   "threshold": 0.5,
+   "cooldown_sec": 2.0,
+   "max_length": 8,
+   "develop_from_age": true,
+   "vocal_tract_decoupled": true,
+   "context": true,
+   "listen_learn": true,
+   "context_lambda": 0.0,
+   "vision_context": true,
+   "listen_lr": 0.001,
+   "hippocampus": {
+    "capacity": 512,
+    "decay": 0.5,
+    "replay_passes": 10,
+    "recent_ratio": 0.7,
+    "sleep_lr": 0.005
+   },
+   "word_choice": "gru_hippo",
+   "hippo_gain": 1.0,
+   "listen_self": false,
+   "listen_eos": true,
+   "segment_mode": "end_prob",
+   "vanish_input": true,
+   "here_input": true
+  }
+ },
+ "run": {
+  "type": "train",
+  "steps": 1800,
+  "seed": 91,
+  "K": 10,
+  "checkpoint": 100,
+  "csv": "F/logs/F2-82c_短期B_テスト長め/run.csv"
+ },
+ "plugins": {
+  "word_production": {
+   "events_out": "F/logs/F2-82c_短期B_テスト長め/太郎の発話.csv"
+  },
+  "word_learning": {
+   "events_out": "F/logs/F2-82c_短期B_テスト長め/発話イベント.csv"
+  },
+  "object_files": {
+   "events_out": "F/logs/F2-82c_短期B_テスト長め/物体ファイル.csv",
+   "points_per_side": 16,
+   "frames_out": "F/logs/F2-82c_短期B_テスト長め/検出フレーム",
+   "interval_s": 0.5,
+   "attend": true,
+   "attend_out": "F/logs/F2-82c_短期B_テスト長め/注意.csv",
+   "vanish_misses": 2
+  },
+  "view_video": {
+   "out": "F/logs/F2-82c_短期B_テスト長め/動画_視界.mp4",
+   "until": 1800
+  }
+ }
+}

@@ -43,7 +43,7 @@ import f71_pattern_generalization_disambiguation as f71
 from hearing import normalize_kana
 
 MODEL_PATH = sys.argv[1] if len(sys.argv) > 1 else "F/logs/F2-81_M4d_あるの印学習/model.pt"
-OUT_DIR = "F/logs/F2-81_M4d_あるの印学習/静止測定"
+OUT_DIR = os.path.join(os.path.dirname(MODEL_PATH), "静止測定")   # モデルと同じ場所に出す（別モデルで既定先を上書きした事故 2026-09-06）
 
 WORDS = ["くつ", "こっぷ", "おさら", "おわん", "かばん", "がおお", "ばす", "ぼおる"]
 EMPTY = "ないね"                 # 空の机の代理（「ないね」チャンクのプロトタイプ）
