@@ -253,7 +253,20 @@ def chunk_ids_for_text(t, text):
     ids = t.hearing_vocab.encode(text)
     if ids is None:
         return []
-    return [t.chunk_vocab.encode_chunk(tuple(ids))]
+    # 【2026-09-07 修正】丸ごと1塊にすると名簿に無い新idが生まれ embedding の範囲外で落ちる。
+    #   名簿にある塊で左から最長一致に切る（無い部分は捨てて警告）。
+    cv = t.chunk_vocab
+    out, i = [], 0
+    while i < len(ids):
+        best = None
+        for j in range(len(ids), i, -1):
+            cid = cv.chunk2idx.get(tuple(ids[i:j]))
+            if cid is not None:
+                best = (cid, j); break
+        if best is None:
+            print(f"[警告] c1文脈の位置{i}から名簿に一致する塊が無い。読み飛ばす"); i += 1; continue
+        out.append(best[0]); i = best[1]
+    return out
 
 
 def main():
