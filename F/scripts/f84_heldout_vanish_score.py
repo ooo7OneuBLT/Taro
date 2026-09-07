@@ -176,6 +176,7 @@ def main():
             table.append({
                 "T": round(T, 3), "消えた物": "", "側": "不明",
                 "太郎の発話": "", "判定": "?対象不明（発話イベント無し）",
+                "厳密": "?対象不明（発話イベント無し）",
             })
             continue
 
@@ -203,20 +204,54 @@ def main():
                      if r.get("gone") == "1" and T <= r["_t"] < window_end]
         gens = [r.get("generated_word", "") for r in in_window]
 
-        has_correct = any(g.startswith(word) and ("ない" in g) and word
-                           for g in gens)
-        has_nai_only = any(("ない" in g) and not (g.startswith(word) and word)
-                            for g in gens)
-        if has_correct:
-            judge = "○正解（語＋ない）"
-        elif has_nai_only:
-            judge = "×語違い（ないはあるが語が違う）"
+        # 厳密判定（従来）：語で始まり、かつ「ない」を含む。
+        has_correct_strict = any(g.startswith(word) and ("ない" in g) and word
+                                  for g in gens)
+        has_nai_only_strict = any(
+            ("ない" in g) and not (g.startswith(word) and word) for g in gens)
+        if has_correct_strict:
+            judge_strict = "○正解（語＋ない）"
+        elif has_nai_only_strict:
+            judge_strict = "×語違い（ないはあるが語が違う）"
         else:
-            judge = "×ない無し"
+            judge_strict = "×ない無し"
+
+        # 断片許容判定（2026-09-07 仕様_M5_段2）：「generatedに『ない』を含み、
+        #   かつ（語で始まる or 語の連続2モーラ以上の部分文字列が『ない』より
+        #   前に含まれる）」を正解とする。ユーザー決定「語の一部が崩れるのは
+        #   直さない」（2026-09-07）を採点側に反映した。
+        def _has_fragment(g, w):
+            if not w or "ない" not in g:
+                return False
+            nai_pos = g.find("ない")
+            head = g[:nai_pos]
+            if head.startswith(w):
+                return True
+            # wの中の連続2モーラ以上の部分文字列がheadに含まれるか。
+            for length in range(len(w), 1, -1):
+                for start in range(0, len(w) - length + 1):
+                    sub = w[start:start + length]
+                    if len(sub) >= 2 and sub in head:
+                        return True
+            return False
+
+        has_correct_fragment = any(_has_fragment(g, word) for g in gens)
+        has_nai_only_fragment = any(
+            ("ない" in g) and not _has_fragment(g, word) for g in gens)
+        if has_correct_fragment:
+            judge_fragment = "○正解（語＋ない・断片可）"
+        elif has_nai_only_fragment:
+            judge_fragment = "×語違い（ないはあるが語が違う）"
+        else:
+            judge_fragment = "×ない無し"
+
+        # 既定の「判定」列は断片許容（仕様書の採点方針）。厳密判定は別列で残す。
+        judge = judge_fragment
 
         table.append({
             "T": round(T, 3), "消えた物": target, "側": side,
             "太郎の発話": "; ".join(g for g in gens if g), "判定": judge,
+            "厳密": judge_strict,
         })
 
     # 側ごとの集計。
@@ -233,11 +268,18 @@ def main():
         n_correct = sum(1 for r in rows if r["判定"].startswith("○"))
         n_wrong_word = sum(1 for r in rows if "語違い" in r["判定"])
         n_no_nai = sum(1 for r in rows if r["判定"] == "×ない無し")
+        # 厳密判定（従来の判定基準）側の集計。列「厳密」を使う。
+        n_correct_strict = sum(1 for r in rows if r["厳密"].startswith("○"))
+        n_wrong_word_strict = sum(1 for r in rows if "語違い" in r["厳密"])
+        n_no_nai_strict = sum(1 for r in rows if r["厳密"] == "×ない無し")
         return {
             "件数": n,
             "語＋ない率": round(n_correct / n, 4) if n else None,
             "語違い率": round(n_wrong_word / n, 4) if n else None,
             "ない無し率": round(n_no_nai / n, 4) if n else None,
+            "厳密_語＋ない率": round(n_correct_strict / n, 4) if n else None,
+            "厳密_語違い率": round(n_wrong_word_strict / n, 4) if n else None,
+            "厳密_ない無し率": round(n_no_nai_strict / n, 4) if n else None,
         }
 
     # 見えている窓（gone=0）に「ない」が漏れていないか。
@@ -260,10 +302,10 @@ def main():
     os.makedirs(LOG_DIR, exist_ok=True)
     with open(OUT_CSV, "w", newline="", encoding="utf-8") as fp:
         w = csv.writer(fp)
-        w.writerow(["T", "消えた物", "側", "太郎の発話", "判定"])
+        w.writerow(["T", "消えた物", "側", "太郎の発話", "判定", "厳密"])
         for row in table:
             w.writerow([row["T"], row["消えた物"], row["側"],
-                       row["太郎の発話"], row["判定"]])
+                       row["太郎の発話"], row["判定"], row["厳密"]])
 
     with open(OUT_JSON, "w", encoding="utf-8") as fp:
         json.dump(result, fp, ensure_ascii=False, indent=2)
