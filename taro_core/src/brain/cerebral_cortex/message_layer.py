@@ -237,7 +237,7 @@ class MessageLayer:
 
         noun_candidates: [(chunk_id, prob)]（塊GRUの先頭塊の分布のうち、
         役割 noun のものだけを呼び出し側が渡す）。
-        戻り値: (chunk_ids, conf, roles)。conf = noun_prob * pred_prob
+        戻り値: (chunk_ids, conf, roles)。conf = noun_prob（述語は表で決まるので掛けない。M6c）
         （pred_count[state]が空なら pred は選ばれず conf は noun_prob のまま）。
         """
         order = self._best_role_order()
@@ -259,7 +259,11 @@ class MessageLayer:
             elif r == "pred" and pred_id is not None:
                 chunk_ids.append(pred_id)
                 roles.append("pred")
-        conf = noun_prob * pred_prob
+        # 【2026-09-07・M6c】自信は名詞の確率だけにする。述語は状態の表から決まる（表が
+        #   選んだ以上、迷いはない）ので pred_prob を掛けると、断片（いね等）に票が
+        #   割れただけで自信が半減し、閾値（0.5）に届かず黙る／海馬の反復に常に負ける
+        #   （F2-88b：全64発話が海馬、教えていない語の消えた窓は空）。
+        conf = noun_prob if pred_id is not None or not pred_table else noun_prob
         return chunk_ids, conf, roles
 
     def state_dict(self):
