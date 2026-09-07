@@ -961,6 +961,16 @@ class Trainer:
                         _out0, _hh0 = t.chunk_brain.forward_hidden(
                             torch.tensor([[_par_c]], dtype=torch.long, device=_dev),
                             hidden=t._chunk_context_hidden, prefix_vec=_key)
+                        # 【M6d・2026-09-07】<PARENT>の直後は学習時に必ず印（<HERE>/<GONE>）が
+                        #   来るので、印を入れずに読むと分布の質量は印に集まり名詞は 0.001〜0.01
+                        #   （F2-88c：全窓で海馬に負け、教えていない語の窓は空）。ここでは
+                        #   **常に <HERE>** を入れて「見えている物の名前」の分布を読む。本当の
+                        #   状態（消えた）は述語の表にだけ渡す＝名詞選びに状態を漏らさない、は保つ。
+                        _here_c = t.chunk_vocab.specials.get("here")
+                        if _here_c is not None:
+                            _out0, _hh0 = t.chunk_brain.forward_hidden(
+                                torch.tensor([[_here_c]], dtype=torch.long, device=_dev),
+                                hidden=_hh0)
                         _logits0 = t.chunk_brain.perception_head(_out0)[0, -1]
                         _probs0 = torch.softmax(_logits0, dim=-1)
                         # 【Tier3・仕様書§3】softmax上位から役割nounの塊だけ残す。
