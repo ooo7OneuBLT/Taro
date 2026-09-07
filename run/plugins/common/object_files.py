@@ -104,6 +104,11 @@ class ObjectFiles(Plugin):
         self.events_out = _abs_path(events_out) if events_out else None
         self.device = self.config.get("device")
         self.points_per_side = self.config.get("points_per_side")
+        # 【2026-09-07・メモリ削減候補(a)】既定None＝SamAutomaticMaskGeneratorの
+        #   既定値(64)のまま＝1ビットも変わらない。渡したときだけ上書きする。
+        self.points_per_batch = self.config.get("points_per_batch")
+        # 【2026-09-07・メモリ削減候補(c)】既定False＝従来どおり呼ばない。
+        self.empty_cache_after_detect = bool(self.config.get("empty_cache_after_detect", False))
         frames_out = self.config.get("frames_out")
         self.frames_out = _abs_path(frames_out) if frames_out else None
         self._frame_font = None
@@ -122,7 +127,8 @@ class ObjectFiles(Plugin):
             "facebookresearch/dinov2", "dinov2_vits14", verbose=False
         ).eval().to(self.device)
 
-        self._mgen = self._load_mobilesam(device=self.device)
+        self._mgen = self._load_mobilesam(device=self.device,
+                                           points_per_batch=self.points_per_batch)
         if self.points_per_side is not None:
             # load_mobilesam（object_detector.py）にpoints_per_sideを渡す口が無いので、
             # 生成器の point_grids を直接作り直す（object_detector.py は変更しない）。
@@ -216,6 +222,11 @@ class ObjectFiles(Plugin):
         t0 = time.perf_counter()
         p, n = self._patch_features(self._model, img224, self.device)
         dets = self._detect(p, n, img=img224, mask_generator=self._mgen)
+        if self.empty_cache_after_detect:
+            # 【2026-09-07・メモリ削減候補(c)】既定Falseでは1行も実行されない。
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
         prev_by_id = {f.id: f for f in self.ofs.files}
         res = self.ofs.step(dets)
         dt_ms = (time.perf_counter() - t0) * 1000.0

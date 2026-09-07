@@ -102,7 +102,7 @@ def detect(patch_feats, n, img_size=224, thresh=0.55, min_cells=1, img=None, mas
     return out
 
 
-def load_mobilesam(weights_path=None, device=None):
+def load_mobilesam(weights_path=None, device=None, points_per_batch=None):
     """MobileSAM（訓練済み・軽量な物体切り出しモデル）を読み込む。1回だけ呼んで
     使い回すこと（読み込みが重い）。返り値を `detect(..., mask_generator=...)` に渡す。
 
@@ -111,6 +111,12 @@ def load_mobilesam(weights_path=None, device=None):
     で確認済み・商用利用可・AI学習禁止条項なし）。
     パラメータ（points_per_side等）はF2-64検証時と同じ設定
     （`F/docs/物体ファイルと注意/2026-09-04c_統合まとめ.md`）。
+
+    【なぜ points_per_batch を引数化したか、2026-09-07】メモリ削減候補の検証
+    （実装・仕事1）。`SamAutomaticMaskGenerator` の既定は64（1バッチで同時に
+    処理する候補点の数。大きいほど中間テンソルが太る）。既定 None のときは
+    SamAutomaticMaskGenerator 自身の既定値（64）がそのまま使われる＝
+    従来と1ビットも変わらない。値を渡したときだけ明示的に上書きする。
     """
     from mobile_sam import sam_model_registry, SamAutomaticMaskGenerator
     import torch
@@ -127,9 +133,11 @@ def load_mobilesam(weights_path=None, device=None):
     sam = sam_model_registry["vit_t"](checkpoint=weights_path)
     sam.to(device=device)
     sam.eval()
-    return SamAutomaticMaskGenerator(
-        sam, points_per_side=32, pred_iou_thresh=0.86,
-        stability_score_thresh=0.92, min_mask_region_area=50)
+    kwargs = dict(pred_iou_thresh=0.86, stability_score_thresh=0.92,
+                  min_mask_region_area=50, points_per_side=32)
+    if points_per_batch is not None:
+        kwargs["points_per_batch"] = int(points_per_batch)
+    return SamAutomaticMaskGenerator(sam, **kwargs)
 
 
 def _mask_touches_edge(bbox, w, h, margin=1):
