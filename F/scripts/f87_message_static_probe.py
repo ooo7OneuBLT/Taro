@@ -2,12 +2,16 @@
 """言いたいことの層の静止測定（f85の複製、2026-09-07）。
 
 仕様：F/docs/二語文/仕様_M6_言いたいことの層_2026-09-07.md 後半「5. 静止測定 f87」節。
+【M6b改訂・2026-09-07】F/docs/二語文/仕様_M6b_役割は見た目との結び付きで_2026-09-07.md
+後半。判定文とrole_labelsの出力を修正。
 
 f85（F/scripts/f85_chunk_static_probe.py）と同じ入力（8語のプロトタイプ＋空の机
 「ないね」）×印（ある／消えた）×文脈（なし／c1）で、生成部だけを仕様書§3の
 組み立て（先頭塊の分布→役割nounで絞る→compose）に差し替える。表には
 noun・pred・組み立てた文字列を出す。判定文は「消えたの印で教えていない3語
-（こっぷ・かばん・ぼおる）が『語＋ないね』になった数」。
+（こっぷ・かばん・ぼおる）が『noun=入力語 かつ pred=ないね』になった数」
+（M6bでの修正：M6は noun非空かつpredに『ないね』を含む、で判定していたため
+noun側が入力と無関係な語でも通ってしまっていた）。
 
 モデルは走らせない（学習ステップを進めない）。
 
@@ -283,31 +287,55 @@ def main():
         w_.writerows(rows)
     print("  ->", gru_csv, f"({len(rows)}行)", flush=True)
 
-    # 【仕様書「検証・止まる条件」机上確認②の判定文】消えたの印(c0)で
-    #   教えていない3語（こっぷ・かばん・ぼおる）が「語＋ないね」（末尾が
-    #   「ないね」を含む2塊）になった数。
+    # 【M6b・2026-09-07・仕様_M6b判定修正】判定文を「noun が入力の語と一致
+    #   かつ pred が『ないね』」に直す（M6の判定「noun非空かつpredにないねを
+    #   含む」は、noun側が入力と無関係な語でも通ってしまっていたため）。
     print("[5] 判定文の集計", flush=True)
     hit = 0
     detail = []
     for r in rows:
         if r["input"] in UNTAUGHT and r["mark"] == "gone" and r["context"] == "c0":
-            ok = bool(r["noun"]) and (r["pred"] == "ないね" or "ないね" in r["word"])
+            ok = (r["noun"] == r["input"]) and (r["pred"] == "ないね")
             detail.append((r["input"], r["word"], r["noun"], r["pred"], ok))
             if ok:
                 hit += 1
-    print(f"  消えたの印×教えていない3語（c0）：{hit}/3 が「語＋ないね」", flush=True)
+    print(f"  消えたの印×教えていない3語（c0）：{hit}/3 が「noun=入力語 かつ pred=ないね」",
+          flush=True)
     for d in detail:
         print("   ", d, flush=True)
+
+    # 【M6b】役割の一覧（塊・観測数・vis_cons・役割）を出力する（仕様書「報告」節）。
+    print("[5.5] 役割の一覧", flush=True)
+    role_rows = []
+    for cid, sc in sorted(ml.state_count.items()):
+        n = sc["here"] + sc["gone"]
+        vc = ml.vis_cons.get(cid)
+        r = ml.role(cid)
+        word = cv.chunk_string(cid, t.hearing_vocab)
+        role_rows.append({
+            "chunk_id": cid, "word": word, "n_obs": n,
+            "vis_cons": (round(vc, 5) if vc is not None else ""),
+            "role": (r if r is not None else ""),
+        })
+        print(f"   chunk={cid} word={word} n_obs={n}"
+              f" vis_cons={vc if vc is not None else 'None'} role={r}", flush=True)
+    role_csv = os.path.join(OUT_DIR, "役割一覧.csv")
+    with io.open(role_csv, "w", encoding="utf-8", newline="") as fp:
+        w_ = csv.DictWriter(fp, fieldnames=["chunk_id", "word", "n_obs", "vis_cons", "role"])
+        w_.writeheader()
+        w_.writerows(role_rows)
+    print("  ->", role_csv, f"({len(role_rows)}行)", flush=True)
 
     print("[6] 結果.md 記録", flush=True)
     md = []
     md.append("# f87 言いたいことの層の静止測定：結果\n")
     md.append(f"モデル: `{MODEL_PATH}`\n")
     md.append(f"消えたの印×教えていない3語（こっぷ・かばん・ぼおる、c0文脈）の"
-              f"「語＋ないね」率: {hit}/3\n")
+              f"「noun=入力語 かつ pred=ないね」率: {hit}/3\n")
     md.append("詳細（input, word, noun, pred, ok):\n")
     for d in detail:
         md.append(f"- {d}\n")
+    md.append(f"\n役割の一覧: `{role_csv}`\n")
     md_path = os.path.join(OUT_DIR, "結果.md")
     with io.open(md_path, "w", encoding="utf-8") as fp:
         fp.write("\n".join(md))

@@ -463,15 +463,31 @@ class Trainer:
         """
         t = self.taro
         cv = t.chunk_vocab
+        # 【仕様書§4】音レベル側と同じ投射を使うが、勾配は流さない
+        #   （taro._chunk_optimizerはchunk_brain.parameters()だけを持つため、
+        #   visual_projectionへ逆伝播しても学習器に登録された対象が無く無駄）。
+        # 【M6b・2026-09-07・仕様_M6b】message_layer.observe()が塊ごとの見た目
+        #   （key_vis）を要るようになったため、_pfxの計算をobserve呼び出しより
+        #   前に持ってきた（以前は下のブロックで計算していた）。
+        _pfx = None
+        if vision_vec is not None and getattr(t, "_visual_projection", None) is not None:
+            _vin = torch.tensor(list(vision_vec), dtype=torch.float32,
+                                device=t.chunk_brain._device())
+            _pfx = t._visual_projection(_vin).detach()
         # 【言いたいことの層・2026-09-07・仕様_M6_言いたいことの層.md §2】
-        #   親の発話を聞くたびに3つの表（塊の役割・述語・順番）を数える。
-        #   自己発話（speaker=="self"）では更新しない。既定False
+        #   親の発話を聞くたびに4つの表（塊の役割の元になる見た目・述語・順番）を
+        #   数える。自己発話（speaker=="self"）では更新しない。既定False
         #   （produce.message_level無し）ではmessage_layerがNoneのまま＝
         #   このifは一度も通らず、既存の全経路は1ビットも変わらない。
+        # 【M6b・2026-09-07】key_vis=親の発話時の見た目（_pfx）を渡す。役割判定が
+        #   「状態と一緒に変わるか」から「見た目のばらつきが小さいか」に変わった
+        #   ため（仕様_M6b_役割は見た目との結び付きで_2026-09-07.md）。
         if speaker == "parent" and getattr(t, "message_layer", None) is not None:
             _msg_state = "gone" if gone else ("here" if here else None)
             if _msg_state is not None:
-                t.message_layer.observe([int(i) for i in chunk_ids], _msg_state)
+                _key_vis = _pfx.detach().cpu().numpy() if _pfx is not None else None
+                t.message_layer.observe([int(i) for i in chunk_ids], _msg_state,
+                                        key_vis=_key_vis)
         ids = [cv.specials[speaker]]
         if gone and cv.specials.get("gone") is not None:
             ids.append(cv.specials["gone"])
@@ -479,14 +495,6 @@ class Trainer:
             ids.append(cv.specials["here"])
         # 【仕様書§4】EOSを常に付ける（塊の列は短いので終わりを学ばせる）。
         ids = ids + [int(i) for i in chunk_ids] + [2]
-        # 【仕様書§4】音レベル側と同じ投射を使うが、勾配は流さない
-        #   （taro._chunk_optimizerはchunk_brain.parameters()だけを持つため、
-        #   visual_projectionへ逆伝播しても学習器に登録された対象が無く無駄）。
-        _pfx = None
-        if vision_vec is not None and getattr(t, "_visual_projection", None) is not None:
-            _vin = torch.tensor(list(vision_vec), dtype=torch.float32,
-                                device=t.chunk_brain._device())
-            _pfx = t._visual_projection(_vin).detach()
         _state_channel = bool((self.cfg.produce or {}).get("state_channel", False))
         _state_id = None
         if _state_channel:
