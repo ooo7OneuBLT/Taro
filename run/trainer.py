@@ -127,6 +127,12 @@ class Trainer:
         self._snap_data = None
         self._snap_model = None
         self._last_parent_events = []      # 【2026-08-18新設・F1-3】直近step_kの発話イベント
+        # 【M7a・2026-09-08・仕様_M7a_世界の予測器_測るだけ】世界の予測器へ渡す
+        #   材料の置き場。cfg.world_predictorがNone（既定）なら一度も書き込まれず
+        #   参照もされない＝既存実験の挙動は1ビットも変わらない。
+        self._wp_parent_chunks = None       # 直近の親の発話（塊id列）。消費してNoneに戻す
+        self._wp_prev_action = None         # 直前tickの運動a（tanh範囲）
+        self._wp_last_parent_speak_sec = None   # 親が最後に喋ったsim秒（time_since計算用）
         # 【2026-08-19新設・F1-4b】語から注意への読み出し。「思い浮かべている」語の
         #   記憶＝(vec, 思い浮かべ始めた時刻)。cfg.word_attentionがNoneのままなら
         #   一度も書き込まれず参照もされない＝既定挙動不変（設計後半「部品2」）。
@@ -463,6 +469,12 @@ class Trainer:
         """
         t = self.taro
         cv = t.chunk_vocab
+        # 【M7a・2026-09-08・仕様_M7a_世界の予測器_測るだけ】親が喋った塊の列を
+        #   世界の予測器へ渡す置き場に控える（_world_predictor_stepが消費してNoneに
+        #   戻す）。cfg.world_predictorがNone（既定）でも書き込み自体は行うが、
+        #   読む側が無ければ使われないだけ＝既存挙動には影響しない。
+        if speaker == "parent":
+            self._wp_parent_chunks = [int(i) for i in chunk_ids]
         # 【仕様書§4】音レベル側と同じ投射を使うが、勾配は流さない
         #   （taro._chunk_optimizerはchunk_brain.parameters()だけを持つため、
         #   visual_projectionへ逆伝播しても学習器に登録された対象が無く無駄）。
@@ -529,6 +541,96 @@ class Trainer:
             _, h = t.chunk_brain.forward_hidden(x, hidden=t._chunk_context_hidden,
                                                 prefix_vec=_pfx, state_id=_state_id)
         t._chunk_context_hidden = h.detach()
+
+    def _world_predictor_step(self):
+        """世界の予測器（M7a）を1tick進める。測るだけ。
+
+        仕様：F/docs/二語文/仕様_M7a_世界の予測器_測るだけ_2026-09-08.md
+        「後半：実装担当向け技術付録」3節(c)。cfg.world_predictorがNone（既定）なら
+        即returnし、追加計算は一切走らない＝既存実験の挙動・コストは1ビットも
+        変わらない。予測器は太郎の他の部品（報酬・行動・学習）に一切書き込まない
+        （self.ctx.last_world_predに置くだけ。読むのはプラグイン）。
+        """
+        t = self.taro
+        wp = getattr(t, "world_predictor", None)
+        if wp is None:
+            self.ctx.last_world_pred = None
+            return
+        import math
+
+        # ---- 物の状態（頭頂連合野が見る「今の物」）------------------------------
+        # 【なぜ224.0か】object_files.py:438 CENTER_X, CENTER_Y = 112.0, 112.0
+        #   （画像は224x224前提で中央=112,112）から逆算した画像1辺の長さ。
+        IMG_SIZE = 224.0
+        att = getattr(self.ctx, "attended_object", None)
+        if att is not None:
+            present = 1.0
+            visible = 1.0 if att.get("visible") else 0.0
+            vanished = 1.0 if att.get("vanished") else 0.0
+            pos = att.get("pos") or (0.0, 0.0)
+            pos_x = float(pos[0]) / IMG_SIZE
+            pos_y = float(pos[1]) / IMG_SIZE
+            area = float(att.get("area") or 0.0)
+            area_norm = math.log1p(max(area, 0.0)) / 10.0
+            obj_state = [present, visible, vanished, pos_x, pos_y, area_norm]
+            obj_vec = att.get("last_seen_vec")
+        else:
+            obj_state = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+            obj_vec = None
+
+        # ---- 親（このtickに喋ったか・どの塊か）--------------------------------
+        parent_events = getattr(self.ctx, "last_parent_utterance", None) or []
+        parent_spoke = 1.0 if parent_events else 0.0
+        if parent_spoke:
+            self._wp_last_parent_speak_sec = self.ctx.sim_sec
+        chunk_ids = self._wp_parent_chunks
+        self._wp_parent_chunks = None      # 消費（次tickへ持ち越さない）
+        chunk_id_plus1 = (int(chunk_ids[0]) + 1) if chunk_ids else 0
+        if self._wp_last_parent_speak_sec is None:
+            time_since = 1.0                # まだ一度も喋っていない＝上限扱い
+        else:
+            time_since = min(self.ctx.sim_sec - self._wp_last_parent_speak_sec, 10.0) / 10.0
+
+        # ---- 直前の運動 ----------------------------------------------------
+        act = self._wp_prev_action
+        act_list = (act.detach().cpu().numpy().reshape(-1).tolist()
+                    if act is not None else None)
+
+        # 【なぜbuild_inputをここで呼ばないか、2026-09-08】WorldPredictor.step()の
+        #   "中"（tbptt窓のflush=backward/optimizer.stepが終わった"後"）で入力を
+        #   組み立てないと、学習対象パラメータ（obj_vec_norm・chunk_embedding）の
+        #   計算グラフが更新前の重みのまま次の窓に紛れ込み、in-placeエラーになる
+        #   （world_predictor.pyの_build_input docstring参照）。そのためstep()には
+        #   生の値のまま渡す。
+        input_now = {
+            "obj_state": obj_state, "obj_vec": obj_vec,
+            "parent_spoke": parent_spoke, "chunk_id_plus1": chunk_id_plus1,
+            "time_since_parent": time_since, "act": act_list,
+        }
+        target = {
+            "obj_state": obj_state,
+            "obj_vec": obj_vec,
+            "parent_spoke": parent_spoke,
+            "parent_chunk_id_plus1": chunk_id_plus1 if parent_spoke else None,
+        }
+        res = wp.step(input_now, target)
+
+        self.ctx.last_world_pred = {
+            "step": self.ctx.step,
+            "t_sec": round(self.ctx.sim_sec, 3),
+            "present": obj_state[0],
+            "visible": obj_state[1],
+            "vanished": obj_state[2],
+            "parent_spoke": parent_spoke,
+            "parent_text": (parent_events[0].get("text", "") if parent_events else ""),
+            "err_state": res["err_state"],
+            "err_vec": res["err_vec"],
+            "err_parent": res["err_parent"],
+            "err_slow": res["err_slow"],  # 追記2026-09-08（err_totalには含めない）
+            "err_total": res["err_total"],
+            "baseline": res["baseline"],
+            "z": res["z"],
+        }
 
     def _ensure_chunk_capacity(self):
         """塊の名簿が塊GRUの入力口（embedding）を追い越していたら、入力口を伸ばす。
@@ -2029,6 +2131,10 @@ class Trainer:
             pred = clp + t.nat_head(torch.cat([z, a.detach()], dim=-1))
             # 拮抗筋モード：a(n_joint) → to_env_action で筋活性化へ写像。OFFなら a_env==a
             a_env = t.brain.to_env_action(a)
+            # 【M7a・2026-09-08・仕様_M7a_世界の予測器_測るだけ】世界の予測器の入力
+            #   act（直前の運動、tanh範囲のまま）。cfg.world_predictorがNoneなら
+            #   読まれないだけ＝既存挙動には影響しない。
+            self._wp_prev_action = a.detach()
             _prof_t = self._prof_t0()   # 【作業C】物理+描画+触覚（MIMo内部・env.step一式）
             state["obs"], term = self.step_k(rescale_action(a_env, env.action_space))
             self._prof_add("env_step", _prof_t)
@@ -2074,6 +2180,11 @@ class Trainer:
             for p in self.plugins:
                 p.on_step(self.ctx)
             self._prof_add("plugin", _prof_t)
+            # 【M7a・2026-09-08・仕様_M7a_世界の予測器_測るだけ】プラグインの
+            #   on_stepループの直後（on_step_late=報酬確定より前）。cfg.world_predictor
+            #   がNone（既定）なら_world_predictor_step内で即returnし、追加計算は
+            #   一切走らない＝既存実験の挙動・コストは1ビットも変わらない。
+            self._world_predictor_step()
             # ---- 学習 --------------------------------------------------------
             _prof_t = self._prof_t0()   # 【作業C】報酬・RPE・逆伝播（学習）
             pe = t.block_pe(pred, nlp)

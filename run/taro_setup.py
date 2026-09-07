@@ -1093,6 +1093,40 @@ class Taro:
         #   1つもずれない。
         _setup_produce(self, cfg, env, verbose=verbose)
 
+        # ---- ⑦b 世界の予測器（M7a・測るだけ・2026-09-08）----------------------
+        #   仕様：F/docs/二語文/仕様_M7a_世界の予測器_測るだけ_2026-09-08.md
+        #   「後半」2節。既定None（cfg.world_predictor無し）ではNoneのまま＝
+        #   既存実験の挙動・乱数列・コストは1ビットも変わらない。
+        #   obj_vec_dim=384固定（実装判断。理由は world_predictor.py 冒頭docstring
+        #   「なぜobj_vec_dim=384か」参照）。n_chunksはchunk_vocab.size（無ければ
+        #   最小の3=<PAD>/<BOS>/<EOS>のみ）。act_dimはself.n_act（②で確定済み）。
+        #   _setup_produceの"後"に置く理由：chunk_vocabがそこで構築されるため、
+        #   その前だとサイズが確定していない。
+        self.world_predictor = None
+        if cfg.world_predictor is not None:
+            from cerebral_cortex.world_predictor import WorldPredictor
+            wp_cfg = cfg.world_predictor if isinstance(cfg.world_predictor, dict) else {}
+            _n_chunks = (self.chunk_vocab.size if getattr(self, "chunk_vocab", None)
+                         is not None else 3)
+            # 【M4e・2026-09-07の教訓と同じ】新しい部品の構築（Embedding/GRUCell/
+            #   Linearの初期化）は既存の乱数列を1つもずらさないよう、この構築だけ
+            #   fork_rngの支流に逃がす。
+            with torch.random.fork_rng(devices=[]):
+                self.world_predictor = WorldPredictor(
+                    obj_vec_dim=384, n_chunks=_n_chunks, act_dim=self.n_act,
+                    h_fast=int(wp_cfg.get("h_fast", 64)),
+                    h_slow=int(wp_cfg.get("h_slow", 32)),
+                    tau_fast=float(wp_cfg.get("tau_fast", 5)),
+                    tau_slow=float(wp_cfg.get("tau_slow", 40)),
+                    chunk_emb=int(wp_cfg.get("chunk_emb", 16)),
+                    lr=float(wp_cfg.get("lr", 1e-3)),
+                    tbptt=int(wp_cfg.get("tbptt", 10)),
+                    grad_clip=float(wp_cfg.get("grad_clip", 1.0)))
+            self.world_predictor.to(self.brain._device())
+            _pwp = getattr(self, "_pending_world_predictor", None)
+            if _pwp is not None:
+                self.world_predictor.load_state_dict(_pwp)
+
         # ---- ⑧ 努力コストの重み ---------------------------------------------
         # 筋力（最大トルク）が大きい筋ほど動かすとコストが高い（代謝の標準：活性化²×筋サイズ）。
         # 注意：体を作り直しても**更新していない**（元の実装もそうだった）。
@@ -1320,6 +1354,10 @@ class Taro:
         #   chunk_vocab/chunk_brainと同じ流儀（_setup_produceがMessageLayerを
         #   作った直後に流し込む）。
         self._pending_message_layer = blob.get("message_layer")
+        # 【M7a・2026-09-08・仕様_M7a_世界の予測器_測るだけ】visual_projectionと
+        #   同じ流儀（world_predictorはTaro.__init__の"⑦"直後・_setup_produceの
+        #   "後"に構築するため、ここではblobの中身を一時退避するだけにする）。
+        self._pending_world_predictor = blob.get("world_predictor")
         if "produce_cerebellum" in blob:
             self._pending_produce_cerebellum = blob["produce_cerebellum"]
             if verbose:
@@ -1763,6 +1801,14 @@ class Taro:
             blob["message_layer"] = self.message_layer.state_dict()
         elif _pending_ml is not None:
             blob["message_layer"] = _pending_ml
+        # 【M7a・2026-09-08・仕様_M7a_世界の予測器_測るだけ】無ければキーを
+        #   足さない流儀（chunk_brain等と同じ）。隠れ状態・baselineは含まない
+        #   （WorldPredictor.state_dictは重みだけ、仕様書1節「hiddenは保存しない」）。
+        _pending_wp = getattr(self, "_pending_world_predictor", None)
+        if getattr(self, "world_predictor", None) is not None:
+            blob["world_predictor"] = self.world_predictor.state_dict()
+        elif _pending_wp is not None:
+            blob["world_predictor"] = _pending_wp
         _pending_sg = getattr(self, "_pending_speech_gate", None)
         if getattr(self, "_speech_gate", None) is not None:
             blob["speech_gate"] = self._speech_gate.state()

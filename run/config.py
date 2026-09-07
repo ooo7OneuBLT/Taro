@@ -131,6 +131,13 @@ TARO_DEFAULTS = {
                "{'threshold': 0.80, 'cooldown_sec': 2.0, 'max_length': 8, "
                "'vocal_tract_stage': 2, 'vocal_tract_decoupled': true, 'lr': 0.005} の"
                "形（辞書、すべて省略可）", None),
+    # 【M7a・2026-09-08・仕様_M7a_世界の予測器_測るだけ】連合野の世界予測器（測るだけ、
+    #   太郎の行動・発話・既存の学習には一切影響しない）。None=OFF（既定）。
+    #   有効化するときは{'h_fast':64,'h_slow':32,'tau_fast':5,'tau_slow':40,
+    #   'chunk_emb':16,'lr':0.001,'tbptt':10,'grad_clip':1.0}の形（辞書、すべて省略可）。
+    "world_predictor": (None, "世界の予測器（M7a、測るだけ）。None=OFF（既定）。有効化する"
+               "ときは{'h_fast':64,'h_slow':32,'tau_fast':5,'tau_slow':40,"
+               "'lr':0.001,'tbptt':10}の形（辞書、すべて省略可）", None),
     # 座位保持の学習（2026-08-15）。層1＝姿勢制御反射（ゲート方式）、
     # 層2＝立ち直り反射（角速度ダンパー、Tier3）。
     # 設計：作業記録（非公開）
