@@ -379,4 +379,17 @@ class WorldPredictor(nn.Module):
         return super().state_dict(*args, **kwargs)
 
     def load_state_dict(self, state_dict, *args, **kwargs):
-        return super().load_state_dict(state_dict, *args, **kwargs)
+        """塊名簿の大きさが保存時と違っても読めるようにする（2026-09-08、F2-89b の失敗を受けて）。
+
+        学習中に塊名簿が伸びる（F2-89 では 18→20）ので、保存した chunk_embedding / head_chunk の行数と
+        今の名簿の大きさが食い違う。脳本体の resize_embedding と同じ「先頭コピー＋残りは新規初期化」で合わせる。
+        """
+        sd = dict(state_dict)
+        own = self.state_dict()
+        for k in ("chunk_embedding.weight", "head_chunk.weight", "head_chunk.bias"):
+            if k in sd and k in own and tuple(sd[k].shape) != tuple(own[k].shape):
+                new = own[k].clone()
+                n = min(int(sd[k].shape[0]), int(new.shape[0]))
+                new[:n] = sd[k][:n].to(new.device, new.dtype)
+                sd[k] = new
+        return super().load_state_dict(sd, *args, **kwargs)
