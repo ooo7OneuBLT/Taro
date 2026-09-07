@@ -1,0 +1,82 @@
+{
+ "name": "F2-87_M6_学習",
+ "note": "2026-09-07 仕様_M6_言いたいことの層。F2-85_M5_短期B学習 の複製。taro.model を F2-84_r2_seed98_2026-09-07.pt（塊レベル層の土台）に差し替え、produce.message_level: true を追加（chunk_level は前提として真のまま）。object_filesに points_per_batch/empty_cache_after_detect を追加（メモリ対策）。出力先を F2-87_M6_学習 に変更。仕様：F/docs/二語文/仕様_M6_言いたいことの層_2026-09-07.md",
+ "scene": "座位_12ヶ月_F2-49_実物8択_r1_個体1_消失発話_気づき待ち_3語黙る_2026-09-06",
+ "taro": {
+  "actuation": "muscle",
+  "age_months": 12.0,
+  "orienting_reflex": true,
+  "hearing": true,
+  "lexicon_vision": {
+   "backend": "dinov2_vits14",
+   "fovea_px": 32,
+   "eye": "left",
+   "source": "wide"
+  },
+  "lexicon_mode": "contrast",
+  "lexicon_eta_pull": 0.05,
+  "lexicon_eta_push": 0.0,
+  "model": "F/models/F2-84_r2_seed98_2026-09-07.pt",
+  "save": "F/logs/F2-87_M6_学習/model.pt",
+  "produce": {
+   "mode": "word",
+   "threshold": 0.5,
+   "cooldown_sec": 2.0,
+   "max_length": 8,
+   "develop_from_age": true,
+   "vocal_tract_decoupled": true,
+   "context": true,
+   "listen_learn": true,
+   "context_lambda": 0.0,
+   "vision_context": true,
+   "listen_lr": 0.001,
+   "hippocampus": {
+    "capacity": 512,
+    "decay": 0.5,
+    "replay_passes": 10,
+    "recent_ratio": 0.7,
+    "sleep_lr": 0.005
+   },
+   "word_choice": "gru_hippo",
+   "hippo_gain": 1.0,
+   "listen_self": false,
+   "listen_eos": true,
+   "segment_mode": "end_prob",
+   "vanish_input": true,
+   "here_input": true,
+   "chunk_level": true,
+   "message_level": true
+  }
+ },
+ "run": {
+  "type": "train",
+  "steps": 4000,
+  "seed": 91,
+  "K": 10,
+  "checkpoint": 100,
+  "csv": "F/logs/F2-87_M6_学習/run.csv"
+ },
+ "plugins": {
+  "word_production": {
+   "events_out": "F/logs/F2-87_M6_学習/太郎の発話.csv"
+  },
+  "word_learning": {
+   "events_out": "F/logs/F2-87_M6_学習/発話イベント.csv"
+  },
+  "object_files": {
+   "events_out": "F/logs/F2-87_M6_学習/物体ファイル.csv",
+   "points_per_side": 16,
+   "points_per_batch": 16,
+   "empty_cache_after_detect": true,
+   "frames_out": "F/logs/F2-87_M6_学習/検出フレーム",
+   "interval_s": 0.5,
+   "attend": true,
+   "attend_out": "F/logs/F2-87_M6_学習/注意.csv",
+   "vanish_misses": 2
+  },
+  "view_video": {
+   "out": "F/logs/F2-87_M6_学習/動画_視界.mp4",
+   "until": 600
+  }
+ }
+}

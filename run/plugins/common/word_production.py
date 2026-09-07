@@ -97,6 +97,13 @@ class WordProduction(Plugin):
             #   流儀で末尾に追加。chunk_level無しでは last_produce が常に
             #   unit="mora"を持つ（trainer.py）ので、行の中身は従来と変わらない。
             "unit": ev.get("unit", "mora"),
+            # 【言いたいことの層・2026-09-07・仕様_M6_言いたいことの層.md
+            #   後半「word_productionの列」】unitと同じ流儀で末尾に追加。
+            #   message_level無効時はlast_produceが常にnoun=""/pred=""/
+            #   roles=[]を持つ（trainer.py）ので、既存行の中身は変わらない。
+            "noun": ev.get("noun", ""),
+            "pred": ev.get("pred", ""),
+            "roles": ev.get("roles", []),
         })
 
     def metrics(self, ctx):
@@ -122,14 +129,16 @@ class WordProduction(Plugin):
                            "generated_word", "reward", "plan_length",
                            "known_moras", "exact_match",
                            "choice_gru", "choice_hippo", "chosen",
-                           "gate", "gone", "attended_id", "here", "unit"])
+                           "gate", "gone", "attended_id", "here", "unit",
+                           "noun", "pred"])
                 for r in self.rows:
                     w.writerow([r["step"], r["sim_sec"], r["toy"], r["target_word"],
                                r["sim"], r["generated_word"], r["reward"],
                                r["plan_length"], r["known_moras"], r["exact_match"],
                                r.get("choice_gru"), r.get("choice_hippo"), r.get("chosen"),
                                r.get("gate", "ok"), r.get("gone", 0), r.get("attended_id", ""),
-                               r.get("here", 0), r.get("unit", "mora")])
+                               r.get("here", 0), r.get("unit", "mora"),
+                               r.get("noun", ""), r.get("pred", "")])
         exact = [r for r in self.rows if r["exact_match"]]
         return {
             "発話回数": len(self.rows),

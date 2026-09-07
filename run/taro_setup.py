@@ -456,6 +456,13 @@ def _setup_produce(taro, cfg, env, *, verbose=True):
         taro._chunk_context_hidden = None
         taro._pending_chunk_brain = getattr(taro, "_pending_chunk_brain", None)
         taro._pending_chunk_vocab = getattr(taro, "_pending_chunk_vocab", None)
+        # 【言いたいことの層・2026-09-07・仕様_M6_言いたいことの層.md §4】既定OFF
+        #   （cfg.produce=None）ではmessage_layerはNoneのまま＝run/trainer.pyの
+        #   新しい分岐は一度も実行されない＝既存実験の挙動は1ビットも変わらない。
+        #   _pending_message_layerはvisual_projection等と同じ流儀で素通しする。
+        taro.message_level = False
+        taro.message_layer = None
+        taro._pending_message_layer = getattr(taro, "_pending_message_layer", None)
         return
     from vocal_tract import VocalTract
     from hearing import Vocabulary
@@ -710,6 +717,32 @@ def _setup_produce(taro, cfg, env, *, verbose=True):
     else:
         taro._pending_chunk_brain = getattr(taro, "_pending_chunk_brain", None)
         taro._pending_chunk_vocab = getattr(taro, "_pending_chunk_vocab", None)
+    # 【言いたいことの層・2026-09-07・仕様_M6_言いたいことの層.md §4】
+    #   物の箱→名詞の塊・状態の箱→述語の塊を数え上げる層。既定False
+    #   （produce.message_level無し）ではmessage_layerはNoneのまま＝
+    #   run/trainer.pyの新しい分岐は一度も実行されない＝既存実験の挙動は
+    #   1ビットも変わらない。chunk_levelが前提（塊の名簿・塊GRUの上に載る
+    #   設計。仕様書§2「chunk_level前提、違えばValueError」と同じ流儀）。
+    taro.message_level = bool(pd.get("message_level", False))
+    taro.message_layer = None
+    if taro.message_level:
+        if not taro.chunk_level:
+            raise ValueError(
+                "produce.message_level=true には produce.chunk_level=true が"
+                "必要（言いたいことの層は塊レベル層の上に載る設計。"
+                "共存禁止と同じ流儀＝仕様_M6_言いたいことの層.md §4）。")
+        from cerebral_cortex.message_layer import MessageLayer
+        ml = MessageLayer()
+        _pml = getattr(taro, "_pending_message_layer", None)
+        if _pml is not None:
+            ml.load_state_dict(_pml)
+            if verbose:
+                print(f"  [言いたいことの層] ロード：塊{len(ml.state_count)}件"
+                      f" 述語表{sum(len(v) for v in ml.pred_count.values())}件"
+                      f" 順番表{len(ml.role_bigram)}件", flush=True)
+        taro.message_layer = ml
+    else:
+        taro._pending_message_layer = getattr(taro, "_pending_message_layer", None)
     # 【M4e・2026-09-07・仕様_M4e_状態の線と驚きの書き込み】驚きの書き込み。
     #   消えたの印が立っている間に聞いた発話は、海馬に書く強さをgone_strength倍
     #   にする（既定1.0＝従来と1ビットも変わらない）。run/trainer.pyの_context_feed
@@ -1283,6 +1316,10 @@ class Taro:
         #   同じ流儀（_setup_produceがChunkVocab/TaroBrainを作った直後に流し込む）。
         self._pending_chunk_brain = blob.get("chunk_brain")
         self._pending_chunk_vocab = blob.get("chunk_vocab")
+        # 【言いたいことの層・2026-09-07・仕様_M6_言いたいことの層.md §4】
+        #   chunk_vocab/chunk_brainと同じ流儀（_setup_produceがMessageLayerを
+        #   作った直後に流し込む）。
+        self._pending_message_layer = blob.get("message_layer")
         if "produce_cerebellum" in blob:
             self._pending_produce_cerebellum = blob["produce_cerebellum"]
             if verbose:
@@ -1718,6 +1755,14 @@ class Taro:
             blob["chunk_vocab"] = self.chunk_vocab.state_dict()
         elif _pending_cv is not None:
             blob["chunk_vocab"] = _pending_cv
+        # 【言いたいことの層・2026-09-07・仕様_M6_言いたいことの層.md §4】
+        #   message_level真のときだけキーを足す（無ければキーを足さない流儀。
+        #   chunk_brain/chunk_vocabと同じ）。
+        _pending_ml = getattr(self, "_pending_message_layer", None)
+        if getattr(self, "message_layer", None) is not None:
+            blob["message_layer"] = self.message_layer.state_dict()
+        elif _pending_ml is not None:
+            blob["message_layer"] = _pending_ml
         _pending_sg = getattr(self, "_pending_speech_gate", None)
         if getattr(self, "_speech_gate", None) is not None:
             blob["speech_gate"] = self._speech_gate.state()

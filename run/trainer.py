@@ -463,6 +463,15 @@ class Trainer:
         """
         t = self.taro
         cv = t.chunk_vocab
+        # 【言いたいことの層・2026-09-07・仕様_M6_言いたいことの層.md §2】
+        #   親の発話を聞くたびに3つの表（塊の役割・述語・順番）を数える。
+        #   自己発話（speaker=="self"）では更新しない。既定False
+        #   （produce.message_level無し）ではmessage_layerがNoneのまま＝
+        #   このifは一度も通らず、既存の全経路は1ビットも変わらない。
+        if speaker == "parent" and getattr(t, "message_layer", None) is not None:
+            _msg_state = "gone" if gone else ("here" if here else None)
+            if _msg_state is not None:
+                t.message_layer.observe([int(i) for i in chunk_ids], _msg_state)
         ids = [cv.specials[speaker]]
         if gone and cv.specials.get("gone") is not None:
             ids.append(cv.specials["gone"])
@@ -927,37 +936,84 @@ class Trainer:
                 _par_c = cv.specials.get("parent")
                 _gone_id_c = cv.specials.get("gone")
                 _here_id_c = cv.specials.get("here")
-                with torch.no_grad():
-                    _key = t._visual_projection(_vin)
-                    _out, _hh = t.chunk_brain.forward_hidden(
-                        torch.tensor([[_par_c]], dtype=torch.long, device=_dev),
-                        hidden=t._chunk_context_hidden, prefix_vec=_key,
-                        state_id=_gen_state_id)
-                    _logits = t.chunk_brain.perception_head(_out)[0, -1]
-                    # 【M4/M4d同型】開始トークンの直後にgone/hereを強制する。
-                    if _gone_now and _gone_id_c is not None:
+                # 【言いたいことの層・2026-09-07・仕様_M6_言いたいことの層.md §3】
+                #   message_level真のときだけ、本体側の生成を「名詞の塊＋述語の
+                #   塊を別々に選ぶ」組み立てに差し替える。既定False・
+                #   message_layer未構築ではelse節（M5のままの塊GRU自己回帰）が
+                #   そのまま実行され、既存実験の挙動は1ビットも変わらない。
+                _msg_ready = (bool(getattr(t, "message_level", False))
+                              and getattr(t, "message_layer", None) is not None)
+                self._last_message = None
+                if _msg_ready:
+                    with torch.no_grad():
+                        _key = t._visual_projection(_vin)
+                        # 先頭の塊の分布だけ取る（<PARENT>直後、prefix_vec=見た目、
+                        #   印は入れない＝状態を名詞選びに漏らさない。state_idも
+                        #   同じ理由で渡さない）。
+                        _out0, _hh0 = t.chunk_brain.forward_hidden(
+                            torch.tensor([[_par_c]], dtype=torch.long, device=_dev),
+                            hidden=t._chunk_context_hidden, prefix_vec=_key)
+                        _logits0 = t.chunk_brain.perception_head(_out0)[0, -1]
+                        _probs0 = torch.softmax(_logits0, dim=-1)
+                        # 【Tier3・仕様書§3】softmax上位から役割nounの塊だけ残す。
+                        #   上位候補数20は恣意的定数（塊の名簿の規模に対して
+                        #   十分大きく取っただけ、文献根拠なし）。
+                        _topk = min(20, _probs0.shape[-1])
+                        _top_vals, _top_idx = torch.topk(_probs0, _topk)
+                    _noun_candidates = [
+                        (int(_i), float(_p))
+                        for _p, _i in zip(_top_vals.tolist(), _top_idx.tolist())
+                        if t.message_layer.role(int(_i)) == "noun"]
+                    _msg_state = "gone" if _gone_now else ("here" if _here_now else None)
+                    _seq, _conf_g, _roles_g = t.message_layer.compose(
+                        _msg_state, _noun_candidates)
+                    _seq_clean = [tk for tk in _seq if tk != _gone_id_c and tk != _here_id_c]
+                    _word_g = "".join(cv.chunk_string(tk, t.hearing.vocab) for tk in _seq_clean)
+                    _noun_str, _pred_str = "", ""
+                    for _tk, _rl in zip(_seq, _roles_g):
+                        _s = cv.chunk_string(_tk, t.hearing.vocab)
+                        if _rl == "noun":
+                            _noun_str = _s
+                        elif _rl == "pred":
+                            _pred_str = _s
+                    # 【仕様書§3】last_produceに"noun"・"pred"（文字列）・"roles"を
+                    #   持たせる。海馬側が選ばれても（下のsim比較後）、名詞・述語の
+                    #   内訳は塊レベルGRUの組み立て結果を報告する（海馬の想起は
+                    #   役割情報を持たないため。仕様に無かった判断・作業記録に記載）。
+                    self._last_message = {
+                        "noun": _noun_str, "pred": _pred_str, "roles": list(_roles_g)}
+                else:
+                    with torch.no_grad():
+                        _key = t._visual_projection(_vin)
                         _out, _hh = t.chunk_brain.forward_hidden(
-                            torch.tensor([[_gone_id_c]], dtype=torch.long, device=_dev),
-                            hidden=_hh, state_id=_gen_state_id)
+                            torch.tensor([[_par_c]], dtype=torch.long, device=_dev),
+                            hidden=t._chunk_context_hidden, prefix_vec=_key,
+                            state_id=_gen_state_id)
                         _logits = t.chunk_brain.perception_head(_out)[0, -1]
-                    elif _here_now and _here_id_c is not None:
-                        _out, _hh = t.chunk_brain.forward_hidden(
-                            torch.tensor([[_here_id_c]], dtype=torch.long, device=_dev),
-                            hidden=_hh, state_id=_gen_state_id)
-                        _logits = t.chunk_brain.perception_head(_out)[0, -1]
-                    _conf_g = float(torch.softmax(_logits, dim=-1).max())
-                    _seq = []
-                    for _ in range(4):    # 【仕様書§6】塊は最大4個で止める（Tier3、恣意的定数）
-                        _tk = int(torch.argmax(_logits))
-                        if _tk == 2:
-                            break
-                        _seq.append(_tk)
-                        _out, _hh = t.chunk_brain.forward_hidden(
-                            torch.tensor([[_tk]], dtype=torch.long, device=_dev),
-                            hidden=_hh, state_id=_gen_state_id)
-                        _logits = t.chunk_brain.perception_head(_out)[0, -1]
-                _seq_clean = [tk for tk in _seq if tk != _gone_id_c and tk != _here_id_c]
-                _word_g = "".join(cv.chunk_string(tk, t.hearing.vocab) for tk in _seq_clean)
+                        # 【M4/M4d同型】開始トークンの直後にgone/hereを強制する。
+                        if _gone_now and _gone_id_c is not None:
+                            _out, _hh = t.chunk_brain.forward_hidden(
+                                torch.tensor([[_gone_id_c]], dtype=torch.long, device=_dev),
+                                hidden=_hh, state_id=_gen_state_id)
+                            _logits = t.chunk_brain.perception_head(_out)[0, -1]
+                        elif _here_now and _here_id_c is not None:
+                            _out, _hh = t.chunk_brain.forward_hidden(
+                                torch.tensor([[_here_id_c]], dtype=torch.long, device=_dev),
+                                hidden=_hh, state_id=_gen_state_id)
+                            _logits = t.chunk_brain.perception_head(_out)[0, -1]
+                        _conf_g = float(torch.softmax(_logits, dim=-1).max())
+                        _seq = []
+                        for _ in range(4):    # 【仕様書§6】塊は最大4個で止める（Tier3、恣意的定数）
+                            _tk = int(torch.argmax(_logits))
+                            if _tk == 2:
+                                break
+                            _seq.append(_tk)
+                            _out, _hh = t.chunk_brain.forward_hidden(
+                                torch.tensor([[_tk]], dtype=torch.long, device=_dev),
+                                hidden=_hh, state_id=_gen_state_id)
+                            _logits = t.chunk_brain.perception_head(_out)[0, -1]
+                    _seq_clean = [tk for tk in _seq if tk != _gone_id_c and tk != _here_id_c]
+                    _word_g = "".join(cv.chunk_string(tk, t.hearing.vocab) for tk in _seq_clean)
                 _word_h, _conf_h = "", 0.0
                 _toks_clean = []
                 _hip = getattr(t, "language_hippocampus", None)
@@ -1208,7 +1264,15 @@ class Trainer:
             # 【塊レベル層・2026-09-07・仕様_M5_塊レベル層.md §6】既定"mora"
             #   （chunk_level無しでは常に"mora"＝word_production.pyのCSVに新列
             #   unitが増えるだけで、既存の全数値は1ビットも変わらない）。
-            "unit": "chunk" if getattr(t, "chunk_level", False) else "mora"}
+            "unit": "chunk" if getattr(t, "chunk_level", False) else "mora",
+            # 【言いたいことの層・2026-09-07・仕様_M6_言いたいことの層.md §3】
+            #   message_level無しでは_last_messageが常にNone（gru_hippo以外の
+            #   経路では属性自体が無い）＝noun/pred/rolesは常に空。
+            #   word_production.pyのCSVに新列noun/predが増えるだけで、
+            #   既存の全数値は1ビットも変わらない。
+            "noun": (getattr(self, "_last_message", None) or {}).get("noun", ""),
+            "pred": (getattr(self, "_last_message", None) or {}).get("pred", ""),
+            "roles": (getattr(self, "_last_message", None) or {}).get("roles", [])}
 
     def _apply_babble(self, pd):
         """喃語モード（F2-1）：視覚トリガーなし・クールダウンだけで自発的に声を出す。
