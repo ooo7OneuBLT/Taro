@@ -40,6 +40,7 @@
   <ログディレクトリ>/結果.json
   <ログディレクトリ>/図_短期B.png
 """
+import ast
 import csv
 import json
 import os
@@ -125,6 +126,34 @@ def compute_correction(attend_rows):
     return statistics.median(diffs)
 
 
+def intended_word(row):
+    """太郎が発音する前に選んだ語の文字列（＝「意図した語」）を返す。
+
+    【なぜ、2026-09-07】word_production.py は choice_gru / choice_hippo に
+    候補ごとの ['語', 確信度] を残す。chosen列（"gru"/"hippo"）でどちらを
+    選んだかが分かる。generated_word はそのあとの発音（モーラ連鎖）の結果で、
+    「っ」「ぷ」等が崩れて字面が変わることがある（例：F2-85bログ、こっぷが
+    消えた窓でgenerated_word="ここあないね"だがchoice_gruは
+    ['こっぷないね', 0.772]＝選んだ語自体は正しい）。採点を発音の崩れに
+    引きずられさせないため、選んだ時点の文字列を「意図した語」として使う。
+    """
+    chosen = row.get("chosen")
+    col = None
+    if chosen == "gru":
+        col = "choice_gru"
+    elif chosen == "hippo":
+        col = "choice_hippo"
+    raw = row.get(col) if col else None
+    if raw:
+        try:
+            parsed = ast.literal_eval(raw)
+            if isinstance(parsed, (list, tuple)) and parsed:
+                return str(parsed[0])
+        except (ValueError, SyntaxError):
+            pass
+    return row.get("generated_word", "")
+
+
 def find_vanish_events(attend_rows):
     """attended_idごとに vanished列の偽→真を検出し、[{"T":秒, "attended_id":id}]を返す。
 
@@ -177,6 +206,7 @@ def main():
                 "T": round(T, 3), "消えた物": "", "側": "不明",
                 "太郎の発話": "", "判定": "?対象不明（発話イベント無し）",
                 "厳密": "?対象不明（発話イベント無し）",
+                "意図した語": "", "意図判定": "?対象不明（発話イベント無し）",
             })
             continue
 
@@ -203,6 +233,7 @@ def main():
         in_window = [r for r in ut_sorted
                      if r.get("gone") == "1" and T <= r["_t"] < window_end]
         gens = [r.get("generated_word", "") for r in in_window]
+        intended_gens = [intended_word(r) for r in in_window]
 
         # 厳密判定（従来）：語で始まり、かつ「ない」を含む。
         has_correct_strict = any(g.startswith(word) and ("ない" in g) and word
@@ -248,10 +279,25 @@ def main():
         # 既定の「判定」列は断片許容（仕様書の採点方針）。厳密判定は別列で残す。
         judge = judge_fragment
 
+        # 意図判定：発音される前に太郎が選んだ語（intended_gens）に断片許容と
+        # 同じ規則を適用する。発音の崩れ（モーラ連鎖の失敗）に引きずられずに
+        # 「何を言おうとしたか」を採点する。
+        has_correct_intended = any(_has_fragment(g, word) for g in intended_gens)
+        has_nai_only_intended = any(
+            ("ない" in g) and not _has_fragment(g, word) for g in intended_gens)
+        if has_correct_intended:
+            judge_intended = "○正解（語＋ない・意図）"
+        elif has_nai_only_intended:
+            judge_intended = "×語違い（ないはあるが語が違う）"
+        else:
+            judge_intended = "×ない無し"
+
         table.append({
             "T": round(T, 3), "消えた物": target, "側": side,
             "太郎の発話": "; ".join(g for g in gens if g), "判定": judge,
             "厳密": judge_strict,
+            "意図した語": "; ".join(g for g in intended_gens if g),
+            "意図判定": judge_intended,
         })
 
     # 側ごとの集計。
@@ -272,6 +318,10 @@ def main():
         n_correct_strict = sum(1 for r in rows if r["厳密"].startswith("○"))
         n_wrong_word_strict = sum(1 for r in rows if "語違い" in r["厳密"])
         n_no_nai_strict = sum(1 for r in rows if r["厳密"] == "×ない無し")
+        # 意図判定（発音前に選んだ語での判定）側の集計。列「意図判定」を使う。
+        n_correct_intended = sum(1 for r in rows if r["意図判定"].startswith("○"))
+        n_wrong_word_intended = sum(1 for r in rows if "語違い" in r["意図判定"])
+        n_no_nai_intended = sum(1 for r in rows if r["意図判定"] == "×ない無し")
         return {
             "件数": n,
             "語＋ない率": round(n_correct / n, 4) if n else None,
@@ -280,6 +330,9 @@ def main():
             "厳密_語＋ない率": round(n_correct_strict / n, 4) if n else None,
             "厳密_語違い率": round(n_wrong_word_strict / n, 4) if n else None,
             "厳密_ない無し率": round(n_no_nai_strict / n, 4) if n else None,
+            "意図_語＋ない率": round(n_correct_intended / n, 4) if n else None,
+            "意図_語違い率": round(n_wrong_word_intended / n, 4) if n else None,
+            "意図_ない無し率": round(n_no_nai_intended / n, 4) if n else None,
         }
 
     # 見えている窓（gone=0）に「ない」が漏れていないか。
@@ -302,10 +355,12 @@ def main():
     os.makedirs(LOG_DIR, exist_ok=True)
     with open(OUT_CSV, "w", newline="", encoding="utf-8") as fp:
         w = csv.writer(fp)
-        w.writerow(["T", "消えた物", "側", "太郎の発話", "判定", "厳密"])
+        w.writerow(["T", "消えた物", "側", "太郎の発話", "判定", "厳密",
+                    "意図した語", "意図判定"])
         for row in table:
             w.writerow([row["T"], row["消えた物"], row["側"],
-                       row["太郎の発話"], row["判定"], row["厳密"]])
+                       row["太郎の発話"], row["判定"], row["厳密"],
+                       row["意図した語"], row["意図判定"]])
 
     with open(OUT_JSON, "w", encoding="utf-8") as fp:
         json.dump(result, fp, ensure_ascii=False, indent=2)
