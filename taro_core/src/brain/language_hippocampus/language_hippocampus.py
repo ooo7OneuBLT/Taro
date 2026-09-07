@@ -45,17 +45,22 @@ class LanguageHippocampus:
         self.episodes = []
 
     # ------------------------------------------------------------ 書き込み
-    def write(self, key_vis, speaker, tokens, step):
+    def write(self, key_vis, speaker, tokens, step, strength=1.0):
         """1エピソードを焼き付ける（1回で覚える＝海馬の性質）。
 
         容量超過時はstrength最小のエピソードを捨てる（古さではなく弱さで捨てる。
         減衰で古いものは自然に弱くなるため、結果として古いものが捨てられやすい）。
+
+        strength: 【M4e・2026-09-07・仕様_M4e_状態の線と驚きの書き込み】既定1.0。
+          「消えたの印」が立っている間に聞いた発話は、呼び出し側が
+          produce.hippocampus.gone_strength（既定1.0）を渡すことで大きくできる。
+          人間側：予測が外れた出来事は強く符号化される（驚きの書き込み）。
         """
         ep = {
             "key_vis": np.asarray(key_vis, dtype=np.float32).copy(),
             "speaker": int(speaker),
             "tokens": [int(t) for t in tokens],
-            "strength": 1.0,
+            "strength": float(strength),
             "written_at": int(step),
         }
         if len(self.episodes) >= self.capacity:

@@ -44,6 +44,11 @@ from hearing import normalize_kana
 
 MODEL_PATH = sys.argv[1] if len(sys.argv) > 1 else "F/logs/F2-81_M4d_あるの印学習/model.pt"
 OUT_DIR = os.path.join(os.path.dirname(MODEL_PATH), "静止測定")   # モデルと同じ場所に出す（別モデルで既定先を上書きした事故 2026-09-06）
+# 【M4e・2026-09-07・仕様_M4e_状態の線と驚きの書き込み】状態の線を使うかどうか。
+#   第3引数に"1"を渡したときだけ有効化を試みる（既定は引数無し＝従来どおり
+#   常にstate_id=None＝1ビットも変わらない）。実際に使うかは main() で
+#   モデルがstate_embeddingを持つかどうかとのANDを取って決める（後述STATE_ON）。
+STATE_CHANNEL_ARG = len(sys.argv) > 2 and sys.argv[2] == "1"
 
 WORDS = ["くつ", "こっぷ", "おさら", "おわん", "かばん", "がおお", "ばす", "ぼおる"]
 EMPTY = "ないね"                 # 空の机の代理（「ないね」チャンクのプロトタイプ）
@@ -92,12 +97,25 @@ def project_key(t, vec384):
         return t._visual_projection(vin)
 
 
-def build_context_h(t, key, mark, speaker, text):
+def _mark_to_state_id(mark, state_on):
+    """【M4e・2026-09-07】gone->2, here->1, none->None。state_on=Falseなら常にNone。"""
+    if not state_on:
+        return None
+    if mark == "gone":
+        return 2
+    if mark == "here":
+        return 1
+    return None
+
+
+def build_context_h(t, key, mark, speaker, text, state_on=False):
     """文脈c1のH：[<話者>](, <GONE>|<HERE>) + encode(text) を forward_hidden に
     通した最終hidden（trainer.py _context_feed の最終ブロックと同じ手順。
     prefix_vecは呼び出し元と同じkeyを使う）。
 
     mark: "none"|"here"|"gone"。speaker は "<PARENT>" か "<SELF>"。
+    state_on: 【M4e】Trueならmarkに応じたstate_idをforward_hiddenへ渡す
+      （trainer.py _context_feed の_state_id計算と同じ規則）。
     """
     pv = t.produce_vocab
     sp = pv.char2idx[speaker]
@@ -107,17 +125,22 @@ def build_context_h(t, key, mark, speaker, text):
     elif mark == "here" and getattr(t, "_here_id", None) is not None:
         ids = [ids[0], t._here_id] + ids[1:]
     x = torch.tensor([ids], dtype=torch.long)
+    _state_id = _mark_to_state_id(mark, state_on)
     with torch.no_grad():
-        _, h = t.brain.forward_hidden(x, hidden=None, prefix_vec=key)
+        _, h = t.brain.forward_hidden(x, hidden=None, prefix_vec=key, state_id=_state_id)
     return h.detach()
 
 
-def generate(t, key, hidden, force_mark, max_length=MAX_LENGTH):
+def generate(t, key, hidden, force_mark, max_length=MAX_LENGTH, state_on=False):
     """trainer.py の gru_hippo ブロックをそのまま写した生成（本体＝GRU自力）。
 
     force_mark: "none"|"here"|"gone"。開始トークン(<PARENT>)の直後に、
     force_mark=="gone"なら<GONE>を、force_mark=="here"なら<HERE>を強制する
     （trainer.py の「_gone_now なら<GONE>、_here_now なら<HERE>」分岐と同じ）。
+    state_on: 【M4e・2026-09-07】Trueならforce_markに応じたstate_idを
+      forward_hiddenの4か所すべてに同じ値で渡す（trainer.pyの生成4か所と同じ規則）。
+      モデルにstate_embeddingが無ければ main() 側で常にFalseに落としてから渡す
+      （従来どおりNoneになる）。
 
     戻り値: (word, conf, top3) 。top3は先頭実文字のsoftmax上位3つ [(文字, 確率), ...]。
     """
@@ -125,17 +148,19 @@ def generate(t, key, hidden, force_mark, max_length=MAX_LENGTH):
     par = pv.char2idx["<PARENT>"]
     gone_id = getattr(t, "_gone_id", None)
     here_id = getattr(t, "_here_id", None)
+    _state_id = _mark_to_state_id(force_mark, state_on)
     with torch.no_grad():
         out, hh = t.brain.forward_hidden(
-            torch.tensor([[par]], dtype=torch.long), hidden=hidden, prefix_vec=key)
+            torch.tensor([[par]], dtype=torch.long), hidden=hidden, prefix_vec=key,
+            state_id=_state_id)
         logits = t.brain.perception_head(out)[0, -1]
         if force_mark == "gone" and gone_id is not None:
             out, hh = t.brain.forward_hidden(
-                torch.tensor([[gone_id]], dtype=torch.long), hidden=hh)
+                torch.tensor([[gone_id]], dtype=torch.long), hidden=hh, state_id=_state_id)
             logits = t.brain.perception_head(out)[0, -1]
         elif force_mark == "here" and here_id is not None:
             out, hh = t.brain.forward_hidden(
-                torch.tensor([[here_id]], dtype=torch.long), hidden=hh)
+                torch.tensor([[here_id]], dtype=torch.long), hidden=hh, state_id=_state_id)
             logits = t.brain.perception_head(out)[0, -1]
         probs = torch.softmax(logits, dim=-1)
         conf = float(probs.max())
@@ -148,7 +173,7 @@ def generate(t, key, hidden, force_mark, max_length=MAX_LENGTH):
                 break
             seq.append(tk)
             out, hh = t.brain.forward_hidden(
-                torch.tensor([[tk]], dtype=torch.long), hidden=hh)
+                torch.tensor([[tk]], dtype=torch.long), hidden=hh, state_id=_state_id)
             logits = t.brain.perception_head(out)[0, -1]
     # 【trainer.py と同じ】<GONE>・<HERE>を強制した分だけでなく、自力生成の
     #   途中で自発的に選んだ場合もデコードから除く（採点用にwordは常に見た目の
@@ -225,6 +250,12 @@ def main():
     hip = t.language_hippocampus
     print(f"  <GONE> id={gone_id}  <HERE> id={here_id}  "
           f"海馬エピソード数={len(hip.episodes)}", flush=True)
+    # 【M4e・2026-09-07】モデルが状態の線(state_embedding)を持ち、かつ第3引数で
+    #   有効化されたときだけstate_idを渡す（どちらか欠けても従来どおりNone）。
+    STATE_ON = STATE_CHANNEL_ARG and hasattr(t.brain, "state_embedding")
+    print(f"  [M4e] state_channel引数={STATE_CHANNEL_ARG} "
+          f"モデルにstate_embedding有={hasattr(t.brain, 'state_embedding')} "
+          f"-> STATE_ON={STATE_ON}", flush=True)
 
     print("[2] 語彙の表からプロトタイプを読む", flush=True)
     protos = load_prototypes(blob)
@@ -240,10 +271,11 @@ def main():
     keys = {w: project_key(t, protos[w]) for w in INPUTS}
     for w in INPUTS:
         key = keys[w]
-        h_c1 = build_context_h(t, key, mark="gone", speaker=C1_SPEAKER, text=C1_TEXT)
+        h_c1 = build_context_h(t, key, mark="gone", speaker=C1_SPEAKER, text=C1_TEXT,
+                               state_on=STATE_ON)
         for mark in MARKS:
             for ctx_name, hidden in (("c0", None), ("c1", h_c1)):
-                word, conf, top3 = generate(t, key, hidden, force_mark=mark)
+                word, conf, top3 = generate(t, key, hidden, force_mark=mark, state_on=STATE_ON)
                 gru_rows.append({
                     "input": w, "mark": mark, "context": ctx_name,
                     "word": word, "conf": round(conf, 5),

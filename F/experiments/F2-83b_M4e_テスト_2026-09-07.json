@@ -1,0 +1,80 @@
+{
+ "name": "F2-83b_M4e_テスト",
+ "note": "2026-09-07 仕様_M4e_状態の線と驚きの書き込み。F2-82c_短期B_テスト長め の複製。produce.state_channel: true、produce.hippocampus.gone_strength: 3.0 を追加。taro.model を F/logs/F2-83_M4e_学習/model.pt に変更。run.steps=1800（黙る側3語の消失イベント数を増やすため）。仕様：F/docs/二語文/仕様_M4e_状態の線と驚きの書き込み_2026-09-07.md",
+ "scene": "座位_12ヶ月_F2-49_実物8択_r1_個体1_消失発話_気づき待ち_3語黙る_2026-09-06",
+ "taro": {
+  "actuation": "muscle",
+  "age_months": 12.0,
+  "orienting_reflex": true,
+  "hearing": true,
+  "lexicon_vision": {
+   "backend": "dinov2_vits14",
+   "fovea_px": 32,
+   "eye": "left",
+   "source": "wide"
+  },
+  "lexicon_mode": "contrast",
+  "lexicon_eta_pull": 0.05,
+  "lexicon_eta_push": 0.0,
+  "model": "F/logs/F2-83_M4e_学習/model.pt",
+  "save": "F/logs/F2-83b_M4e_テスト/model.pt",
+  "produce": {
+   "mode": "word",
+   "threshold": 0.5,
+   "cooldown_sec": 2.0,
+   "max_length": 8,
+   "develop_from_age": true,
+   "vocal_tract_decoupled": true,
+   "context": true,
+   "listen_learn": true,
+   "context_lambda": 0.0,
+   "vision_context": true,
+   "listen_lr": 0.001,
+   "hippocampus": {
+    "capacity": 512,
+    "decay": 0.5,
+    "replay_passes": 10,
+    "recent_ratio": 0.7,
+    "sleep_lr": 0.005,
+    "gone_strength": 3.0
+   },
+   "word_choice": "gru_hippo",
+   "hippo_gain": 1.0,
+   "listen_self": false,
+   "listen_eos": true,
+   "segment_mode": "end_prob",
+   "vanish_input": true,
+   "here_input": true,
+   "state_channel": true
+  }
+ },
+ "run": {
+  "type": "train",
+  "steps": 1800,
+  "seed": 91,
+  "K": 10,
+  "checkpoint": 100,
+  "csv": "F/logs/F2-83b_M4e_テスト/run.csv"
+ },
+ "plugins": {
+  "word_production": {
+   "events_out": "F/logs/F2-83b_M4e_テスト/太郎の発話.csv"
+  },
+  "word_learning": {
+   "events_out": "F/logs/F2-83b_M4e_テスト/発話イベント.csv"
+  },
+  "object_files": {
+   "events_out": "F/logs/F2-83b_M4e_テスト/物体ファイル.csv",
+   "points_per_side": 16,
+   "frames_out": "F/logs/F2-83b_M4e_テスト/検出フレーム",
+   "interval_s": 0.5,
+   "attend": true,
+   "attend_out": "F/logs/F2-83b_M4e_テスト/注意.csv",
+   "vanish_misses": 2
+  },
+  "view_video": {
+   "out": "F/logs/F2-83b_M4e_テスト/動画_視界.mp4",
+   "until": 1800
+  }
+ }
+}

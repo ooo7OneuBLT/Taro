@@ -374,6 +374,13 @@ class Trainer:
             ids = ids + [2]
         if ids[0] >= _cap:
             return
+        # 【M4e・2026-09-07・仕様_M4e_状態の線と驚きの書き込み】状態の線。
+        #   gone/hereは排他（呼び出し元の決定）。produce.state_channel（既定False）
+        #   が偽なら常にNone＝forward_hiddenの挙動不変（1ビットも変わらない）。
+        _state_channel = bool((self.cfg.produce or {}).get("state_channel", False))
+        _state_id = None
+        if _state_channel:
+            _state_id = 2 if gone else (1 if here else None)
         x = torch.tensor([ids], dtype=torch.long, device=t.brain._device())
         # 【V1・2026-08-31】視覚トークン：そのとき目に映っているものの要約を
         #   変換層で64次元に翻訳し、列の頭に1トークンぶん添える
@@ -396,7 +403,7 @@ class Trainer:
             # 視覚トークンは勾配つきで作る（変換層も一緒に育つ）。
             _pfx = t._visual_projection(_vin) if _vin is not None else None
             out, _ = t.brain.forward_hidden(xin, hidden=t._context_hidden,
-                                            prefix_vec=_pfx)
+                                            prefix_vec=_pfx, state_id=_state_id)
             if _pfx is not None:
                 out = out[:, 1:, :]      # 先頭＝視覚トークン位置の出力は損失に使わない
             loss = F.cross_entropy(t.brain.perception_head(out)[0], tgt[0])
@@ -426,11 +433,16 @@ class Trainer:
                 # written_atは診断専用（recall等の測定用）。学習ループ本体の
                 # step変数はここまで届かないので、trainer側で持つ単純な連番でよい。
                 _wa = getattr(self, "_lang_hippo_step", 0)
-                t.language_hippocampus.write(_kv, ids[0], ids[1:], _wa)
+                # 【M4e・2026-09-07】驚きの書き込み：消えたの印が立っている間に
+                #   聞いた発話は書く強さをgone_strength（既定1.0）にする。
+                #   hpはproduce.hippocampusの辞書（無ければ{}＝既定1.0のまま）。
+                _hp = (self.cfg.produce or {}).get("hippocampus") or {}
+                _st = float(_hp.get("gone_strength", 1.0)) if gone else 1.0
+                t.language_hippocampus.write(_kv, ids[0], ids[1:], _wa, strength=_st)
                 self._lang_hippo_step = _wa + 1
         with torch.no_grad():
             _pfx2 = t._visual_projection(_vin) if _vin is not None else None
-            _, h = t.brain.forward_hidden(x, hidden=t._context_hidden,
+            _, h = t.brain.forward_hidden(x, hidden=t._context_hidden, state_id=_state_id,
                                           prefix_vec=_pfx2)
         t._context_hidden = h.detach()
 
@@ -793,11 +805,17 @@ class Trainer:
             if _vanish_input and _att is not None and _att.get("last_seen_vec") is not None:
                 _vec_for_key = _att["last_seen_vec"]
             _vin = torch.tensor(list(_vec_for_key), dtype=torch.float32, device=_dev)
+            # 【M4e・2026-09-07・仕様_M4e_状態の線と驚きの書き込み】生成の4か所
+            #   すべて同じ値。produce.state_channel（既定False）が偽ならNone。
+            _state_channel_g = bool(pd.get("state_channel", False))
+            _gen_state_id = None
+            if _state_channel_g:
+                _gen_state_id = 2 if _gone_now else (1 if _here_now else None)
             with torch.no_grad():
                 _key = t._visual_projection(_vin)
                 _out, _hh = t.brain.forward_hidden(
                     torch.tensor([[_par]], dtype=torch.long, device=_dev),
-                    hidden=t._context_hidden, prefix_vec=_key)
+                    hidden=t._context_hidden, prefix_vec=_key, state_id=_gen_state_id)
                 _logits = t.brain.perception_head(_out)[0, -1]
                 # 【M4】本体の自己回帰は、開始トークン(<PARENT>)の直後に<GONE>を
                 #   強制してから続きを手繰る（仕様書(b)）。自信(_conf_g)は
@@ -807,12 +825,12 @@ class Trainer:
                 if _gone_now and _gone_id_v is not None:
                     _out, _hh = t.brain.forward_hidden(
                         torch.tensor([[_gone_id_v]], dtype=torch.long, device=_dev),
-                        hidden=_hh)
+                        hidden=_hh, state_id=_gen_state_id)
                     _logits = t.brain.perception_head(_out)[0, -1]
                 elif _here_now and _here_id_v is not None:
                     _out, _hh = t.brain.forward_hidden(
                         torch.tensor([[_here_id_v]], dtype=torch.long, device=_dev),
-                        hidden=_hh)
+                        hidden=_hh, state_id=_gen_state_id)
                     _logits = t.brain.perception_head(_out)[0, -1]
                 _conf_g = float(torch.softmax(_logits, dim=-1).max())
                 _seq = []
@@ -822,7 +840,8 @@ class Trainer:
                         break
                     _seq.append(_tk)
                     _out, _hh = t.brain.forward_hidden(
-                        torch.tensor([[_tk]], dtype=torch.long, device=_dev), hidden=_hh)
+                        torch.tensor([[_tk]], dtype=torch.long, device=_dev),
+                        hidden=_hh, state_id=_gen_state_id)
                     _logits = t.brain.perception_head(_out)[0, -1]
             # 【M4】デコードでは<GONE>を表示しない（採点用の別列gone=1で残す）。
             # 【M4d】<HERE>も同様に表示しない（採点用の別列here=1で残す）。
@@ -1301,7 +1320,19 @@ class Trainer:
                     xin = torch.tensor([ids[:-1]], dtype=torch.long, device=dev)
                     tgt = torch.tensor([ids[1:]], dtype=torch.long, device=dev)
                     pfx = torch.tensor(ep["key_vis"], dtype=torch.float32, device=dev)
-                    out, _ = t.brain.forward_hidden(xin, hidden=None, prefix_vec=pfx)
+                    # 【M4e・2026-09-07・仕様_M4e_状態の線と驚きの書き込み】
+                    #   tokens[0]がgone/hereの印なら、再生でも同じ状態の線を
+                    #   立てたまま学習する。既定False（state_channel無し）ではNone。
+                    _sc_replay = bool((self.cfg.produce or {}).get("state_channel", False))
+                    _st_replay = None
+                    if _sc_replay and ep["tokens"]:
+                        _tok0 = ep["tokens"][0]
+                        if _tok0 == getattr(t, "_gone_id", None):
+                            _st_replay = 2
+                        elif _tok0 == getattr(t, "_here_id", None):
+                            _st_replay = 1
+                    out, _ = t.brain.forward_hidden(xin, hidden=None, prefix_vec=pfx,
+                                                    state_id=_st_replay)
                     out = out[:, 1:, :]      # 先頭＝視覚トークン位置は損失に使わない
                     loss = F.cross_entropy(t.brain.perception_head(out)[0], tgt[0])
                     opt.zero_grad()

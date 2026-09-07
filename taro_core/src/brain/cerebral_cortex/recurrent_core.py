@@ -83,6 +83,20 @@ class TaroBrain(nn.Module):
             self.critic = None
             self.satiety_head = None
 
+        # 【M4e・2026-09-07・仕様_M4e_状態の線と驚きの書き込み】状態の線（提案2への
+        #   第一歩）。0=なし、1=ある、2=消えた。padding_idx=0でindex 0は零ベクトル
+        #   固定＝state_idを渡さない（None）呼び出しでは何も足さない＝既存実験は
+        #   1ビットも変わらない。forward_hiddenのstate_id引数で使う。
+        # 【重要・実測で発覚・2026-09-07】nn.Embedding()の初期化はtorchのグローバル
+        #   乱数生成器を消費する。__init__の途中でここに新しい層を足すと、この後に
+        #   作られるGRU等の初期値だけでなく、モデル構築より**後**（生成・探索noise
+        #   ・海馬のサンプリング等）の乱数列まで全部ずれる（実測：produce.state_channel
+        #   無しでも30step先頭の choice_gru 確信度が0.998→0.82等に変化＝既定不変①に
+        #   違反）。torch.random.fork_rng() でこの層の初期化だけを乱数の「支流」に
+        #   逃がし、グローバル生成器の状態をこの行の前後で不変に保つ。
+        with torch.random.fork_rng(devices=[]):
+            self.state_embedding = nn.Embedding(3, embedding_dim, padding_idx=0)
+
         self.gru = nn.GRU(gru_input_dim, hidden_dim, num_layers, batch_first=True)
 
         self.head_place = nn.Linear(hidden_dim, NUM_PLACE)
@@ -143,7 +157,7 @@ class TaroBrain(nn.Module):
             self._mask_cache[key] = m
         return m
 
-    def forward_hidden(self, x, hidden=None, body_state=None, prefix_vec=None):
+    def forward_hidden(self, x, hidden=None, body_state=None, prefix_vec=None, state_id=None):
         """
         入力トークンを処理して隠れ状態を更新する。
 
@@ -152,10 +166,20 @@ class TaroBrain(nn.Module):
           渡すとトークン列の頭に1トークンぶんとして連結する（設計_視覚とGRUの
           統合.md）。Noneなら従来と1ビットも変わらない。出力の系列長は+1になる
           ので、損失を取る呼び出し側は先頭位置を読み飛ばすこと。
+        state_id: 【M4e・2026-09-07・仕様_M4e_状態の線と驚きの書き込み】今の状態
+          （0=なし/1=ある/2=消えた）。渡すと、prefix_vec連結の**後**（島皮質の
+          連結の**前**）に、全位置（prefixの位置にも）へ同じ埋め込みベクトルを
+          足す。文の先頭だけでなく1音ごとに毎回同じ値が入り続ける＝人間側の
+          「消えた」という知覚状態が言い終わるまで続いていることに対応する。
+          Noneなら従来と1ビットも変わらない。
         """
         emb = self.embedding(x)
         if prefix_vec is not None:
             emb = torch.cat([prefix_vec.view(1, 1, -1).to(emb.dtype), emb], dim=1)
+        if state_id is not None:
+            _st = self.state_embedding(
+                torch.tensor([state_id], device=emb.device)).view(1, 1, -1)
+            emb = emb + _st
         if self.insula is not None:
             if body_state is not None:
                 body_vec = self.insula(body_state)

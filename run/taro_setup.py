@@ -435,6 +435,12 @@ def _setup_produce(taro, cfg, env, *, verbose=True):
         #   HEREトークンも登録されない＝run/trainer.pyのhere_input分岐は
         #   getattr(t, "_here_id", None) がNoneのまま＝一切通らない。
         taro._here_id = None
+        # 【M4e・2026-09-07・仕様_M4e_状態の線と驚きの書き込み】既定False。
+        #   cfg.produce=Noneではtrainer.pyの各forward_hidden呼び出しは
+        #   self.cfg.produce（None扱い→ {}）から state_channel を読み、常にFalse
+        #   ＝state_idは常にNone＝1ビットも変わらない。
+        taro._state_channel = False
+        taro._gone_strength = 1.0
         return
     from vocal_tract import VocalTract
     from hearing import Vocabulary
@@ -533,6 +539,22 @@ def _setup_produce(taro, cfg, env, *, verbose=True):
                 "produce.here_input=true には produce.vanish_input=true が必要"
                 "（<HERE>は<GONE>と対で初めて意味を持つ）。")
         taro._here_id = pv.add_special("<HERE>")
+    # 【M4e・2026-09-07・仕様_M4e_状態の線と驚きの書き込み】状態の線（GRU入口へ
+    #   1音ごとに毎回同じ値を足す仕組み）を使うかどうかの設定読み取り。
+    #   taro.brain.state_embedding は TaroBrain.__init__ で常に作られる
+    #   （taro_core/src/brain/cerebral_cortex/recurrent_core.py）ため、ここでは
+    #   「使うかどうか」だけを読む。run/trainer.pyの各forward_hidden呼び出しは
+    #   self.cfg.produce.get("state_channel", False) を直接読むため、この属性
+    #   taro._state_channel 自体はtrainer.pyの分岐には使われない（診断・将来の
+    #   参照用に一貫した場所へ置いておく）。既定False（設定なし）では従来と
+    #   1ビットも変わらない。<GONE>/<HERE>と同じく、意味を持たせるには
+    #   produce.context=true が必要（GRUの文脈が無いと状態の線を1音ごとに
+    #   足す先＝GRU入口が文脈を持たないため）。
+    taro._state_channel = bool(pd.get("state_channel", False))
+    if taro._state_channel and not taro._context_enabled:
+        raise ValueError(
+            "produce.state_channel=true には produce.context=true が必要"
+            "（状態の線はGRUの文脈入力へ流す仕組みで、文脈が無いと意味を持たない）。")
     taro.brain.resize_embedding(pv.size)
     taro.brain.set_vocab_mapping(pv.char2idx)
     # 【聞く学習・2026-08-31・設計_文脈（コンテキスト）.md 追補】聞いた発話の
@@ -605,6 +627,13 @@ def _setup_produce(taro, cfg, env, *, verbose=True):
         _plh = getattr(taro, "_pending_language_hippocampus", None)
         if _plh is not None:
             taro.language_hippocampus.load_state_dict(_plh)
+    # 【M4e・2026-09-07・仕様_M4e_状態の線と驚きの書き込み】驚きの書き込み。
+    #   消えたの印が立っている間に聞いた発話は、海馬に書く強さをgone_strength倍
+    #   にする（既定1.0＝従来と1ビットも変わらない）。run/trainer.pyの_context_feed
+    #   が self.cfg.produce.get("hippocampus", {}).get("gone_strength", 1.0) を
+    #   直接読むため、この属性自体はtrainer.pyの分岐には使われない
+    #   （taro._state_channel と同じく、診断・将来の参照用に一貫した場所へ置く）。
+    taro._gone_strength = float((pd.get("hippocampus") or {}).get("gone_strength", 1.0))
     taro.produce_vocab = pv
     # 【設計「⚠学習器の共有」案a】運動学習(taro.learner)とは別インスタンス。
     #   generate()が使うtaro.brainのパラメータ（embedding/gru＝音声用でmotor_gruとは
