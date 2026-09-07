@@ -441,6 +441,21 @@ def _setup_produce(taro, cfg, env, *, verbose=True):
         #   ＝state_idは常にNone＝1ビットも変わらない。
         taro._state_channel = False
         taro._gone_strength = 1.0
+        # 【塊レベル層・2026-09-07・仕様_M5_塊レベル層.md §2】既定OFF
+        #   （cfg.produce=None）ではchunk_vocab/chunk_brain/_chunk_optimizer/
+        #   _chunk_context_hiddenはNoneのまま＝run/trainer.pyの新しい分岐は
+        #   一度も実行されない＝既存実験の挙動は1ビットも変わらない。
+        #   _pending_chunk_brain/_pending_chunk_vocabは_load()が退避した値を
+        #   （あれば）そのまま素通しする（visual_projection/language_hippocampus
+        #   と同じ流儀。cfg.model未指定の新規モデルではまだ属性自体が無いので
+        #   getattrで安全にNone扱いする）。
+        taro.chunk_level = False
+        taro.chunk_vocab = None
+        taro.chunk_brain = None
+        taro._chunk_optimizer = None
+        taro._chunk_context_hidden = None
+        taro._pending_chunk_brain = getattr(taro, "_pending_chunk_brain", None)
+        taro._pending_chunk_vocab = getattr(taro, "_pending_chunk_vocab", None)
         return
     from vocal_tract import VocalTract
     from hearing import Vocabulary
@@ -627,6 +642,74 @@ def _setup_produce(taro, cfg, env, *, verbose=True):
         _plh = getattr(taro, "_pending_language_hippocampus", None)
         if _plh is not None:
             taro.language_hippocampus.load_state_dict(_plh)
+    # 【塊レベル層・2026-09-07・仕様_M5_塊レベル層.md §2】塊レベルのGRU。
+    #   既定False（produce.chunk_level無し）ではchunk_vocab/chunk_brain/
+    #   _chunk_optimizer/_chunk_context_hiddenはNoneのまま＝run/trainer.pyの
+    #   新しい分岐は一度も実行されない＝既存実験の挙動は1ビットも変わらない。
+    taro.chunk_level = bool(pd.get("chunk_level", False))
+    taro.chunk_vocab = None
+    taro.chunk_brain = None
+    taro._chunk_optimizer = None
+    taro._chunk_context_hidden = None
+    if taro.chunk_level:
+        if not taro._context_enabled or str(pd.get("word_choice", "lexicon")) != "gru_hippo":
+            raise ValueError(
+                "produce.chunk_level=true には produce.context=true と "
+                "produce.word_choice='gru_hippo' が必要"
+                "（塊レベルGRUは文脈GRU＋海馬の経路にだけ差し込む設計。"
+                "共存禁止と同じ流儀＝仕様_M5_塊レベル層.md §2）。")
+        from cerebral_cortex.chunk_vocab import ChunkVocab
+        from cerebral_cortex.recurrent_core import TaroBrain as _ChunkBrainCls
+        cv = ChunkVocab()
+        _pcv = getattr(taro, "_pending_chunk_vocab", None)
+        if _pcv is not None:
+            cv.load_state_dict(_pcv)
+        # 【仕様書§1・§2】<PARENT>/<SELF>/<GONE>/<HERE>を音の名簿と同じ4種
+        #   （id空間は別）。specialsのキーはtrainer.pyの_chunk_context_feedが
+        #   speaker（"parent"/"self"）とgone/hereの印を直接引く形に合わせた
+        #   （taro._context_speaker_ids={"parent":..,"self":..}と同じ発想。
+        #   仕様書§1は「音の名簿と同名」とのみ指定しキーの正確な文字列までは
+        #   決めていなかったため、trainer.py側の呼び出し規約に合わせてここで
+        #   判断した＝作業記録「仕様に無かった判断」に記載）。
+        cv.add_special("parent")
+        cv.add_special("self")
+        cv.add_special("gone")
+        cv.add_special("here")
+        taro.chunk_vocab = cv
+        # 【重要・既定不変の落とし穴・2026-09-07】nn.Embedding/nn.GRUの初期化は
+        #   torchのグローバル乱数生成器を消費する。fork_rngでこの構築だけを
+        #   支流へ逃がし、chunk_level無しの既存実験の乱数列を1つもずらさない
+        #   （recurrent_core.py state_embeddingの同種コメント・落とし穴と同じ）。
+        with torch.random.fork_rng(devices=[]):
+            taro.chunk_brain = _ChunkBrainCls(
+                vocab_size=cv.size, embedding_dim=64, hidden_dim=128,
+                body_state_dim=0)
+        _pcb = getattr(taro, "_pending_chunk_brain", None)
+        if _pcb is not None:
+            _own = taro.chunk_brain.state_dict()
+            _matched = {k: v for k, v in _pcb.items()
+                        if k in _own and _own[k].shape == v.shape}
+            taro.chunk_brain.load_state_dict(_matched, strict=False)
+            if verbose:
+                print(f"  [塊GRU] ロード{len(_matched)}/{len(_own)}層", flush=True)
+        taro._chunk_optimizer = torch.optim.Adam(
+            taro.chunk_brain.parameters(), lr=float(pd.get("listen_lr", 0.005)))
+        taro._chunk_context_hidden = None
+        # 【仕様書§2】海馬：chunk_level真ならlanguage_hippocampus.unit="chunk"。
+        #   保存済み海馬のunitが"mora"（または無し）なら中身を捨てて空から
+        #   （print で明示）。
+        if taro.language_hippocampus is not None:
+            if taro.language_hippocampus.unit != "chunk":
+                if taro.language_hippocampus.episodes and verbose:
+                    print("注意[塊レベル] 保存済み海馬はunit='mora'（モーラの列）でした。"
+                          "塊レベル層では海馬は塊の列で書き直すため、中身を空にします"
+                          f"（捨てたエピソード数={len(taro.language_hippocampus.episodes)}）。",
+                          flush=True)
+                taro.language_hippocampus.episodes = []
+                taro.language_hippocampus.unit = "chunk"
+    else:
+        taro._pending_chunk_brain = getattr(taro, "_pending_chunk_brain", None)
+        taro._pending_chunk_vocab = getattr(taro, "_pending_chunk_vocab", None)
     # 【M4e・2026-09-07・仕様_M4e_状態の線と驚きの書き込み】驚きの書き込み。
     #   消えたの印が立っている間に聞いた発話は、海馬に書く強さをgone_strength倍
     #   にする（既定1.0＝従来と1ビットも変わらない）。run/trainer.pyの_context_feed
@@ -1196,6 +1279,10 @@ class Taro:
         # 【言語海馬・段階1・2026-09-01】visual_projectionと同じ流儀
         #   （_setup_produceがLanguageHippocampusを作った直後に流し込む）。
         self._pending_language_hippocampus = blob.get("language_hippocampus")
+        # 【塊レベル層・2026-09-07・仕様_M5_塊レベル層.md §2】visual_projectionと
+        #   同じ流儀（_setup_produceがChunkVocab/TaroBrainを作った直後に流し込む）。
+        self._pending_chunk_brain = blob.get("chunk_brain")
+        self._pending_chunk_vocab = blob.get("chunk_vocab")
         if "produce_cerebellum" in blob:
             self._pending_produce_cerebellum = blob["produce_cerebellum"]
             if verbose:
@@ -1618,6 +1705,19 @@ class Taro:
             blob["language_hippocampus"] = self.language_hippocampus.state_dict()
         elif _pending_lh is not None:
             blob["language_hippocampus"] = _pending_lh
+        # 【塊レベル層・2026-09-07・仕様_M5_塊レベル層.md §2】chunk_level真の
+        #   ときだけキーを足す（無ければキーを足さない流儀。visual_projection・
+        #   language_hippocampusと同じ）。
+        _pending_cb = getattr(self, "_pending_chunk_brain", None)
+        if getattr(self, "chunk_brain", None) is not None:
+            blob["chunk_brain"] = self.chunk_brain.state_dict()
+        elif _pending_cb is not None:
+            blob["chunk_brain"] = _pending_cb
+        _pending_cv = getattr(self, "_pending_chunk_vocab", None)
+        if getattr(self, "chunk_vocab", None) is not None:
+            blob["chunk_vocab"] = self.chunk_vocab.state_dict()
+        elif _pending_cv is not None:
+            blob["chunk_vocab"] = _pending_cv
         _pending_sg = getattr(self, "_pending_speech_gate", None)
         if getattr(self, "_speech_gate", None) is not None:
             blob["speech_gate"] = self._speech_gate.state()

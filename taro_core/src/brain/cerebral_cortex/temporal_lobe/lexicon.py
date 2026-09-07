@@ -89,6 +89,10 @@ class Lexicon:
         # 注意：構造的な下限であって調整用の恣意的定数ではない（1にすると全単音が語になる）。
         self.min_len = min_len
         self.counts = {}
+        # 【塊レベル層・2026-09-07】仕様_M5_塊レベル層.md §1・§3。observe()が
+        #   直近の分節結果（塊の列）を置く場所。まだ一度もobserveしていない
+        #   状態でも呼び出し側が空リストとして扱えるよう空で初期化しておく。
+        self.last_chunks = []
         # 【分節第2案・2026-09-03】設計_分節（語の切れ目の発見）.md 第2案 第2部
         #   「発話まるごとの記録」節。単独で聞いたことのある発話全体を記録する
         #   （既知語を足がかりに切り出す segment_end_prob 専用。従来の counts/segment
@@ -344,6 +348,12 @@ class Lexicon:
             chunks = self.segment_end_prob(tokens, confidences, end_probs)
         else:
             chunks = self.segment_all(tokens, confidences)
+        # 【塊レベル層・2026-09-07】仕様_M5_塊レベル層.md §1。呼び出し側
+        #   （run/trainer.py）が塊の列を丸ごと使えるように保持する。従来の
+        #   戻り値（最長の1個）は変えないので、chunk_level無しの経路は
+        #   1ビットも変わらない。空なら [tuple(tokens)] を置く（塊が1つも
+        #   切り出せない＝発話全体が1つの塊、という仕様§3の規約）。
+        self.last_chunks = list(chunks) if chunks else [tuple(tokens)]
         chunk = max(chunks, key=len) if chunks else None
         for chunk_ in chunks:
             self._register(chunk_, states, state)

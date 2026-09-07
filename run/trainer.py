@@ -427,7 +427,12 @@ class Trainer:
             #   自分の声のリハーサルは段階2以降で別途設計する（設計に追記済み）。
             _is_parent = (getattr(t, "produce_vocab", None) is not None and
                           ids[0] == t.produce_vocab.char2idx.get("<PARENT>", -1))
-            if getattr(t, "language_hippocampus", None) is not None and _is_parent:
+            # 【塊レベル層・2026-09-07・仕様_M5_塊レベル層.md §3】chunk_level真の
+            #   ときは海馬を塊の列で書く（_chunk_context_feedが別に書く）ので、
+            #   ここ（モーラの列）では書かない。既定False（chunk_level無し）では
+            #   このガードは常にFalse＝従来と1ビットも変わらない。
+            if (getattr(t, "language_hippocampus", None) is not None and _is_parent
+                    and not getattr(t, "chunk_level", False)):
                 _kv = (_pfx.detach().cpu().numpy() if _pfx is not None
                        else np.zeros(t.brain.embedding.embedding_dim, dtype=np.float32))
                 # written_atは診断専用（recall等の測定用）。学習ループ本体の
@@ -445,6 +450,82 @@ class Trainer:
             _, h = t.brain.forward_hidden(x, hidden=t._context_hidden, state_id=_state_id,
                                           prefix_vec=_pfx2)
         t._context_hidden = h.detach()
+
+    def _chunk_context_feed(self, speaker, chunk_ids, vision_vec=None, gone=False, here=False):
+        """文脈（塊レベルGRUの隠れ状態）へ塊の列を1本流す（新設・2026-09-07）。
+
+        仕様_M5_塊レベル層_2026-09-07.md 後半§4。_context_feed（音レベル）と同型で、
+        入口が「塊のid列」である点だけが違う。produce.chunk_level=false（既定）では
+        呼ばれない＝既存の音レベル経路は1ビットも変わらない。
+
+        speaker: "parent" か "self"（t.chunk_vocab.specialsのキー）。
+        gone/hereはM4/M4dと同じ規約（排他・話者トークンの直後に挟む）。
+        """
+        t = self.taro
+        cv = t.chunk_vocab
+        ids = [cv.specials[speaker]]
+        if gone and cv.specials.get("gone") is not None:
+            ids.append(cv.specials["gone"])
+        elif here and cv.specials.get("here") is not None:
+            ids.append(cv.specials["here"])
+        # 【仕様書§4】EOSを常に付ける（塊の列は短いので終わりを学ばせる）。
+        ids = ids + [int(i) for i in chunk_ids] + [2]
+        # 【仕様書§4】音レベル側と同じ投射を使うが、勾配は流さない
+        #   （taro._chunk_optimizerはchunk_brain.parameters()だけを持つため、
+        #   visual_projectionへ逆伝播しても学習器に登録された対象が無く無駄）。
+        _pfx = None
+        if vision_vec is not None and getattr(t, "_visual_projection", None) is not None:
+            _vin = torch.tensor(list(vision_vec), dtype=torch.float32,
+                                device=t.chunk_brain._device())
+            _pfx = t._visual_projection(_vin).detach()
+        _state_channel = bool((self.cfg.produce or {}).get("state_channel", False))
+        _state_id = None
+        if _state_channel:
+            _state_id = 2 if gone else (1 if here else None)
+        if (getattr(t, "_listen_learn", False) and len(ids) >= 2
+                and (speaker != "self" or getattr(t, "_listen_self", True))):
+            import torch.nn.functional as F
+            xin = torch.tensor([ids[:-1]], dtype=torch.long, device=t.chunk_brain._device())
+            tgt = torch.tensor([ids[1:]], dtype=torch.long, device=t.chunk_brain._device())
+            out, _ = t.chunk_brain.forward_hidden(xin, hidden=t._chunk_context_hidden,
+                                                  prefix_vec=_pfx, state_id=_state_id)
+            out = out[:, 1:, :]      # 先頭＝視覚トークン位置の出力は損失に使わない
+            loss = F.cross_entropy(t.chunk_brain.perception_head(out)[0], tgt[0])
+            t._chunk_optimizer.zero_grad()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(
+                (p_ for g in t._chunk_optimizer.param_groups for p_ in g["params"]),
+                getattr(t, "_listen_grad_clip", 1.0))
+            t._chunk_optimizer.step()
+            # 【仕様書§4】海馬は塊の列で書く（親の発話だけ。_context_feedと同じ制約）。
+            if (speaker == "parent"
+                    and getattr(t, "language_hippocampus", None) is not None):
+                _kv = (_pfx.detach().cpu().numpy() if _pfx is not None
+                       else np.zeros(t.chunk_brain.embedding.embedding_dim, dtype=np.float32))
+                _wa = getattr(self, "_lang_hippo_step", 0)
+                _hp = (self.cfg.produce or {}).get("hippocampus") or {}
+                _st = float(_hp.get("gone_strength", 1.0)) if gone else 1.0
+                t.language_hippocampus.write(_kv, ids[0], ids[1:-1], _wa, strength=_st)
+                self._lang_hippo_step = _wa + 1
+        with torch.no_grad():
+            x = torch.tensor([ids], dtype=torch.long, device=t.chunk_brain._device())
+            _, h = t.chunk_brain.forward_hidden(x, hidden=t._chunk_context_hidden,
+                                                prefix_vec=_pfx, state_id=_state_id)
+        t._chunk_context_hidden = h.detach()
+
+    def _ensure_chunk_capacity(self):
+        """塊の名簿が塊GRUの入力口（embedding）を追い越していたら、入力口を伸ばす。
+
+        _ensure_brain_capacity（音レベル）と同型（2026-09-07・仕様_M5_塊レベル層）。
+        """
+        t = self.taro
+        cv = t.chunk_vocab
+        if cv.size <= t.chunk_brain.embedding.num_embeddings:
+            return
+        t.chunk_brain.resize_embedding(cv.size)
+        if getattr(t, "_chunk_optimizer", None) is not None:
+            lr = t._chunk_optimizer.param_groups[0]["lr"]
+            t._chunk_optimizer = torch.optim.Adam(t.chunk_brain.parameters(), lr=lr)
 
     def _ensure_brain_capacity(self):
         """脳の名簿が入力口（embedding）を追い越していたら、入力口を伸ばす。
@@ -556,6 +637,16 @@ class Trainer:
                                       end_probs=_end_probs, mode="end_prob")
         else:
             chunk = t.lexicon.observe(tokens, confidences, state=state)
+        # 【塊レベル層・2026-09-07・仕様_M5_塊レベル層.md §3】observe直後に
+        #   このtickの塊の列（lexicon.last_chunks）を塊idへ変換しておく。
+        #   実際に文脈・海馬へ流す（_chunk_context_feed呼び出し）のは、下の
+        #   _context_enabled ブロックで視覚ベクトル・gone/hereが揃ってから
+        #   （observe直後の時点ではまだ計算されていない）。既定False
+        #   （chunk_level無し）ではNoneのまま＝何も起きない。
+        _chunk_cids = None
+        if getattr(t, "chunk_level", False) and getattr(t, "chunk_vocab", None) is not None:
+            _chunk_cids = t.chunk_vocab.encode_chunks(t.lexicon.last_chunks)
+            self._ensure_chunk_capacity()
         # 【なぜstateもここに置くか】word_learningプラグイン（読むだけ）が「正解物の
         #   特徴EMA」を作るのに使う（プラグインがtaro.fusionを呼び直すと二重計算に
         #   なるうえ、この瞬間のobs（o）はstep_kのK tick内の値でctx.last["obs_out"]
@@ -574,6 +665,10 @@ class Trainer:
             _tgt = pu.get("target")
             if t._context_last_target is not None and _tgt != t._context_last_target:
                 t._context_hidden = None
+                # 【塊レベル層・2026-09-07・仕様_M5_塊レベル層.md §4】音レベルの
+                #   文脈がリセットされる場所で塊レベルの文脈も一緒にリセットする。
+                if getattr(t, "chunk_level", False):
+                    t._chunk_context_hidden = None
             t._context_last_target = _tgt
             # 【V1】聞く側にだけ視覚を添える（設計の分岐A＝案2。言う側はV3で）。
             #   state は lexicon 用に計算済みの DINOv2 ベクトル（再計算なし）。
@@ -602,6 +697,12 @@ class Trainer:
                         (self.cfg.produce or {}).get("here_input", False))
             self._context_feed("parent", self._to_produce_ids(text),
                                vision_vec=_vv, gone=_gone, here=_here)
+            # 【塊レベル層・2026-09-07・仕様_M5_塊レベル層.md §3】音レベルの
+            #   _context_feed（切れ目の発見の維持）はそのまま呼んだ上で、
+            #   塊レベルのGRU・海馬にも同じ発話を塊の列として流す。
+            if getattr(t, "chunk_level", False) and _chunk_cids is not None:
+                self._chunk_context_feed("parent", _chunk_cids,
+                                         vision_vec=_vv, gone=_gone, here=_here)
         # 【発話の動機・2026-08-31】随伴の判定：自分が言った後、窓内に親の声が
         #   来たら報酬1（正誤は見ない＝設計B'）。言わなかった決定は窓切れ（上のA）
         #   で報酬0になる。social未設定なら不実行。
@@ -811,74 +912,141 @@ class Trainer:
             _gen_state_id = None
             if _state_channel_g:
                 _gen_state_id = 2 if _gone_now else (1 if _here_now else None)
-            with torch.no_grad():
-                _key = t._visual_projection(_vin)
-                _out, _hh = t.brain.forward_hidden(
-                    torch.tensor([[_par]], dtype=torch.long, device=_dev),
-                    hidden=t._context_hidden, prefix_vec=_key, state_id=_gen_state_id)
-                _logits = t.brain.perception_head(_out)[0, -1]
-                # 【M4】本体の自己回帰は、開始トークン(<PARENT>)の直後に<GONE>を
-                #   強制してから続きを手繰る（仕様書(b)）。自信(_conf_g)は
-                #   <GONE>強制後の最初の実文字への確信度で測る。
-                # 【M4d・2026-09-06】<GONE>と対で、消えていないときは<HERE>を
-                #   同じ位置に強制する（_gone_now/_here_nowは排他）。
-                if _gone_now and _gone_id_v is not None:
-                    _out, _hh = t.brain.forward_hidden(
-                        torch.tensor([[_gone_id_v]], dtype=torch.long, device=_dev),
-                        hidden=_hh, state_id=_gen_state_id)
-                    _logits = t.brain.perception_head(_out)[0, -1]
-                elif _here_now and _here_id_v is not None:
-                    _out, _hh = t.brain.forward_hidden(
-                        torch.tensor([[_here_id_v]], dtype=torch.long, device=_dev),
-                        hidden=_hh, state_id=_gen_state_id)
-                    _logits = t.brain.perception_head(_out)[0, -1]
-                _conf_g = float(torch.softmax(_logits, dim=-1).max())
-                _seq = []
-                for _ in range(int(pd.get("max_length", 8))):
-                    _tk = int(torch.argmax(_logits))
-                    if _tk == 2:
-                        break
-                    _seq.append(_tk)
-                    _out, _hh = t.brain.forward_hidden(
-                        torch.tensor([[_tk]], dtype=torch.long, device=_dev),
-                        hidden=_hh, state_id=_gen_state_id)
-                    _logits = t.brain.perception_head(_out)[0, -1]
-            # 【M4】デコードでは<GONE>を表示しない（採点用の別列gone=1で残す）。
-            # 【M4d】<HERE>も同様に表示しない（採点用の別列here=1で残す）。
-            _seq_clean = [tk for tk in _seq
-                          if tk != _gone_id_v and tk != _here_id_v]
-            _word_g = _pv.decode(_seq_clean) if _seq_clean else ""
-            _word_h, _conf_h = "", 0.0
-            _hip = getattr(t, "language_hippocampus", None)
-            if _hip is not None and len(_hip) > 0:
-                if _vanish_input and _gone_id_v is not None:
-                    # 【M4】海馬側は、vanished時はtokens[0]==<GONE>の記憶だけ、
-                    #   通常時はtokens[0]!=<GONE>の記憶だけを候補にする（仕様書(b)）。
-                    #   language_hippocampus.pyは変更禁止のため、recall_with_confと
-                    #   同じコサイン最近傍探索を、候補を絞った上でここで行う
-                    #   （_hippo_recall_filtered、taro_core側は一切変更しない）。
-                    # 【M4d・2026-09-06】あるの印の記憶と消えたの印の記憶を混ぜない
-                    #   （仕様書決定3）。want を3値にする（here_input無しなら
-                    #   _here_now は常にFalse＝want="gone"|"none"の従来2値のまま）。
+            # 【塊レベル層・2026-09-07・仕様_M5_塊レベル層.md §6】chunk_level真の
+            #   ときだけ、本体側（GRU＋海馬の候補生成）を塊GRU＋塊の名簿に丸ごと
+            #   差し替える。以降（980行付近のchunk=決定後）は無改修（発音側は
+            #   文字列だけを見るため）。既定False・chunk_vocab/chunk_brain未構築
+            #   ではelse節（従来のモーラGRU経路）がそのまま実行され、既存実験の
+            #   挙動は1ビットも変わらない。
+            self._last_chunk_seq_used = None
+            _chunk_ready = (bool(getattr(t, "chunk_level", False))
+                            and getattr(t, "chunk_vocab", None) is not None
+                            and getattr(t, "chunk_brain", None) is not None)
+            if _chunk_ready:
+                cv = t.chunk_vocab
+                _par_c = cv.specials.get("parent")
+                _gone_id_c = cv.specials.get("gone")
+                _here_id_c = cv.specials.get("here")
+                with torch.no_grad():
+                    _key = t._visual_projection(_vin)
+                    _out, _hh = t.chunk_brain.forward_hidden(
+                        torch.tensor([[_par_c]], dtype=torch.long, device=_dev),
+                        hidden=t._chunk_context_hidden, prefix_vec=_key,
+                        state_id=_gen_state_id)
+                    _logits = t.chunk_brain.perception_head(_out)[0, -1]
+                    # 【M4/M4d同型】開始トークンの直後にgone/hereを強制する。
+                    if _gone_now and _gone_id_c is not None:
+                        _out, _hh = t.chunk_brain.forward_hidden(
+                            torch.tensor([[_gone_id_c]], dtype=torch.long, device=_dev),
+                            hidden=_hh, state_id=_gen_state_id)
+                        _logits = t.chunk_brain.perception_head(_out)[0, -1]
+                    elif _here_now and _here_id_c is not None:
+                        _out, _hh = t.chunk_brain.forward_hidden(
+                            torch.tensor([[_here_id_c]], dtype=torch.long, device=_dev),
+                            hidden=_hh, state_id=_gen_state_id)
+                        _logits = t.chunk_brain.perception_head(_out)[0, -1]
+                    _conf_g = float(torch.softmax(_logits, dim=-1).max())
+                    _seq = []
+                    for _ in range(4):    # 【仕様書§6】塊は最大4個で止める（Tier3、恣意的定数）
+                        _tk = int(torch.argmax(_logits))
+                        if _tk == 2:
+                            break
+                        _seq.append(_tk)
+                        _out, _hh = t.chunk_brain.forward_hidden(
+                            torch.tensor([[_tk]], dtype=torch.long, device=_dev),
+                            hidden=_hh, state_id=_gen_state_id)
+                        _logits = t.chunk_brain.perception_head(_out)[0, -1]
+                _seq_clean = [tk for tk in _seq if tk != _gone_id_c and tk != _here_id_c]
+                _word_g = "".join(cv.chunk_string(tk, t.hearing.vocab) for tk in _seq_clean)
+                _word_h, _conf_h = "", 0.0
+                _toks_clean = []
+                _hip = getattr(t, "language_hippocampus", None)
+                if _hip is not None and len(_hip) > 0:
                     _want = "gone" if _gone_now else ("here" if _here_now else "none")
                     _toks, _simh, _str = self._hippo_recall_filtered(
-                        _hip, _key.detach().cpu().numpy(),
-                        want=_want, gone_id=_gone_id_v, here_id=_here_id_v)
+                        _hip, _key.detach().cpu().numpy(), want=_want,
+                        gone_id=_gone_id_c, here_id=_here_id_c)
+                    _toks_clean = [tk for tk in _toks if tk != _gone_id_c and tk != _here_id_c]
+                    _word_h = "".join(cv.chunk_string(tk, t.hearing.vocab) for tk in _toks_clean)
+                    _conf_h = float(pd.get("hippo_gain", 1.0)) * float(_simh) * float(_str)
+                if _word_h and _conf_h > _conf_g:
+                    _word, sim, _src = _word_h, _conf_h, "hippo"
+                    self._last_chunk_seq_used = list(_toks_clean)
                 else:
-                    _toks, _simh, _str = _hip.recall_with_conf(_key.detach().cpu().numpy())
-                # 【M4d】海馬から拾った記憶にも<HERE>が混じりうる（あるの印の
-                #   記憶）ため、<GONE>と同様にデコード前に除く。
-                _toks_clean = [tk for tk in _toks
-                              if tk != _gone_id_v and tk != _here_id_v]
-                _word_h = _pv.decode(_toks_clean) if _toks_clean else ""
-                _conf_h = float(pd.get("hippo_gain", 1.0)) * float(_simh) * float(_str)
-            if _word_h and _conf_h > _conf_g:
-                _word, sim, _src = _word_h, _conf_h, "hippo"
+                    _word, sim, _src = _word_g, _conf_g, "gru"
+                    self._last_chunk_seq_used = list(_seq_clean)
+                chunk = tuple(t.hearing.vocab.encode(_word)) if _word else None
+                self._last_choice = {"gru": [_word_g, round(_conf_g, 3)],
+                                     "hippo": [_word_h, round(_conf_h, 3)], "chosen": _src}
             else:
-                _word, sim, _src = _word_g, _conf_g, "gru"
-            chunk = tuple(t.hearing.vocab.encode(_word)) if _word else None
-            self._last_choice = {"gru": [_word_g, round(_conf_g, 3)],
-                                 "hippo": [_word_h, round(_conf_h, 3)], "chosen": _src}
+                with torch.no_grad():
+                    _key = t._visual_projection(_vin)
+                    _out, _hh = t.brain.forward_hidden(
+                        torch.tensor([[_par]], dtype=torch.long, device=_dev),
+                        hidden=t._context_hidden, prefix_vec=_key, state_id=_gen_state_id)
+                    _logits = t.brain.perception_head(_out)[0, -1]
+                    # 【M4】本体の自己回帰は、開始トークン(<PARENT>)の直後に<GONE>を
+                    #   強制してから続きを手繰る（仕様書(b)）。自信(_conf_g)は
+                    #   <GONE>強制後の最初の実文字への確信度で測る。
+                    # 【M4d・2026-09-06】<GONE>と対で、消えていないときは<HERE>を
+                    #   同じ位置に強制する（_gone_now/_here_nowは排他）。
+                    if _gone_now and _gone_id_v is not None:
+                        _out, _hh = t.brain.forward_hidden(
+                            torch.tensor([[_gone_id_v]], dtype=torch.long, device=_dev),
+                            hidden=_hh, state_id=_gen_state_id)
+                        _logits = t.brain.perception_head(_out)[0, -1]
+                    elif _here_now and _here_id_v is not None:
+                        _out, _hh = t.brain.forward_hidden(
+                            torch.tensor([[_here_id_v]], dtype=torch.long, device=_dev),
+                            hidden=_hh, state_id=_gen_state_id)
+                        _logits = t.brain.perception_head(_out)[0, -1]
+                    _conf_g = float(torch.softmax(_logits, dim=-1).max())
+                    _seq = []
+                    for _ in range(int(pd.get("max_length", 8))):
+                        _tk = int(torch.argmax(_logits))
+                        if _tk == 2:
+                            break
+                        _seq.append(_tk)
+                        _out, _hh = t.brain.forward_hidden(
+                            torch.tensor([[_tk]], dtype=torch.long, device=_dev),
+                            hidden=_hh, state_id=_gen_state_id)
+                        _logits = t.brain.perception_head(_out)[0, -1]
+                # 【M4】デコードでは<GONE>を表示しない（採点用の別列gone=1で残す）。
+                # 【M4d】<HERE>も同様に表示しない（採点用の別列here=1で残す）。
+                _seq_clean = [tk for tk in _seq
+                              if tk != _gone_id_v and tk != _here_id_v]
+                _word_g = _pv.decode(_seq_clean) if _seq_clean else ""
+                _word_h, _conf_h = "", 0.0
+                _hip = getattr(t, "language_hippocampus", None)
+                if _hip is not None and len(_hip) > 0:
+                    if _vanish_input and _gone_id_v is not None:
+                        # 【M4】海馬側は、vanished時はtokens[0]==<GONE>の記憶だけ、
+                        #   通常時はtokens[0]!=<GONE>の記憶だけを候補にする（仕様書(b)）。
+                        #   language_hippocampus.pyは変更禁止のため、recall_with_confと
+                        #   同じコサイン最近傍探索を、候補を絞った上でここで行う
+                        #   （_hippo_recall_filtered、taro_core側は一切変更しない）。
+                        # 【M4d・2026-09-06】あるの印の記憶と消えたの印の記憶を混ぜない
+                        #   （仕様書決定3）。want を3値にする（here_input無しなら
+                        #   _here_now は常にFalse＝want="gone"|"none"の従来2値のまま）。
+                        _want = "gone" if _gone_now else ("here" if _here_now else "none")
+                        _toks, _simh, _str = self._hippo_recall_filtered(
+                            _hip, _key.detach().cpu().numpy(),
+                            want=_want, gone_id=_gone_id_v, here_id=_here_id_v)
+                    else:
+                        _toks, _simh, _str = _hip.recall_with_conf(_key.detach().cpu().numpy())
+                    # 【M4d】海馬から拾った記憶にも<HERE>が混じりうる（あるの印の
+                    #   記憶）ため、<GONE>と同様にデコード前に除く。
+                    _toks_clean = [tk for tk in _toks
+                                  if tk != _gone_id_v and tk != _here_id_v]
+                    _word_h = _pv.decode(_toks_clean) if _toks_clean else ""
+                    _conf_h = float(pd.get("hippo_gain", 1.0)) * float(_simh) * float(_str)
+                if _word_h and _conf_h > _conf_g:
+                    _word, sim, _src = _word_h, _conf_h, "hippo"
+                else:
+                    _word, sim, _src = _word_g, _conf_g, "gru"
+                chunk = tuple(t.hearing.vocab.encode(_word)) if _word else None
+                self._last_choice = {"gru": [_word_g, round(_conf_g, 3)],
+                                     "hippo": [_word_h, round(_conf_h, 3)], "chosen": _src}
         if chunk is None:
             return
         # 【Tier3・2026-08-22】閾値はorienting_reflexの認識信号REC_THRESHOLD
@@ -979,6 +1147,15 @@ class Trainer:
             t._produce_hidden = h
             # 【文脈・2026-08-30・決定2・3】自分の発話も話者の印つきで文脈へ。
             self._context_feed("self", generated)
+            # 【塊レベル層・2026-09-07・仕様_M5_塊レベル層.md §6】自分の発話も
+            #   塊の列で塊レベルの文脈へ流す（海馬には書かない。_context_feedの
+            #   speaker=="self"と同じ制約は_chunk_context_feed側で担保済み）。
+            #   既定False・選んだ塊列が無い（言語海馬経路を通らなかった）ときは
+            #   何もしない。
+            if getattr(t, "chunk_level", False):
+                _cs = getattr(self, "_last_chunk_seq_used", None)
+                if _cs:
+                    self._chunk_context_feed("self", _cs)
             # 【発話の動機・2026-08-31】声が出たことを世界（親）へ合図する。
             #   親側は parent_labeling.update() がこれを拾って返事を予約する。
             # 【親の言い直し・2026-09-03】合図は門（produce.social）の有無に関係なく立てる。
@@ -1027,7 +1204,11 @@ class Trainer:
             #   （既存実験のCSV読み手が新列を無視すれば1ビットも変わらない）。
             # 【M4d・2026-09-06】here_input無効なら常にhere=0（_here_nowが常にFalse）。
             "gate": "ok", "gone": int(_gone_now), "here": int(_here_now),
-            "attended_id": _attended_id}
+            "attended_id": _attended_id,
+            # 【塊レベル層・2026-09-07・仕様_M5_塊レベル層.md §6】既定"mora"
+            #   （chunk_level無しでは常に"mora"＝word_production.pyのCSVに新列
+            #   unitが増えるだけで、既存の全数値は1ビットも変わらない）。
+            "unit": "chunk" if getattr(t, "chunk_level", False) else "mora"}
 
     def _apply_babble(self, pd):
         """喃語モード（F2-1）：視覚トリガーなし・クールダウンだけで自発的に声を出す。
@@ -1300,11 +1481,20 @@ class Trainer:
         """
         t = self.taro
         hippo = getattr(t, "language_hippocampus", None)
-        if hippo is None or len(hippo) == 0 or getattr(t, "_listen_optimizer", None) is None:
+        if hippo is None or len(hippo) == 0:
+            return
+        # 【塊レベル層・2026-09-07・仕様_M5_塊レベル層.md §5】chunk_level真なら
+        #   エピソードは塊の列なので、鍛えるのは塊GRU（_chunk_optimizer）。
+        #   音レベルGRUはここでは再生しない（聞く学習・切れ目の発見は_context_feed
+        #   経由で引き続き走る）。偽（既定）ならこれまでどおり音レベルGRUを鍛える。
+        _chunk_level = bool(getattr(t, "chunk_level", False))
+        brain = t.chunk_brain if _chunk_level else t.brain
+        opt = (getattr(t, "_chunk_optimizer", None) if _chunk_level
+               else getattr(t, "_listen_optimizer", None))
+        if brain is None or opt is None:
             return
         import torch.nn.functional as F
-        dev = t.brain._device()
-        opt = t._listen_optimizer
+        dev = brain._device()
         orig_lrs = [g["lr"] for g in opt.param_groups]
         for g in opt.param_groups:
             g["lr"] = hippo.sleep_lr
@@ -1314,7 +1504,14 @@ class Trainer:
                 perm = torch.randperm(len(eps)).tolist()
                 eps = [eps[i] for i in perm]
                 for ep in eps:
-                    ids = [ep["speaker"]] + list(ep["tokens"])
+                    # 【仕様書§5】塊の列は書き込み時にEOSを省いているので
+                    #   （_chunk_context_feedのwrite呼び出し参照）、ここで戻す。
+                    #   音レベル（既定）はEOSの有無を書き込み時の値のまま使う
+                    #   （従来どおり）。
+                    if _chunk_level:
+                        ids = [ep["speaker"]] + list(ep["tokens"]) + [2]
+                    else:
+                        ids = [ep["speaker"]] + list(ep["tokens"])
                     if len(ids) < 2:
                         continue
                     xin = torch.tensor([ids[:-1]], dtype=torch.long, device=dev)
@@ -1323,18 +1520,26 @@ class Trainer:
                     # 【M4e・2026-09-07・仕様_M4e_状態の線と驚きの書き込み】
                     #   tokens[0]がgone/hereの印なら、再生でも同じ状態の線を
                     #   立てたまま学習する。既定False（state_channel無し）ではNone。
+                    #   塊レベルではgone/hereのidは chunk_vocab.specials 側の空間
+                    #   （音の名簿の_gone_id/_here_idとは別空間）を見る。
                     _sc_replay = bool((self.cfg.produce or {}).get("state_channel", False))
                     _st_replay = None
                     if _sc_replay and ep["tokens"]:
                         _tok0 = ep["tokens"][0]
-                        if _tok0 == getattr(t, "_gone_id", None):
+                        if _chunk_level:
+                            _gone_ref = t.chunk_vocab.specials.get("gone")
+                            _here_ref = t.chunk_vocab.specials.get("here")
+                        else:
+                            _gone_ref = getattr(t, "_gone_id", None)
+                            _here_ref = getattr(t, "_here_id", None)
+                        if _tok0 == _gone_ref:
                             _st_replay = 2
-                        elif _tok0 == getattr(t, "_here_id", None):
+                        elif _tok0 == _here_ref:
                             _st_replay = 1
-                    out, _ = t.brain.forward_hidden(xin, hidden=None, prefix_vec=pfx,
-                                                    state_id=_st_replay)
+                    out, _ = brain.forward_hidden(xin, hidden=None, prefix_vec=pfx,
+                                                  state_id=_st_replay)
                     out = out[:, 1:, :]      # 先頭＝視覚トークン位置は損失に使わない
-                    loss = F.cross_entropy(t.brain.perception_head(out)[0], tgt[0])
+                    loss = F.cross_entropy(brain.perception_head(out)[0], tgt[0])
                     opt.zero_grad()
                     loss.backward()
                     torch.nn.utils.clip_grad_norm_(

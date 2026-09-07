@@ -43,6 +43,10 @@ class LanguageHippocampus:
         self.recent_ratio = float(cfg.get("recent_ratio", 0.7))
         self.sleep_lr = float(cfg.get("sleep_lr", 0.005))
         self.episodes = []
+        # 【塊レベル層・2026-09-07】仕様_M5_塊レベル層.md §2。tokensが「モーラID列」
+        #   か「塊ID列」かの印。既定"mora"＝従来どおり。produce.chunk_levelが真の
+        #   ときだけ run/taro_setup.py が"chunk"に切り替える。
+        self.unit = str(cfg.get("unit", "mora"))
 
     # ------------------------------------------------------------ 書き込み
     def write(self, key_vis, speaker, tokens, step, strength=1.0):
@@ -157,6 +161,7 @@ class LanguageHippocampus:
             "replay_passes": self.replay_passes,
             "recent_ratio": self.recent_ratio,
             "sleep_lr": self.sleep_lr,
+            "unit": self.unit,
             "episodes": [
                 {
                     "key_vis": ep["key_vis"].tolist(),
@@ -175,6 +180,7 @@ class LanguageHippocampus:
         self.replay_passes = int(d.get("replay_passes", self.replay_passes))
         self.recent_ratio = float(d.get("recent_ratio", self.recent_ratio))
         self.sleep_lr = float(d.get("sleep_lr", self.sleep_lr))
+        self.unit = str(d.get("unit", "mora"))
         self.episodes = [
             {
                 "key_vis": np.asarray(ep["key_vis"], dtype=np.float32),
