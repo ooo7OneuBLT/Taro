@@ -661,6 +661,14 @@ class Trainer:
         att = getattr(self.ctx, "attended_object", None)
         attended_id = att.get("file_id") if att is not None else None
 
+        # 【F2-92 の実測を受けた追加・2026-09-09】4000歩で物体ファイルが62個でき、寿命10tick未満が7個、
+        #   注意外の物の驚き（z>2）が702回（注意中は514回）。一瞬しか続かない検出（机の縁・親の手など）にも
+        #   予測器の記憶を作り、その驚きが z_max に混ざる。`min_hits`（既定0＝従来どおり）以上の検出回数が
+        #   ある物だけを予測の対象にする。注意中の物は常に含める
+        min_hits = int(wp_cfg.get("min_hits", 0))
+        if min_hits > 0:
+            files = [f for f in files if int(getattr(f, "hits", 0)) >= min_hits or f.id == attended_id]
+
         files_sorted = sorted(files, key=lambda f: f.since_seen)
         selected = files_sorted[:max_files]
         if attended_id is not None and not any(f.id == attended_id for f in selected):
@@ -676,9 +684,12 @@ class Trainer:
                 selected = selected + [att_f]
 
         selected_ids = set(f.id for f in selected)
+        if not hasattr(self, "_wp_app0"):
+            self._wp_app0 = {}          # file_id -> 最初に見たときの appearance（appearance_freeze 用）
         for old_id in list(wp.active_ids()):
             if old_id is not None and old_id not in selected_ids:
                 wp.drop(old_id)
+                self._wp_app0.pop(old_id, None)
 
         if not selected:
             # 【仕様「後半」2節】「物が無いとき（filesが空）は何もしない
@@ -715,7 +726,21 @@ class Trainer:
             pos_y = float(f.pos[1]) / IMG_SIZE
             area_norm = math.log1p(max(float(f.area or 0.0), 0.0)) / 10.0
             obj_state = [present, visible, vanished, pos_x, pos_y, area_norm]
-            per_file_io[f.id] = (obj_state, f.appearance, visible, vanished)
+            obj_vec = f.appearance
+            # 【F2-92 の実測を受けた追加・2026-09-09】物体ファイルの appearance（マスク内パッチ平均の EMA、
+            #   検出のたびに 0.3 で更新）は 0.5 秒ごとに跳ぶ。見えている間の見た目の誤差が F2-91（注意中の物の
+            #   中心窩 CLS、0.006）に対し 0.722、物の状態の誤差も 0.153→0.586 に悪化した。`appearance_freeze`
+            #   （既定False＝従来どおり）なら、その物を最初に見たときの appearance を凍結して入力・的に使う
+            #   （「同じ物だ」という同一性の手がかりとしてだけ使い、細かい変動は予測させない）
+            if bool(wp_cfg.get("appearance_freeze", False)):
+                app0 = self._wp_app0.get(f.id)
+                if app0 is None and f.appearance is not None:
+                    import numpy as _np
+                    app0 = _np.array(f.appearance, dtype=float).copy()
+                    self._wp_app0[f.id] = app0
+                if app0 is not None:
+                    obj_vec = app0
+            per_file_io[f.id] = (obj_state, obj_vec, visible, vanished)
 
         by_file_result = {}
         z_candidates = []          # (z_state, file_id) のリスト。z_maxの元

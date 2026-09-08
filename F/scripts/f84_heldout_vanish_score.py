@@ -41,6 +41,7 @@
   <ログディレクトリ>/図_短期B.png
 """
 import ast
+import collections
 import csv
 import json
 import os
@@ -194,6 +195,20 @@ def main():
 
     vanish_events = find_vanish_events(attend_rows)
 
+    # 【述語判定・2026-09-09】太郎が「消えた」状態に使う述語の塊を、走行の中から数える。
+    #   F2-89 以降、親の「かばんないね」の塊の切れ目が「かばんな｜いね」になり、消えた述語の塊が
+    #   「いね」になった（消えたときだけ 21/21、あるときは「だよ」）。文字判定（「ない」を含む）は
+    #   これを 0 と数えるが、意図（消えた→この述語）は無傷。ユーザー決定「発音の崩れは直さない、
+    #   意図で採点」「塊の切れ目の揺れは別件」に従い、述語の塊が「消えたの述語」に一致し、名詞が
+    #   語の断片を含めば正解とする列を足す（従来の列は残す）。
+    gone_preds = collections.Counter(r.get("pred", "") for r in ut_sorted
+                                     if r.get("gone") == "1" and r.get("pred"))
+    here_preds = collections.Counter(r.get("pred", "") for r in ut_sorted
+                                     if r.get("gone") != "1" and r.get("pred"))
+    gone_pred = gone_preds.most_common(1)[0][0] if gone_preds else ""
+    if gone_pred and here_preds and here_preds.most_common(1)[0][0] == gone_pred:
+        gone_pred = ""      # あるときと同じ述語なら「消えた専用」とは言えない
+
     table = []
     false_positive_table = []
     for ev in vanish_events:
@@ -207,6 +222,7 @@ def main():
                 "太郎の発話": "", "判定": "?対象不明（発話イベント無し）",
                 "厳密": "?対象不明（発話イベント無し）",
                 "意図した語": "", "意図判定": "?対象不明（発話イベント無し）",
+                "述語判定": "?対象不明（発話イベント無し）",
             })
             continue
 
@@ -292,12 +308,42 @@ def main():
         else:
             judge_intended = "×ない無し"
 
+        # 述語判定：述語の塊が「消えたの述語」（走行中に太郎が消えた状態にだけ使う塊）に一致し、
+        #   名詞の塊が語の断片を含む。
+        def _noun_ok(noun, w):
+            # 名詞の塊が語で始まる、または語の連続2モーラ以上を含む（「ない」の位置は問わない）
+            if not w or not noun:
+                return False
+            if noun.startswith(w):
+                return True
+            for length in range(len(w), 1, -1):
+                for start in range(0, len(w) - length + 1):
+                    sub = w[start:start + length]
+                    if len(sub) >= 2 and sub in noun:
+                        return True
+            return False
+
+        if gone_pred:
+            has_pred_ok = any(r.get("pred") == gone_pred and _noun_ok(r.get("noun", ""), word)
+                              for r in in_window)
+            has_pred_wrong_word = any(r.get("pred") == gone_pred and not _noun_ok(r.get("noun", ""), word)
+                                      for r in in_window)
+            if has_pred_ok:
+                judge_pred = "○正解（語＋消えた述語）"
+            elif has_pred_wrong_word:
+                judge_pred = "×語違い（消えた述語はあるが語が違う）"
+            else:
+                judge_pred = "×消えた述語無し"
+        else:
+            judge_pred = "?消えた述語が定まらない"
+
         table.append({
             "T": round(T, 3), "消えた物": target, "側": side,
             "太郎の発話": "; ".join(g for g in gens if g), "判定": judge,
             "厳密": judge_strict,
             "意図した語": "; ".join(g for g in intended_gens if g),
             "意図判定": judge_intended,
+            "述語判定": judge_pred,
         })
 
     # 側ごとの集計。
@@ -322,8 +368,15 @@ def main():
         n_correct_intended = sum(1 for r in rows if r["意図判定"].startswith("○"))
         n_wrong_word_intended = sum(1 for r in rows if "語違い" in r["意図判定"])
         n_no_nai_intended = sum(1 for r in rows if r["意図判定"] == "×ない無し")
+        # 述語判定（消えた述語の塊＋名詞の断片）側の集計。列「述語判定」を使う。
+        n_correct_pred = sum(1 for r in rows if r["述語判定"].startswith("○"))
+        n_wrong_word_pred = sum(1 for r in rows if "語違い" in r["述語判定"])
+        n_no_pred = sum(1 for r in rows if r["述語判定"] == "×消えた述語無し")
         return {
             "件数": n,
+            "述語_語＋消えた述語率": round(n_correct_pred / n, 4) if n else None,
+            "述語_語違い率": round(n_wrong_word_pred / n, 4) if n else None,
+            "述語_消えた述語無し率": round(n_no_pred / n, 4) if n else None,
             "語＋ない率": round(n_correct / n, 4) if n else None,
             "語違い率": round(n_wrong_word / n, 4) if n else None,
             "ない無し率": round(n_no_nai / n, 4) if n else None,
@@ -343,6 +396,7 @@ def main():
     result = {
         "教えた側(5語)": side_summary("教えた側(5語)"),
         "黙る側(3語)": side_summary("黙る側(3語)"),
+        "消えた述語（太郎が消えた状態に使う塊）": gone_pred,
         "対象不明の事象件数": sum(1 for r in table if r["側"] == "不明"),
         "偽陽性件数": len(false_positive_table),
         "偽陽性": false_positive_table,
@@ -356,11 +410,11 @@ def main():
     with open(OUT_CSV, "w", newline="", encoding="utf-8") as fp:
         w = csv.writer(fp)
         w.writerow(["T", "消えた物", "側", "太郎の発話", "判定", "厳密",
-                    "意図した語", "意図判定"])
+                    "意図した語", "意図判定", "述語判定"])
         for row in table:
             w.writerow([row["T"], row["消えた物"], row["側"],
                        row["太郎の発話"], row["判定"], row["厳密"],
-                       row["意図した語"], row["意図判定"]])
+                       row["意図した語"], row["意図判定"], row.get("述語判定", "")])
 
     with open(OUT_JSON, "w", encoding="utf-8") as fp:
         json.dump(result, fp, ensure_ascii=False, indent=2)
