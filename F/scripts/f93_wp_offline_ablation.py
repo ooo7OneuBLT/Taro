@@ -190,7 +190,24 @@ def build_wp(variant, act_dim, n_chunks):
     return wp
 
 
+def _var_vec_unit(records):
+    """V3（単位ベクトル化）の相対誤差の分母＝単位ベクトル化した的の要素分散平均。
+    【2026-09-10 落とし穴】生の分散で割ると V3 の相対値が 0 に見える（実際は≈1）。
+    変種で的を変えたら分母も変える。"""
+    vecs = []
+    for rec in records:
+        for _fid, d in rec.get("vision", {}).items():
+            if d.get("obj_vec") is not None:
+                v = np.asarray(d["obj_vec"], dtype=np.float64)
+                n = np.linalg.norm(v)
+                if n > 0:
+                    vecs.append(v / n)
+    return float(np.var(np.stack(vecs), axis=0).mean()) if vecs else 1.0
+
+
 def run_variant(variant, records, act_dim, n_chunks, var_vec_mean, var_state_mean):
+    if variant == "V3":
+        var_vec_mean = _var_vec_unit(records)
     wp = build_wp(variant, act_dim, n_chunks)
 
     bins_acc = {label: {"err_vec_sum": 0.0, "err_vec_n": 0,
