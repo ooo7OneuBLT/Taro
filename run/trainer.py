@@ -934,6 +934,26 @@ class Trainer:
                           "time_since_parent": time_since}
         body_input = {"act": act_list}
         pred = wp.predict_all(vision_inputs, hearing_input, body_input)
+
+        # 【仕様_M7b-1改3「後半」1節・2026-09-10】予測器が毎tick受け取った入力を
+        #   ctxに置くだけ（読むだけの世界の予測器_record.pyが拾う）。既存の変数
+        #   （vision_inputs・hearing_input・body_input・attended_id・per_file_io）を
+        #   参照するだけで、ports以外の分岐・既存の経路は一切触らない。
+        #   「self.step」は仕様書の記述だがTrainerにその属性は無いため
+        #   self.ctx.step と読み替えた（実装判断・仕様に明記が無い点。理由：
+        #   world_predictor_logの t_sec と同じ round(self.ctx.sim_sec, 3) の
+        #   隣で使う「今のtick番号」はself.ctx.stepしかない）。
+        self.ctx.world_pred_inputs = {
+            "step": self.ctx.step,
+            "t_sec": round(self.ctx.sim_sec, 3),
+            "vision": vision_inputs,
+            "hearing": hearing_input,
+            "body": body_input,
+            "attended_id": attended_id,
+            "visible": {fid: bool(io[2]) for fid, io in per_file_io.items()},
+            "vanished": {fid: bool(io[3]) for fid, io in per_file_io.items()},
+        }
+
         err_slow = pred["err_slow"]
 
         # 【勾配検査・仕様_M7b-1改2「後半」2節】走行の300歩目（既定。
