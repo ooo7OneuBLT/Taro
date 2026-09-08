@@ -1122,7 +1122,12 @@ class Taro:
                     lr=float(wp_cfg.get("lr", 1e-3)),
                     tbptt=int(wp_cfg.get("tbptt", 10)),
                     grad_clip=float(wp_cfg.get("grad_clip", 1.0)),
-                    block_norm=bool(wp_cfg.get("block_norm", False)))
+                    block_norm=bool(wp_cfg.get("block_norm", False)),
+                    # 【M7b-1・2026-09-09】multi_object・max_filesだけWorldPredictorへ
+                    #   渡す（ne_surprise_rate/ne_surprise_thresh はtrainer.py側が
+                    #   wp_cfgから直接読む。仕様「後半」6節）。既定False/4＝既定不変。
+                    multi_object=bool(wp_cfg.get("multi_object", False)),
+                    max_files=int(wp_cfg.get("max_files", 4)))
             self.world_predictor.to(self.brain._device())
             _pwp = getattr(self, "_pending_world_predictor", None)
             if _pwp is not None:

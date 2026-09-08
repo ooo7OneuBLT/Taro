@@ -133,6 +133,11 @@ class Trainer:
         self._wp_parent_chunks = None       # 直近の親の発話（塊id列）。消費してNoneに戻す
         self._wp_prev_action = None         # 直前tickの運動a（tanh範囲）
         self._wp_last_parent_speak_sec = None   # 親が最後に喋ったsim秒（time_since計算用）
+        # 【M7b-1・2026-09-09・仕様_M7b-1_物ごとの予測器と驚きの配線】物ごとの
+        #   驚きの余韻（注意の加点に使う）。cfg.world_predictor.multi_objectが
+        #   偽（既定）のままなら一度も書き込まれず参照もされない＝既定不変。
+        self._wp_surprise_trace = {}
+        self._wp_z_max = None                    # 直近tickの物ごとz_stateの最大（NEへ渡す）
         # 【2026-08-19新設・F1-4b】語から注意への読み出し。「思い浮かべている」語の
         #   記憶＝(vec, 思い浮かべ始めた時刻)。cfg.word_attentionがNoneのままなら
         #   一度も書き込まれず参照もされない＝既定挙動不変（設計後半「部品2」）。
@@ -543,42 +548,36 @@ class Trainer:
         t._chunk_context_hidden = h.detach()
 
     def _world_predictor_step(self):
-        """世界の予測器（M7a）を1tick進める。測るだけ。
+        """世界の予測器（M7a／M7b-1）を1tick進める。測るだけ（M7b-1で驚き→NEの1本だけ
+        別の部品＝青斑核へ書き込む。他の部品には一切書き込まない）。
 
         仕様：F/docs/二語文/仕様_M7a_世界の予測器_測るだけ_2026-09-08.md
-        「後半：実装担当向け技術付録」3節(c)。cfg.world_predictorがNone（既定）なら
-        即returnし、追加計算は一切走らない＝既存実験の挙動・コストは1ビットも
-        変わらない。予測器は太郎の他の部品（報酬・行動・学習）に一切書き込まない
-        （self.ctx.last_world_predに置くだけ。読むのはプラグイン）。
+        「後半：実装担当向け技術付録」3節(c)。M7b-1追記：F/docs/二語文/
+        仕様_M7b-1_物ごとの予測器と驚きの配線_2026-09-09.md「後半」2節。
+        cfg.world_predictorがNone（既定）なら即returnし、追加計算は一切走らない
+        ＝既存実験の挙動・コストは1ビットも変わらない。
+        wp_cfg.multi_objectが偽（既定）なら従来（M7a・単一状態）どおり＝
+        既定不変。self.ctx.last_world_pred・self.ctx.world_pred_by_fileに
+        置くだけ（読むのはプラグイン）。青斑核への書き込みは
+        _world_predictor_step自身ではなく呼び出し側（on_step、NE更新の直後）が行う
+        （self._wp_z_maxをここに置くだけ）。
         """
         t = self.taro
         wp = getattr(t, "world_predictor", None)
         if wp is None:
             self.ctx.last_world_pred = None
+            self._wp_z_max = None
             return
         import math
 
-        # ---- 物の状態（頭頂連合野が見る「今の物」）------------------------------
+        wp_cfg = self.cfg.world_predictor if isinstance(self.cfg.world_predictor, dict) else {}
+        multi_object = bool(wp_cfg.get("multi_object", False))
+
         # 【なぜ224.0か】object_files.py:438 CENTER_X, CENTER_Y = 112.0, 112.0
         #   （画像は224x224前提で中央=112,112）から逆算した画像1辺の長さ。
         IMG_SIZE = 224.0
-        att = getattr(self.ctx, "attended_object", None)
-        if att is not None:
-            present = 1.0
-            visible = 1.0 if att.get("visible") else 0.0
-            vanished = 1.0 if att.get("vanished") else 0.0
-            pos = att.get("pos") or (0.0, 0.0)
-            pos_x = float(pos[0]) / IMG_SIZE
-            pos_y = float(pos[1]) / IMG_SIZE
-            area = float(att.get("area") or 0.0)
-            area_norm = math.log1p(max(area, 0.0)) / 10.0
-            obj_state = [present, visible, vanished, pos_x, pos_y, area_norm]
-            obj_vec = att.get("last_seen_vec")
-        else:
-            obj_state = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-            obj_vec = None
 
-        # ---- 親（このtickに喋ったか・どの塊か）--------------------------------
+        # ---- 親（このtickに喋ったか・どの塊か。全物に共通）----------------------
         parent_events = getattr(self.ctx, "last_parent_utterance", None) or []
         parent_spoke = 1.0 if parent_events else 0.0
         if parent_spoke:
@@ -591,46 +590,219 @@ class Trainer:
         else:
             time_since = min(self.ctx.sim_sec - self._wp_last_parent_speak_sec, 10.0) / 10.0
 
-        # ---- 直前の運動 ----------------------------------------------------
+        # ---- 直前の運動（全物に共通）------------------------------------------
         act = self._wp_prev_action
         act_list = (act.detach().cpu().numpy().reshape(-1).tolist()
                     if act is not None else None)
 
-        # 【なぜbuild_inputをここで呼ばないか、2026-09-08】WorldPredictor.step()の
-        #   "中"（tbptt窓のflush=backward/optimizer.stepが終わった"後"）で入力を
-        #   組み立てないと、学習対象パラメータ（obj_vec_norm・chunk_embedding）の
-        #   計算グラフが更新前の重みのまま次の窓に紛れ込み、in-placeエラーになる
-        #   （world_predictor.pyの_build_input docstring参照）。そのためstep()には
-        #   生の値のまま渡す。
-        input_now = {
-            "obj_state": obj_state, "obj_vec": obj_vec,
-            "parent_spoke": parent_spoke, "chunk_id_plus1": chunk_id_plus1,
-            "time_since_parent": time_since, "act": act_list,
-        }
-        target = {
-            "obj_state": obj_state,
-            "obj_vec": obj_vec,
-            "parent_spoke": parent_spoke,
-            "parent_chunk_id_plus1": chunk_id_plus1 if parent_spoke else None,
-        }
-        res = wp.step(input_now, target)
+        if not multi_object:
+            # ---- 従来どおり（M7a・単一状態・既定不変）--------------------------
+            att = getattr(self.ctx, "attended_object", None)
+            if att is not None:
+                present = 1.0
+                visible = 1.0 if att.get("visible") else 0.0
+                vanished = 1.0 if att.get("vanished") else 0.0
+                pos = att.get("pos") or (0.0, 0.0)
+                pos_x = float(pos[0]) / IMG_SIZE
+                pos_y = float(pos[1]) / IMG_SIZE
+                area = float(att.get("area") or 0.0)
+                area_norm = math.log1p(max(area, 0.0)) / 10.0
+                obj_state = [present, visible, vanished, pos_x, pos_y, area_norm]
+                obj_vec = att.get("last_seen_vec")
+            else:
+                obj_state = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+                obj_vec = None
 
-        self.ctx.last_world_pred = {
-            "step": self.ctx.step,
-            "t_sec": round(self.ctx.sim_sec, 3),
-            "present": obj_state[0],
-            "visible": obj_state[1],
-            "vanished": obj_state[2],
-            "parent_spoke": parent_spoke,
-            "parent_text": (parent_events[0].get("text", "") if parent_events else ""),
-            "err_state": res["err_state"],
-            "err_vec": res["err_vec"],
-            "err_parent": res["err_parent"],
-            "err_slow": res["err_slow"],  # 追記2026-09-08（err_totalには含めない）
-            "err_total": res["err_total"],
-            "baseline": res["baseline"],
-            "z": res["z"],
-        }
+            # 【なぜbuild_inputをここで呼ばないか、2026-09-08】WorldPredictor.step()の
+            #   "中"（tbptt窓のflush=backward/optimizer.stepが終わった"後"）で入力を
+            #   組み立てないと、学習対象パラメータ（obj_vec_norm・chunk_embedding）の
+            #   計算グラフが更新前の重みのまま次の窓に紛れ込み、in-placeエラーになる
+            #   （world_predictor.pyの_build_input docstring参照）。そのためstep()には
+            #   生の値のまま渡す。
+            input_now = {
+                "obj_state": obj_state, "obj_vec": obj_vec,
+                "parent_spoke": parent_spoke, "chunk_id_plus1": chunk_id_plus1,
+                "time_since_parent": time_since, "act": act_list,
+            }
+            target = {
+                "obj_state": obj_state,
+                "obj_vec": obj_vec,
+                "parent_spoke": parent_spoke,
+                "parent_chunk_id_plus1": chunk_id_plus1 if parent_spoke else None,
+            }
+            res = wp.step(input_now, target)
+
+            self.ctx.last_world_pred = {
+                "step": self.ctx.step,
+                "t_sec": round(self.ctx.sim_sec, 3),
+                "present": obj_state[0],
+                "visible": obj_state[1],
+                "vanished": obj_state[2],
+                "parent_spoke": parent_spoke,
+                "parent_text": (parent_events[0].get("text", "") if parent_events else ""),
+                "err_state": res["err_state"],
+                "err_vec": res["err_vec"],
+                "err_parent": res["err_parent"],
+                "err_slow": res["err_slow"],  # 追記2026-09-08（err_totalには含めない）
+                "err_total": res["err_total"],
+                "baseline": res["baseline"],
+                "z": res["z"],
+            }
+            self._wp_z_max = None   # 単一状態モードでは驚き→NEの配線自体を使わない
+            return
+
+        # ---- 多物モード（M7b-1・2026-09-09）------------------------------------
+        # 仕様「後半」2節：files=ctx.object_files.files、since_seenの小さい順に
+        # max_files個。注意中の物は必ず含める。wp.active_ids()にあって今回の
+        # 一覧に無いidはwp.drop(id)（記憶を捨てる＝物が視界から長く消えたら忘れる）。
+        ofs = getattr(self.ctx, "object_files", None)
+        files = list(getattr(ofs, "files", None) or [])
+        max_files = int(wp_cfg.get("max_files", 4))
+        att = getattr(self.ctx, "attended_object", None)
+        attended_id = att.get("file_id") if att is not None else None
+
+        files_sorted = sorted(files, key=lambda f: f.since_seen)
+        selected = files_sorted[:max_files]
+        if attended_id is not None and not any(f.id == attended_id for f in selected):
+            att_f = next((f for f in files if f.id == attended_id), None)
+            if att_f is not None:
+                # 【実装判断・2026-09-09、仕様に明記が無いため理由を残す】容量が
+                #   いっぱいなら「since_seenが一番大きい（一番長く見ていない）」
+                #   物を追い出して注意中の物を入れる（since_seen昇順ソート済みの
+                #   末尾を1つ削る）。注意中の物を必ず含める、という指示を
+                #   満たす最小の変更。
+                if len(selected) >= max_files:
+                    selected = selected[:max_files - 1]
+                selected = selected + [att_f]
+
+        selected_ids = set(f.id for f in selected)
+        for old_id in list(wp.active_ids()):
+            if old_id is not None and old_id not in selected_ids:
+                wp.drop(old_id)
+
+        if not selected:
+            # 【仕様「後半」2節】「物が無いとき（filesが空）は何もしない
+            #   （ctx.last_world_pred=None）」。
+            self.ctx.last_world_pred = None
+            self.ctx.world_pred_by_file = {}
+            self._wp_surprise_trace = {}
+            self.ctx.surprise_trace = {}
+            self._wp_z_max = None
+            return
+
+        vanish_misses = getattr(self.ctx, "vanish_misses", 1)
+
+        # 【実装判断・2026-09-09、仕様に無かった点】仕様「後半」2節はwp.step_for(f.id,...)を
+        #   物ごとに独立に呼ぶ形を示すが、机上確認でそのまま実装すると「ある物の
+        #   flush（optimizer.step、重みをin-placeで更新）が、まだflushしていない
+        #   別の物の計算グラフが参照している同じ重みを書き換えてしまい、後で
+        #   backwardしようとした瞬間に`RuntimeError: ...modified by an inplace
+        #   operation`になる」ことを実測した（仕様が警告する_build_input事故と
+        #   同型）。tbptt=1が防ぐのは「1物の中で窓が2tick以上に伸びる」ことだけで、
+        #   「複数の物が同じ重みを共有しながら独立にflushする」ことは防げない。
+        #   対策：1tickにつき「全物のobserve_for（誤差を集めるだけ・まだbackward
+        #   しない）」→「flush_pendingを1回だけ（全物ぶんまとめてbackward+
+        #   optimizer.step）」→「全物のpredict_for（次tickの予測を作る）」の
+        #   二段構えにした（world_predictor.py側の新設メソッド。詳細はそちらの
+        #   クラス冒頭コメント参照）。単一状態（multi_object=False）の経路は
+        #   一切変更していない。
+        per_file_io = {}
+        for f in selected:
+            present = 1.0
+            visible = 1.0 if f.misses == 0 else 0.0
+            vanished = 1.0 if f.misses >= vanish_misses else 0.0
+            pos_x = float(f.pos[0]) / IMG_SIZE
+            pos_y = float(f.pos[1]) / IMG_SIZE
+            area_norm = math.log1p(max(float(f.area or 0.0), 0.0)) / 10.0
+            obj_state = [present, visible, vanished, pos_x, pos_y, area_norm]
+            per_file_io[f.id] = (obj_state, f.appearance, visible, vanished)
+
+        by_file_result = {}
+        z_candidates = []          # (z_state, file_id) のリスト。z_maxの元
+        attended_pack = None       # 注意中の物の[res, obj_state, err_slow]。last_world_pred用
+        for f in selected:
+            obj_state, obj_vec, visible, vanished = per_file_io[f.id]
+            target = {
+                "obj_state": obj_state,
+                "obj_vec": obj_vec,
+                "parent_spoke": parent_spoke,
+                "parent_chunk_id_plus1": chunk_id_plus1 if parent_spoke else None,
+            }
+            res = wp.observe_for(f.id, target)
+
+            is_attended = (f.id == attended_id)
+            by_file_result[f.id] = {
+                "visible": visible, "vanished": vanished,
+                "err_state": res["err_state"], "z_state": res["z_state"],
+                "attended": is_attended,
+            }
+            if res["z_state"] is not None:
+                z_candidates.append((res["z_state"], f.id))
+            if is_attended:
+                attended_pack = [res, obj_state]
+
+        wp.flush_pending()
+
+        for f in selected:
+            obj_state, obj_vec, visible, vanished = per_file_io[f.id]
+            input_now = {
+                "obj_state": obj_state, "obj_vec": obj_vec,
+                "parent_spoke": parent_spoke, "chunk_id_plus1": chunk_id_plus1,
+                "time_since_parent": time_since, "act": act_list,
+            }
+            err_slow = wp.predict_for(f.id, input_now)
+            if f.id == attended_id and attended_pack is not None:
+                attended_pack.append(err_slow)
+
+        self.ctx.world_pred_by_file = by_file_result
+
+        if z_candidates:
+            z_max, z_max_id = max(z_candidates, key=lambda pair: pair[0])
+        else:
+            z_max, z_max_id = None, None
+        self._wp_z_max = z_max
+
+        # ---- 注意への加点用の余韻（仕様「後半」2節末尾）-------------------------
+        # trace <- 0.8*trace + max(0, z_state-thresh)（毎tick、10tick≈1秒で1/10に減衰）。
+        # object_files.pyがattend_surprise_gain（既定0）で読むだけ＝既定不変。
+        thresh = float(wp_cfg.get("ne_surprise_thresh", 2.0))
+        new_trace = {}
+        for file_id, d in by_file_result.items():
+            z_state = d["z_state"] if d["z_state"] is not None else 0.0
+            prev = self._wp_surprise_trace.get(file_id, 0.0)
+            new_trace[file_id] = 0.8 * prev + max(0.0, z_state - thresh)
+        self._wp_surprise_trace = new_trace
+        self.ctx.surprise_trace = new_trace
+
+        parent_text = (parent_events[0].get("text", "") if parent_events else "")
+        ne_level = t.ne.get_ne_level()
+        if attended_pack is not None and len(attended_pack) == 3:
+            res, obj_state, err_slow = attended_pack
+            self.ctx.last_world_pred = {
+                "step": self.ctx.step,
+                "t_sec": round(self.ctx.sim_sec, 3),
+                "present": obj_state[0],
+                "visible": obj_state[1],
+                "vanished": obj_state[2],
+                "parent_spoke": parent_spoke,
+                "parent_text": parent_text,
+                "err_state": res["err_state"],
+                "err_vec": res["err_vec"],
+                "err_parent": res["err_parent"],
+                "err_slow": err_slow,
+                "err_total": res["err_total"],
+                "baseline": res["baseline"],
+                "z": res["z"],
+                "n_files": len(selected),
+                "z_max": z_max, "z_max_id": z_max_id, "ne_level": ne_level,
+            }
+        else:
+            # 注意中の物が今回の選抜に無い（例：一度も注意していない）。
+            # 【仕様「後半」2節】「物が無いとき（files空）は何もしない
+            #   （ctx.last_world_pred=None）」。ここは「物はあるが注意中の物が
+            #   無い」場合で、files自体が空のときと同じ扱いにする
+            #   [実装判断・2026-09-09、仕様に明記が無いため理由を残す]。
+            self.ctx.last_world_pred = None
 
     def _ensure_chunk_capacity(self):
         """塊の名簿が塊GRUの入力口（embedding）を追い越していたら、入力口を伸ばす。
@@ -2360,6 +2532,15 @@ class Trainer:
             # 努力コストで下がった報酬をNEに見せると「失敗した→探索せよ」と誤読し、
             # 大振幅ノイズが努力コストを打ち消す自滅ループになる（実測 noise 0.095→0.5）。
             t.ne.observe_reward(rew_task); t.ne.release_ne()
+            # 【M7b-1・2026-09-09・仕様_M7b-1_物ごとの予測器と驚きの配線「後半」2節】
+            #   運動の報酬（上の1行）とは別の軸として、物ごとの驚きの最大値
+            #   （self._wp_z_max、_world_predictor_stepが置く）を青斑核へ渡す。
+            #   ne_surprise_rate（既定0.0）が0ならobserve_surprise内で即returnし
+            #   1ビットも変わらない（既定不変）。
+            wp_cfg = cfg.world_predictor if isinstance(cfg.world_predictor, dict) else {}
+            t.ne.observe_surprise(self._wp_z_max,
+                                   rate=wp_cfg.get("ne_surprise_rate", 0.0),
+                                   thresh=wp_cfg.get("ne_surprise_thresh", 2.0))
             if term:
                 reach_goal = None
                 if self.reach_traj is not None:

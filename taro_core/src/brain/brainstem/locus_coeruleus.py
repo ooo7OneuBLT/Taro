@@ -169,3 +169,25 @@ class LocusCoeruleus:
 
     def get_ne_level(self):
         return self.ne_level
+
+    def observe_surprise(self, z, rate=0.0, thresh=2.0):
+        """驚き（世界の予測器の物ごとの誤差のz値の最大）をNEへ足す（M7b-1、2026-09-09）。
+
+        【人間模倣】青斑核は「予想外の不確かさ」の検出器でもある（Yu & Dayan 2005、
+        F/docs/二語文/文献調査/2026-09-09_予測と自信の分離_人間側.md）。運動の報酬
+        （observe_reward/release_ne、探索⇔活用）とは別の入力軸として、驚きが
+        直接NEを持ち上げる経路を足す。
+
+        仕様：F/docs/二語文/仕様_M7b-1_物ごとの予測器と驚きの配線_2026-09-09.md
+        「後半」3節。`z > thresh` の超過分だけ天井までNEを上げる。下がる側は
+        既存の`release_ne`（報酬に基づき base_ne へ戻る＝慣れ）にすべて任せる
+        （このメソッドは上げるだけ・reward_historyには一切触らない）。
+
+        rate: 既定0.0＝呼んでも何もしない（既定不変。cfg.world_predictor.
+              ne_surprise_rateが無い/0の実験では1ビットも変わらない）。
+        z: 通常はNoneもあり得る（世界の予測器が無効・物が1つも無い等）ので、
+           Noneなら何もしない。
+        """
+        if not rate or z is None or z <= thresh:
+            return
+        self.ne_level = min(self._ceiling(), self.ne_level + rate * (z - thresh))

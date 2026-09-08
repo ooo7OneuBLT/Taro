@@ -146,6 +146,13 @@ class ObjectFiles(Plugin):
         self.attend = bool(self.config.get("attend", False))
         self.attend_radius = float(self.config.get("attend_radius", 56))
         self.vanish_misses = int(self.config.get("vanish_misses", 1))
+        # 【M7b-1・2026-09-09】trainer.py._world_predictor_stepが「消えたか」の
+        #   判定にvanish_missesと同じ基準を使うための置き場（読むだけ・ここでは
+        #   書き込む以外何もしない）。仕様「後半」4節。attend=Falseでは
+        #   _process_attention自体が呼ばれないため使われない。
+        ctx.vanish_misses = self.vanish_misses
+        # 【M7b-1・2026-09-09】注意の加点用の係数（既定0＝既定不変）。仕様「後半」4節。
+        self.attend_surprise_gain = float(self.config.get("attend_surprise_gain", 0.0))
         attend_out = self.config.get("attend_out")
         self.attend_out = _abs_path(attend_out) if attend_out else None
         self._attended_id = None
@@ -446,7 +453,15 @@ class ObjectFiles(Plugin):
         if candidates:
             # 中央付近に複数あれば一番大きいものを取る（1個の物が部位ごとに
             # 複数ファイルへ分裂する既知の性質＝M1.5bで判明への対処）。
-            self._attended_id = max(candidates, key=lambda f: f.area).id
+            # 【M7b-1・2026-09-09】仕様「後半」4節：「今の面積」に「その物の驚きの
+            #   余韻」を足す。gain=0（既定）なら surprise_trace を足しても面積の
+            #   大小関係は変わらない＝既定不変。surprise_traceはtrainer.pyが
+            #   ctx.surprise_traceに置く（無ければ空辞書扱い）。
+            gain = self.attend_surprise_gain
+            _trace = getattr(ctx, "surprise_trace", {}) or {}
+            self._attended_id = max(
+                candidates,
+                key=lambda f: f.area + gain * _trace.get(f.id, 0.0)).id
         # 無ければ前回のattendedを保持（消えた物を追い続ける）。
         lost_ids = set(res["lost"])
         if self._attended_id is not None and self._attended_id in lost_ids:
