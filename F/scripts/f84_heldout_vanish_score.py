@@ -37,7 +37,7 @@
 
 出力（このスクリプト自身の新規出力）：
   <ログディレクトリ>/採点.csv
-  <ログディレクトリ>/結果.json
+  <ログディレクトリ>/結果_採点.json
   <ログディレクトリ>/図_短期B.png
 """
 import ast
@@ -55,7 +55,7 @@ EVENTS_CSV = os.path.join(LOG_DIR, "発話イベント.csv")
 UTTER_CSV = os.path.join(LOG_DIR, "太郎の発話.csv")
 META_JSON = os.path.join(LOG_DIR, "run.meta.json")
 OUT_CSV = os.path.join(LOG_DIR, "採点.csv")
-OUT_JSON = os.path.join(LOG_DIR, "結果.json")
+OUT_JSON = os.path.join(LOG_DIR, "結果_採点.json")  # 2026-09-09 f89 の 結果.json と衝突するため改名
 OUT_PNG = os.path.join(LOG_DIR, "図_短期B.png")
 
 # run/scenes/ の場所（このファイルは F/scripts/ 直下にある前提。落とし穴108と同じ
