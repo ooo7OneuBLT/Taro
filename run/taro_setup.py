@@ -1121,7 +1121,8 @@ class Taro:
                     chunk_emb=int(wp_cfg.get("chunk_emb", 16)),
                     lr=float(wp_cfg.get("lr", 1e-3)),
                     tbptt=int(wp_cfg.get("tbptt", 10)),
-                    grad_clip=float(wp_cfg.get("grad_clip", 1.0)))
+                    grad_clip=float(wp_cfg.get("grad_clip", 1.0)),
+                    block_norm=bool(wp_cfg.get("block_norm", False)))
             self.world_predictor.to(self.brain._device())
             _pwp = getattr(self, "_pending_world_predictor", None)
             if _pwp is not None:

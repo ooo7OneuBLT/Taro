@@ -55,8 +55,16 @@ class WorldPredictor(nn.Module):
 
     def __init__(self, obj_vec_dim, n_chunks, act_dim, h_fast=64, h_slow=32,
                  tau_fast=5, tau_slow=40, chunk_emb=16, lr=1e-3, tbptt=10,
-                 grad_clip=1.0):
+                 grad_clip=1.0, block_norm=False):
         super().__init__()
+        # 【block_norm・2026-09-09・F2-91】入力4ブロック（状態の印6／見た目384／親18／運動180）を
+        #   それぞれ √次元 で割り、網に入るときの声の大きさを対等にする（感覚皮質の割り算による
+        #   正規化＝divisive normalization の工学版）。F2-89/90 の実測：印の列の重みが育つのに
+        #   4000回かかった原因の候補＝見た目が印の8倍の大きさで入っていた。既定False＝既定不変
+        self.block_norm = bool(block_norm)
+        self.block_norm_alpha = 0.01      # 大きさの移動平均の速さ（約100tick＝10秒で馴染む）
+        self.block_norm_eps = 1e-3
+        self.register_buffer("_blk_ms", torch.ones(4))   # ブロックごとの ||x||² の移動平均（初期1＝最初は割らないのと同じ）
         self.obj_vec_dim = int(obj_vec_dim)
         self.n_chunks = int(n_chunks)
         self.act_dim = int(act_dim)
@@ -239,6 +247,19 @@ class WorldPredictor(nn.Module):
                 raise ValueError(
                     f"actの次元が構築時の想定({self.act_dim})と違う "
                     f"（実際={act_t.shape[-1]}）")
+        if self.block_norm:
+            # 各ブロックを「そのブロックの実際の大きさ（ノルムの二乗の移動平均の平方根）」で割る。
+            # √次元で割るだけでは各次元の値の大きさ（見た目≈1、印は0/1、親は喋らないと0、運動は小さい）が
+            # 違うので比率がそろわない（ユーザー指摘、2026-09-09）。実測の大きさで割れば走行中にそろう
+            blocks = [obj_state_t, vec_t, parent_t, act_t]
+            out = []
+            with torch.no_grad():
+                for i, b in enumerate(blocks):
+                    self._blk_ms[i] = (1.0 - self.block_norm_alpha) * self._blk_ms[i] \
+                        + self.block_norm_alpha * float((b.detach() ** 2).sum())
+            for i, b in enumerate(blocks):
+                out.append(b / torch.sqrt(self._blk_ms[i] + self.block_norm_eps))
+            obj_state_t, vec_t, parent_t, act_t = out
         x = torch.cat([obj_state_t, vec_t, parent_t, act_t], dim=-1)
         return x
 
@@ -386,6 +407,8 @@ class WorldPredictor(nn.Module):
         """
         sd = dict(state_dict)
         own = self.state_dict()
+        if "_blk_ms" not in sd:            # block_norm 導入前（F2-89/90）の保存物も読める
+            sd["_blk_ms"] = own["_blk_ms"]
         for k in ("chunk_embedding.weight", "head_chunk.weight", "head_chunk.bias"):
             if k in sd and k in own and tuple(sd[k].shape) != tuple(own[k].shape):
                 new = own[k].clone()
