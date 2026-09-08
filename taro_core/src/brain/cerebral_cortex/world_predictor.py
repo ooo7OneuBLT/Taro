@@ -732,7 +732,7 @@ class PortWorldPredictor(nn.Module):
 
     def __init__(self, n_chunks, act_dim, obj_vec_dim=384, h_port=64, h_slow=32,
                  summary_dim=32, tau_fast=5, tau_slow=40, chunk_emb=16, lr=1e-3,
-                 grad_clip=1.0, max_files=4):
+                 grad_clip=1.0, max_files=4, slow_window=None, slow_lr=None):
         super().__init__()
         self.obj_vec_dim = int(obj_vec_dim)
         self.n_chunks = int(n_chunks)
@@ -790,7 +790,23 @@ class PortWorldPredictor(nn.Module):
         self.block_norm_alpha = 0.01
         self.block_norm_eps = 1e-3
 
-        self.optimizer = torch.optim.Adam(self.parameters(), lr=lr)
+        # 【仕様_M7b-1改2「後半」1節・2026-09-09】slow_window=None（既定）＝
+        #   従来どおり全パラメータ1本のAdam（F2-96の挙動を完全に再現、既定不変）。
+        #   整数を渡すと「遅い群（summary[*]・gru_slow）だけ窓ごとに更新する」
+        #   新方式になる（ポート群は毎tick、遅い群はslow_window tickごと）。
+        self.slow_window = int(slow_window) if slow_window is not None else None
+        _slow_params = list(self.summary.parameters()) + list(self.gru_slow.parameters())
+        self._slow_param_ids = set(id(p) for p in _slow_params)
+        if self.slow_window is None:
+            self.optimizer = torch.optim.Adam(self.parameters(), lr=lr)
+            self.optimizer_slow = None
+        else:
+            _fast_params = [p for p in self.parameters()
+                             if id(p) not in self._slow_param_ids]
+            self.optimizer = torch.optim.Adam(_fast_params, lr=lr)
+            self.optimizer_slow = torch.optim.Adam(
+                _slow_params, lr=(float(slow_lr) if slow_lr is not None else lr))
+        self._slow_tick = 0   # 窓の中で何tick経ったか（slow_windowに達したらoptimizer_slow.step）
 
         # ---- 記憶（学習される重みではない）--------------------------------------
         self._vision_states = {}          # file_id -> _PortMem
@@ -802,6 +818,11 @@ class PortWorldPredictor(nn.Module):
         # まとめて1回だけbackward+stepするための共有累積（既存WorldPredictorの
         # _multi_loss_accumと同じ役目）。
         self._pending_loss = None
+
+        # 【勾配検査・仕様「後半」2節】構築直後の重みを保存しておき、grad_report()で
+        #   「初期値との差」で動いた重みを機械判定する。新しい部品の追加はここには無い
+        #   （optimizerの追加は乱数を消費しないため、fork_rngの外でも安全）。
+        self._init_params = {n: p.detach().clone() for n, p in self.named_parameters()}
 
     # ------------------------------------------------------------------
     def _device(self):
@@ -825,6 +846,25 @@ class PortWorldPredictor(nn.Module):
         self._body_state = _PortMem()
         self._h_slow = None
         self._pending_loss = None
+        self._slow_tick = 0
+        if self.optimizer_slow is not None:
+            self.optimizer_slow.zero_grad()
+
+    def grad_report(self):
+        """構築直後の重み（_init_params）との差で「動いた重み」を機械判定する。
+
+        仕様_M7b-1改2「後半」2節。戻り値：{name: {"changed": float, "moved": bool}}。
+        changedは|p-init|.sum()（1つでも動けば0より大きくなる、桁は気にしない）。
+        """
+        report = {}
+        for n, p in self.named_parameters():
+            init = self._init_params.get(n)
+            if init is None:
+                report[n] = {"changed": None, "moved": None}
+                continue
+            changed = float((p.detach() - init).abs().sum().item())
+            report[n] = {"changed": changed, "moved": bool(changed > 0.0)}
+        return report
 
     def _get_vision(self, file_id):
         st = self._vision_states.get(file_id)
@@ -947,6 +987,21 @@ class PortWorldPredictor(nn.Module):
             err_parent_v = float(err_parent.item())
             loss_terms.append(err_parent)
 
+        # 【ポートごとの驚き・仕様「後半」3節】z_hearing：err_parentのbaseline/var_ema
+        #   （視覚のby_fileループと同じ0.99/0.01の式）。self._hearing_state（_PortMem）の
+        #   baseline/var_ema（視覚以外では未使用のフィールド）をそのまま流用する。
+        z_hearing_v = None
+        if err_parent_v is not None:
+            hs = self._hearing_state
+            if hs.baseline is None:
+                hs.baseline = err_parent_v
+                hs.var_ema = 0.0
+            else:
+                hs.baseline = 0.99 * hs.baseline + 0.01 * err_parent_v
+                hs.var_ema = 0.99 * hs.var_ema + 0.01 * (err_parent_v - hs.baseline) ** 2
+            std_h = hs.var_ema ** 0.5 if hs.var_ema is not None else 0.0
+            z_hearing_v = (err_parent_v - hs.baseline) / (std_h + 1e-6)
+
         # ---- 体（自分の運動）----------------------------------------------------
         err_body_v = None
         if self._body_state.pred is not None:
@@ -959,6 +1014,19 @@ class PortWorldPredictor(nn.Module):
             err_body = F.mse_loss(self._body_state.pred["act_pred"], act_target)
             err_body_v = float(err_body.item())
             loss_terms.append(err_body)
+
+        # z_body：err_bodyのbaseline/var_ema（同じ式、self._body_state流用）。
+        z_body_v = None
+        if err_body_v is not None:
+            bs = self._body_state
+            if bs.baseline is None:
+                bs.baseline = err_body_v
+                bs.var_ema = 0.0
+            else:
+                bs.baseline = 0.99 * bs.baseline + 0.01 * err_body_v
+                bs.var_ema = 0.99 * bs.var_ema + 0.01 * (err_body_v - bs.baseline) ** 2
+            std_b = bs.var_ema ** 0.5 if bs.var_ema is not None else 0.0
+            z_body_v = (err_body_v - bs.baseline) / (std_b + 1e-6)
 
         # ---- 視覚（物ごと）-------------------------------------------------------
         by_file = {}
@@ -1025,23 +1093,57 @@ class PortWorldPredictor(nn.Module):
             total_loss = (self._pending_loss if total_loss is None
                            else total_loss + self._pending_loss)
         if total_loss is not None:
-            self.optimizer.zero_grad()
-            total_loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.parameters(), self.grad_clip)
-            self.optimizer.step()
-            # 窓の境界（tbptt=1固定）＝ここで全hiddenをdetach（次tickへ計算グラフを持ち越さない）。
-            for st in self._vision_states.values():
-                if st.h is not None:
-                    st.h = st.h.detach()
-            if self._hearing_state.h is not None:
-                self._hearing_state.h = self._hearing_state.h.detach()
-            if self._body_state.h is not None:
-                self._body_state.h = self._body_state.h.detach()
-            if self._h_slow is not None:
-                self._h_slow = self._h_slow.detach()
+            if self.slow_window is None:
+                # ---- 従来どおり（既定不変）：1本のoptimizerで全パラメータを毎tick更新。
+                self.optimizer.zero_grad()
+                total_loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.parameters(), self.grad_clip)
+                self.optimizer.step()
+                # 窓の境界（tbptt=1固定）＝ここで全hiddenをdetach（次tickへ計算グラフを持ち越さない）。
+                for st in self._vision_states.values():
+                    if st.h is not None:
+                        st.h = st.h.detach()
+                if self._hearing_state.h is not None:
+                    self._hearing_state.h = self._hearing_state.h.detach()
+                if self._body_state.h is not None:
+                    self._body_state.h = self._body_state.h.detach()
+                if self._h_slow is not None:
+                    self._h_slow = self._h_slow.detach()
+            else:
+                # 【仕様_M7b-1改2「後半」1節】2つの更新係：ポート群は毎tick、遅い群
+                #   （summary[*]・gru_slow）はslow_windowごと。ポート群のzero_gradは
+                #   遅い群の.grad（別optimizer）を消さない＝窓の間、毎tickのbackwardで
+                #   遅い群の勾配が足し上がる。retain_graph=Trueで、_h_slowが窓の境界
+                #   まで持ち越す計算グラフ（gru_slowの多段の鎖）を再利用できるようにする。
+                self.optimizer.zero_grad()
+                total_loss.backward(retain_graph=True)
+                fast_params = [p for p in self.parameters()
+                                if id(p) not in self._slow_param_ids]
+                torch.nn.utils.clip_grad_norm_(fast_params, self.grad_clip)
+                self.optimizer.step()
+                # ポート側の隠れ状態は従来どおり毎tick detach（tbptt=1、ポートは
+                #   変えない）。_h_slowだけは窓の境界まで詳細をdetachしない。
+                for st in self._vision_states.values():
+                    if st.h is not None:
+                        st.h = st.h.detach()
+                if self._hearing_state.h is not None:
+                    self._hearing_state.h = self._hearing_state.h.detach()
+                if self._body_state.h is not None:
+                    self._body_state.h = self._body_state.h.detach()
+                self._slow_tick += 1
+                if self._slow_tick >= self.slow_window:
+                    slow_params = [p for p in self.parameters()
+                                    if id(p) in self._slow_param_ids]
+                    torch.nn.utils.clip_grad_norm_(slow_params, self.grad_clip)
+                    self.optimizer_slow.step()
+                    self.optimizer_slow.zero_grad()
+                    if self._h_slow is not None:
+                        self._h_slow = self._h_slow.detach()
+                    self._slow_tick = 0
         self._pending_loss = None
 
-        return {"by_file": by_file, "err_parent": err_parent_v, "err_body": err_body_v}
+        return {"by_file": by_file, "err_parent": err_parent_v, "err_body": err_body_v,
+                "z_hearing": z_hearing_v, "z_body": z_body_v}
 
     def predict_all(self, vision_inputs, hearing_input, body_input):
         """1tickの②：全ポートのpredict（今の入力で状態を更新し次tickの予測を作る）。
@@ -1070,7 +1172,12 @@ class PortWorldPredictor(nn.Module):
                 "vec_pred": self.heads["head_vec"](h_new),
             }
             st.h = h_new
-            summaries.append(self.summary["vision"](h_new))
+            # 【仕様「後半」1節】summary[kind](h_new.detach())＝ポートの隠れ状態を
+            #   切り離してからまとめに渡す（ポートの重みが遅い群のグラフに入らない
+            #   ようにする）。slow_window=Noneのときはh_newは既にtbptt=1で
+            #   detach済みの前tick分から作られており、この.detach()を足しても
+            #   数値は変わらない（既定不変）ので常に呼ぶ。
+            summaries.append(self.summary["vision"](h_new.detach()))
 
         # ---- 聴覚 -----------------------------------------------------------
         x_h = self._build_hearing_x(hearing_input.get("parent_spoke", 0.0),
@@ -1082,14 +1189,14 @@ class PortWorldPredictor(nn.Module):
             "chunk_logit": self.heads["head_chunk"](h_hearing_new),
         }
         self._hearing_state.h = h_hearing_new
-        summaries.append(self.summary["hearing"](h_hearing_new))
+        summaries.append(self.summary["hearing"](h_hearing_new.detach()))
 
         # ---- 体 -------------------------------------------------------------
         x_b = self._build_body_x(body_input.get("act"))
         h_body_new = self._fast_step("body", self._body_state.h, x_b)
         self._body_state.pred = {"act_pred": self.heads["head_act"](h_body_new)}
         self._body_state.h = h_body_new
-        summaries.append(self.summary["body"](h_body_new))
+        summaries.append(self.summary["body"](h_body_new.detach()))
 
         # ---- 遅い層（1つ共有。全ポートのsummaryの和を√ポート数で割る）------------
         n_ports = len(summaries)
@@ -1103,7 +1210,11 @@ class PortWorldPredictor(nn.Module):
         #   計算されたagg（今tickの入力を取り込んだ後の全ポートのまとめ、detach）
         #   と比べる。予測と答え合わせが同一tick内で完結するため、
         #   複数tickにまたがるbackwardのin-place事故を避けられる。
-        ctx_pred = self.head_ctx(h_slow_prev)
+        # 【仕様_M7b-1改2「後半」1節】h_slow_prev.detach()＝head_ctxは「測るだけ」
+        #   （遅い層を育てる役目は持たせない）。slow_window=Noneのときはh_slow_prevは
+        #   既にtbptt=1で毎tick detach済みのため、この.detach()を足しても数値は
+        #   変わらない（既定不変）。
+        ctx_pred = self.head_ctx(h_slow_prev.detach())
         err_slow = F.mse_loss(ctx_pred, agg.detach())
 
         self._h_slow = h_slow_new

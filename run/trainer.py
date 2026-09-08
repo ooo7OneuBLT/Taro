@@ -936,6 +936,18 @@ class Trainer:
         pred = wp.predict_all(vision_inputs, hearing_input, body_input)
         err_slow = pred["err_slow"]
 
+        # 【勾配検査・仕様_M7b-1改2「後半」2節】走行の300歩目（既定。
+        #   wp_cfg.grad_check_stepで変更可）に1回だけ、新しい重みが全部動いたかを
+        #   機械で調べる。self.ctx.stepは単調増加のため、この等号チェックは
+        #   自然に「1回だけ」になる。grad_report()はPortWorldPredictor専用
+        #   （既存WorldPredictorには無い）。
+        _gc_step = int(wp_cfg.get("grad_check_step", 300))
+        if self.ctx.step == _gc_step and hasattr(wp, "grad_report"):
+            self.ctx.world_predictor_grad_report = wp.grad_report()
+
+        z_hearing = obs.get("z_hearing")
+        z_body = obs.get("z_body")
+
         by_file_result = {}
         z_candidates = []
         attended_entry = None
@@ -972,6 +984,30 @@ class Trainer:
         self.ctx.surprise_trace = new_trace
 
         ne_level = self.taro.ne.get_ne_level()
+
+        # 【ポートごとの驚き・仕様_M7b-1改2「後半」3節】候補
+        #   {("vision", file_id): z_state} ∪ {("hearing",): z_hearing, ("body",): z_body}
+        #   の最大を「今いちばん驚いているポート」とする（行動は変えない、記録だけ）。
+        # 【修正2026-09-09・実装担当】z_candidates の要素は
+        #   (z_state, f.id) の順（970行付近 z_candidates.append((d["z_state"], f.id))
+        #   と、直後の max(z_candidates, key=lambda pair: pair[0]) が根拠）。
+        #   ここを (fid, zs) で受けると z_state と file_id が入れ替わり、
+        #   vision候補の比較値が file_id になってしまう（机上確認400stepで
+        #   attend_port列に "vision:-8.51..." のような小数のidが出て発覚）。
+        attend_candidates = {}
+        for zs, fid in z_candidates:
+            attend_candidates[("vision", fid)] = zs
+        if z_hearing is not None:
+            attend_candidates[("hearing",)] = z_hearing
+        if z_body is not None:
+            attend_candidates[("body",)] = z_body
+        if attend_candidates:
+            _best_key = max(attend_candidates, key=lambda k: attend_candidates[k])
+            attend_port = (f"vision:{_best_key[1]}" if _best_key[0] == "vision"
+                            else _best_key[0])
+        else:
+            attend_port = ""
+
         if attended_entry is not None and attended_entry.get("err_state") is not None:
             obj_state = per_file_io[attended_id][0]
             self.ctx.last_world_pred = {
@@ -992,11 +1028,28 @@ class Trainer:
                 "z": attended_entry["z"],
                 "n_files": len(selected),
                 "z_max": z_max, "z_max_id": z_max_id, "ne_level": ne_level,
+                "z_hearing": z_hearing, "z_body": z_body, "attend_port": attend_port,
             }
         else:
             # 注意中の物が今回の選抜に無い、または初回tick（まだ予測が無い）。
-            # 【仕様「後半」2節】既存の多物分岐と同じ扱い＝ctx.last_world_pred=None。
-            self.ctx.last_world_pred = None
+            # 【仕様_M7b-1改2「後半」3節、実装判断・仕様に明記が無いため理由を残す】
+            #   多物分岐（既存）はこの分岐でctx.last_world_pred=Noneにしていたが、
+            #   ポート型では聴覚・体は常に1ポートあるので、視覚が無い/初回tickでも
+            #   z_hearing・z_body・attend_portの行を出す（既存列は空欄）。仕様
+            #   「last_world_predがNoneになる分岐でも、portsのときは聴覚・体が
+            #   あるのでdictを作る」に従う。
+            self.ctx.last_world_pred = {
+                "step": self.ctx.step,
+                "t_sec": round(self.ctx.sim_sec, 3),
+                "present": None, "visible": None, "vanished": None,
+                "parent_spoke": parent_spoke, "parent_text": parent_text,
+                "err_state": None, "err_vec": None,
+                "err_parent": obs["err_parent"], "err_body": obs["err_body"],
+                "err_slow": err_slow, "err_total": None, "baseline": None, "z": None,
+                "n_files": len(selected), "z_max": z_max, "z_max_id": z_max_id,
+                "ne_level": ne_level,
+                "z_hearing": z_hearing, "z_body": z_body, "attend_port": attend_port,
+            }
 
     def _ensure_chunk_capacity(self):
         """塊の名簿が塊GRUの入力口（embedding）を追い越していたら、入力口を伸ばす。

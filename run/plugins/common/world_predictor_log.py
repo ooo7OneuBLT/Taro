@@ -28,6 +28,7 @@ M7b-1（物ごとの予測器と驚きの配線）追記：F/docs/二語文/仕�
   この辞書が置かれない/空のため1行も出ない＝ファイル自体を作らない）
 """
 import csv
+import json
 import os
 
 from run.plugins.base import Plugin
@@ -38,10 +39,13 @@ _REPO_ROOT = os.path.abspath(os.path.join(_HERE, os.pardir, os.pardir, os.pardir
 _COLUMNS = ["step", "t_sec", "present", "visible", "vanished", "parent_spoke",
             "parent_text", "err_state", "err_vec", "err_parent", "err_slow",
             "err_body", "err_total", "baseline", "z",
-            "n_files", "z_max", "z_max_id", "ne_level"]
+            "n_files", "z_max", "z_max_id", "ne_level",
+            "z_hearing", "z_body", "attend_port"]
 # err_body は仕様_M7b-1改_ポート型の世界の予測器_2026-09-09.md「後半」4節で追加
 # （ports=True のときだけctx.last_world_predに入る。他のモードではev.get("err_body")
 # がNoneを返し、csv.writerがNoneを空文字として書く＝既定不変）。
+# z_hearing・z_body・attend_portは仕様_M7b-1改2_遅い層の学習の道筋とポートごとの
+# 驚き_2026-09-09.md「後半」3節で追加（ports=Trueのときだけ埋まる。他のモードは空欄）。
 
 _BY_FILE_COLUMNS = ["step", "t_sec", "file_id", "attended", "visible",
                      "vanished", "err_state", "z_state"]
@@ -66,11 +70,19 @@ class WorldPredictorLog(Plugin):
         self.events_out = self.config.get("events_out")
         self.rows = []
         self.by_file_rows = []
+        # 【勾配検査・仕様_M7b-1改2「後半」2節】trainerがself.ctx.world_predictor_grad_report
+        #   に1回だけ置く（grad_check_step目）。ここで最初に見えた値を保持しておき、
+        #   report()でファイルに書く（読むだけ＝太郎も環境も変えない、他プラグインと同じ規約）。
+        self._grad_report = None
 
     def on_step_late(self, ctx):
         ev = getattr(ctx, "last_world_pred", None)
         if ev:
             self.rows.append({k: ev.get(k) for k in _COLUMNS})
+        if self._grad_report is None:
+            gr = getattr(ctx, "world_predictor_grad_report", None)
+            if gr is not None:
+                self._grad_report = gr
         # 【M7b-1・2026-09-09】ctx.world_pred_by_file は multi_object=True の
         #   ときだけ trainer.py が置く（辞書 file_id -> {...}）。既定（無効）では
         #   getattrがNoneを返し、by_file_rowsは1行も増えない＝新CSVは作られない。
@@ -111,5 +123,20 @@ class WorldPredictorLog(Plugin):
                 w.writerow(_BY_FILE_COLUMNS)
                 for r in self.by_file_rows:
                     w.writerow([r.get(c, "") for c in _BY_FILE_COLUMNS])
+
+        unmoved_count = None
+        if self._grad_report is not None and self.events_out:
+            path = _abs_path(self.events_out)
+            grad_dir = os.path.dirname(path) or "."
+            os.makedirs(grad_dir, exist_ok=True)
+            grad_path = os.path.join(grad_dir, "世界の予測器_勾配検査.json")
+            with open(grad_path, "w", encoding="utf-8") as fp:
+                json.dump(self._grad_report, fp, ensure_ascii=False, indent=2)
+            unmoved = [n for n, d in self._grad_report.items() if not d.get("moved")]
+            unmoved_count = len(unmoved)
+            if unmoved:
+                print(f"注意[world_predictor] 勾配が届いていない重み: {unmoved}")
+
         return {"世界の予測器_行数": len(self.rows),
-                "世界の予測器_物ごと_行数": len(self.by_file_rows)}
+                "世界の予測器_物ごと_行数": len(self.by_file_rows),
+                "勾配検査_未更新数": unmoved_count}

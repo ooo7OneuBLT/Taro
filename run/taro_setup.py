@@ -1134,7 +1134,11 @@ class Taro:
                         chunk_emb=int(wp_cfg.get("chunk_emb", 16)),
                         lr=float(wp_cfg.get("lr", 1e-3)),
                         grad_clip=float(wp_cfg.get("grad_clip", 1.0)),
-                        max_files=int(wp_cfg.get("max_files", 4)))
+                        max_files=int(wp_cfg.get("max_files", 4)),
+                        # 【M7b-1改2・2026-09-09】仕様_M7b-1改2「後半」4節。
+                        #   slow_windowは既定None（未指定）＝従来どおり（既定不変）。
+                        slow_window=wp_cfg.get("slow_window"),
+                        slow_lr=wp_cfg.get("slow_lr"))
                 else:
                     from cerebral_cortex.world_predictor import WorldPredictor
                     self.world_predictor = WorldPredictor(
