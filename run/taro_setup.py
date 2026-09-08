@@ -1138,7 +1138,16 @@ class Taro:
                         # 【M7b-1改2・2026-09-09】仕様_M7b-1改2「後半」4節。
                         #   slow_windowは既定None（未指定）＝従来どおり（既定不変）。
                         slow_window=wp_cfg.get("slow_window"),
-                        slow_lr=wp_cfg.get("slow_lr"))
+                        slow_lr=wp_cfg.get("slow_lr"),
+                        # 【M7b-1改4・2026-09-10】仕様_M7b-1改4「後半」2節。
+                        #   leaky_fast/vec_proj_dim/loss_balance/baseline_initは
+                        #   前回（F2-98切り分け）の実装で本体には既にあったがtaro_setup
+                        #   には未配線だった4つ。既定値はPortWorldPredictor.__init__の
+                        #   既定と同じ（既定不変）。
+                        leaky_fast=bool(wp_cfg.get("leaky_fast", True)),
+                        vec_proj_dim=wp_cfg.get("vec_proj_dim"),
+                        loss_balance=bool(wp_cfg.get("loss_balance", False)),
+                        baseline_init=wp_cfg.get("baseline_init", "first"))
                 else:
                     from cerebral_cortex.world_predictor import WorldPredictor
                     self.world_predictor = WorldPredictor(

@@ -40,15 +40,18 @@ _COLUMNS = ["step", "t_sec", "present", "visible", "vanished", "parent_spoke",
             "parent_text", "err_state", "err_vec", "err_parent", "err_slow",
             "err_body", "err_total", "baseline", "z",
             "n_files", "z_max", "z_max_id", "ne_level",
-            "z_hearing", "z_body", "attend_port"]
+            "z_hearing", "z_body", "attend_port", "z_vec_att", "z_vec_max"]
 # err_body は仕様_M7b-1改_ポート型の世界の予測器_2026-09-09.md「後半」4節で追加
 # （ports=True のときだけctx.last_world_predに入る。他のモードではev.get("err_body")
 # がNoneを返し、csv.writerがNoneを空文字として書く＝既定不変）。
 # z_hearing・z_body・attend_portは仕様_M7b-1改2_遅い層の学習の道筋とポートごとの
 # 驚き_2026-09-09.md「後半」3節で追加（ports=Trueのときだけ埋まる。他のモードは空欄）。
+# z_vec_att・z_vec_maxは仕様_M7b-1改4_V8設定と驚きの基準の初期化_2026-09-10.md
+# 「後半」2節で追加（新奇さ＝見た目の外れ。ports=Trueのときだけ埋まる。他のモードは空欄）。
 
 _BY_FILE_COLUMNS = ["step", "t_sec", "file_id", "attended", "visible",
-                     "vanished", "err_state", "z_state"]
+                     "vanished", "err_state", "z_state", "z_vec"]
+# z_vec は仕様_M7b-1改4「後半」2節で追加（z_stateの後）。他モードは空欄。
 
 
 def _abs_path(p):
@@ -95,7 +98,7 @@ class WorldPredictorLog(Plugin):
                     "step": step, "t_sec": t_sec, "file_id": file_id,
                     "attended": d.get("attended"), "visible": d.get("visible"),
                     "vanished": d.get("vanished"), "err_state": d.get("err_state"),
-                    "z_state": d.get("z_state"),
+                    "z_state": d.get("z_state"), "z_vec": d.get("z_vec"),
                 })
 
     def metrics(self, ctx):

@@ -692,8 +692,15 @@ class _PortMem:
     ポート型では聴覚（err_parent）が視覚と別ポートになったため、各視覚ファイルの
     err_totalは「そのファイルのerr_state+err_vec + そのtick共通のerr_parent」で
     計算し、ファイルごとに別々のEMAを追う（M7b-1の多物モードと同じ形を踏襲）。
+
+    【baseline_vec/var_vec・n_obs・2026-09-10・仕様_M7b-1改4「後半」1節】
+    baseline_vec/var_vecはerr_vecだけの基準線（新奇さz_vec用、新設）。n_obsは
+    このファイルでbaseline系列を更新した回数（3系列＝total/state/vecは常に同じ
+    tickで一緒に更新されるため共通の1本で足りる[実装判断]）。baseline_init="shared"の
+    ときだけ使う（α_t=max(1/n_obs,0.01)の分母。"first"では従来どおり固定0.01）。
     """
-    __slots__ = ("h", "pred", "baseline", "var_ema", "baseline_state", "var_state")
+    __slots__ = ("h", "pred", "baseline", "var_ema", "baseline_state", "var_state",
+                 "baseline_vec", "var_vec", "n_obs")
 
     def __init__(self):
         self.h = None
@@ -702,6 +709,9 @@ class _PortMem:
         self.var_ema = None
         self.baseline_state = None
         self.var_state = None
+        self.baseline_vec = None
+        self.var_vec = None
+        self.n_obs = 0
 
 
 class PortWorldPredictor(nn.Module):
@@ -734,7 +744,7 @@ class PortWorldPredictor(nn.Module):
                  summary_dim=32, tau_fast=5, tau_slow=40, chunk_emb=16, lr=1e-3,
                  grad_clip=1.0, max_files=4, slow_window=None, slow_lr=None,
                  leaky_fast=True, loss_scale_vec=1.0, loss_scale_state=1.0,
-                 vec_proj_dim=None):
+                 vec_proj_dim=None, loss_balance=False, baseline_init="first"):
         super().__init__()
         self.obj_vec_dim = int(obj_vec_dim)
         self.n_chunks = int(n_chunks)
@@ -774,6 +784,51 @@ class PortWorldPredictor(nn.Module):
         else:
             vec_head_dim = self.obj_vec_dim
         self._vec_head_dim = vec_head_dim
+
+        # 【仕様_M7b-1改4「後半」1節・2026-09-10、実装判断は各所にコメントで残す】
+        #   loss_balance：視覚ポートの2頭の損失を「的の要素分散」で割り、外れの
+        #   釣り合いを取る（見た目・状態それぞれ1本の走行中EMA。既定False＝
+        #   既定不変）。_blk_msと同じ流儀でregister_bufferに保存する（block_normの
+        #   実測スケールと同じ役目＝学習に使う量なのでstate_dictに残す）。
+        #   baseline_init：物ごとの驚きの基準線（baseline/var_ema・baseline_state/
+        #   var_state・baseline_vec/var_vec）の初期値を、"first"（既定・従来どおり
+        #   ＝その物の最初の観測そのものを基準に、var=0から始める）にするか、
+        #   "shared"（全物で共有する走行中の基準を借りて始め、観測が増えるにつれ
+        #   自分の値へ寄せていく）にするか。既定"first"＝既定不変。
+        self.loss_balance = bool(loss_balance)
+        self.baseline_init = str(baseline_init) if baseline_init is not None else "first"
+        if self.baseline_init not in ("first", "shared"):
+            raise ValueError(
+                "PortWorldPredictor: baseline_init は 'first' か 'shared' のみ"
+                f"（実際={self.baseline_init}）。仕様_M7b-1改4「後半」1節参照。")
+
+        # loss_balance用：見た目・状態それぞれの「的の要素分散」の走行中EMA。
+        # _blk_ms（block_norm）と同じ流儀＝重み・学習に使う量なのでbufferに保存
+        # （state_dictに含まれる＝保存・読み込みで引き継ぐ）。
+        self.register_buffer("_var_ema_vec", torch.tensor(0.0))
+        self.register_buffer("_var_ema_state", torch.tensor(0.0))
+        # 【実装判断】更新回数のカウンタ（α_t=max(1/n,0.01)の分母）は、baselineの
+        #   走行中の値そのもの（重み相当）ではなく「何回目の更新か」という進行度に
+        #   すぎないため、既存のbaseline/var_ema（_PortMem側、非bufferで保存対象外）
+        #   と同じ扱いにし、bufferにはしない（保存・読み込みをまたいでも動作は壊れない。
+        #   厳密な値の再現より実装の単純さを優先した[Tier3]）。
+        self._var_ema_n = 0
+
+        # baseline_init="shared"用：全物で共有する走行中の基準線（err_total・
+        # err_state・err_vecそれぞれ）。仕様「後半」1節「_shared_baseline_state/
+        # _shared_var_state・_shared_baseline/_shared_var」。err_vec用
+        # （_shared_baseline_vec/_shared_var_vec）は仕様が明示していないが、
+        # baseline_vec/var_vecも「baseline_initと同じ流儀」と書かれているため
+        # 同型で追加した[実装判断]。既存のbaseline/var_ema（_PortMem側）と同じ
+        # 「モジュールの重みではない・state_dictに含めない」哲学を踏襲し、
+        # 通常のPython属性のまま（bufferにしない）。
+        self._shared_baseline = 0.0
+        self._shared_var = 0.0
+        self._shared_baseline_state = 0.0
+        self._shared_var_state = 0.0
+        self._shared_baseline_vec = 0.0
+        self._shared_var_vec = 0.0
+        self._shared_n = 0
 
         vision_in = 6 + self._vec_head_dim
         hearing_in = 1 + self.chunk_emb_dim + 1
@@ -912,6 +967,72 @@ class PortWorldPredictor(nn.Module):
             st = _PortMem()
             self._vision_states[file_id] = st
         return st
+
+    # ------------------------------------------------------------------
+    # 【驚きの基準の初期化・仕様_M7b-1改4「後半」1節・2026-09-10】
+    def _update_track(self, is_first, n_obs, baseline, var, err_v, shared_baseline, shared_var):
+        """1つの基準線（baseline/var、err_total・err_state・err_vecのいずれか）を
+        1tickぶん更新し、(新しいbaseline, 新しいvar, z値) を返す。
+
+        is_first: このファイルでこの3系列（total/state/vec）を初めて作るとき
+            True（=呼び出し側の st.baseline_state is None で判定。3系列は常に
+            同じtickで一緒に作られるためこの1つの判定で足りる）。
+        n_obs: このファイルでこの3系列を更新した回数（呼び出し側が1つカウンタで
+            3回とも同じ値を渡す＝「物ごとの更新率」は系列ごとではなく物ごと）。
+
+        baseline_init="first"（既定）：従来どおり、初回はerr_vそのもので初期化し
+        var=0、以後は固定α=0.01のEMA（既存のPortWorldPredictor.observe_allが
+        導入時から使っていた式そのまま＝既定不変）。
+        baseline_init="shared"：初回は全物で共有する走行中の基準（shared_baseline/
+        shared_var、呼び出し側が"更新前"の値を渡す）を借りて初期化する。2回目
+        以降はα_t=max(1/n_obs,0.01)で自分の観測へ寄せていく（仕様「後半」1節
+        「物ごとの更新率はα_t=max(1/n_obs_file,0.01)」）。
+
+        【実装判断・仕様に無かった点、机上確認400stepで実測したので追記】走行中
+        いちばん最初に観測される物（まだ_shared_nが0＝母集団側が1回も更新されて
+        いない）だけは、shared_var=0.0のまま借りると分母（std+1e-6）がほぼ0になり
+        z が数十万に跳ねる（実測：F2-99相当の机上確認でfile_id=0の2tick目に
+        z_state=815071）。"first"モードなら初回はbaseline:=err_vで作るためこの
+        問題が起きない。そのためuse_sharedをこのメソッドの外（呼び出し側）で
+        `self.baseline_init=="shared" and self._shared_n>0`として決め、母集団側が
+        1件も無いときだけ"first"と同じ式にフォールバックする。
+        """
+        use_shared = self.baseline_init == "shared" and self._shared_n > 0
+        if is_first:
+            if use_shared:
+                baseline = shared_baseline
+                var = shared_var
+            else:
+                baseline = err_v
+                var = 0.0
+        else:
+            alpha = max(1.0 / n_obs, 0.01) if use_shared else 0.01
+            baseline = (1.0 - alpha) * baseline + alpha * err_v
+            var = (1.0 - alpha) * var + alpha * (err_v - baseline) ** 2
+        std = var ** 0.5
+        z = (err_v - baseline) / (std + 1e-6)
+        return baseline, var, z
+
+    def _update_shared(self, err_total_v, err_state_v, err_vec_v):
+        """baseline_init="shared"用：全物で共有する走行中の基準線を、この物の
+        今tickの観測でα_t=max(1/n,0.01)（最初の100観測は累積平均、以後EMA0.01）
+        で更新する（仕様「後半」1節「毎tick全物の観測でα=0.01更新、最初の100観測
+        は累積平均」）。baseline_init="first"のときは呼ばれない（無駄な計算を
+        避ける・既定不変を保つ）。
+        """
+        self._shared_n += 1
+        alpha = max(1.0 / self._shared_n, 0.01)
+        self._shared_baseline = (1.0 - alpha) * self._shared_baseline + alpha * err_total_v
+        self._shared_var = (1.0 - alpha) * self._shared_var \
+            + alpha * (err_total_v - self._shared_baseline) ** 2
+        self._shared_baseline_state = (1.0 - alpha) * self._shared_baseline_state \
+            + alpha * err_state_v
+        self._shared_var_state = (1.0 - alpha) * self._shared_var_state \
+            + alpha * (err_state_v - self._shared_baseline_state) ** 2
+        self._shared_baseline_vec = (1.0 - alpha) * self._shared_baseline_vec \
+            + alpha * err_vec_v
+        self._shared_var_vec = (1.0 - alpha) * self._shared_var_vec \
+            + alpha * (err_vec_v - self._shared_baseline_vec) ** 2
 
     def _init_slow_if_needed(self):
         if self._h_slow is None:
@@ -1084,7 +1205,7 @@ class PortWorldPredictor(nn.Module):
             if st.pred is None:
                 by_file[file_id] = {"err_state": None, "err_vec": None,
                                      "z_state": None, "err_total": None,
-                                     "baseline": None, "z": None}
+                                     "baseline": None, "z": None, "z_vec": None}
                 continue
             state_target = torch.tensor(list(target["obj_state"]), dtype=torch.float32,
                                          device=device).view(1, -1)
@@ -1106,40 +1227,61 @@ class PortWorldPredictor(nn.Module):
 
             err_state_v = float(err_state.item())
             err_vec_v = float(err_vec.item())
-            # 【loss_scale_vec/loss_scale_state・切り分け実験F2-98】学習に使う損失
-            #   だけに係数を掛ける（記録・戻り値のerr_state_v/err_vec_vは生の値の
-            #   まま＝上で既にfloat化済み）。既定1.0×は元の値と厳密に一致する
-            #   （既定不変）。
-            loss_terms.append(self.loss_scale_state * err_state
-                               + self.loss_scale_vec * err_vec)
 
-            # ---- err_total/baseline/z（従来どおり。err_parentはこのtick共通の値）----
+            # 【loss_balance・仕様_M7b-1改4「後半」1節・2026-09-10】視覚の2つの頭の
+            #   損失を、それぞれ「的の要素分散」の走行中EMAで割り、外れの釣り合いを
+            #   取る（見た目と状態を同じ重さで学ぶ）。既定False＝既定不変（下のelse節が
+            #   従来どおりの計算）。var_ema自体は今回の観測（state_target/vec_target）
+            #   を含めて先に更新してから使う（同tick内で完結、次tickへ持ち越さない）。
+            if self.loss_balance:
+                with torch.no_grad():
+                    state_var_obs = float(state_target.detach().var(unbiased=False).item())
+                    vec_var_obs = float(vec_target.detach().var(unbiased=False).item())
+                self._var_ema_n += 1
+                alpha_v = max(1.0 / self._var_ema_n, 0.01)
+                self._var_ema_state.mul_(1.0 - alpha_v).add_(alpha_v * state_var_obs)
+                self._var_ema_vec.mul_(1.0 - alpha_v).add_(alpha_v * vec_var_obs)
+                inv_state = 1.0 / (float(self._var_ema_state.item()) + 1e-3)
+                inv_vec = 1.0 / (float(self._var_ema_vec.item()) + 1e-3)
+                loss_terms.append(self.loss_scale_state * (err_state * inv_state)
+                                   + self.loss_scale_vec * (err_vec * inv_vec))
+            else:
+                # 【loss_scale_vec/loss_scale_state・切り分け実験F2-98】学習に使う損失
+                #   だけに係数を掛ける（記録・戻り値のerr_state_v/err_vec_vは生の値の
+                #   まま＝上で既にfloat化済み）。既定1.0×は元の値と厳密に一致する
+                #   （既定不変）。
+                loss_terms.append(self.loss_scale_state * err_state
+                                   + self.loss_scale_vec * err_vec)
+
             err_total_v = err_state_v + err_vec_v + (err_parent_v or 0.0)
-            if st.baseline is None:
-                st.baseline = err_total_v
-                st.var_ema = 0.0
-            else:
-                st.baseline = 0.99 * st.baseline + 0.01 * err_total_v
-                dev2 = (err_total_v - st.baseline) ** 2
-                st.var_ema = 0.99 * st.var_ema + 0.01 * dev2
-            std_ema = st.var_ema ** 0.5 if st.var_ema is not None else 0.0
-            baseline_v = st.baseline
-            z_v = (err_total_v - st.baseline) / (std_ema + 1e-6)
 
-            # ---- err_state だけの基準線（驚き→青斑核の配線用、M7b-1と同じ）---------
-            if st.baseline_state is None:
-                st.baseline_state = err_state_v
-                st.var_state = 0.0
-            else:
-                st.baseline_state = 0.99 * st.baseline_state + 0.01 * err_state_v
-                dev2_state = (err_state_v - st.baseline_state) ** 2
-                st.var_state = 0.99 * st.var_state + 0.01 * dev2_state
-            std_state = st.var_state ** 0.5 if st.var_state is not None else 0.0
-            z_state_v = (err_state_v - st.baseline_state) / (std_state + 1e-6)
+            # 【驚きの基準の初期化・baseline_init・仕様_M7b-1改4「後半」1節】
+            #   3系列（err_total・err_state・err_vec）は常に同じtickで一緒に作られる
+            #   ため、is_first・n_obsは共通の1つの判定でよい（_PortMem.n_obs）。
+            #   baseline_init="shared"の初期化に使う_shared_*は"更新前"の値を渡し
+            #   （このtickの観測をまだ混ぜていない値）、その後で_update_sharedを
+            #   呼んで次回・次の物のために更新する（自分自身を混ぜて自分を初期化
+            #   する循環を避けるため、この順序にした[実装判断]）。
+            is_first = st.baseline_state is None
+            st.n_obs = 1 if is_first else st.n_obs + 1
+            st.baseline, st.var_ema, z_v = self._update_track(
+                is_first, st.n_obs, st.baseline, st.var_ema, err_total_v,
+                self._shared_baseline, self._shared_var)
+            st.baseline_state, st.var_state, z_state_v = self._update_track(
+                is_first, st.n_obs, st.baseline_state, st.var_state, err_state_v,
+                self._shared_baseline_state, self._shared_var_state)
+            # ---- 新奇さ z_vec（err_vecだけの基準線、仕様「後半」1節「決めたこと5」）----
+            st.baseline_vec, st.var_vec, z_vec_v = self._update_track(
+                is_first, st.n_obs, st.baseline_vec, st.var_vec, err_vec_v,
+                self._shared_baseline_vec, self._shared_var_vec)
+            baseline_v = st.baseline
+
+            if self.baseline_init == "shared":
+                self._update_shared(err_total_v, err_state_v, err_vec_v)
 
             by_file[file_id] = {"err_state": err_state_v, "err_vec": err_vec_v,
                                  "z_state": z_state_v, "err_total": err_total_v,
-                                 "baseline": baseline_v, "z": z_v}
+                                 "baseline": baseline_v, "z": z_v, "z_vec": z_vec_v}
 
         # ---- flush（①の後半：このtickぶん＋前tickのpredict_allが積んだerr_slowを
         #      まとめて1回だけbackward+Adam step）------------------------------
@@ -1290,6 +1432,12 @@ class PortWorldPredictor(nn.Module):
         own = self.state_dict()
         if "_blk_ms" not in sd:
             sd["_blk_ms"] = own["_blk_ms"]
+        # 【loss_balance・仕様_M7b-1改4「後半」1節】_var_ema_vec/_var_ema_stateは
+        #   今回追加したbuffer。導入前（F2-97以前）の保存物にはこのキーが無いので、
+        #   _blk_msと同じ流儀で今の初期値（0.0）で補う。
+        for k in ("_var_ema_vec", "_var_ema_state"):
+            if k not in sd:
+                sd[k] = own[k]
         for k in ("chunk_embedding.weight", "heads.head_chunk.weight", "heads.head_chunk.bias"):
             if k in sd and k in own and tuple(sd[k].shape) != tuple(own[k].shape):
                 new = own[k].clone()

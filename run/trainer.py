@@ -970,6 +970,7 @@ class Trainer:
 
         by_file_result = {}
         z_candidates = []
+        z_vec_candidates = []
         attended_entry = None
         for f in selected:
             _, _, visible, vanished = per_file_io[f.id]
@@ -978,10 +979,16 @@ class Trainer:
             by_file_result[f.id] = {
                 "visible": visible, "vanished": vanished,
                 "err_state": d.get("err_state"), "z_state": d.get("z_state"),
+                # 【新奇さz_vec・仕様_M7b-1改4「後半」2節】驚き（出来事、z_state）と
+                #   新奇さ（見た目、z_vec）を2列に分けて通す。注意・青斑核への候補は
+                #   従来どおりz_state側だけ（z_candidatesはz_stateのみ、下も不変）。
+                "z_vec": d.get("z_vec"),
                 "attended": is_attended,
             }
             if d.get("z_state") is not None:
                 z_candidates.append((d["z_state"], f.id))
+            if d.get("z_vec") is not None:
+                z_vec_candidates.append(d["z_vec"])
             if is_attended:
                 attended_entry = d
 
@@ -992,6 +999,7 @@ class Trainer:
         else:
             z_max, z_max_id = None, None
         self._wp_z_max = z_max
+        z_vec_max = max(z_vec_candidates) if z_vec_candidates else None
 
         # ---- 注意への加点用の余韻（既存の多物分岐と同じ式）----------------------
         thresh = float(wp_cfg.get("ne_surprise_thresh", 2.0))
@@ -1049,6 +1057,7 @@ class Trainer:
                 "n_files": len(selected),
                 "z_max": z_max, "z_max_id": z_max_id, "ne_level": ne_level,
                 "z_hearing": z_hearing, "z_body": z_body, "attend_port": attend_port,
+                "z_vec_att": attended_entry.get("z_vec"), "z_vec_max": z_vec_max,
             }
         else:
             # 注意中の物が今回の選抜に無い、または初回tick（まだ予測が無い）。
@@ -1069,6 +1078,7 @@ class Trainer:
                 "n_files": len(selected), "z_max": z_max, "z_max_id": z_max_id,
                 "ne_level": ne_level,
                 "z_hearing": z_hearing, "z_body": z_body, "attend_port": attend_port,
+                "z_vec_att": None, "z_vec_max": z_vec_max,
             }
 
     def _ensure_chunk_capacity(self):
