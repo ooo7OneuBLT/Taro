@@ -75,6 +75,11 @@ def load_rows():
                 "err_vec": f("err_vec"),
                 "err_parent": f("err_parent"),
                 "err_slow": f("err_slow"),
+                # 【2026-09-09追記・仕様_M7b-1改「後半」1節】err_body列はports=Trueの
+                #   ときだけ埋まる。列が無い（多物/単一モードのCSV）ときはfキーが
+                #   ""を返しNoneになる＝既存動作不変（このスクリプト自体はerr_bodyを
+                #   まだ図にしない。追加のみ）。
+                "err_body": f("err_body"),
                 "err_total": f("err_total"),
                 "baseline": f("baseline"),
                 "z": f("z"),

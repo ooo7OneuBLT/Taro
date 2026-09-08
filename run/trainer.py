@@ -595,6 +595,15 @@ class Trainer:
         act_list = (act.detach().cpu().numpy().reshape(-1).tolist()
                     if act is not None else None)
 
+        # 【M7b-1改・2026-09-09】ポート型（PortWorldPredictor）分岐。既存の
+        #   単一・多物分岐（下）は無改修。wp_cfg.ports（既定False）が真のときだけ
+        #   ここへ来る（taro_setup.pyがports/multi_objectを排他で構築するため、
+        #   同時に真になることは無い）。
+        if bool(wp_cfg.get("ports", False)):
+            self._world_predictor_step_ports(wp, wp_cfg, parent_events, parent_spoke,
+                                              chunk_id_plus1, time_since, act_list)
+            return
+
         if not multi_object:
             # ---- 従来どおり（M7a・単一状態・既定不変）--------------------------
             att = getattr(self.ctx, "attended_object", None)
@@ -827,6 +836,166 @@ class Trainer:
             #   （ctx.last_world_pred=None）」。ここは「物はあるが注意中の物が
             #   無い」場合で、files自体が空のときと同じ扱いにする
             #   [実装判断・2026-09-09、仕様に明記が無いため理由を残す]。
+            self.ctx.last_world_pred = None
+
+    def _world_predictor_step_ports(self, wp, wp_cfg, parent_events, parent_spoke,
+                                     chunk_id_plus1, time_since, act_list):
+        """世界の予測器・ポート型（M7b-1改）を1tick進める。
+
+        仕様：F/docs/二語文/仕様_M7b-1改_ポート型の世界の予測器_2026-09-09.md
+        「後半：実装担当向け技術付録」2節。_world_predictor_step（呼び出し元）が
+        「wp_cfg.get('ports')が真」のときだけここへ分岐する。既存の単一・多物
+        分岐は無改修のため、物の選抜規則（min_hits・appearance_freeze・注意中の
+        物を必ず含める・上限・drop）はここに複製している（元の多物分岐と同じ
+        規則。仕様「後半」2節「物の選抜はM7b-1の多物分岐と同じ」）。
+
+        wp（PortWorldPredictor）とのやり取りは observe_all(...) → predict_all(...)
+        の2回だけ（内部で三段。world_predictor.py側のPortWorldPredictorクラス
+        docstring参照）。
+        """
+        import math
+        IMG_SIZE = 224.0
+
+        ofs = getattr(self.ctx, "object_files", None)
+        files = list(getattr(ofs, "files", None) or [])
+        max_files = int(wp_cfg.get("max_files", 4))
+        att = getattr(self.ctx, "attended_object", None)
+        attended_id = att.get("file_id") if att is not None else None
+
+        min_hits = int(wp_cfg.get("min_hits", 0))
+        if min_hits > 0:
+            files = [f for f in files
+                     if int(getattr(f, "hits", 0)) >= min_hits or f.id == attended_id]
+
+        files_sorted = sorted(files, key=lambda f: f.since_seen)
+        selected = files_sorted[:max_files]
+        if attended_id is not None and not any(f.id == attended_id for f in selected):
+            att_f = next((f for f in files if f.id == attended_id), None)
+            if att_f is not None:
+                if len(selected) >= max_files:
+                    selected = selected[:max_files - 1]
+                selected = selected + [att_f]
+
+        selected_ids = set(f.id for f in selected)
+        if not hasattr(self, "_wp_app0"):
+            self._wp_app0 = {}          # file_id -> 最初に見たときのappearance（appearance_freeze用。多物分岐と共有属性）
+        for old_id in list(wp.active_ids()):
+            if old_id is not None and old_id not in selected_ids:
+                wp.drop(old_id)
+                self._wp_app0.pop(old_id, None)
+
+        parent_text = (parent_events[0].get("text", "") if parent_events else "")
+
+        if not selected:
+            # 【仕様「後半」2節】既存の多物分岐と同じ扱い：物が無いとき何もしない。
+            self.ctx.last_world_pred = None
+            self.ctx.world_pred_by_file = {}
+            self._wp_surprise_trace = {}
+            self.ctx.surprise_trace = {}
+            self._wp_z_max = None
+            return
+
+        vanish_misses = getattr(self.ctx, "vanish_misses", 1)
+
+        per_file_io = {}
+        for f in selected:
+            present = 1.0
+            visible = 1.0 if f.misses == 0 else 0.0
+            vanished = 1.0 if f.misses >= vanish_misses else 0.0
+            pos_x = float(f.pos[0]) / IMG_SIZE
+            pos_y = float(f.pos[1]) / IMG_SIZE
+            area_norm = math.log1p(max(float(f.area or 0.0), 0.0)) / 10.0
+            obj_state = [present, visible, vanished, pos_x, pos_y, area_norm]
+            obj_vec = f.appearance
+            if bool(wp_cfg.get("appearance_freeze", False)):
+                app0 = self._wp_app0.get(f.id)
+                if app0 is None and f.appearance is not None:
+                    import numpy as _np
+                    app0 = _np.array(f.appearance, dtype=float).copy()
+                    self._wp_app0[f.id] = app0
+                if app0 is not None:
+                    obj_vec = app0
+            per_file_io[f.id] = (obj_state, obj_vec, visible, vanished)
+
+        vision_targets = {fid: {"obj_state": io[0], "obj_vec": io[1]}
+                          for fid, io in per_file_io.items()}
+        hearing_target = {"parent_spoke": parent_spoke,
+                           "parent_chunk_id_plus1": chunk_id_plus1 if parent_spoke else None}
+        body_target = {"act": act_list}
+
+        obs = wp.observe_all(vision_targets, hearing_target, body_target)
+
+        # 【なぜ同じ辞書をvision_inputsにも使うか】obj_state/obj_vecはこのtick
+        #   時点で確定した値であり、observe(前tickの予測との答え合わせ)とpredict
+        #   (次tickの予測を作る入力)のどちらも「今tickの実際の観測」を使う
+        #   （既存WorldPredictorのstep_forも同じ値をtarget・input両方に使っている）。
+        vision_inputs = vision_targets
+        hearing_input = {"parent_spoke": parent_spoke, "chunk_id_plus1": chunk_id_plus1,
+                          "time_since_parent": time_since}
+        body_input = {"act": act_list}
+        pred = wp.predict_all(vision_inputs, hearing_input, body_input)
+        err_slow = pred["err_slow"]
+
+        by_file_result = {}
+        z_candidates = []
+        attended_entry = None
+        for f in selected:
+            _, _, visible, vanished = per_file_io[f.id]
+            d = obs["by_file"].get(f.id, {})
+            is_attended = (f.id == attended_id)
+            by_file_result[f.id] = {
+                "visible": visible, "vanished": vanished,
+                "err_state": d.get("err_state"), "z_state": d.get("z_state"),
+                "attended": is_attended,
+            }
+            if d.get("z_state") is not None:
+                z_candidates.append((d["z_state"], f.id))
+            if is_attended:
+                attended_entry = d
+
+        self.ctx.world_pred_by_file = by_file_result
+
+        if z_candidates:
+            z_max, z_max_id = max(z_candidates, key=lambda pair: pair[0])
+        else:
+            z_max, z_max_id = None, None
+        self._wp_z_max = z_max
+
+        # ---- 注意への加点用の余韻（既存の多物分岐と同じ式）----------------------
+        thresh = float(wp_cfg.get("ne_surprise_thresh", 2.0))
+        new_trace = {}
+        for file_id, d in by_file_result.items():
+            z_state = d["z_state"] if d["z_state"] is not None else 0.0
+            prev = self._wp_surprise_trace.get(file_id, 0.0)
+            new_trace[file_id] = 0.8 * prev + max(0.0, z_state - thresh)
+        self._wp_surprise_trace = new_trace
+        self.ctx.surprise_trace = new_trace
+
+        ne_level = self.taro.ne.get_ne_level()
+        if attended_entry is not None and attended_entry.get("err_state") is not None:
+            obj_state = per_file_io[attended_id][0]
+            self.ctx.last_world_pred = {
+                "step": self.ctx.step,
+                "t_sec": round(self.ctx.sim_sec, 3),
+                "present": obj_state[0],
+                "visible": obj_state[1],
+                "vanished": obj_state[2],
+                "parent_spoke": parent_spoke,
+                "parent_text": parent_text,
+                "err_state": attended_entry["err_state"],
+                "err_vec": attended_entry["err_vec"],
+                "err_parent": obs["err_parent"],
+                "err_body": obs["err_body"],
+                "err_slow": err_slow,
+                "err_total": attended_entry["err_total"],
+                "baseline": attended_entry["baseline"],
+                "z": attended_entry["z"],
+                "n_files": len(selected),
+                "z_max": z_max, "z_max_id": z_max_id, "ne_level": ne_level,
+            }
+        else:
+            # 注意中の物が今回の選抜に無い、または初回tick（まだ予測が無い）。
+            # 【仕様「後半」2節】既存の多物分岐と同じ扱い＝ctx.last_world_pred=None。
             self.ctx.last_world_pred = None
 
     def _ensure_chunk_capacity(self):

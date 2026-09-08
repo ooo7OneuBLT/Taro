@@ -1104,30 +1104,55 @@ class Taro:
         #   その前だとサイズが確定していない。
         self.world_predictor = None
         if cfg.world_predictor is not None:
-            from cerebral_cortex.world_predictor import WorldPredictor
             wp_cfg = cfg.world_predictor if isinstance(cfg.world_predictor, dict) else {}
             _n_chunks = (self.chunk_vocab.size if getattr(self, "chunk_vocab", None)
                          is not None else 3)
+            # 【M7b-1改・2026-09-09】仕様_M7b-1改_ポート型の世界の予測器_2026-09-09.md
+            #   「後半」3節：cfg.world_predictor.ports（既定False）が真なら
+            #   PortWorldPredictorを構築する。multi_objectと排他（両方真は設定
+            #   ミスとして早期にValueErrorで止める）。ports無し（既定）の経路は
+            #   従来のWorldPredictor構築と1ビットも変わらない＝既定不変。
+            _ports = bool(wp_cfg.get("ports", False))
+            _multi_object = bool(wp_cfg.get("multi_object", False))
+            if _ports and _multi_object:
+                raise ValueError(
+                    "taro_setup: world_predictor.ports と multi_object は同時に"
+                    "真にできない（仕様_M7b-1改「後半」3節、排他）。")
             # 【M4e・2026-09-07の教訓と同じ】新しい部品の構築（Embedding/GRUCell/
             #   Linearの初期化）は既存の乱数列を1つもずらさないよう、この構築だけ
             #   fork_rngの支流に逃がす。
             with torch.random.fork_rng(devices=[]):
-                self.world_predictor = WorldPredictor(
-                    obj_vec_dim=384, n_chunks=_n_chunks, act_dim=self.n_act,
-                    h_fast=int(wp_cfg.get("h_fast", 64)),
-                    h_slow=int(wp_cfg.get("h_slow", 32)),
-                    tau_fast=float(wp_cfg.get("tau_fast", 5)),
-                    tau_slow=float(wp_cfg.get("tau_slow", 40)),
-                    chunk_emb=int(wp_cfg.get("chunk_emb", 16)),
-                    lr=float(wp_cfg.get("lr", 1e-3)),
-                    tbptt=int(wp_cfg.get("tbptt", 10)),
-                    grad_clip=float(wp_cfg.get("grad_clip", 1.0)),
-                    block_norm=bool(wp_cfg.get("block_norm", False)),
-                    # 【M7b-1・2026-09-09】multi_object・max_filesだけWorldPredictorへ
-                    #   渡す（ne_surprise_rate/ne_surprise_thresh はtrainer.py側が
-                    #   wp_cfgから直接読む。仕様「後半」6節）。既定False/4＝既定不変。
-                    multi_object=bool(wp_cfg.get("multi_object", False)),
-                    max_files=int(wp_cfg.get("max_files", 4)))
+                if _ports:
+                    from cerebral_cortex.world_predictor import PortWorldPredictor
+                    self.world_predictor = PortWorldPredictor(
+                        n_chunks=_n_chunks, act_dim=self.n_act, obj_vec_dim=384,
+                        h_port=int(wp_cfg.get("h_port", 64)),
+                        h_slow=int(wp_cfg.get("h_slow", 32)),
+                        summary_dim=int(wp_cfg.get("summary_dim", 32)),
+                        tau_fast=float(wp_cfg.get("tau_fast", 5)),
+                        tau_slow=float(wp_cfg.get("tau_slow", 40)),
+                        chunk_emb=int(wp_cfg.get("chunk_emb", 16)),
+                        lr=float(wp_cfg.get("lr", 1e-3)),
+                        grad_clip=float(wp_cfg.get("grad_clip", 1.0)),
+                        max_files=int(wp_cfg.get("max_files", 4)))
+                else:
+                    from cerebral_cortex.world_predictor import WorldPredictor
+                    self.world_predictor = WorldPredictor(
+                        obj_vec_dim=384, n_chunks=_n_chunks, act_dim=self.n_act,
+                        h_fast=int(wp_cfg.get("h_fast", 64)),
+                        h_slow=int(wp_cfg.get("h_slow", 32)),
+                        tau_fast=float(wp_cfg.get("tau_fast", 5)),
+                        tau_slow=float(wp_cfg.get("tau_slow", 40)),
+                        chunk_emb=int(wp_cfg.get("chunk_emb", 16)),
+                        lr=float(wp_cfg.get("lr", 1e-3)),
+                        tbptt=int(wp_cfg.get("tbptt", 10)),
+                        grad_clip=float(wp_cfg.get("grad_clip", 1.0)),
+                        block_norm=bool(wp_cfg.get("block_norm", False)),
+                        # 【M7b-1・2026-09-09】multi_object・max_filesだけWorldPredictorへ
+                        #   渡す（ne_surprise_rate/ne_surprise_thresh はtrainer.py側が
+                        #   wp_cfgから直接読む。仕様「後半」6節）。既定False/4＝既定不変。
+                        multi_object=_multi_object,
+                        max_files=int(wp_cfg.get("max_files", 4)))
             self.world_predictor.to(self.brain._device())
             _pwp = getattr(self, "_pending_world_predictor", None)
             if _pwp is not None:

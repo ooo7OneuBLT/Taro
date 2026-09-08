@@ -37,8 +37,11 @@ _REPO_ROOT = os.path.abspath(os.path.join(_HERE, os.pardir, os.pardir, os.pardir
 
 _COLUMNS = ["step", "t_sec", "present", "visible", "vanished", "parent_spoke",
             "parent_text", "err_state", "err_vec", "err_parent", "err_slow",
-            "err_total", "baseline", "z",
+            "err_body", "err_total", "baseline", "z",
             "n_files", "z_max", "z_max_id", "ne_level"]
+# err_body は仕様_M7b-1改_ポート型の世界の予測器_2026-09-09.md「後半」4節で追加
+# （ports=True のときだけctx.last_world_predに入る。他のモードではev.get("err_body")
+# がNoneを返し、csv.writerがNoneを空文字として書く＝既定不変）。
 
 _BY_FILE_COLUMNS = ["step", "t_sec", "file_id", "attended", "visible",
                      "vanished", "err_state", "z_state"]

@@ -640,3 +640,492 @@ class WorldPredictor(nn.Module):
                 new[:n] = sd[k][:n].to(new.device, new.dtype)
                 sd[k] = new
         return super().load_state_dict(sd, *args, **kwargs)
+
+
+# =============================================================================
+# 【M7b-1改・2026-09-09】ポート型の世界の予測器（感覚ごとの速い層＋共有の遅い層）。
+#
+# 【出典】仕様_M7b-1改_ポート型の世界の予測器_2026-09-09.md「後半：実装担当向け
+# 技術付録」1節。前の仕様（仕様_M7b-1_物ごとの予測器と驚きの配線_2026-09-09.md）が
+# 導入した WorldPredictor.multi_object（物ごとに全部＝場面の記憶まで複製する）が、
+# F2-92/F2-94 の実測（見た目の誤差 0.006→0.722、物の状態 0.153→0.586）で
+# 「場面の記憶まで物ごとに空から作り直す」問題を起こしたのを受け、遅い層（＝場面の
+# 記憶）だけ1本共有し、速い層（＝各感覚の直近の記憶）を「ポート」として複数
+# 差し込む構造に変えた。視覚ポートだけ物ごとに複製（重み共有・記憶は物ごと）、
+# 聴覚・体ポートは常に1つ。
+#
+# 【WorldPredictor（既存）とのすみ分け】既存クラスは無改修。ports=True の実験
+# だけが下のPortWorldPredictorを使う（run/taro_setup.pyがcfg.world_predictor.ports
+# で分岐。既定False＝既存WorldPredictorのまま、1ビットも変わらない）。
+# =============================================================================
+
+
+class _PortSpec:
+    """ポートの規格（手で決める側。中身の学習はPortWorldPredictor側に任せる）。
+
+    仕様「決めたこと」4節：「手で決めるのは『どの感覚のポートがあるか』
+    『ポートの規格（まとめの大きさ・時定数）』だけ」。in_dimはポートの入力の
+    連結後の次元（block_normのブロック分けの単位でもある）。head_namesは
+    このポートが持つ頭（PortWorldPredictor.headsのキー）の一覧（ドキュメント・
+    ログ用途。計算そのものはPortWorldPredictor側が直接headsを引いて行う）。
+    """
+    __slots__ = ("kind", "in_dim", "head_names")
+
+    def __init__(self, kind, in_dim, head_names):
+        self.kind = kind
+        self.in_dim = int(in_dim)
+        self.head_names = list(head_names)
+
+
+class _PortMem:
+    """1ポートぶんの「記憶」（学習される重みではない）。
+
+    速い層の隠れ状態hと直前tickに作った予測predを持つ。視覚ポート（物ごとに
+    複製）だけ、err_total・err_stateそれぞれのEMA基準線（baseline/var_ema・
+    baseline_state/var_state）も持つ（仕様「後半」1節「各ポート（視覚は物ごと）の
+    前tickの予測とbaseline_state/var_state（視覚のみ、z_state用）」）。
+
+    【実装判断・2026-09-09、仕様に無かった点】baseline/var_ema（err_total用）は
+    仕様本文が明示していないが、「戻り値：…baseline/z（err_total、従来どおり）」
+    という記述があり、"従来"＝M7b-1の多物モード（_ObjState.baseline、物ごとに
+    err_total=err_state+err_vec+err_parentのEMAを追う）を指すと解釈した。
+    ポート型では聴覚（err_parent）が視覚と別ポートになったため、各視覚ファイルの
+    err_totalは「そのファイルのerr_state+err_vec + そのtick共通のerr_parent」で
+    計算し、ファイルごとに別々のEMAを追う（M7b-1の多物モードと同じ形を踏襲）。
+    """
+    __slots__ = ("h", "pred", "baseline", "var_ema", "baseline_state", "var_state")
+
+    def __init__(self):
+        self.h = None
+        self.pred = None
+        self.baseline = None
+        self.var_ema = None
+        self.baseline_state = None
+        self.var_state = None
+
+
+class PortWorldPredictor(nn.Module):
+    """速い層＝ポート（視覚・聴覚・体）、遅い層＝1つ共有、のMTRNN型世界予測器。
+
+    仕様_M7b-1改_ポート型の世界の予測器_2026-09-09.md「後半」1節。
+
+    【構造】
+      - 視覚ポート：物ごとに複製（重みは共有＝self.gru["vision"]等は1組、
+        隠れ状態self._vision_statesだけfile_idごと）。入力＝[obj_state(6),
+        LayerNorm(obj_vec(384))]。頭＝head_state(6)・head_vec(384)。
+      - 聴覚ポート：常に1つ。入力＝[spoke(1), Embedding(chunk)(chunk_emb),
+        time_since(1)]。頭＝head_speak(1)・head_chunk(n_chunks)。
+      - 体ポート：常に1つ。入力＝[act(act_dim)]。頭＝head_act(act_dim)。
+      - 遅い層：1つ共有（gru_slow）。入力＝全ポートのsummary（summary_dim次元に
+        揃えた各ポートのh）の和を√(ポート数)で割ったもの。head_ctxが次tickの
+        「和のまとめ」を当てる（detach）→err_slow。
+
+    【1tickの手順（仕様「後半」1節）】呼び出し側（run/trainer.py）は
+    observe_all(...) → predict_all(...) の2回だけ呼ぶ（内部で三段：
+    ①全ポートのobserve+1回のbackward+Adam step、②全ポートのpredict）。
+    tbptt=1固定（毎tick、flush直後に全hiddenをdetach）。WorldPredictor.observe_for
+    /flush_pending/predict_for（多物モード）と同じ理由（1tick内で複数の"物"が
+    同じ重みを共有しながら独立にflushするとin-placeエラーになる、
+    WorldPredictor._multi_loss_accumのdocstring参照）で、1tickにつき
+    ちょうど1回だけbackward+optimizer.stepする二段構えにしている。
+    """
+
+    def __init__(self, n_chunks, act_dim, obj_vec_dim=384, h_port=64, h_slow=32,
+                 summary_dim=32, tau_fast=5, tau_slow=40, chunk_emb=16, lr=1e-3,
+                 grad_clip=1.0, max_files=4):
+        super().__init__()
+        self.obj_vec_dim = int(obj_vec_dim)
+        self.n_chunks = int(n_chunks)
+        self.act_dim = int(act_dim)
+        self.h_port = int(h_port)
+        self.h_slow_dim = int(h_slow)
+        self.summary_dim = int(summary_dim)
+        self.tau_fast = float(tau_fast)
+        self.tau_slow = float(tau_slow)
+        self.chunk_emb_dim = int(chunk_emb)
+        self.grad_clip = float(grad_clip)
+        self.max_files = int(max_files)
+
+        vision_in = 6 + self.obj_vec_dim
+        hearing_in = 1 + self.chunk_emb_dim + 1
+        body_in = self.act_dim
+        self.specs = {
+            "vision": _PortSpec("vision", vision_in, ["head_state", "head_vec"]),
+            "hearing": _PortSpec("hearing", hearing_in, ["head_speak", "head_chunk"]),
+            "body": _PortSpec("body", body_in, ["head_act"]),
+        }
+
+        # ---- 入力の組み立て（視覚・聴覚で共有する部品）--------------------------
+        self.obj_vec_norm = nn.LayerNorm(self.obj_vec_dim)
+        self.chunk_embedding = nn.Embedding(
+            self.n_chunks + 1, self.chunk_emb_dim, padding_idx=0)
+
+        # ---- ポートの重み（種類ごとに1組）---------------------------------------
+        self.gru = nn.ModuleDict({
+            kind: nn.GRUCell(spec.in_dim + self.h_slow_dim, self.h_port)
+            for kind, spec in self.specs.items()
+        })
+        self.summary = nn.ModuleDict({
+            kind: nn.Linear(self.h_port, self.summary_dim) for kind in self.specs
+        })
+        self.heads = nn.ModuleDict({
+            "head_state": nn.Linear(self.h_port, 6),
+            "head_vec": nn.Linear(self.h_port, self.obj_vec_dim),
+            "head_speak": nn.Linear(self.h_port, 1),
+            "head_chunk": nn.Linear(self.h_port, self.n_chunks),
+            "head_act": nn.Linear(self.h_port, self.act_dim),
+        })
+
+        # ---- 遅い層（1つ共有）----------------------------------------------------
+        self.gru_slow = nn.GRUCell(self.summary_dim, self.h_slow_dim)
+        self.head_ctx = nn.Linear(self.h_slow_dim, self.summary_dim)
+
+        # 【block_norm・実装判断、仕様に無かった点】既存WorldPredictorのblock_norm
+        #   （4ブロック：状態6/見た目384/親18/運動act_dim、既定Falseで切替可能）と
+        #   同じ式・同じ4分割（視覚state・視覚vec・聴覚・体）をここでは常時オンにした。
+        #   ポート型の実験（F2-96）は最初からblock_norm:trueで設計されており
+        #   （仕様「後半」6節のconfig）、切るモードを別途持つ意味が薄いため
+        #   固定にした[Tier3・工学的選択]。
+        self.register_buffer("_blk_ms", torch.ones(4))
+        self.block_norm_alpha = 0.01
+        self.block_norm_eps = 1e-3
+
+        self.optimizer = torch.optim.Adam(self.parameters(), lr=lr)
+
+        # ---- 記憶（学習される重みではない）--------------------------------------
+        self._vision_states = {}          # file_id -> _PortMem
+        self._hearing_state = _PortMem()
+        self._body_state = _PortMem()
+        self._h_slow = None                # 遅い層の隠れ状態(1,h_slow_dim)。前tick分。
+
+        # 1tickの中で「観測時に積んだ誤差＋前tickのpredictが積んだerr_slow」を
+        # まとめて1回だけbackward+stepするための共有累積（既存WorldPredictorの
+        # _multi_loss_accumと同じ役目）。
+        self._pending_loss = None
+
+    # ------------------------------------------------------------------
+    def _device(self):
+        return next(self.parameters()).device
+
+    def drop(self, file_id):
+        """その物の視覚ポートの記憶を捨てる（重みには触らない）。"""
+        self._vision_states.pop(file_id, None)
+
+    def active_ids(self):
+        """今、視覚ポートの記憶を持っている物のidの一覧。"""
+        return list(self._vision_states.keys())
+
+    def reset_hidden(self):
+        """全ポート・遅い層の隠れ状態と直前の予測をリセットする（エピソード境界などで呼ぶ）。
+
+        重み・optimizer・block_normの統計（_blk_ms）は変えない。
+        """
+        self._vision_states = {}
+        self._hearing_state = _PortMem()
+        self._body_state = _PortMem()
+        self._h_slow = None
+        self._pending_loss = None
+
+    def _get_vision(self, file_id):
+        st = self._vision_states.get(file_id)
+        if st is None:
+            st = _PortMem()
+            self._vision_states[file_id] = st
+        return st
+
+    def _init_slow_if_needed(self):
+        if self._h_slow is None:
+            self._h_slow = torch.zeros(1, self.h_slow_dim, device=self._device())
+
+    # ------------------------------------------------------------------
+    # 入力の組み立て（ブロック正規化つき。既存WorldPredictor._build_inputの
+    # block_norm節と同じ式：各ブロックを実測の大きさ（||x||²のEMAの平方根）で割る）。
+    def _block_norm_apply(self, blocks_and_idx):
+        out = []
+        with torch.no_grad():
+            for b, i in blocks_and_idx:
+                self._blk_ms[i] = ((1.0 - self.block_norm_alpha) * self._blk_ms[i]
+                                    + self.block_norm_alpha * float((b.detach() ** 2).sum()))
+        for b, i in blocks_and_idx:
+            out.append(b / torch.sqrt(self._blk_ms[i] + self.block_norm_eps))
+        return out
+
+    def _build_vision_x(self, obj_state, obj_vec):
+        """block_ms index: 0=state(6), 1=vec(384)。"""
+        device = self._device()
+        state_t = torch.tensor(list(obj_state), dtype=torch.float32,
+                                device=device).view(1, -1)
+        if state_t.shape[-1] != 6:
+            raise ValueError(f"obj_state は6次元のはず（実際={state_t.shape[-1]}）")
+        if obj_vec is None:
+            vec_t = torch.zeros(1, self.obj_vec_dim, device=device)
+        else:
+            vec_t = torch.tensor(list(obj_vec), dtype=torch.float32,
+                                  device=device).view(1, -1)
+            if vec_t.shape[-1] != self.obj_vec_dim:
+                raise ValueError(
+                    f"obj_vecの次元が構築時の想定({self.obj_vec_dim})と違う "
+                    f"（実際={vec_t.shape[-1]}）")
+        vec_t = self.obj_vec_norm(vec_t)
+        state_t, vec_t = self._block_norm_apply([(state_t, 0), (vec_t, 1)])
+        return torch.cat([state_t, vec_t], dim=-1)
+
+    def _build_hearing_x(self, parent_spoke, chunk_id_plus1, time_since_parent):
+        """block_ms index: 2=聴覚（spoke+chunk_emb+timeを1ブロックとして正規化）。"""
+        device = self._device()
+        idx = max(0, min(int(chunk_id_plus1), self.n_chunks))
+        chunk_vec = self.chunk_embedding(
+            torch.tensor([idx], dtype=torch.long, device=device))
+        parent_t = torch.cat([
+            torch.tensor([[float(parent_spoke)]], dtype=torch.float32, device=device),
+            chunk_vec,
+            torch.tensor([[float(time_since_parent)]], dtype=torch.float32, device=device),
+        ], dim=-1)
+        (parent_t,) = self._block_norm_apply([(parent_t, 2)])
+        return parent_t
+
+    def _build_body_x(self, act):
+        """block_ms index: 3=体。"""
+        device = self._device()
+        if act is None:
+            act_t = torch.zeros(1, self.act_dim, device=device)
+        else:
+            act_t = torch.tensor(list(act), dtype=torch.float32,
+                                  device=device).view(1, -1)
+            if act_t.shape[-1] != self.act_dim:
+                raise ValueError(
+                    f"actの次元が構築時の想定({self.act_dim})と違う "
+                    f"（実際={act_t.shape[-1]}）")
+        (act_t,) = self._block_norm_apply([(act_t, 3)])
+        return act_t
+
+    def _fast_step(self, kind, h_prev, x):
+        """1ポートぶんの速い層を1tick進める（漏れ積分GRU）。h_prevがNoneなら零から。"""
+        if h_prev is None:
+            h_prev = torch.zeros(1, self.h_port, device=self._device())
+        f_in = torch.cat([x, self._h_slow], dim=-1)
+        h_gru = self.gru[kind](f_in, h_prev)
+        h_new = ((1.0 - 1.0 / self.tau_fast) * h_prev
+                  + (1.0 / self.tau_fast) * h_gru)
+        return h_new
+
+    # ------------------------------------------------------------------
+    def observe_all(self, vision_targets, hearing_target, body_target):
+        """1tickの①：全ポートのobserve（前tickの予測と今の観測を比べる）＋
+        1回のbackward+Adam step（仕様「後半」1節①）。
+
+        vision_targets: {file_id: {"obj_state":[6の列], "obj_vec":[384の列] or None}}
+        hearing_target: {"parent_spoke":0.0/1.0, "parent_chunk_id_plus1": int or None}
+        body_target: {"act": [act_dimの列] or None}
+
+        戻り値：{"by_file": {file_id: {"err_state","err_vec","z_state",
+                "err_total","baseline","z"}}, "err_parent", "err_body"}
+                （まだ誰も予測していない物・聴覚・体は初回のみNone。
+                err_slowはこの中には無い＝predict_allが今tickぶんを返す）
+        """
+        device = self._device()
+        loss_terms = []
+
+        # ---- 聴覚（親の発話。全ポート共通の対象）--------------------------------
+        err_parent_v = None
+        if self._hearing_state.pred is not None:
+            speak_target = torch.tensor(
+                [[float(hearing_target.get("parent_spoke", 0.0))]],
+                dtype=torch.float32, device=device)
+            err_speak = F.binary_cross_entropy_with_logits(
+                self._hearing_state.pred["speak_logit"], speak_target)
+            chunk_id_plus1 = hearing_target.get("parent_chunk_id_plus1")
+            if (hearing_target.get("parent_spoke", 0.0) and chunk_id_plus1 is not None
+                    and 1 <= int(chunk_id_plus1) <= self.n_chunks):
+                chunk_target = torch.tensor(
+                    [int(chunk_id_plus1) - 1], dtype=torch.long, device=device)
+                err_chunk = F.cross_entropy(
+                    self._hearing_state.pred["chunk_logit"], chunk_target)
+            else:
+                err_chunk = torch.zeros((), device=device)
+            err_parent = err_speak + err_chunk
+            err_parent_v = float(err_parent.item())
+            loss_terms.append(err_parent)
+
+        # ---- 体（自分の運動）----------------------------------------------------
+        err_body_v = None
+        if self._body_state.pred is not None:
+            act_target_raw = body_target.get("act")
+            if act_target_raw is None:
+                act_target = torch.zeros(1, self.act_dim, device=device)
+            else:
+                act_target = torch.tensor(list(act_target_raw), dtype=torch.float32,
+                                           device=device).view(1, -1)
+            err_body = F.mse_loss(self._body_state.pred["act_pred"], act_target)
+            err_body_v = float(err_body.item())
+            loss_terms.append(err_body)
+
+        # ---- 視覚（物ごと）-------------------------------------------------------
+        by_file = {}
+        for file_id, target in vision_targets.items():
+            st = self._get_vision(file_id)
+            if st.pred is None:
+                by_file[file_id] = {"err_state": None, "err_vec": None,
+                                     "z_state": None, "err_total": None,
+                                     "baseline": None, "z": None}
+                continue
+            state_target = torch.tensor(list(target["obj_state"]), dtype=torch.float32,
+                                         device=device).view(1, -1)
+            bce_part = F.binary_cross_entropy_with_logits(
+                st.pred["state_logit"][:, :3], state_target[:, :3])
+            mse_part = F.mse_loss(st.pred["state_logit"][:, 3:], state_target[:, 3:])
+            err_state = bce_part + mse_part
+
+            vec_target_raw = target.get("obj_vec")
+            if vec_target_raw is None:
+                vec_target = torch.zeros(1, self.obj_vec_dim, device=device)
+            else:
+                vec_target = torch.tensor(list(vec_target_raw), dtype=torch.float32,
+                                           device=device).view(1, -1)
+            err_vec = F.mse_loss(st.pred["vec_pred"], vec_target)
+
+            err_state_v = float(err_state.item())
+            err_vec_v = float(err_vec.item())
+            loss_terms.append(err_state + err_vec)
+
+            # ---- err_total/baseline/z（従来どおり。err_parentはこのtick共通の値）----
+            err_total_v = err_state_v + err_vec_v + (err_parent_v or 0.0)
+            if st.baseline is None:
+                st.baseline = err_total_v
+                st.var_ema = 0.0
+            else:
+                st.baseline = 0.99 * st.baseline + 0.01 * err_total_v
+                dev2 = (err_total_v - st.baseline) ** 2
+                st.var_ema = 0.99 * st.var_ema + 0.01 * dev2
+            std_ema = st.var_ema ** 0.5 if st.var_ema is not None else 0.0
+            baseline_v = st.baseline
+            z_v = (err_total_v - st.baseline) / (std_ema + 1e-6)
+
+            # ---- err_state だけの基準線（驚き→青斑核の配線用、M7b-1と同じ）---------
+            if st.baseline_state is None:
+                st.baseline_state = err_state_v
+                st.var_state = 0.0
+            else:
+                st.baseline_state = 0.99 * st.baseline_state + 0.01 * err_state_v
+                dev2_state = (err_state_v - st.baseline_state) ** 2
+                st.var_state = 0.99 * st.var_state + 0.01 * dev2_state
+            std_state = st.var_state ** 0.5 if st.var_state is not None else 0.0
+            z_state_v = (err_state_v - st.baseline_state) / (std_state + 1e-6)
+
+            by_file[file_id] = {"err_state": err_state_v, "err_vec": err_vec_v,
+                                 "z_state": z_state_v, "err_total": err_total_v,
+                                 "baseline": baseline_v, "z": z_v}
+
+        # ---- flush（①の後半：このtickぶん＋前tickのpredict_allが積んだerr_slowを
+        #      まとめて1回だけbackward+Adam step）------------------------------
+        total_loss = None
+        for term in loss_terms:
+            total_loss = term if total_loss is None else total_loss + term
+        if self._pending_loss is not None:
+            total_loss = (self._pending_loss if total_loss is None
+                           else total_loss + self._pending_loss)
+        if total_loss is not None:
+            self.optimizer.zero_grad()
+            total_loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.parameters(), self.grad_clip)
+            self.optimizer.step()
+            # 窓の境界（tbptt=1固定）＝ここで全hiddenをdetach（次tickへ計算グラフを持ち越さない）。
+            for st in self._vision_states.values():
+                if st.h is not None:
+                    st.h = st.h.detach()
+            if self._hearing_state.h is not None:
+                self._hearing_state.h = self._hearing_state.h.detach()
+            if self._body_state.h is not None:
+                self._body_state.h = self._body_state.h.detach()
+            if self._h_slow is not None:
+                self._h_slow = self._h_slow.detach()
+        self._pending_loss = None
+
+        return {"by_file": by_file, "err_parent": err_parent_v, "err_body": err_body_v}
+
+    def predict_all(self, vision_inputs, hearing_input, body_input):
+        """1tickの②：全ポートのpredict（今の入力で状態を更新し次tickの予測を作る）。
+
+        flush（observe_allの①後半）の"後"に呼ぶこと（更新済みの重みで次tickの
+        予測を作る）。遅い層も更新し、今tickぶんのerr_slowを次のobserve_all呼び出し
+        （＝次tickのflush）に積む。
+
+        vision_inputs: {file_id: {"obj_state":[6], "obj_vec": [...] or None}}
+        hearing_input: {"parent_spoke":..., "chunk_id_plus1":..., "time_since_parent":...}
+        body_input: {"act": [...] or None}
+        戻り値：{"err_slow": float}
+        """
+        self._init_slow_if_needed()
+        h_slow_prev = self._h_slow
+
+        summaries = []
+
+        # ---- 視覚（物ごと）-------------------------------------------------------
+        for file_id, inp in vision_inputs.items():
+            st = self._get_vision(file_id)
+            x = self._build_vision_x(inp["obj_state"], inp.get("obj_vec"))
+            h_new = self._fast_step("vision", st.h, x)
+            st.pred = {
+                "state_logit": self.heads["head_state"](h_new),
+                "vec_pred": self.heads["head_vec"](h_new),
+            }
+            st.h = h_new
+            summaries.append(self.summary["vision"](h_new))
+
+        # ---- 聴覚 -----------------------------------------------------------
+        x_h = self._build_hearing_x(hearing_input.get("parent_spoke", 0.0),
+                                     hearing_input.get("chunk_id_plus1", 0),
+                                     hearing_input.get("time_since_parent", 1.0))
+        h_hearing_new = self._fast_step("hearing", self._hearing_state.h, x_h)
+        self._hearing_state.pred = {
+            "speak_logit": self.heads["head_speak"](h_hearing_new),
+            "chunk_logit": self.heads["head_chunk"](h_hearing_new),
+        }
+        self._hearing_state.h = h_hearing_new
+        summaries.append(self.summary["hearing"](h_hearing_new))
+
+        # ---- 体 -------------------------------------------------------------
+        x_b = self._build_body_x(body_input.get("act"))
+        h_body_new = self._fast_step("body", self._body_state.h, x_b)
+        self._body_state.pred = {"act_pred": self.heads["head_act"](h_body_new)}
+        self._body_state.h = h_body_new
+        summaries.append(self.summary["body"](h_body_new))
+
+        # ---- 遅い層（1つ共有。全ポートのsummaryの和を√ポート数で割る）------------
+        n_ports = len(summaries)
+        agg = sum(summaries) / (float(n_ports) ** 0.5)
+        h_slow_gru = self.gru_slow(agg, h_slow_prev)
+        h_slow_new = ((1.0 - 1.0 / self.tau_slow) * h_slow_prev
+                       + (1.0 / self.tau_slow) * h_slow_gru)
+
+        # 【追記2026-09-09・既存WorldPredictor._forward_tickのTier3判断を踏襲】
+        #   head_ctx(h_slow_prev)＝前tickまでの文脈から作った予測を、今tick
+        #   計算されたagg（今tickの入力を取り込んだ後の全ポートのまとめ、detach）
+        #   と比べる。予測と答え合わせが同一tick内で完結するため、
+        #   複数tickにまたがるbackwardのin-place事故を避けられる。
+        ctx_pred = self.head_ctx(h_slow_prev)
+        err_slow = F.mse_loss(ctx_pred, agg.detach())
+
+        self._h_slow = h_slow_new
+        self._pending_loss = (err_slow if self._pending_loss is None
+                                else self._pending_loss + err_slow)
+
+        return {"err_slow": float(err_slow.item())}
+
+    def state_dict(self, *args, **kwargs):  # noqa: D401
+        """モジュールの重みだけを保存する（隠れ状態・baselineは含まない）。"""
+        return super().state_dict(*args, **kwargs)
+
+    def load_state_dict(self, state_dict, *args, **kwargs):
+        """塊名簿の大きさが保存時と違っても読めるようにする（既存WorldPredictorと同じ流儀）。"""
+        sd = dict(state_dict)
+        own = self.state_dict()
+        if "_blk_ms" not in sd:
+            sd["_blk_ms"] = own["_blk_ms"]
+        for k in ("chunk_embedding.weight", "heads.head_chunk.weight", "heads.head_chunk.bias"):
+            if k in sd and k in own and tuple(sd[k].shape) != tuple(own[k].shape):
+                new = own[k].clone()
+                n = min(int(sd[k].shape[0]), int(new.shape[0]))
+                new[:n] = sd[k][:n].to(new.device, new.dtype)
+                sd[k] = new
+        return super().load_state_dict(sd, *args, **kwargs)
