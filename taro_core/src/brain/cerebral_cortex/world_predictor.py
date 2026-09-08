@@ -732,7 +732,9 @@ class PortWorldPredictor(nn.Module):
 
     def __init__(self, n_chunks, act_dim, obj_vec_dim=384, h_port=64, h_slow=32,
                  summary_dim=32, tau_fast=5, tau_slow=40, chunk_emb=16, lr=1e-3,
-                 grad_clip=1.0, max_files=4, slow_window=None, slow_lr=None):
+                 grad_clip=1.0, max_files=4, slow_window=None, slow_lr=None,
+                 leaky_fast=True, loss_scale_vec=1.0, loss_scale_state=1.0,
+                 vec_proj_dim=None):
         super().__init__()
         self.obj_vec_dim = int(obj_vec_dim)
         self.n_chunks = int(n_chunks)
@@ -746,7 +748,34 @@ class PortWorldPredictor(nn.Module):
         self.grad_clip = float(grad_clip)
         self.max_files = int(max_files)
 
-        vision_in = 6 + self.obj_vec_dim
+        # 【切り分け実験F2-98・2026-09-10、実装判断3件・既定値は全て従来どおり】
+        #   leaky_fast=False：速い層の漏れ積分を外し h_new = gru(f_in, h_prev) にする
+        #   （_fast_step参照。既定True＝従来どおり漏れ積分あり）。
+        #   loss_scale_vec/loss_scale_state：observe_allの視覚ロスに掛ける係数
+        #   （学習に使う損失だけ。記録・戻り値の err_vec/err_state は生の値のまま）。
+        #   既定1.0＝掛けても値は変わらない（1.0倍は浮動小数点で厳密に元の値と一致）。
+        #   vec_proj_dim：整数なら視覚ポートの obj_vec を固定の乱数行列で
+        #   vec_proj_dim次元へ落とす（LayerNorm・head_vecもその次元）。既定None＝
+        #   従来どおり384次元のまま（_project_vecが恒等写像になる）。
+        self.leaky_fast = bool(leaky_fast)
+        self.loss_scale_vec = float(loss_scale_vec)
+        self.loss_scale_state = float(loss_scale_state)
+        self.vec_proj_dim = int(vec_proj_dim) if vec_proj_dim is not None else None
+        if self.vec_proj_dim is not None:
+            # fork_rng：この乱数行列を作るための乱数消費が、他の層の重み初期化に
+            # 使う外側の乱数状態へ漏れない（with を抜けると外側の状態は元に戻る）。
+            # 固定seed=0＝構築のたびに同じ行列になる（再現性）。
+            with torch.random.fork_rng():
+                torch.manual_seed(0)
+                proj = torch.randn(self.obj_vec_dim, self.vec_proj_dim) \
+                    * (1.0 / (self.vec_proj_dim ** 0.5))
+            self.register_buffer("vec_proj", proj)
+            vec_head_dim = self.vec_proj_dim
+        else:
+            vec_head_dim = self.obj_vec_dim
+        self._vec_head_dim = vec_head_dim
+
+        vision_in = 6 + self._vec_head_dim
         hearing_in = 1 + self.chunk_emb_dim + 1
         body_in = self.act_dim
         self.specs = {
@@ -756,7 +785,9 @@ class PortWorldPredictor(nn.Module):
         }
 
         # ---- 入力の組み立て（視覚・聴覚で共有する部品）--------------------------
-        self.obj_vec_norm = nn.LayerNorm(self.obj_vec_dim)
+        # 【vec_proj_dim】obj_vec_norm は「射影後」の次元に対して掛ける
+        #   （vec_proj_dim=None なら射影は恒等写像＝従来どおり384次元のまま）。
+        self.obj_vec_norm = nn.LayerNorm(self._vec_head_dim)
         self.chunk_embedding = nn.Embedding(
             self.n_chunks + 1, self.chunk_emb_dim, padding_idx=0)
 
@@ -770,7 +801,7 @@ class PortWorldPredictor(nn.Module):
         })
         self.heads = nn.ModuleDict({
             "head_state": nn.Linear(self.h_port, 6),
-            "head_vec": nn.Linear(self.h_port, self.obj_vec_dim),
+            "head_vec": nn.Linear(self.h_port, self._vec_head_dim),
             "head_speak": nn.Linear(self.h_port, 1),
             "head_chunk": nn.Linear(self.h_port, self.n_chunks),
             "head_act": nn.Linear(self.h_port, self.act_dim),
@@ -827,6 +858,15 @@ class PortWorldPredictor(nn.Module):
     # ------------------------------------------------------------------
     def _device(self):
         return next(self.parameters()).device
+
+    def _project_vec(self, v):
+        """obj_vec_dim次元(v)を、vec_proj_dimが設定されていればその次元へ落とす。
+
+        vec_proj_dim=None（既定）なら恒等写像（vはそのまま返る＝既定不変）。
+        """
+        if self.vec_proj_dim is None:
+            return v
+        return v @ self.vec_proj
 
     def drop(self, file_id):
         """その物の視覚ポートの記憶を捨てる（重みには触らない）。"""
@@ -906,6 +946,7 @@ class PortWorldPredictor(nn.Module):
                 raise ValueError(
                     f"obj_vecの次元が構築時の想定({self.obj_vec_dim})と違う "
                     f"（実際={vec_t.shape[-1]}）")
+        vec_t = self._project_vec(vec_t)
         vec_t = self.obj_vec_norm(vec_t)
         state_t, vec_t = self._block_norm_apply([(state_t, 0), (vec_t, 1)])
         return torch.cat([state_t, vec_t], dim=-1)
@@ -940,13 +981,21 @@ class PortWorldPredictor(nn.Module):
         return act_t
 
     def _fast_step(self, kind, h_prev, x):
-        """1ポートぶんの速い層を1tick進める（漏れ積分GRU）。h_prevがNoneなら零から。"""
+        """1ポートぶんの速い層を1tick進める（漏れ積分GRU）。h_prevがNoneなら零から。
+
+        【leaky_fast・切り分け実験F2-98】False なら漏れ積分を外し
+        h_new = GRUCell(f_in, h_prev) そのまま（既定True＝従来どおり漏れ積分あり、
+        既定不変）。
+        """
         if h_prev is None:
             h_prev = torch.zeros(1, self.h_port, device=self._device())
         f_in = torch.cat([x, self._h_slow], dim=-1)
         h_gru = self.gru[kind](f_in, h_prev)
-        h_new = ((1.0 - 1.0 / self.tau_fast) * h_prev
-                  + (1.0 / self.tau_fast) * h_gru)
+        if self.leaky_fast:
+            h_new = ((1.0 - 1.0 / self.tau_fast) * h_prev
+                      + (1.0 / self.tau_fast) * h_gru)
+        else:
+            h_new = h_gru
         return h_new
 
     # ------------------------------------------------------------------
@@ -1046,15 +1095,23 @@ class PortWorldPredictor(nn.Module):
 
             vec_target_raw = target.get("obj_vec")
             if vec_target_raw is None:
-                vec_target = torch.zeros(1, self.obj_vec_dim, device=device)
+                vec_target = torch.zeros(1, self._vec_head_dim, device=device)
             else:
                 vec_target = torch.tensor(list(vec_target_raw), dtype=torch.float32,
                                            device=device).view(1, -1)
+                # 【vec_proj_dim・切り分け実験F2-98】的も入力と同じ固定射影で落とす
+                #   （vec_proj_dim=None なら_project_vecは恒等写像＝既定不変）。
+                vec_target = self._project_vec(vec_target)
             err_vec = F.mse_loss(st.pred["vec_pred"], vec_target)
 
             err_state_v = float(err_state.item())
             err_vec_v = float(err_vec.item())
-            loss_terms.append(err_state + err_vec)
+            # 【loss_scale_vec/loss_scale_state・切り分け実験F2-98】学習に使う損失
+            #   だけに係数を掛ける（記録・戻り値のerr_state_v/err_vec_vは生の値の
+            #   まま＝上で既にfloat化済み）。既定1.0×は元の値と厳密に一致する
+            #   （既定不変）。
+            loss_terms.append(self.loss_scale_state * err_state
+                               + self.loss_scale_vec * err_vec)
 
             # ---- err_total/baseline/z（従来どおり。err_parentはこのtick共通の値）----
             err_total_v = err_state_v + err_vec_v + (err_parent_v or 0.0)
