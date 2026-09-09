@@ -2,7 +2,8 @@
 """物体ファイル（`物体ファイル.csv`）の枚数・分裂・寿命を集計する。
 
 【仕様】F/docs/二語文/仕様_物体ファイルの人間寄せ_凝集性・連続性・上限_2026-09-09.md
-「後半」3節、および仕様_予測して確かめる検出_2026-09-09「後半」3節（mode列の追加分）。
+「後半」3節、および仕様_予測して確かめる検出_2026-09-09「後半」3節（mode列の追加分）・
+追記3「直し」3節（conf_iou/conf_area_ratio/conf_emb_cosの分布）。
 
 引数：ログディレクトリ（例 F/logs/F2-100pre_物体ファイル人間寄せ_短い走行）。
 
@@ -145,10 +146,30 @@ def main(log_dir):
     #   ある（rowsをstep順にたどりながら追跡する）。
     confirm_steps = [s for s, m in mode_by_step.items() if m == "confirm"]
     confirm_steps_set = set(confirm_steps)
+
+    # 【2026-09-09・追記3「直し」3節】conf_*分布の「注意中」判定に使う
+    #   (step -> attended_id)。注意.csvが無い（attend=False）走行では空のまま
+    #   （conf_dist_attendedは常に空＝そのまま出力される）。
+    attended_by_step = {}
+    attend_csv_path = os.path.join(log_dir, "注意.csv")
+    if os.path.exists(attend_csv_path):
+        with open(attend_csv_path, "r", encoding="utf-8", newline="") as fp:
+            for r in csv.DictReader(fp):
+                step = _to_int(r["step"])
+                if step is not None:
+                    attended_by_step[step] = r.get("attended_id") or ""
+
     _sorted_rows = sorted(rows, key=lambda r: (_to_int(r["step"]) if _to_int(r["step"]) is not None else -1))
     _last_misses = {}
     confirm_denom = 0
     confirm_unmatched = 0
+    # 【追記3「直し」3節】注意中かつ直前まで見えていたカード／注意外のカードの
+    #   conf_iou・conf_area_ratio・conf_emb_cosをそれぞれ集める。
+    conf_attended = {"conf_iou": [], "conf_area_ratio": [], "conf_emb_cos": []}
+    conf_other = {"conf_iou": [], "conf_area_ratio": [], "conf_emb_cos": []}
+    # 【追記3「合否」節】見失い率＝「注意中で直前まで見えていたカード」限定版。
+    attended_confirm_denom = 0
+    attended_confirm_unmatched = 0
     for r in _sorted_rows:
         fid = r["file_id"]
         if fid == "":
@@ -172,15 +193,64 @@ def main(log_dir):
             prior = _last_misses.get(fid)
         # created/revived は「直前に見えていた」の定義に当てはまらない
         # （新規/復活の瞬間で、直前状態が無いか別物）ので分母に数えない。
-        if step in confirm_steps_set and ev in ("matched", "unmatched", "absorbed") and prior == 0:
+        is_confirm_step = step in confirm_steps_set
+        if is_confirm_step and ev in ("matched", "unmatched", "absorbed") and prior == 0:
             confirm_denom += 1
             if ev == "unmatched":
                 confirm_unmatched += 1
+        # conf_* 分布：確認コマの matched/unmatched 行（conf_iou等はこの2つの
+        # イベントにしか書かれない。仕様「後半」2節）。注意中＝その時点の
+        # attended_idがこのfile_idと一致、かつ「直前まで見えていた」(prior==0)。
+        # 注意外＝attended_idがこのfile_idと不一致（priorは問わない＝「大半は偽」
+        # の記述どおり、隠れていたカードの確認失敗も含める）。
+        if is_confirm_step and ev in ("matched", "unmatched"):
+            is_attended = (attended_by_step.get(step, "") == fid)
+            group = None
+            if is_attended and prior == 0:
+                group = conf_attended
+                attended_confirm_denom += 1
+                if ev == "unmatched":
+                    attended_confirm_unmatched += 1
+            elif not is_attended:
+                group = conf_other
+            if group is not None:
+                for col in ("conf_iou", "conf_area_ratio", "conf_emb_cos"):
+                    v = _to_float(r.get(col))
+                    if v is not None:
+                        group[col].append(v)
         if misses_after is not None:
             _last_misses[fid] = misses_after
     confirm_card_total = confirm_denom
     miss_rate = (round(confirm_unmatched / confirm_card_total, 4)
                  if confirm_card_total else None)
+    # 【2026-09-09・追記3「合否」節】合否判定に使う定義：「注意中で直前まで
+    #   見えていたカード」限定の見失い率（miss_rate_confirmは注意の有無を
+    #   問わない全カード版で従来どおり残す）。
+    miss_rate_attended = (round(attended_confirm_unmatched / attended_confirm_denom, 4)
+                           if attended_confirm_denom else None)
+
+    def _pctl(vals, p):
+        if not vals:
+            return None
+        s = sorted(vals)
+        idx = min(int(round(p * (len(s) - 1))), len(s) - 1)
+        return round(s[idx], 4)
+
+    def _dist_summary(group):
+        out = {"n": len(group["conf_iou"]) or len(group["conf_area_ratio"])
+               or len(group["conf_emb_cos"])}
+        for col in ("conf_iou", "conf_area_ratio", "conf_emb_cos"):
+            vals = group[col]
+            out[col] = {
+                "n": len(vals),
+                "median": _pctl(vals, 0.5),
+                "p10": _pctl(vals, 0.1),
+                "p90": _pctl(vals, 0.9),
+            }
+        return out
+
+    conf_dist_attended = _dist_summary(conf_attended)
+    conf_dist_other = _dist_summary(conf_other)
 
     # ---- 8. mode別処理時間（run.csvのobject_files_confirm_ms/scan_ms列） ------
     confirm_ms_vals, scan_ms_vals = [], []
@@ -272,6 +342,16 @@ def main(log_dir):
         "attend_persistence_median_steps": attend_persistence_median,
         "attend_switch_count": attend_switch_count,
         "attend_switch_close_rate": attend_switch_close_rate,
+        # 【2026-09-09・追記3「直し」3節】注意中かつ直前まで見えていたカード
+        #   （正しく「いた」はず）／注意外のカード（大半は偽）のconf_iou・
+        #   conf_area_ratio・conf_emb_cosの分布（中央値・10%/90%点）。
+        #   conf_iou等の列が無い旧ログ（confirm_emb_cos未使用の走行）では
+        #   全てNone・n=0のまま。
+        "conf_dist_attended": conf_dist_attended,
+        "conf_dist_other": conf_dist_other,
+        "miss_rate_confirm_attended": miss_rate_attended,
+        "attended_confirm_card_total": attended_confirm_denom,
+        "attended_confirm_unmatched_total": attended_confirm_unmatched,
     }
 
     out_path = os.path.join(log_dir, "結果_物体ファイル.json")

@@ -73,7 +73,7 @@ def figure_mask(patch_feats, n, thresh=0.55):
 
 
 def detect(patch_feats, n, img_size=224, thresh=0.55, min_cells=1, img=None, mask_generator=None,
-           cohesion_gap_px=None):
+           cohesion_gap_px=None, point_predictor=None):
     """検出の一覧を返す。各検出＝ (中心xy[画素・img_size基準], 面積比[0-1], 見た目ベクトル[384])。
 
     `mask_generator` を渡すとMobileSAM経由（`img`も必須）。渡さなければ既定どおり
@@ -82,12 +82,17 @@ def detect(patch_feats, n, img_size=224, thresh=0.55, min_cells=1, img=None, mas
     `cohesion_gap_px`（【2026-09-09・凝集性】仕様_物体ファイルの人間寄せ_凝集性・
     連続性・上限）：Noneなら従来どおり（既定不変）。整数を渡すと、MobileSAM経由の
     検出だけに効く。詳細は `_detect_mobilesam` 参照。
+
+    `point_predictor`（【2026-09-09・予測して確かめる検出「追記3」1節】）：
+    Noneなら従来どおり（既定不変・`emb`キーは付かない）。`make_point_predictor()`
+    で得た `SamPredictor` を渡すと、見回り（scan）の各検出にも確認(confirm)と
+    同じ埋め込みから計算した `emb`（256次元）を足す。詳細は `_detect_mobilesam` 参照。
     """
     if mask_generator is not None:
         if img is None:
             raise ValueError("mask_generator を使うときは img（生のRGB画像）も渡す必要がある")
         return _detect_mobilesam(patch_feats, n, img, mask_generator, img_size,
-                                  cohesion_gap_px=cohesion_gap_px)
+                                  cohesion_gap_px=cohesion_gap_px, point_predictor=point_predictor)
 
     mask = figure_mask(patch_feats, n, thresh)
     # 均一な面でも1マスぶんのノイズ（グリッド線などの陰影差）で分断されるので、
@@ -159,7 +164,7 @@ def make_point_predictor(mask_generator):
 
 
 def confirm_points(predictor, img224, points, expected_areas, file_ids=None,
-                    iou_thresh=0.7, area_tol=0.5):
+                    iou_thresh=0.7, area_tol=0.5, card_embs=None, emb_cos_thresh=None):
     """点プロンプトで「さっきの場所に、さっきの大きさの物がまだあるか」を確認する。
 
     【なぜ、2026-09-09】仕様_予測して確かめる検出_2026-09-09「後半」1節。
@@ -176,6 +181,19 @@ def confirm_points(predictor, img224, points, expected_areas, file_ids=None,
     結ばない（`ObjectFileSystem.confirm_update`）。`mask` も返すのは、
     同じ物を複数のカードが確認したときの重複判定（マスクのIoU）に使うため。
 
+    【なぜ card_embs・emb_cos_thresh・emb を返すか、2026-09-09・追記3】
+    F2-103pre の実測（追記3「何が起きたか」）：点プロンプトは何も無い場所でも
+    机の影・縁のマスクを返し、面積さえ近ければ「確認できた」になってしまう
+    （偽の確認）。人間側は同一性の判断に位置だけでなく見た目も使う
+    （Xu & Carey 1996、12か月で特徴も使う[Tier1]）。`get_image_embedding()`は
+    `set_image()`の時点で計算済みのテンソルを返すだけで追加のforwardは無い
+    （斥候報告2026-09-09で確認済み＝追加コスト零）。採用候補マスクの領域だけ
+    埋め込み格子（64x64）上で平均した256次元ベクトルを`emb`として返し、
+    `card_embs`（呼び出し元がカードごとに持つ`ObjectFile.emb`）が渡されていれば
+    コサイン類似度`emb_cos`を計算し、`emb_cos_thresh`未満なら不採用にする。
+    `card_embs`がNone、または個々のカードのembがNone（emb_cos_threshが
+    Noneのとき・古いカード）のときは従来どおり照合しない（既定不変）。
+
     Args:
         predictor: `make_point_predictor()` で得た `SamPredictor`。
         img224: (224, 224, 3) の uint8 RGB画像。
@@ -186,22 +204,43 @@ def confirm_points(predictor, img224, points, expected_areas, file_ids=None,
         iou_thresh: `predict()` が返す `iou_predictions` の下限。これ未満の候補マスクは
             採用対象から外す。
         area_tol: 採用する面積の許容比率（|area-expected|/expected <= area_tol）。
+        card_embs: 各pointに対応するカードの見た目埋め込み（256次元 or None）の
+            リスト（pointsと同じ長さ）。Noneなら全点で照合しない（既定不変）。
+        emb_cos_thresh: 採用条件に足す `cos(emb, card_emb)` の下限。Noneなら
+            照合しない（既定不変）。
     Returns:
-        pointsと同じ長さ・同じ順のリスト。採用できれば
-        {"pos": マスク重心(x,y), "area": 面積比, "ok": True, "iou": float,
-         "mask": bool配列(H,W), "file_id": 対応するfile_id}、
-        無ければ {"ok": False, "file_id": 対応するfile_id}。appearance は
-        返さない（呼び出し元がカードのものをそのまま使う＝見た目は同じなので
-        位置だけで対応がつく）。
+        pointsと同じ長さ・同じ順のリスト。iou_thresh・area_tolの両方を満たす
+        候補が見つからなければ {"ok": False, "file_id": 対応するfile_id}。
+        見つかれば（emb_cos_threshで最終的に落ちても）
+        {"ok": bool, "file_id": fid, "iou": float, "area_ratio": float
+         （採用候補の面積÷期待面積）, "emb_cos": float（card_embが無ければ無し）}
+        に加え、ok=Trueのときだけ
+        {"pos": マスク重心(x,y), "area": 面積比, "mask": bool配列(H,W)}
+        を足す（失敗の場合もiou/area_ratio/emb_cosは書く＝「何で落ちたか」が
+        分かるように。追記3「直し」2節）。appearanceは返さない（呼び出し元が
+        カードのものをそのまま使う）。
     """
     import numpy as np
+    from PIL import Image
     img224 = np.asarray(img224)
     h, w = img224.shape[0], img224.shape[1]
     if file_ids is None:
         file_ids = [None] * len(points)
+    if card_embs is None:
+        card_embs = [None] * len(points)
     predictor.set_image(img224)
+    emb_np = None
+    if emb_cos_thresh is not None:
+        # 【追記3「直し」1節】emb_cos_threshが指定されているときだけ埋め込みを
+        # 読む（get_image_embedding自体は追加コスト零だが、Noneのとき・
+        # 従来呼び出しでは一切触らない＝既定不変）。
+        image_embedding = predictor.get_image_embedding()
+        emb_np = image_embedding.detach().cpu().numpy()[0]   # (256, eh, ew)
+    eh = int(emb_np.shape[1]) if emb_np is not None else None
+    ew = int(emb_np.shape[2]) if emb_np is not None else None
+
     out = []
-    for (x, y), expected_area, fid in zip(points, expected_areas, file_ids):
+    for (x, y), expected_area, fid, card_emb in zip(points, expected_areas, file_ids, card_embs):
         masks, iou_preds, _ = predictor.predict(
             point_coords=np.array([[float(x), float(y)]], dtype=np.float64),
             point_labels=np.array([1]),
@@ -230,8 +269,39 @@ def confirm_points(predictor, img224, points, expected_areas, file_ids=None,
             continue
         cx = float(xs.mean())
         cy = float(ys.mean())
-        out.append({"pos": (cx, cy), "area": area, "ok": True, "iou": float(iou_preds[i]),
-                    "mask": mask.astype(bool), "file_id": fid})
+        area_ratio = area / expected_area
+
+        emb = None
+        emb_cos = None
+        ok = True
+        if emb_np is not None:
+            small = np.array(
+                Image.fromarray(mask.astype(np.uint8) * 255).resize((ew, eh), Image.NEAREST))
+            region = small > 0
+            if region.any():
+                emb = emb_np[:, region].mean(axis=1)
+            else:
+                # マスクが埋め込み格子で1マスにも満たない極小マスク→中心1マスで代用。
+                gy = min(max(int(cy / h * eh), 0), eh - 1)
+                gx = min(max(int(cx / w * ew), 0), ew - 1)
+                emb = emb_np[:, gy, gx]
+            if card_emb is not None:
+                a = emb / (np.linalg.norm(emb) + 1e-9)
+                b = np.asarray(card_emb, dtype=np.float64)
+                b = b / (np.linalg.norm(b) + 1e-9)
+                emb_cos = float(a @ b)
+                ok = emb_cos >= emb_cos_thresh
+
+        result = {"ok": ok, "file_id": fid, "iou": float(iou_preds[i]), "area_ratio": area_ratio}
+        if emb_cos is not None:
+            result["emb_cos"] = emb_cos
+        if ok:
+            result["pos"] = (cx, cy)
+            result["area"] = area
+            result["mask"] = mask.astype(bool)
+            if emb is not None:
+                result["emb"] = emb
+        out.append(result)
     predictor.reset_image()
     return out
 
@@ -285,16 +355,33 @@ def _cohesion_groups(masks, gap):
 
 
 def _detect_mobilesam(patch_feats, n, img, mask_generator, img_size=224, min_area_frac=0.01,
-                       cohesion_gap_px=None):
+                       cohesion_gap_px=None, point_predictor=None):
     """`cohesion_gap_px`（【2026-09-09・凝集性】仕様_物体ファイルの人間寄せ_
     凝集性・連続性・上限）：Noneなら従来どおり（マスク1枚＝検出1件、既定不変）。
     整数を渡すと、端接触・面積の足切りを終えたマスクの bbox を `cohesion_gap_px`
     画素だけ広げた箱同士が重なるものを1つの物としてまとめる（`_cohesion_groups`）。
     連結成分が1つだけのマスクは従来の計算式（bbox中心・m["area"]）のまま。
     まとめる場合だけ、segmentationの論理和を取り、重心・画素数から
-    pos/area を計算し直す（仕様「後半」1節）。"""
+    pos/area を計算し直す（仕様「後半」1節）。
+
+    `point_predictor`（【2026-09-09・予測して確かめる検出「追記3」1節】）：
+    Noneなら従来どおり（`emb`キーを一切付けない＝既定不変・追加コストも無し）。
+    `SamPredictor` を渡すと、`mask_generator.generate()`（自動生成器が内部で
+    別インスタンスの `set_image`→`generate`→`reset_image` を行う）とは別に、
+    ここで自前の `point_predictor.set_image(img)` を1回呼んで埋め込みを取る。
+    【なぜこの形にしたか】斥候報告（2026-09-09）どおり、自動生成器の内部
+    `predictor` は `generate()` の最後に `reset_image()` されるため、外から
+    その埋め込みを横取りすることはできない。自前の `SamPredictor` でもう1回
+    `set_image` する＝エンコーダのforwardが1回余分にかかる
+    （実測を報告に書く）。confirm_emb_cos を使わない走行（既定）では
+    `point_predictor=None` のまま呼ばれるので、この追加コストは一切発生しない。"""
     img = np.asarray(img)
     h, w = img.shape[0], img.shape[1]
+    emb_np = None
+    if point_predictor is not None:
+        point_predictor.set_image(img)
+        emb_np = point_predictor.get_image_embedding().detach().cpu().numpy()[0]   # (256, eh, ew)
+        point_predictor.reset_image()
     raw_masks = mask_generator.generate(img)
     feats_grid = patch_feats.reshape(n, n, -1)
     scale = img_size / n
@@ -350,5 +437,21 @@ def _detect_mobilesam(patch_feats, n, img, mask_generator, img_size=224, min_are
             i = min(max(int(cy / scale), 0), n - 1)
             j = min(max(int(cx / scale), 0), n - 1)
             v = feats_grid[i, j]
-        out.append({"pos": (cx, cy), "area": area, "appearance": v})
+        det = {"pos": (cx, cy), "area": area, "appearance": v}
+        if emb_np is not None:
+            # 【追記3「直し」1節】confirm_points と同じやり方（マスクを埋め込み
+            # 格子(eh,ew)へ最近傍で縮め、その領域の平均）。point_predictorが
+            # Noneのときはこのブロックごと実行されない＝既定不変。
+            from PIL import Image
+            eh, ew = emb_np.shape[1], emb_np.shape[2]
+            small = np.array(
+                Image.fromarray(seg.astype(np.uint8) * 255).resize((ew, eh), Image.NEAREST))
+            region = small > 0
+            if region.any():
+                det["emb"] = emb_np[:, region].mean(axis=1)
+            else:
+                gy = min(max(int(cy / h * eh), 0), eh - 1)
+                gx = min(max(int(cx / w * ew), 0), ew - 1)
+                det["emb"] = emb_np[:, gy, gx]
+        out.append(det)
     return out

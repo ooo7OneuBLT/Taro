@@ -69,7 +69,7 @@ _H = np.array([[1, 0, 0, 0],
 class ObjectFile:
     """1つの物体ファイル。位置・速度（カルマン状態）と見た目を持つ。名前は持たない。"""
 
-    def __init__(self, id_, pos, appearance, area, process_noise, meas_noise, t=None):
+    def __init__(self, id_, pos, appearance, area, process_noise, meas_noise, t=None, emb=None):
         self.id = id_
         self.x = np.array([pos[0], pos[1], 0.0, 0.0], dtype=np.float64)
         self.P = np.eye(4) * 30.0
@@ -77,6 +77,13 @@ class ObjectFile:
         self.R = np.eye(2) * meas_noise
         self.appearance = np.asarray(appearance, dtype=np.float64)
         self.area = float(area)
+        # 【なぜ、2026-09-09・予測して確かめる検出「追記3」1節】appearance
+        #   （DINOv2、384次元・見回りの粗い見た目、EMA更新）とは別に、MobileSAMの
+        #   画像埋め込み由来の256次元ベクトルを持つ。確認(confirm)の「本当に
+        #   その物か」の照合に使う（見た目の同一性、Xu & Carey 1996[Tier1]）。
+        #   emb=None（既定）＝従来どおり照合しない・生成しない検出からは
+        #   常にNoneのまま（既定不変）。
+        self.emb = None if emb is None else np.asarray(emb, dtype=np.float64)
         self.age = 0             # 何コマ存在するか
         self.hits = 1            # 対応がついた回数
         self.misses = 0          # 連続して対応がつかなかったコマ数
@@ -126,7 +133,7 @@ class ObjectFile:
         S = self.innovation_cov()
         return float(np.sqrt(y @ np.linalg.inv(S) @ y))
 
-    def update(self, pos, appearance, area, appearance_lr=0.3, t=None):
+    def update(self, pos, appearance, area, appearance_lr=0.3, t=None, emb=None):
         z = np.asarray(pos, dtype=np.float64)
         y = z - _H @ self.x
         S = _H @ self.P @ _H.T + self.R
@@ -137,6 +144,13 @@ class ObjectFile:
         # 見た目は指数移動平均で更新（1枚のノイズに引きずられないため）
         self.appearance = (1 - appearance_lr) * self.appearance + appearance_lr * np.asarray(appearance, dtype=np.float64)
         self.area = float(area)
+        if emb is not None:
+            # 【なぜ、2026-09-09・予測して確かめる検出「追記3」1節】emb=None
+            #   （既定・確認(confirm)の更新）では一切触らない＝既定不変。
+            #   見回り(scan)がembを持つ検出で一致したときだけ単純に置き換える
+            #   （appearanceと違いEMAにしない。1枚の埋め込みが1回のforwardで
+            #   決定的に決まる値であり、時間平滑化する理由が無いため）。
+            self.emb = np.asarray(emb, dtype=np.float64)
         self.hits += 1
         self.misses = 0
         self.since_seen = 0
@@ -375,7 +389,7 @@ class ObjectFileSystem:
                 if cost[i, j] <= self.gate:
                     f, d = self.files[i], detections[j]
                     gap = f.since_seen
-                    residual = f.update(d["pos"], d["appearance"], d["area"], t=t)
+                    residual = f.update(d["pos"], d["appearance"], d["area"], t=t, emb=d.get("emb"))
                     matched.append((f.id, j, residual))
                     if gap >= self.reappear_gap and residual > self.mahal_gate:
                         violations.append((f.id, residual, gap))
@@ -409,7 +423,7 @@ class ObjectFileSystem:
                     if best_dist is None or dist < best_dist:
                         best_f, best_dist = f, dist
                 if best_f is not None:
-                    best_f.update(d["pos"], d["appearance"], d["area"], t=t)
+                    best_f.update(d["pos"], d["appearance"], d["area"], t=t, emb=d.get("emb"))
                     absorbed.append((j, best_f.id))
                 else:
                     still_remaining.append(j)
@@ -449,7 +463,7 @@ class ObjectFileSystem:
                     used_grave.add(best_idx)
                     self._make_room(protect_id, t)
                     nf = ObjectFile(g["id"], d["pos"], d["appearance"], d["area"],
-                                    self.process_noise, self.meas_noise, t=t)
+                                    self.process_noise, self.meas_noise, t=t, emb=d.get("emb"))
                     nf.hits = g["hits"]
                     nf.age = g["age"]
                     self.files.append(nf)
@@ -468,7 +482,7 @@ class ObjectFileSystem:
             if ev is not None:
                 evicted.append(ev)
             nf = ObjectFile(self._next_id, d["pos"], d["appearance"], d["area"],
-                            self.process_noise, self.meas_noise, t=t)
+                            self.process_noise, self.meas_noise, t=t, emb=d.get("emb"))
             self._next_id += 1
             self.files.append(nf)
             created.append(nf.id)

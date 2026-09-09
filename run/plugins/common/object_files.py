@@ -130,6 +130,11 @@ class ObjectFiles(Plugin):
         self.scan_interval_s = None if scan_interval_s is None else float(scan_interval_s)
         self.confirm_iou_thresh = float(self.config.get("confirm_iou_thresh", 0.7))
         self.confirm_area_tol = float(self.config.get("confirm_area_tol", 0.5))
+        # 【2026-09-09・予測して確かめる検出「追記3」1節】確認に見た目の照合を
+        #   足す。既定None＝照合しない（従来どおり）＝既定不変。埋め込みの
+        #   計算(get_image_embedding/set_image)自体、Noneのときは一切呼ばれない。
+        confirm_emb_cos = self.config.get("confirm_emb_cos")
+        self.confirm_emb_cos = None if confirm_emb_cos is None else float(confirm_emb_cos)
         scan_change_thresh = self.config.get("scan_change_thresh")
         self.scan_change_thresh = None if scan_change_thresh is None else float(scan_change_thresh)
         scan_on_misses = self.config.get("scan_on_misses")
@@ -264,6 +269,13 @@ class ObjectFiles(Plugin):
         self._confirm_points = confirm_points
         self._ObjectFileSystem = ObjectFileSystem
 
+    def _get_point_predictor(self):
+        """【2026-09-09・追記3「直し」1節】confirm_emb_cosがNoneのときは一度も
+        呼ばれない（既定不変）。呼ばれたら1回だけ作って使い回す。"""
+        if self._point_predictor is None:
+            self._point_predictor = self._make_point_predictor(self._mgen)
+        return self._point_predictor
+
     def on_step(self, ctx):
         if self.attend:
             # 【M3】親の発話は検出コマ(interval_s)より細かい頻度で来るので、
@@ -297,8 +309,11 @@ class ObjectFiles(Plugin):
             # （CSV・metrics に列が増えるだけで、判定・タイミングは一切変えない）。
             t0 = time.perf_counter()
             p, n = self._patch_features(self._model, img224, self.device)
+            point_predictor = (self._get_point_predictor()
+                                if self.confirm_emb_cos is not None else None)
             dets = self._detect(p, n, img=img224, mask_generator=self._mgen,
-                                 cohesion_gap_px=self.cohesion_gap_px)
+                                 cohesion_gap_px=self.cohesion_gap_px,
+                                 point_predictor=point_predictor)
             if self.empty_cache_after_detect:
                 # 【2026-09-07・メモリ削減候補(c)】既定Falseでは1行も実行されない。
                 import torch
@@ -307,11 +322,12 @@ class ObjectFiles(Plugin):
             dt_ms = (time.perf_counter() - t0) * 1000.0
             mode = "scan"
             payload = dets
+            conf_diag = {}
         else:
             # 【2026-09-09・仕様_予測して確かめる検出】確認・見回り・横取りの分岐。
             # confirmのときpayload＝confirm_update()用のカードごとの判定リスト
             #（追記2「直し」1節）、それ以外＝ofs.step()用のdetsリスト（従来どおり）。
-            mode, payload, dt_ms, confirm_debug = self._detect_predictive(img224, t)
+            mode, payload, dt_ms, confirm_debug, conf_diag = self._detect_predictive(img224, t)
 
         prev_by_id = {f.id: f for f in self.ofs.files}
         # 【2026-09-09・枚数の上限】押し出し禁止の対象＝現在注意中のファイル
@@ -436,6 +452,12 @@ class ObjectFiles(Plugin):
             events.append(("", "", "", "", "", "", "", ""))
 
         for file_id, x, y, area, event, misses, since_seen, app_cos_created in events:
+            # 【2026-09-09・追記3「直し」2節】確認コマ(mode=="confirm")の行にだけ
+            #   conf_iou/conf_area_ratio/conf_emb_cosを書く（他の行・従来の走行
+            #   （scan固定）では空欄のまま＝既定不変）。失敗した結果（emb_cosで
+            #   落ちたunmatched）も最良候補の値を書く（conf_diagは`_detect_predictive`
+            #   がokに関わらずiou/area_ratio/emb_cosを持つ結果を集めたもの）。
+            diag = conf_diag.get(file_id, {}) if mode == "confirm" else {}
             self.rows.append({
                 "step": ctx.step, "sim_time": round(t, 3),
                 "n_dets": n_dets, "n_files": n_files,
@@ -445,6 +467,9 @@ class ObjectFiles(Plugin):
                 # 【2026-09-09・仕様_予測して確かめる検出】末尾に追加した列。
                 #   scan_interval_s=Noneのときは常に"scan"（既定不変・列が増えるだけ）。
                 "mode": mode,
+                "conf_iou": diag.get("iou", ""),
+                "conf_area_ratio": diag.get("area_ratio", ""),
+                "conf_emb_cos": diag.get("emb_cos", ""),
             })
 
     def _detect_predictive(self, img224, t):
@@ -453,7 +478,7 @@ class ObjectFiles(Plugin):
         `scan_interval_s` が指定されているときだけ呼ばれる（既定不変）。
 
         Returns:
-            (mode, payload, dt_ms, confirm_debug)
+            (mode, payload, dt_ms, confirm_debug, conf_diag)
             mode: "scan"/"scan_change"/"scan_miss"/"scan_empty"/"confirm"
             payload: mode=="confirm"のときは `ObjectFileSystem.confirm_update()`
                 に渡すカードごとの判定リスト（追記2「直し」1節）。それ以外は
@@ -461,6 +486,10 @@ class ObjectFiles(Plugin):
             dt_ms: この呼び出しにかかった時間（ミリ秒）
             confirm_debug: mode=="confirm"のときだけ、点ごとの結果のリスト
                 （`_save_detection_frame` の描画用）。それ以外はNone。
+            conf_diag: 【2026-09-09・追記3「直し」2節】mode=="confirm"のときだけ、
+                file_id -> {"iou","area_ratio","emb_cos"}（`confirm_points`の
+                結果をそのまま。okに関わらず値がある結果は全部入れる＝
+                「失敗した結果も最良候補の値を書く」）。それ以外は空辞書。
         """
         import numpy as np
         from PIL import Image
@@ -511,8 +540,11 @@ class ObjectFiles(Plugin):
         if do_scan:
             t0 = time.perf_counter()
             p, n = self._patch_features(self._model, img224, self.device)
+            point_predictor = (self._get_point_predictor()
+                                if self.confirm_emb_cos is not None else None)
             dets = self._detect(p, n, img=img224, mask_generator=self._mgen,
-                                 cohesion_gap_px=self.cohesion_gap_px)
+                                 cohesion_gap_px=self.cohesion_gap_px,
+                                 point_predictor=point_predictor)
             if self.empty_cache_after_detect:
                 import torch
                 if torch.cuda.is_available():
@@ -521,7 +553,7 @@ class ObjectFiles(Plugin):
             self._last_scan_t = t
             mode = {"change": "scan_change", "miss": "scan_miss",
                     "empty": "scan_empty"}.get(force_scan_reason, "scan")
-            return mode, dets, dt_ms, None
+            return mode, dets, dt_ms, None, {}
 
         # ---- 確認：既存カードの予測位置を1点ずつ聞く（画像埋め込みは1回だけ）------
         t0 = time.perf_counter()
@@ -529,15 +561,21 @@ class ObjectFiles(Plugin):
         points = [f.pos for f in self.ofs.files]
         expected_areas = [f.area for f in self.ofs.files]
         file_ids = [f.id for f in self.ofs.files]
+        # 【2026-09-09・追記3「直し」1節】カードのembを渡す。emb=Noneのカード
+        #   （古い保存・まだ見回りが1回も無い）はconfirm_points内で従来どおり
+        #   照合されない。confirm_emb_cosがNoneなら全カード渡してもconfirm_points
+        #   側で埋め込み自体を読まないので既定不変。
+        card_embs = [f.emb for f in self.ofs.files]
         pos_by_id = {f.id: f.pos for f in self.ofs.files}
-        if self._point_predictor is None:
-            self._point_predictor = self._make_point_predictor(self._mgen)
+        point_predictor = self._get_point_predictor()
         # 【2026-09-09・追記2「直し」1節】結果にfile_idを付けて返してもらう
         #（confirm_updateで頼んだカードにだけ結ぶため）。
-        results = self._confirm_points(self._point_predictor, img224, points, expected_areas,
+        results = self._confirm_points(point_predictor, img224, points, expected_areas,
                                         file_ids=file_ids,
                                         iou_thresh=self.confirm_iou_thresh,
-                                        area_tol=self.confirm_area_tol)
+                                        area_tol=self.confirm_area_tol,
+                                        card_embs=card_embs,
+                                        emb_cos_thresh=self.confirm_emb_cos)
         # 【2026-09-09・追記2「直し」2節】同じ物を複数のカードが確認したら1枚だけ
         #（固体性を確認にも適用）。IoU>=0.5 または重心距離<=10px を重複とみなし、
         # 注意中のカード＞古いidの順で1枚だけ残す。残りはmisses+=1（confirm_update
@@ -545,8 +583,14 @@ class ObjectFiles(Plugin):
         kept_ids = self._dedup_confirm(results)
         payload = []
         confirm_debug = []
+        conf_diag = {}
         for r in results:
             fid = r.get("file_id")
+            # 【追記3「直し」2節】ok/失敗に関わらず、iou/area_ratio/emb_cosが
+            #   あれば記録する（「何で落ちたかが分かるように」）。
+            if "iou" in r:
+                conf_diag[fid] = {"iou": r.get("iou"), "area_ratio": r.get("area_ratio"),
+                                   "emb_cos": r.get("emb_cos")}
             if r.get("ok") and fid in kept_ids:
                 payload.append({"file_id": fid, "matched": True,
                                  "pos": r["pos"], "area": r["area"]})
@@ -557,7 +601,7 @@ class ObjectFiles(Plugin):
                 payload.append({"file_id": fid, "matched": False})
                 confirm_debug.append({"pos": r.get("pos", pos_by_id.get(fid)), "ok": False})
         dt_ms = (time.perf_counter() - t0) * 1000.0
-        return "confirm", payload, dt_ms, confirm_debug
+        return "confirm", payload, dt_ms, confirm_debug, conf_diag
 
     def _dedup_confirm(self, results):
         """【2026-09-09・仕様_予測して確かめる検出_2026-09-09「追記2」2節】
@@ -900,12 +944,14 @@ class ObjectFiles(Plugin):
                 w = csv.writer(fp)
                 w.writerow(["step", "sim_time", "n_dets", "n_files",
                            "file_id", "x", "y", "area", "event",
-                           "misses", "since_seen", "app_cos_created", "mode"])
+                           "misses", "since_seen", "app_cos_created", "mode",
+                           "conf_iou", "conf_area_ratio", "conf_emb_cos"])
                 for r in self.rows:
                     w.writerow([r["step"], r["sim_time"], r["n_dets"], r["n_files"],
                                r["file_id"], r["x"], r["y"], r["area"], r["event"],
                                r["misses"], r["since_seen"], r["app_cos_created"],
-                               r["mode"]])
+                               r["mode"], r.get("conf_iou", ""), r.get("conf_area_ratio", ""),
+                               r.get("conf_emb_cos", "")])
         if self.attend_rows and self.attend_out:
             os.makedirs(os.path.dirname(self.attend_out) or ".", exist_ok=True)
             with open(self.attend_out, "w", newline="", encoding="utf-8") as fp:
