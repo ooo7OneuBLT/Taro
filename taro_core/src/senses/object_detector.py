@@ -158,7 +158,8 @@ def make_point_predictor(mask_generator):
     return SamPredictor(mask_generator.predictor.model)
 
 
-def confirm_points(predictor, img224, points, expected_areas, iou_thresh=0.7, area_tol=0.5):
+def confirm_points(predictor, img224, points, expected_areas, file_ids=None,
+                    iou_thresh=0.7, area_tol=0.5):
     """点プロンプトで「さっきの場所に、さっきの大きさの物がまだあるか」を確認する。
 
     【なぜ、2026-09-09】仕様_予測して確かめる検出_2026-09-09「後半」1節。
@@ -166,26 +167,41 @@ def confirm_points(predictor, img224, points, expected_areas, iou_thresh=0.7, ar
     代わりに、いま追跡中のカードの数（4枚以内）だけ点で問い合わせる軽い経路。
     画像の埋め込み計算（`set_image`）は1回だけ、`predict()` は点の数だけ呼ぶ。
 
+    【なぜ file_id・mask を返すか、2026-09-09・追記2】F2-101pre2/F2-102pre の
+    実測（`確認・見回り・横取り` の絵）で、確認コマの結果が呼び出し元で
+    どのカードの問い合わせだったか分からなくなり、`ofs.step()` に渡すと
+    ハンガリアン法が結果を別のカードに結び直してしまい、対応しなかった
+    カードが新規カードとして再作成される事故が起きた（追記2「絵」参照）。
+    各結果に頼んだ側の `file_id` を付けて返し、呼び出し元はそのカードにしか
+    結ばない（`ObjectFileSystem.confirm_update`）。`mask` も返すのは、
+    同じ物を複数のカードが確認したときの重複判定（マスクのIoU）に使うため。
+
     Args:
         predictor: `make_point_predictor()` で得た `SamPredictor`。
         img224: (224, 224, 3) の uint8 RGB画像。
         points: [(x, y), ...] 確認したい座標（img224の画素基準）。
         expected_areas: 各pointに対応する期待面積比[0-1]のリスト（pointsと同じ長さ）。
+        file_ids: 各pointに対応する物体ファイルid（pointsと同じ長さ）。Noneなら
+            結果の "file_id" は全てNone（後方互換：呼ばなくても動く）。
         iou_thresh: `predict()` が返す `iou_predictions` の下限。これ未満の候補マスクは
             採用対象から外す。
         area_tol: 採用する面積の許容比率（|area-expected|/expected <= area_tol）。
     Returns:
         pointsと同じ長さ・同じ順のリスト。採用できれば
-        {"pos": マスク重心(x,y), "area": 面積比, "ok": True, "iou": float}、
-        無ければ {"ok": False}。appearance は返さない（呼び出し元がカードの
-        appearanceをそのまま使う＝見た目は同じなので位置だけで対応がつく）。
+        {"pos": マスク重心(x,y), "area": 面積比, "ok": True, "iou": float,
+         "mask": bool配列(H,W), "file_id": 対応するfile_id}、
+        無ければ {"ok": False, "file_id": 対応するfile_id}。appearance は
+        返さない（呼び出し元がカードのものをそのまま使う＝見た目は同じなので
+        位置だけで対応がつく）。
     """
     import numpy as np
     img224 = np.asarray(img224)
     h, w = img224.shape[0], img224.shape[1]
+    if file_ids is None:
+        file_ids = [None] * len(points)
     predictor.set_image(img224)
     out = []
-    for (x, y), expected_area in zip(points, expected_areas):
+    for (x, y), expected_area, fid in zip(points, expected_areas, file_ids):
         masks, iou_preds, _ = predictor.predict(
             point_coords=np.array([[float(x), float(y)]], dtype=np.float64),
             point_labels=np.array([1]),
@@ -204,16 +220,18 @@ def confirm_points(predictor, img224, points, expected_areas, iou_thresh=0.7, ar
             if best is None or diff < best[0]:
                 best = (diff, i, area)
         if best is None:
-            out.append({"ok": False})
+            out.append({"ok": False, "file_id": fid})
             continue
         _diff, i, area = best
-        ys, xs = np.where(masks[i])
+        mask = masks[i]
+        ys, xs = np.where(mask)
         if len(ys) == 0:
-            out.append({"ok": False})
+            out.append({"ok": False, "file_id": fid})
             continue
         cx = float(xs.mean())
         cy = float(ys.mean())
-        out.append({"pos": (cx, cy), "area": area, "ok": True, "iou": float(iou_preds[i])})
+        out.append({"pos": (cx, cy), "area": area, "ok": True, "iou": float(iou_preds[i]),
+                    "mask": mask.astype(bool), "file_id": fid})
     predictor.reset_image()
     return out
 

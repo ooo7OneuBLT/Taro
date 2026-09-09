@@ -306,19 +306,30 @@ class ObjectFiles(Plugin):
                     torch.cuda.empty_cache()
             dt_ms = (time.perf_counter() - t0) * 1000.0
             mode = "scan"
+            payload = dets
         else:
             # 【2026-09-09・仕様_予測して確かめる検出】確認・見回り・横取りの分岐。
-            mode, dets, dt_ms, confirm_debug = self._detect_predictive(img224, t)
+            # confirmのときpayload＝confirm_update()用のカードごとの判定リスト
+            #（追記2「直し」1節）、それ以外＝ofs.step()用のdetsリスト（従来どおり）。
+            mode, payload, dt_ms, confirm_debug = self._detect_predictive(img224, t)
 
         prev_by_id = {f.id: f for f in self.ofs.files}
         # 【2026-09-09・枚数の上限】押し出し禁止の対象＝現在注意中のファイル
         # （_process_attentionはこのofs.stepより後に呼ぶので、ここではまだ
         # 前コマの注意状態を使う。attend=Falseなら常にNone＝従来どおり）。
         protect_id = self._attended_id if self.attend else None
-        # 【2026-09-09・追記「直し」3】確認(confirm)コマは_detect_predictive内で
-        #   predict_only()を先に呼んでいるので、step()側のpredict()は飛ばす
-        #   （1コマにpredict()が2回進むのを防ぐ）。それ以外のmodeは従来どおりFalse。
-        res = self.ofs.step(dets, t=t, protect_id=protect_id, skip_predict=(mode == "confirm"))
+        if self.scan_interval_s is not None and mode == "confirm":
+            # 【2026-09-09・追記2「直し」1節】確認は頼んだカードにだけ結ぶ
+            # （ofs.step()のハンガリアン法には渡さない＝別カードへの誤結合や
+            #  新規カード作成を起こさない）。predict()はpredict_only()で
+            #  済んでいるのでconfirm_updateは呼ばない（内部でも呼ばない）。
+            res = self.ofs.confirm_update(payload, t=t)
+            # n_dets（下のn_dets = len(dets)で使う）＝「一致した結果の数」
+            #（追記2「直し」3節）。matched=Trueのものだけを数える。
+            dets = [p for p in payload if p.get("matched")]
+        else:
+            dets = payload
+            res = self.ofs.step(dets, t=t, protect_id=protect_id)
         # 【2026-09-09・追記「直し」1】このコマで一致(matched)・復活(revived)・
         #   削除(lost)されたfile_idは、見失いの立ち上がり判定から外す
         #   （misses==0に戻った/カード自体が無くなった＝再発火の資格を得る）。
@@ -442,9 +453,11 @@ class ObjectFiles(Plugin):
         `scan_interval_s` が指定されているときだけ呼ばれる（既定不変）。
 
         Returns:
-            (mode, dets, dt_ms, confirm_debug)
+            (mode, payload, dt_ms, confirm_debug)
             mode: "scan"/"scan_change"/"scan_miss"/"scan_empty"/"confirm"
-            dets: `ObjectFileSystem.step()` に渡す検出のリスト
+            payload: mode=="confirm"のときは `ObjectFileSystem.confirm_update()`
+                に渡すカードごとの判定リスト（追記2「直し」1節）。それ以外は
+                `ObjectFileSystem.step()` に渡す検出のリスト（従来どおり）。
             dt_ms: この呼び出しにかかった時間（ミリ秒）
             confirm_debug: mode=="confirm"のときだけ、点ごとの結果のリスト
                 （`_save_detection_frame` の描画用）。それ以外はNone。
@@ -515,23 +528,77 @@ class ObjectFiles(Plugin):
         self.ofs.predict_only(t)
         points = [f.pos for f in self.ofs.files]
         expected_areas = [f.area for f in self.ofs.files]
+        file_ids = [f.id for f in self.ofs.files]
+        pos_by_id = {f.id: f.pos for f in self.ofs.files}
         if self._point_predictor is None:
             self._point_predictor = self._make_point_predictor(self._mgen)
+        # 【2026-09-09・追記2「直し」1節】結果にfile_idを付けて返してもらう
+        #（confirm_updateで頼んだカードにだけ結ぶため）。
         results = self._confirm_points(self._point_predictor, img224, points, expected_areas,
+                                        file_ids=file_ids,
                                         iou_thresh=self.confirm_iou_thresh,
                                         area_tol=self.confirm_area_tol)
-        dets = []
+        # 【2026-09-09・追記2「直し」2節】同じ物を複数のカードが確認したら1枚だけ
+        #（固体性を確認にも適用）。IoU>=0.5 または重心距離<=10px を重複とみなし、
+        # 注意中のカード＞古いidの順で1枚だけ残す。残りはmisses+=1（confirm_update
+        # 側で"matched": False扱いになる）。
+        kept_ids = self._dedup_confirm(results)
+        payload = []
         confirm_debug = []
-        for f, r in zip(self.ofs.files, results):
-            if r.get("ok"):
-                dets.append({"pos": r["pos"], "area": r["area"], "appearance": f.appearance})
+        for r in results:
+            fid = r.get("file_id")
+            if r.get("ok") and fid in kept_ids:
+                payload.append({"file_id": fid, "matched": True,
+                                 "pos": r["pos"], "area": r["area"]})
                 confirm_debug.append({"pos": r["pos"], "ok": True})
             else:
-                # 【仕様「見失い」】okでなかったカードはdetsに入れない＝
-                # ofs.step()側の従来の経路でmisses+=1が起きる。
-                confirm_debug.append({"pos": f.pos, "ok": False})
+                # 【仕様「見失い」】okでなかった、または重複で外れたカードは
+                # matched=False（confirm_update側でmisses+=1が起きる）。
+                payload.append({"file_id": fid, "matched": False})
+                confirm_debug.append({"pos": r.get("pos", pos_by_id.get(fid)), "ok": False})
         dt_ms = (time.perf_counter() - t0) * 1000.0
-        return "confirm", dets, dt_ms, confirm_debug
+        return "confirm", payload, dt_ms, confirm_debug
+
+    def _dedup_confirm(self, results):
+        """【2026-09-09・仕様_予測して確かめる検出_2026-09-09「追記2」2節】
+        `results`（`confirm_points` の生の戻り値、"ok"でないものも含む）の中で
+        "ok" なもの同士を比べ、マスクのIoUが0.5以上、または重心の距離が10px
+        以内なら「同じ物を見ている」とみなし、注意中のカード＞古いid(小さい方)
+        の順で1枚だけ残す。残りのfile_idは戻り値の集合に含めない
+        （＝呼び出し元でmatched=False扱いになり、自然に消える）。
+
+        Returns: 残す（一致として採用する）file_idの集合。
+        """
+        import math
+        import numpy as np
+        ok = [r for r in results if r.get("ok")]
+        if len(ok) <= 1:
+            return set(r["file_id"] for r in ok)
+
+        def _is_dup(a, b):
+            ma, mb = a.get("mask"), b.get("mask")
+            if ma is not None and mb is not None:
+                inter = float(np.logical_and(ma, mb).sum())
+                union = float(np.logical_or(ma, mb).sum())
+                if union > 0 and (inter / union) >= 0.5:
+                    return True
+            ax, ay = a["pos"]
+            bx, by = b["pos"]
+            return math.hypot(ax - bx, ay - by) <= 10.0
+
+        attended_id = self._attended_id if self.attend else None
+        order = sorted(range(len(ok)),
+                        key=lambda i: (ok[i]["file_id"] != attended_id, ok[i]["file_id"]))
+        excluded = set()
+        for pos_a, i in enumerate(order):
+            if i in excluded:
+                continue
+            for j in order[pos_a + 1:]:
+                if j in excluded:
+                    continue
+                if _is_dup(ok[i], ok[j]):
+                    excluded.add(j)
+        return set(ok[i]["file_id"] for i in range(len(ok)) if i not in excluded)
 
     def _save_detection_frame(self, ctx, sim_time, img224, dets, res, prev_by_id,
                                mode="scan", confirm_debug=None):

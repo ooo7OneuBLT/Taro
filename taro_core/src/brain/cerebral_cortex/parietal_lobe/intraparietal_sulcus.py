@@ -252,6 +252,70 @@ class ObjectFileSystem:
             f.predict(t=t, coast_max_s=self.coast_max_s)
             f.age += 1
 
+    def confirm_update(self, results, t=None):
+        """【2026-09-09・仕様_予測して確かめる検出_2026-09-09「追記2」1節】
+        確認（confirm）専用の更新。`predict_only()` で既に1コマぶん進めた
+        予測位置を、点プロンプトの確認結果と突き合わせる。`step()` と違い
+        ハンガリアン法は使わない —— 各結果は呼び出し元（object_files.py）が
+        どの `file_id` への問い合わせだったかを既に知っているので、1対1で
+        そのカードにだけ結ぶ。**確認から新しいカードは作らない**（作成は
+        見回り・横取りの全体切り出し＝`step()` だけ）。
+
+        【なぜ、2026-09-09】F2-101pre2/F2-102pre の実測：確認コマで4枚の
+        カードが全部同じボールを検出し、`step()`（ハンガリアン法）に渡すと
+        1つの検出を1枚のカードにしか対応づけられないため、残り3枚が
+        「対応がつかなかった」として新規カード作成に回っていた（確認モードで
+        作成25／消滅25、寿命の中央値4.65秒）。頼んだカードにだけ結べば、
+        この事故は起きない。
+
+        Args:
+            results: [{"file_id": id, "matched": bool,
+                       "pos": (x,y)（matched時のみ）, "area": float（matched時
+                       のみ）}, ...]（呼び出し元が「同じ物を複数のカードが確認
+                       したら1枚だけ」の重複整理を済ませたあとの、カードごとの
+                       最終判定。file_idはself.filesのidと対応する）。
+            t: sim秒（last_seen_tの更新用。coast_max_sを使うときの起点）。
+        Returns:
+            `step()` と同じ形の辞書。created/revived/absorbedは常に空リスト
+            （確認からは新規作成しない）。matchedのdet_idxはNone固定
+            （呼び出し元はfile_idしか読まないため）。
+        """
+        by_id = {f.id: f for f in self.files}
+        matched = []
+        for r in results:
+            f = by_id.get(r.get("file_id"))
+            if f is None:
+                continue
+            if r.get("matched"):
+                # 【追記2「直し」1節】自分のカードのゲート内（mahalanobis<=mahal_gate）
+                #   かだけを見る。ハンガリアン法のコスト最小化とは別の、
+                #   「この点はこのカードのものか」という単純な足切り。
+                mahal = f.mahalanobis(r["pos"])
+                if mahal <= self.mahal_gate:
+                    residual = f.update(r["pos"], f.appearance, r["area"], t=t)
+                    matched.append((f.id, None, residual))
+                    continue
+            f.misses += 1
+            f.since_seen += 1
+
+        lost = [f.id for f in self.files if f.misses > self.max_missed]
+        if lost:
+            lost_set = set(lost)
+            if self.revive_window_s is not None and t is not None:
+                for f in self.files:
+                    if f.id in lost_set:
+                        self._graveyard.append({
+                            "id": f.id, "pos": f.pos,
+                            "appearance": np.array(f.appearance, dtype=np.float64, copy=True),
+                            "area": f.area, "hits": f.hits, "age": f.age,
+                            "t_lost": t,
+                        })
+            self.files = [f for f in self.files if f.id not in lost_set]
+
+        self.last_revived = []
+        return {"matched": matched, "created": [], "revived": [], "lost": lost,
+                "prediction_violations": [], "absorbed": []}
+
     def step(self, detections, t=None, protect_id=None, skip_predict=False):
         """detections = [{"pos": (x,y), "area": float, "appearance": vec}, ...]（1コマぶん）。
         `t`（sim秒。連続性の墓場の期限管理に使う）と `protect_id`（注意中の
