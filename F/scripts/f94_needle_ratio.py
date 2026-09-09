@@ -101,9 +101,22 @@ def load_by_file_rows():
                 "err_state": _f(r, "err_state"),
                 "z_state": _f(r, "z_state"),
                 "z_vec": _f(r, "z_vec"),
+                # 【2026-09-09・仕様_見る側の段構成_実装 7節】masked列が無い旧ログ
+                #   では常にFalse扱い（互換）。
+                "masked": (r.get("masked", "") or "").strip() in ("True", "1", "1.0"),
             })
     rows.sort(key=lambda r: (r["step"], r["file_id"]))
     return rows
+
+
+def find_masked_steps(by_rows):
+    """【2026-09-09・仕様_見る側の段構成_実装 7節】masked==Trueの物ごと行が
+    1つでもあるstepの集合（そのtickは注意中の物がmaskedだった可能性が高い、
+    という近似。物ごと単位のmaskedをtick単位に落とすための仕様に無かった
+    判断。厳密には「注意中の物のmasked」を見るべきだが、trainer.py側で
+    maskedはtick単位で決まる値（moving/切り替え直後）なので、同じtickの
+    物ごと行は全て同じmasked値を持つ＝どのfile_idの行を見ても同じ）。"""
+    return set(r["step"] for r in by_rows if r["masked"])
 
 
 def find_vanish_return_events(by_rows):
@@ -170,7 +183,11 @@ def find_first_last_vanish_per_file(by_rows):
     return by_fid_vanish_steps
 
 
-def compute_needle_ratio(main_rows, vanish_return_events, switch_events):
+def compute_needle_ratio(main_rows, vanish_return_events, switch_events, masked_steps=None):
+    """masked_steps（【2026-09-09・仕様_見る側の段構成_実装 7節】）：Noneまたは
+    空集合なら従来どおり（既定不変・列が無い旧ログではNoneのまま呼ばれる）。
+    渡すと①②からmasked_stepsを除いた版の針の比も計算して返す
+    （needle_ratio_unmasked用）。"""
     main_by_step = {r["step"]: r for r in main_rows}
 
     vr_steps = set(e["step"] for e in vanish_return_events)
@@ -196,12 +213,26 @@ def compute_needle_ratio(main_rows, vanish_return_events, switch_events):
     mean3 = sum(vals_other) / len(vals_other) if vals_other else None
     ratio = (mean1 / mean2) if (mean1 is not None and mean2 not in (None, 0)) else None
 
-    return {
+    result = {
         "1_消失戻り_平均err_state": mean1, "1_件数": len(vals_vr),
         "2_注意切替_平均err_state": mean2, "2_件数": len(vals_sw),
         "3_それ以外_平均err_state": mean3, "3_件数": len(vals_other),
         "4_針の比": ratio,
     }
+
+    if masked_steps:
+        vals_vr_u = vals_at(vr_steps - masked_steps)
+        vals_sw_u = vals_at((sw_steps - vr_steps) - masked_steps)
+        mean1_u = sum(vals_vr_u) / len(vals_vr_u) if vals_vr_u else None
+        mean2_u = sum(vals_sw_u) / len(vals_sw_u) if vals_sw_u else None
+        ratio_u = (mean1_u / mean2_u) if (mean1_u is not None and mean2_u not in (None, 0)) else None
+        result["needle_ratio_unmasked"] = ratio_u
+        result["1_消失戻り_平均err_state_unmasked"] = mean1_u
+        result["1_件数_unmasked"] = len(vals_vr_u)
+        result["2_注意切替_平均err_state_unmasked"] = mean2_u
+        result["2_件数_unmasked"] = len(vals_sw_u)
+
+    return result
 
 
 def compute_age_stats(by_rows):
@@ -317,7 +348,12 @@ def main():
 
     vanish_return_events = find_vanish_return_events(by_rows)
     switch_events = find_attend_switch_events(by_rows)
-    ratio_stats = compute_needle_ratio(main_rows, vanish_return_events, switch_events)
+    # 【2026-09-09・仕様_見る側の段構成_実装 7節】masked列が無い旧ログでは
+    #   全行False扱い（load_by_file_rows）なので masked_steps は空集合になり、
+    #   needle_ratio_unmaskedはJSONに出ない＝従来どおり（既定不変）。
+    masked_steps = find_masked_steps(by_rows)
+    ratio_stats = compute_needle_ratio(main_rows, vanish_return_events, switch_events,
+                                        masked_steps=masked_steps)
 
     age_stats, age_curve_state, age_curve_vec = compute_age_stats(by_rows)
 

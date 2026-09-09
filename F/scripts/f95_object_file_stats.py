@@ -100,6 +100,10 @@ def main(log_dir):
     # 【2026-09-09・重複をなくす「後半」5節】absorbed（既存カードに吸収された検出）
     #   の件数。absorbed列が無い旧ログでは0のまま（互換）。
     n_absorbed = sum(1 for r in rows if r["event"] == "absorbed")
+    # 【2026-09-09・仕様_見る側の段構成_実装 7節】individuated（段4：位置は
+    #   同じだが見た目で別の物と判定して作った新カード）の件数。event列に
+    #   individuatedが無い旧ログでは0のまま（互換）。
+    n_individuated = sum(1 for r in rows if r["event"] == "individuated")
 
     # ---- 5. カードの寿命の中央値（sim_time、created/revivedからlostまで） -----
     birth = {}      # file_id -> 最初のcreated/revivedのsim_time
@@ -126,6 +130,10 @@ def main(log_dir):
 
     # ---- 6. mode別の検出コマ件数 --------------------------------------------
     # 【互換】mode列が無い旧ログでは全行 "" になる→ "scan" 扱いにする。
+    # 【2026-09-09・仕様_見る側の段構成_実装 7節】mode列にはpreattentive有効時
+    #   "onset"（段1の説明できない変化を切り出した）・"explore"（段6の探索点を
+    #   切り出した）も入り得る。集計は元からmode文字列ごとに数える汎用実装
+    #   なので、この2値も新しいキーとして自然にmode_countsへ出る（コード変更なし）。
     mode_by_step = {}
     for r in rows:
         step = _to_int(r["step"])
@@ -152,12 +160,31 @@ def main(log_dir):
     #   （conf_dist_attendedは常に空＝そのまま出力される）。
     attended_by_step = {}
     attend_csv_path = os.path.join(log_dir, "注意.csv")
+    # 【2026-09-09・仕様_見る側の段構成_実装 7節】札の混入率＝attended_idごとに
+    #   target_word（空文字を除く）の異なり数が2以上の割合。行を1回で読むために
+    #   ここでtarget_wordも合わせて集める（attend=False・注意.csvが無い走行では
+    #   words_by_attended_idが空のままlabel_mix_rate=None・n_attended_ids=0）。
+    words_by_attended_id = {}
     if os.path.exists(attend_csv_path):
         with open(attend_csv_path, "r", encoding="utf-8", newline="") as fp:
             for r in csv.DictReader(fp):
                 step = _to_int(r["step"])
                 if step is not None:
                     attended_by_step[step] = r.get("attended_id") or ""
+                aid = r.get("attended_id") or ""
+                if not aid:
+                    continue
+                word = (r.get("target_word") or "").strip()
+                if not word:
+                    continue
+                words_by_attended_id.setdefault(aid, set()).add(word)
+
+    n_attended_ids = len(set(attended_by_step.get(s, "") for s in attended_by_step
+                              if attended_by_step.get(s, "")))
+    mixed_ids = sum(1 for aid, words in words_by_attended_id.items() if len(words) >= 2)
+    # 【仕様に無かった判断】分母はn_attended_ids（注意された全id）。target_word
+    #   が一度も無いidは異なりword数0なので「混入」に数えない（自然に薄まる）。
+    label_mix_rate = (round(mixed_ids / n_attended_ids, 4) if n_attended_ids else None)
 
     _sorted_rows = sorted(rows, key=lambda r: (_to_int(r["step"]) if _to_int(r["step"]) is not None else -1))
     _last_misses = {}
@@ -338,6 +365,7 @@ def main(log_dir):
         "n_revived": n_revived,
         "n_lost": n_lost,
         "n_absorbed": n_absorbed,
+        "n_individuated": n_individuated,
         "lifespan_median_s": lifespan_median,
         "n_detect_steps": len(all_steps),
         "n_lifespan_samples": len(lifespans),
@@ -366,6 +394,10 @@ def main(log_dir):
         #   conf_reject列が無い旧ログでは全て{"":件数}になる（互換）。
         "conf_reject_counts_attended": reject_counts_attended,
         "conf_reject_counts_other": reject_counts_other,
+        # 【2026-09-09・仕様_見る側の段構成_実装 7節】札の混入率。
+        #   注意.csvが無い/target_wordが一度も無い走行ではNone・0のまま。
+        "label_mix_rate": label_mix_rate,
+        "n_attended_ids": n_attended_ids,
     }
 
     out_path = os.path.join(log_dir, "結果_物体ファイル.json")

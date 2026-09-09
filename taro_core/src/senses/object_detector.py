@@ -73,7 +73,7 @@ def figure_mask(patch_feats, n, thresh=0.55):
 
 
 def detect(patch_feats, n, img_size=224, thresh=0.55, min_cells=1, img=None, mask_generator=None,
-           cohesion_gap_px=None, point_predictor=None):
+           cohesion_gap_px=None, point_predictor=None, blobs=None):
     """検出の一覧を返す。各検出＝ (中心xy[画素・img_size基準], 面積比[0-1], 見た目ベクトル[384])。
 
     `mask_generator` を渡すとMobileSAM経由（`img`も必須）。渡さなければ既定どおり
@@ -87,12 +87,16 @@ def detect(patch_feats, n, img_size=224, thresh=0.55, min_cells=1, img=None, mas
     Noneなら従来どおり（既定不変・`emb`キーは付かない）。`make_point_predictor()`
     で得た `SamPredictor` を渡すと、見回り（scan）の各検出にも確認(confirm)と
     同じ埋め込みから計算した `emb`（256次元）を足す。詳細は `_detect_mobilesam` 参照。
+
+    `blobs`（【2026-09-09・仕様_見る側の段構成】段1の動いた塊の一覧）：Noneなら
+    従来どおり（既定不変）。渡すと`_cohesion_groups`のblobベースの凝集も併用する。
     """
     if mask_generator is not None:
         if img is None:
             raise ValueError("mask_generator を使うときは img（生のRGB画像）も渡す必要がある")
         return _detect_mobilesam(patch_feats, n, img, mask_generator, img_size,
-                                  cohesion_gap_px=cohesion_gap_px, point_predictor=point_predictor)
+                                  cohesion_gap_px=cohesion_gap_px, point_predictor=point_predictor,
+                                  blobs=blobs)
 
     mask = figure_mask(patch_feats, n, thresh)
     # 均一な面でも1マスぶんのノイズ（グリッド線などの陰影差）で分断されるので、
@@ -373,7 +377,7 @@ def _mask_touches_edge(bbox, w, h, margin=1):
     return x <= margin or y <= margin or (x + bw) >= (w - margin) or (y + bh) >= (h - margin)
 
 
-def _cohesion_groups(masks, gap):
+def _cohesion_groups(masks, gap, blobs=None):
     """`masks`（各要素に "bbox" を持つ辞書のリスト）の bbox を `gap` 画素だけ
     広げた箱同士が重なるものを union-find で連結成分にまとめ、インデックスの
     グループのリストを返す（1個だけの物は要素1個のグループのまま）。
@@ -381,7 +385,13 @@ def _cohesion_groups(masks, gap):
     【なぜ、2026-09-09・凝集性】Spelke の凝集性の原理（乳児は連結した面の
     かたまりを1つの物として扱う[Tier1]）を、検出器が出したマスク同士の
     近さ（隙間が`gap`画素以内）で近似する[Tier3・工学的近似：本当の面の
-    連結ではなく矩形の近さで代用]。"""
+    連結ではなく矩形の近さで代用]。
+
+    `blobs`（【2026-09-09・仕様_見る側の段構成】段1が出す動いた塊の一覧、
+    各要素に"bbox"を持つ）：Noneなら従来どおり（既定不変）。渡すと、2つの
+    マスクの重心が同じblobのbboxに入るものも追加でunionする（接触判定は
+    従来どおり残す＝人間の分節の最初の手がかりは共通運動、Kellman & Spelke
+    1983[Tier1]）。"""
     m = len(masks)
     parent = list(range(m))
 
@@ -406,6 +416,19 @@ def _cohesion_groups(masks, gap):
             bx0, by0, bx1, by1 = boxes[j]
             if ax0 < bx1 and bx0 < ax1 and ay0 < by1 and by0 < ay1:
                 union(i, j)
+
+    if blobs:
+        centroids = []
+        for mk in masks:
+            x, y, bw, bh = mk["bbox"]
+            centroids.append((x + bw / 2.0, y + bh / 2.0))
+        for b in blobs:
+            bx, by, bw, bh = b["bbox"]
+            members = [i for i, (cx, cy) in enumerate(centroids)
+                       if bx <= cx <= bx + bw and by <= cy <= by + bh]
+            for k in range(1, len(members)):
+                union(members[0], members[k])
+
     groups = {}
     for i in range(m):
         r = find(i)
@@ -413,8 +436,128 @@ def _cohesion_groups(masks, gap):
     return list(groups.values())
 
 
+def _mask_appearance(mask, feats_grid, n, scale, cx=None, cy=None):
+    """マスク範囲に半分以上重なるDINOv2のマスだけを見た目ベクトルとする
+    （detect()内の元の計算を切り出しただけ。segment_at_pointsと共用するため
+    ＝仕様_見る側の段構成_実装_2026-09-09.md 3節「新しい計算を作らない」）。
+    `cx`/`cy`（省略可）：フォールバック（マスクが1マスより小さいとき）で
+    使う中心座標。省略時はマスク自身の重心から計算する（_detect_mobilesamは
+    従来どおりbbox中心のcx/cyを明示的に渡し、挙動を1ビットも変えない）。"""
+    patch_ids = []
+    for i in range(n):
+        y0, y1 = int(i * scale), int((i + 1) * scale)
+        for j in range(n):
+            x0, x1 = int(j * scale), int((j + 1) * scale)
+            cell = mask[y0:y1, x0:x1]
+            if cell.size and cell.mean() >= 0.5:
+                patch_ids.append((i, j))
+    if patch_ids:
+        return np.mean([feats_grid[i, j] for i, j in patch_ids], axis=0)
+    if cx is None or cy is None:
+        ys, xs = np.where(mask)
+        if len(ys) == 0:
+            return feats_grid[n // 2, n // 2]
+        cy = float(ys.mean())
+        cx = float(xs.mean())
+    i = min(max(int(cy / scale), 0), n - 1)
+    j = min(max(int(cx / scale), 0), n - 1)
+    return feats_grid[i, j]
+
+
+def segment_at_points(predictor, img224, points, patch_feats, n, img_size=224,
+                       min_area_frac=0.002, max_area_frac=0.5, blobs=None):
+    """段2 分節：点プロンプトで指定した場所だけを切り出す（`confirm_points`と
+    同じく`predictor.set_image`1回＋点ごとに`predict`）。
+
+    【なぜ、2026-09-09】仕様_見る側の段構成_実装_2026-09-09.md 3節。段1
+    （前注意の地図）の「説明できない変化」や段6（優先度地図）の「カードの
+    無い高優先度の場所」だけを頼まれた点として切り出す横取りの置き換え。
+    `confirm_points`と違い、ここは既存カードの確認ではなく**新しい候補**を
+    作るための切り出しなので、対応づけ（どのfile_idか）は持たない。
+
+    Args:
+        predictor: `make_point_predictor()` で得た `SamPredictor`。
+        img224: (224, 224, 3) の uint8 RGB画像。
+        points: [(x, y), ...] 切り出したい座標（img224の画素基準）。
+        patch_feats, n: `patch_features()` の戻り値（見た目ベクトル計算用）。
+        min_area_frac, max_area_frac: 採用するマスクの面積比の範囲
+            （範囲外は捨てる）。
+        blobs: 段1の`blobs`（各要素に"bbox"を持つ）。Noneなら凝集しない。
+            渡すと`_cohesion_groups`で「同じblobに入る点から出たマスクは
+            1つの物」としてまとめる（仕様3節「共通運動の凝集」）。
+    Returns:
+        `detect()`と同じ形の辞書のリスト（`mask, bbox, pos, area, appearance,
+        emb`）。`emb`は常にNone（点プロンプトのMobileSAM埋め込みまでは
+        今回計算しない＝仕様に無かった判断。confirmと違い新規候補のため
+        `ObjectFile.emb`は次の見回りで埋まる）。`cohesion_reason`は
+        "motion"（同じblobでまとめられた）または""。
+    """
+    img224 = np.asarray(img224)
+    h, w = img224.shape[0], img224.shape[1]
+    feats_grid = patch_feats.reshape(n, n, -1)
+    scale = img_size / n
+
+    predictor.set_image(img224)
+    raw = []
+    for (x, y) in points:
+        masks, iou_preds, _ = predictor.predict(
+            point_coords=np.array([[float(x), float(y)]], dtype=np.float64),
+            point_labels=np.array([1]),
+            multimask_output=True,
+        )
+        best_i, best_iou = None, None
+        for i in range(masks.shape[0]):
+            iou = float(iou_preds[i])
+            if best_iou is None or iou > best_iou:
+                best_iou, best_i = iou, i
+        if best_i is None:
+            continue
+        mask = masks[best_i].astype(bool)
+        ys, xs = np.where(mask)
+        if len(ys) == 0:
+            continue
+        bx0, bx1 = int(xs.min()), int(xs.max())
+        by0, by1 = int(ys.min()), int(ys.max())
+        raw.append({"mask": mask, "bbox": (bx0, by0, bx1 - bx0 + 1, by1 - by0 + 1)})
+    predictor.reset_image()
+
+    if not raw:
+        return []
+
+    if blobs:
+        groups = _cohesion_groups(raw, gap=0, blobs=blobs)
+    else:
+        groups = [[i] for i in range(len(raw))]
+
+    out = []
+    for group in groups:
+        if len(group) == 1:
+            mask = raw[group[0]]["mask"]
+            bx, by, bw, bh = raw[group[0]]["bbox"]
+            reason = ""
+        else:
+            mask = raw[group[0]]["mask"].copy()
+            for gi in group[1:]:
+                mask = mask | raw[gi]["mask"]
+            ys, xs = np.where(mask)
+            bx, bx1 = int(xs.min()), int(xs.max())
+            by, by1 = int(ys.min()), int(ys.max())
+            bw, bh = bx1 - bx + 1, by1 - by + 1
+            reason = "motion"
+        area = float(mask.sum()) / (h * w)
+        if area < min_area_frac or area > max_area_frac:
+            continue
+        cx = float(bx) + float(bw) / 2.0
+        cy = float(by) + float(bh) / 2.0
+        appearance = _mask_appearance(mask, feats_grid, n, scale)
+        out.append({"mask": mask, "bbox": (bx, by, bw, bh), "pos": (cx, cy),
+                     "area": area, "appearance": appearance, "emb": None,
+                     "cohesion_reason": reason})
+    return out
+
+
 def _detect_mobilesam(patch_feats, n, img, mask_generator, img_size=224, min_area_frac=0.01,
-                       cohesion_gap_px=None, point_predictor=None):
+                       cohesion_gap_px=None, point_predictor=None, blobs=None):
     """`cohesion_gap_px`（【2026-09-09・凝集性】仕様_物体ファイルの人間寄せ_
     凝集性・連続性・上限）：Noneなら従来どおり（マスク1枚＝検出1件、既定不変）。
     整数を渡すと、端接触・面積の足切りを終えたマスクの bbox を `cohesion_gap_px`
@@ -456,7 +599,7 @@ def _detect_mobilesam(patch_feats, n, img, mask_generator, img_size=224, min_are
         kept.append(m)
 
     if cohesion_gap_px is not None and len(kept) > 1:
-        groups = _cohesion_groups(kept, int(cohesion_gap_px))
+        groups = _cohesion_groups(kept, int(cohesion_gap_px), blobs=blobs)
     else:
         groups = [[i] for i in range(len(kept))]
 
@@ -480,22 +623,10 @@ def _detect_mobilesam(patch_feats, n, img, mask_generator, img_size=224, min_are
             cx = float(xs.mean())
             cy = float(ys.mean())
             area = float(seg.sum()) / (h * w)
-        # マスクの範囲に半分以上重なるDINOv2のマスだけを、この物体の見た目とする（従来どおり）
-        patch_ids = []
-        for i in range(n):
-            y0, y1 = int(i * scale), int((i + 1) * scale)
-            for j in range(n):
-                x0, x1 = int(j * scale), int((j + 1) * scale)
-                cell = seg[y0:y1, x0:x1]
-                if cell.size and cell.mean() >= 0.5:
-                    patch_ids.append((i, j))
-        if patch_ids:
-            v = np.mean([feats_grid[i, j] for i, j in patch_ids], axis=0)
-        else:
-            # マスクが1マスより小さいときは中心座標に一番近いマスで代用
-            i = min(max(int(cy / scale), 0), n - 1)
-            j = min(max(int(cx / scale), 0), n - 1)
-            v = feats_grid[i, j]
+        # マスクの範囲に半分以上重なるDINOv2のマスだけを、この物体の見た目とする（従来どおり）。
+        # 【2026-09-09・仕様_見る側の段構成】segment_at_pointsと共用するため
+        #   _mask_appearance に切り出した（新しい計算は作らない・計算式は不変）。
+        v = _mask_appearance(seg, feats_grid, n, scale, cx=cx, cy=cy)
         det = {"pos": (cx, cy), "area": area, "appearance": v}
         if emb_np is not None:
             # 【追記3「直し」1節】confirm_points と同じやり方（マスクを埋め込み

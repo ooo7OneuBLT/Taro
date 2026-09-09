@@ -968,6 +968,18 @@ class Trainer:
         z_hearing = obs.get("z_hearing")
         z_body = obs.get("z_body")
 
+        # 【2026-09-09・仕様_見る側の段構成_実装 6節】驚きの計算への受け口。
+        #   moving（段0：目が動いている最中）または、注意の切り替え直後
+        #   switch_refractory_s秒以内は「今起きた変化」を驚きとして数えない
+        #   （遠心性コピー・切り替えの遅れという輪の歯止め）。
+        #   ctx.efferenceが無い（段0無効）・attention_switch_tが無い（段6無効）
+        #   ときはmasked=False固定＝既定不変。
+        _switch_refractory_s = float(wp_cfg.get("switch_refractory_s", 0.0))
+        _eff = getattr(self.ctx, "efference", None)
+        _switch_t = getattr(self.ctx, "attention_switch_t", -1e9)
+        masked = bool((_eff and _eff.get("moving"))
+                       or (self.ctx.sim_sec - _switch_t < _switch_refractory_s))
+
         by_file_result = {}
         z_candidates = []
         z_vec_candidates = []
@@ -984,9 +996,15 @@ class Trainer:
                 #   従来どおりz_state側だけ（z_candidatesはz_stateのみ、下も不変）。
                 "z_vec": d.get("z_vec"),
                 "attended": is_attended,
+                # 【2026-09-09・仕様_見る側の段構成_実装 6節】記録用。元のz_state
+                #   はこのまま残す（マスクするのはz_candidates・surprise_traceだけ）。
+                "masked": masked,
             }
-            if d.get("z_state") is not None:
-                z_candidates.append((d["z_state"], f.id))
+            # 【同6節】maskedのtickはz_stateを0として候補に渡す（z_max・attend_port
+            #   から外す代わり、常に候補には入れる＝0を渡す、が仕様の文言）。
+            z_for_candidate = 0.0 if masked else d.get("z_state")
+            if z_for_candidate is not None:
+                z_candidates.append((z_for_candidate, f.id))
             if d.get("z_vec") is not None:
                 z_vec_candidates.append(d["z_vec"])
             if is_attended:
@@ -1005,7 +1023,9 @@ class Trainer:
         thresh = float(wp_cfg.get("ne_surprise_thresh", 2.0))
         new_trace = {}
         for file_id, d in by_file_result.items():
-            z_state = d["z_state"] if d["z_state"] is not None else 0.0
+            # 【2026-09-09・仕様_見る側の段構成_実装 6節】maskedのtickはz_stateを
+            #   0として渡す（moving中・切り替え直後の偽の驚きを積ませない）。
+            z_state = 0.0 if masked else (d["z_state"] if d["z_state"] is not None else 0.0)
             prev = self._wp_surprise_trace.get(file_id, 0.0)
             new_trace[file_id] = 0.8 * prev + max(0.0, z_state - thresh)
         self._wp_surprise_trace = new_trace

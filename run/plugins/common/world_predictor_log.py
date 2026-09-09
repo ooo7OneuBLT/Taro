@@ -50,8 +50,11 @@ _COLUMNS = ["step", "t_sec", "present", "visible", "vanished", "parent_spoke",
 # 「後半」2節で追加（新奇さ＝見た目の外れ。ports=Trueのときだけ埋まる。他のモードは空欄）。
 
 _BY_FILE_COLUMNS = ["step", "t_sec", "file_id", "attended", "visible",
-                     "vanished", "err_state", "z_state", "z_vec"]
+                     "vanished", "err_state", "z_state", "z_vec", "masked"]
 # z_vec は仕様_M7b-1改4「後半」2節で追加（z_stateの後）。他モードは空欄。
+# masked は仕様_見る側の段構成_実装_2026-09-09.md「後半」6節で追加（末尾）。
+# ctx.world_pred_by_file の各エントリが持つ"masked"をそのまま書く（trainer.py
+# 側でmoving/切り替え直後にTrueになる。段0・段6が無効ならFalse固定＝既定不変）。
 
 
 def _abs_path(p):
@@ -99,6 +102,7 @@ class WorldPredictorLog(Plugin):
                     "attended": d.get("attended"), "visible": d.get("visible"),
                     "vanished": d.get("vanished"), "err_state": d.get("err_state"),
                     "z_state": d.get("z_state"), "z_vec": d.get("z_vec"),
+                    "masked": d.get("masked"),
                 })
 
     def metrics(self, ctx):

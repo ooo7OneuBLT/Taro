@@ -88,6 +88,10 @@ class ObjectFile:
         self.hits = 1            # 対応がついた回数
         self.misses = 0          # 連続して対応がつかなかったコマ数
         self.since_seen = 0      # 直近で対応がついてから何コマ経ったか
+        # 【2026-09-09・仕様_見る側の段構成_実装「後半」段4】確認で一致するたび
+        #   0.9・conf+0.1、外れたら0.9・confのEMA。段4の判定には今回は使わない
+        #   （記録だけ。CSV app_conf列）。既定0.0スタート＝新設カードは無関心。
+        self.appearance_conf = 0.0
         # 【2026-09-09・仕様_物体ファイルの重複をなくす「後半」1節】最後に一致した
         #   （＝実際に見えた）sim時刻。coast_max_s の「最後に一致した時刻から
         #   何秒まで等速で延長するか」の起点。coast_max_s=None（既定）では
@@ -98,8 +102,14 @@ class ObjectFile:
     def pos(self):
         return float(self.x[0]), float(self.x[1])
 
-    def predict(self, t=None, coast_max_s=None, coast_min_speed_px_s=None, frame_dt_s=1.0):
-        """coast_max_s（【2026-09-09・仕様_物体ファイルの重複をなくす「後半」1節】）：
+    def predict(self, t=None, coast_max_s=None, coast_min_speed_px_s=None, frame_dt_s=1.0,
+                shift=None):
+        """shift（【2026-09-09・仕様_見る側の段構成_実装「後半」段0・段3】）：
+        None（既定）＝従来どおり（既定不変）。(dx, dy)（画素）を渡すと、
+        カルマン予測の後に x[0]+=dx, x[1]+=dy を足す（段0＝遠心性コピーの
+        shift_predを渡す。次コマまでに起きる画像のずれの先回り）。
+
+        coast_max_s（【2026-09-09・仕様_物体ファイルの重複をなくす「後半」1節】）：
         Noneなら従来どおり永遠に等速（既定不変）。秒数を渡すと、`misses>0`（隠れて
         いる）かつ「最後に一致した時刻(last_seen_t)からt秒」がcoast_max_sを超えた
         カードは、この呼び出し以降 vx=vy=0 にして位置を止める（Pの増加だけ続く）。
@@ -136,6 +146,9 @@ class ObjectFile:
             raise ValueError("coast_max_s を使うときは t が必須")
         self.x = _F @ self.x
         self.P = _F @ self.P @ _F.T + self.Q
+        if shift is not None:
+            self.x[0] += shift[0]
+            self.x[1] += shift[1]
 
     def innovation_cov(self):
         """観測前の予測から決まるイノベーション共分散 S = H P H^T + R。
@@ -174,6 +187,9 @@ class ObjectFile:
         self.hits += 1
         self.misses = 0
         self.since_seen = 0
+        # 【2026-09-09・仕様_見る側の段構成_実装「後半」段4】確認で一致するたび
+        #   0.9・conf+0.1（記録だけ。段4の判定には使わない）。
+        self.appearance_conf = 0.9 * self.appearance_conf + 0.1
         if t is not None:
             # 【2026-09-09・重複をなくす「後半」1節】実際に一致した＝見えた時刻。
             self.last_seen_t = t
@@ -243,6 +259,10 @@ class ObjectFileSystem:
             構造上ほぼ担保される＝人間側は見ている物が数画素ずれても同じ物と
             扱う、位置の許容は物の大きさに比例という近似）。"mahal"以外・"size"
             以外の値は仕様に無いためValueErrorにする。
+        appearance_gate_cos: 【2026-09-09・仕様_見る側の段構成_実装「後半」段4】
+            ハンガリアン法のコスト行列で、cos(appearance) < appearance_gate_cos
+            の組をコスト1e6にして対応づけを禁止する（見た目が離れすぎている
+            組は結ばない）。None（既定）＝従来どおり（既定不変）。
     """
 
     def __init__(self, appearance_weight=0.4, mahal_gate=MAHAL_GATE95, max_missed=20,
@@ -250,7 +270,7 @@ class ObjectFileSystem:
                  revive_window_s=None, revive_cos=0.8, revive_dist_px=40.0, max_files=None,
                  coast_max_s=None, uncertainty_penalty=0.0, exclusive_dist_px=None,
                  exclusive_cos=0.7, confirm_gate="mahal", exclusive_scale_by_size=False,
-                 coast_min_speed_px_s=None, frame_dt_s=1.0):
+                 coast_min_speed_px_s=None, frame_dt_s=1.0, appearance_gate_cos=None):
         if confirm_gate not in ("mahal", "size"):
             raise ValueError("confirm_gate は 'mahal' か 'size' のどちらか（%r）" % (confirm_gate,))
         self.appearance_weight = float(appearance_weight)
@@ -274,6 +294,8 @@ class ObjectFileSystem:
         self.coast_min_speed_px_s = (None if coast_min_speed_px_s is None
                                       else float(coast_min_speed_px_s))
         self.frame_dt_s = float(frame_dt_s)
+        self.appearance_gate_cos = (None if appearance_gate_cos is None
+                                     else float(appearance_gate_cos))
         self.confirm_gate = confirm_gate
         self.files = []
         self._next_id = 0
@@ -306,18 +328,21 @@ class ObjectFileSystem:
             })
         return victim.id
 
-    def predict_only(self, t=None):
+    def predict_only(self, t=None, shift=None):
         """【2026-09-09・仕様_予測して確かめる検出】確認（confirm）専用：対応づけは
         せず、各ファイルの予測位置だけを1コマぶん進める。`step()` 冒頭の2行
         （`f.predict()`・`f.age += 1`）と同じ処理を切り出しただけで、`step()`
         自体は無改修（既存の呼び出し元の挙動は不変）。呼び出し元（object_files.py）
         が確認用の点プロンプトを作る前に、いまの予測位置 `f.pos` を得るために使う。
         `t` は coast_max_s（重複をなくす「後半」1節）を使うときに必要（Noneなら
-        従来どおり coast_max_s も渡らないので使われない＝既定不変）。"""
+        従来どおり coast_max_s も渡らないので使われない＝既定不変）。
+        `shift`（【2026-09-09・仕様_見る側の段構成_実装「後半」段0・段3】）：
+        None（既定）＝従来どおり（既定不変）。(dx, dy)を渡すと`ObjectFile.predict`
+        にそのまま渡る（段0の`shift_pred`）。"""
         for f in self.files:
             f.predict(t=t, coast_max_s=self.coast_max_s,
                       coast_min_speed_px_s=self.coast_min_speed_px_s,
-                      frame_dt_s=self.frame_dt_s)
+                      frame_dt_s=self.frame_dt_s, shift=shift)
             f.age += 1
 
     def confirm_update(self, results, t=None):
@@ -388,6 +413,7 @@ class ObjectFileSystem:
                 gate_rejected.append(f.id)
             f.misses += 1
             f.since_seen += 1
+            f.appearance_conf *= 0.9
 
         lost = [f.id for f in self.files if f.misses > self.max_missed]
         if lost:
@@ -405,9 +431,10 @@ class ObjectFileSystem:
 
         self.last_revived = []
         return {"matched": matched, "created": [], "revived": [], "lost": lost,
-                "prediction_violations": [], "absorbed": [], "gate_rejected": gate_rejected}
+                "prediction_violations": [], "absorbed": [], "gate_rejected": gate_rejected,
+                "individuated": []}
 
-    def step(self, detections, t=None, protect_id=None, skip_predict=False):
+    def step(self, detections, t=None, protect_id=None, skip_predict=False, shift=None):
         """detections = [{"pos": (x,y), "area": float, "appearance": vec}, ...]（1コマぶん）。
         `t`（sim秒。連続性の墓場の期限管理に使う）と `protect_id`（注意中の
         file_id。枚数の上限で押し出さない）は任意引数（省略すれば従来どおり）。
@@ -424,17 +451,25 @@ class ObjectFileSystem:
                    予測とのずれが mahal_gate を超えたもの＝見た目で救われた組）,
                   absorbed=[(det_idx, file_id), ...]（【2026-09-09・重複をなくす
                   「後半」3節】固体性：既存カードに吸収された検出。exclusive_dist_px
-                  がNone（既定）なら常に空リスト＝既定不変）
+                  がNone（既定）なら常に空リスト＝既定不変）,
+                  individuated=[file_id,...]（【2026-09-09・仕様_見る側の段構成_
+                  実装「後半」段4】位置は既存カードのexclusive_dist_px以内に
+                  あるのに見た目が exclusive_cos 未満で吸収されず、新規作成に
+                  回った件。exclusive_dist_px・exclusive_cos がNone（既定）なら
+                  常に空リスト＝既定不変）
         `skip_predict`（【2026-09-09・仕様_予測して確かめる検出「追記」3節】）：
             Trueなら冒頭の predict() を飛ばす（呼び出し元が `predict_only()` で
             既に1コマぶん進めている確認(confirm)コマ用。1コマにpredict()が
             2回進むのを防ぐ）。既定False＝従来どおり（既定不変）。
+        `shift`（【2026-09-09・仕様_見る側の段構成_実装「後半」段0・段3】）：
+            None（既定）＝従来どおり（既定不変）。skip_predict=Trueのときは
+            使われない（predict()自体を呼ばないため）。
         """
         if not skip_predict:
             for f in self.files:
                 f.predict(t=t, coast_max_s=self.coast_max_s,
                           coast_min_speed_px_s=self.coast_min_speed_px_s,
-                          frame_dt_s=self.frame_dt_s)
+                          frame_dt_s=self.frame_dt_s, shift=shift)
                 f.age += 1
 
         n_f, n_d = len(self.files), len(detections)
@@ -460,8 +495,14 @@ class ObjectFileSystem:
                     pos_cost = (mahal + penalty) / self.mahal_gate  # 上限で切り詰めない
                     av = d["appearance"] / (np.linalg.norm(d["appearance"]) + 1e-9)
                     fv = f.appearance / (np.linalg.norm(f.appearance) + 1e-9)
-                    app_cost = 1.0 - float(av @ fv)
+                    cos_af = float(av @ fv)
+                    app_cost = 1.0 - cos_af
                     cost[i, j] = (1 - self.appearance_weight) * pos_cost + self.appearance_weight * app_cost
+                    if self.appearance_gate_cos is not None and cos_af < self.appearance_gate_cos:
+                        # 【2026-09-09・仕様_見る側の段構成_実装「後半」段4】
+                        #   見た目が離れすぎている組は対応づけを禁止する
+                        #   （コストを実質無限大にしてハンガリアン法から外す）。
+                        cost[i, j] = 1e6
             ri, ci = linear_sum_assignment(cost)
             used_f, used_d = set(), set()
             for i, j in zip(ri, ci):
@@ -479,11 +520,17 @@ class ObjectFileSystem:
         for i in unmatched_f:
             self.files[i].misses += 1
             self.files[i].since_seen += 1
+            self.files[i].appearance_conf *= 0.9
 
         # ---- 固体性：既存カードに近い検出は新規作成せず吸収する（重複をなくす
         #      「後半」3節。exclusive_dist_pxがNoneなら従来どおり何もしない＝
         #      既定不変）。新規作成（revive含む）の前に行う。 ---------------------
         absorbed = []
+        # 【2026-09-09・仕様_見る側の段構成_実装「後半」段4】位置は既存カードの
+        #   exclusive_dist_px以内にあるのに見た目(exclusive_cos)で吸収されなかった
+        #   検出のインデックス。後で実際に新規作成されたものだけ"individuated"
+        #   として報告する（作られずrevive等に回れば個体化ではない）。
+        individuated_dets = set()
         if self.exclusive_dist_px is not None and unmatched_d:
             still_remaining = []
             for j in unmatched_d:
@@ -491,6 +538,7 @@ class ObjectFileSystem:
                 dv = np.asarray(d["appearance"], dtype=np.float64)
                 dv_n = dv / (np.linalg.norm(dv) + 1e-9)
                 best_f, best_dist = None, None
+                pos_near_but_appearance_failed = False
                 for f in self.files:
                     dist = float(np.hypot(d["pos"][0] - f.pos[0], d["pos"][1] - f.pos[1]))
                     thresh = self.exclusive_dist_px
@@ -509,6 +557,7 @@ class ObjectFileSystem:
                         fv = f.appearance / (np.linalg.norm(f.appearance) + 1e-9)
                         cos = float(dv_n @ fv)
                         if cos < self.exclusive_cos:
+                            pos_near_but_appearance_failed = True
                             continue
                     if best_dist is None or dist < best_dist:
                         best_f, best_dist = f, dist
@@ -517,6 +566,8 @@ class ObjectFileSystem:
                     absorbed.append((j, best_f.id))
                 else:
                     still_remaining.append(j)
+                    if pos_near_but_appearance_failed:
+                        individuated_dets.add(j)
             unmatched_d = still_remaining
 
         # ---- 連続性：墓場の期限切れを捨てる（revive_window_sがNoneなら墓場は空のまま）----
@@ -566,6 +617,7 @@ class ObjectFileSystem:
         # ---- 新規作成（枚数の上限：max_filesがNoneなら従来どおり無制限）----------
         created = []
         evicted = []
+        individuated = []
         for j in remaining_d:
             d = detections[j]
             ev = self._make_room(protect_id, t)
@@ -576,6 +628,8 @@ class ObjectFileSystem:
             self._next_id += 1
             self.files.append(nf)
             created.append(nf.id)
+            if j in individuated_dets:
+                individuated.append(nf.id)
 
         lost = [f.id for f in self.files if f.misses > self.max_missed]
         if lost:
@@ -595,4 +649,5 @@ class ObjectFileSystem:
         self.last_revived = revived
 
         return {"matched": matched, "created": created, "revived": revived,
-                "lost": lost, "prediction_violations": violations, "absorbed": absorbed}
+                "lost": lost, "prediction_violations": violations, "absorbed": absorbed,
+                "individuated": individuated}
