@@ -75,7 +75,18 @@ class PriorityMap:
                                + self.w_nov * z_vec + gbonus
                                - self.w_ior * ior_term - self.w_hab * hab_term)
 
+        # 【2026-09-09・追記2「直し」】旧作りは「別のカードが今のカードを一定
+        # 以上上回る状態が switch_delay_s 秒続いたとき」に切り替えていた（毎回
+        # best_id が変わると数え直し）。Horstmannの約400msは「出来事が起きて
+        # から目が動き始めるまでの遅れ」であり「勝ち続けないと移れない」では
+        # ないため、ユーザーの問いを機に「上回った瞬間に決める。実際に移るのは
+        # その switch_delay_s 秒後」という待ち行列に変えた。決めたあとに候補が
+        # 変わっても決定は取り消さない（最後に決めた相手へ移る＝pending_bestを
+        # 新しい決定で上書きするだけで、タイマーは新しい決定のtからやり直す）。
+        # ヒステリシスは残す（ちらつき止め）。今の対象が候補から消えたとき・
+        # 注意が無いときは従来どおり即時（上のelif分岐のまま、変更なし）。
         switch_signal = False
+        switch_decided = False
         best_id = max(priority, key=lambda i: priority[i]) if priority else None
 
         if moving:
@@ -91,25 +102,26 @@ class PriorityMap:
                 switch_signal = True
                 self._pending_best = None
                 self._pending_since_t = None
-        elif best_id is not None and best_id != self._current_id:
-            cur_p = priority.get(self._current_id, float("-inf"))
-            if priority[best_id] - cur_p > self.hysteresis:
-                if self._pending_best != best_id:
-                    self._pending_best = best_id
-                    self._pending_since_t = t
+        else:
+            # 上回った瞬間に「決める」（新しい候補が現在の最上位と入れ替わる
+            # たびに、最後に決めた相手として pending_best を更新する）。
+            if best_id is not None and best_id != self._current_id:
+                cur_p = priority.get(self._current_id, float("-inf"))
+                if priority[best_id] - cur_p > self.hysteresis:
+                    if self._pending_best != best_id:
+                        self._pending_best = best_id
+                        self._pending_since_t = t
+                        switch_decided = True
+            # 決めたあとは、候補が変わっても・元に戻っても取り消さない。
+            # switch_delay_s 秒経ったら、最後に決めた相手へ実際に移る。
+            if self._pending_best is not None and self._pending_since_t is not None:
                 if (t - self._pending_since_t) >= self.switch_delay_s:
                     self._last_attended_t[self._current_id] = t
-                    self._current_id = best_id
-                    self._hab_start_t[best_id] = t
+                    self._current_id = self._pending_best
+                    self._hab_start_t[self._current_id] = t
                     switch_signal = True
                     self._pending_best = None
                     self._pending_since_t = None
-            else:
-                self._pending_best = None
-                self._pending_since_t = None
-        else:
-            self._pending_best = None
-            self._pending_since_t = None
 
         explore_point = self._compute_explore(files, static_sal, t)
 
@@ -117,6 +129,7 @@ class PriorityMap:
                for fid, lt in self._last_attended_t.items()}
 
         return {"attended_id": self._current_id, "switch_signal": switch_signal,
+                "switch_decided": switch_decided,
                 "priority": priority, "explore_point": explore_point, "ior": ior}
 
     def _compute_explore(self, files, static_sal, t):

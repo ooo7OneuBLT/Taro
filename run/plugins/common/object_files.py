@@ -528,6 +528,10 @@ class ObjectFiles(Plugin):
                 "ec_res_noshift": onset_extra.get("ec_res_noshift", ""),
                 "ec_moving": onset_extra.get("ec_moving", ""),
                 "cohesion": cohesion,
+                # 【2026-09-09・追記1「直し」3】当て付きの点の数／当てに合う
+                #   大きさが無くて捨てた点の数。
+                "n_points_expect": onset_extra.get("n_points_expect", ""),
+                "n_reject_scale": onset_extra.get("n_reject_scale", ""),
             })
 
     def _detect_frame(self, ctx, img224, t, protect_id):
@@ -557,7 +561,10 @@ class ObjectFiles(Plugin):
 
         t0 = time.perf_counter()
         onset_extra = {"n_points": "", "n_blobs": "", "n_unexplained": "",
-                        "ec_res_shift": "", "ec_res_noshift": "", "ec_moving": ""}
+                        "ec_res_shift": "", "ec_res_noshift": "", "ec_moving": "",
+                        # 【2026-09-09・追記1「直し」3】最初のコマ("first")は
+                        #   segment_at_pointsを通らないので空文字のまま（既定不変）。
+                        "n_points_expect": "", "n_reject_scale": ""}
 
         # ---- 0. 遠心性コピー（無効ならshift=(0,0)・moving=False） --------------
         eff = getattr(ctx, "efference", None) or {}
@@ -604,11 +611,15 @@ class ObjectFiles(Plugin):
         self.ofs.predict_only(t, shift=shift_pred)
 
         # ---- 3. 点を集める -------------------------------------------------------
+        # 【2026-09-09・追記1「直し」1】各点に「このくらいの大きさのはず」の
+        #   当て（expect_area、面積比0-1・無ければNone）を付ける
+        #   （segment_at_pointsのマスク選びの手がかり。カードの予測位置は
+        #   そのカードの面積、動きの塊はその塊の面積比、探索点は当てが無い）。
         points = []
-        # 3a. カードの予測位置（misses に関わらず全カード）
+        # 3a. カードの予測位置（misses に関わらず全カード）：当て＝f.area
         for f in self.ofs.files:
-            points.append(f.pos)
-        # 3b. onset：misses==0のカードの予測bboxに重心が入らない塊
+            points.append({"pos": f.pos, "expect_area": max(float(f.area), 0.0)})
+        # 3b. onset：misses==0のカードの予測bboxに重心が入らない塊：当て＝塊の面積比
         unexplained = []
         for b in pre_res["blobs"]:
             cx, cy = b["cx"], b["cy"]
@@ -625,24 +636,32 @@ class ObjectFiles(Plugin):
                 unexplained.append(b)
         onset_extra["n_unexplained"] = len(unexplained)
         for b in unexplained:
-            points.append((b["cx"], b["cy"]))
-        # 3c. 前コマの探索点（あれば）
+            bx, by, bw, bh = b["bbox"]
+            blob_area = (float(bw) * float(bh)) / (224.0 * 224.0)
+            points.append({"pos": (b["cx"], b["cy"]), "expect_area": blob_area})
+        # 3c. 前コマの探索点（あれば）：当て無し（None）
         if self._prev_explore_point is not None:
-            points.append(self._prev_explore_point)
+            points.append({"pos": self._prev_explore_point, "expect_area": None})
         onset_extra["n_points"] = len(points)
 
         # ---- 4. 集めた点をSAMに1回だけ渡して切り出す -----------------------------
         dets = []
+        n_points_expect = 0
+        n_reject_scale = 0
         if points:
             p, n = self._patch_features(self._model, img224, self.device)
             pp = self._get_point_predictor()
-            dets = self._segment_at_points(pp, img224, points, p, n,
-                                            blobs=pre_res["blobs"])
+            dets, seg_stats = self._segment_at_points(pp, img224, points, p, n,
+                                                        blobs=pre_res["blobs"])
+            n_points_expect = seg_stats.get("n_points_expect", 0)
+            n_reject_scale = seg_stats.get("n_reject_scale", 0)
             if self.empty_cache_after_detect:
                 import torch
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
         onset_extra["new_dets"] = dets
+        onset_extra["n_points_expect"] = n_points_expect
+        onset_extra["n_reject_scale"] = n_reject_scale
 
         # ---- 5. 全部まとめて1つの照合にかける -----------------------------------
         res = self.ofs.step(dets, t=t, protect_id=protect_id, skip_predict=True)
@@ -980,10 +999,15 @@ class ObjectFiles(Plugin):
         # 【2026-09-09・仕様_見る側の段構成_実装 5節】priority/switch/explore_x/
         #   explore_y/ior列。priority無効時は空文字のまま＝既定不変。
         priority_v = switch_v = explore_x_v = explore_y_v = ior_v = ""
+        # 【2026-09-09・追記2「直し」3】switch_decided＝このコマで新しく
+        #   切り替えを「決めた」か（実際に移るのは switch_delay_s 秒後・
+        #   switch列のまま）。priority無効時は空文字のまま＝既定不変。
+        switch_decided_v = ""
         if priority_result is not None:
             priority_v = round(priority_result["priority"].get(self._attended_id, 0.0), 6) \
                 if self._attended_id is not None else ""
             switch_v = switch_signal
+            switch_decided_v = bool(priority_result.get("switch_decided", False))
             ep = priority_result.get("explore_point")
             if ep is not None:
                 explore_x_v, explore_y_v = round(ep[0], 2), round(ep[1], 2)
@@ -999,6 +1023,7 @@ class ObjectFiles(Plugin):
             "target_word": target_word, "target_cos": target_cos,
             "priority": priority_v, "switch": switch_v,
             "explore_x": explore_x_v, "explore_y": explore_y_v, "ior": ior_v,
+            "switch_decided": switch_decided_v,
         })
 
     def metrics(self, ctx):
@@ -1028,7 +1053,10 @@ class ObjectFiles(Plugin):
                            #   確認専用の診断列(conf_iou等)・app_confは廃止（中5）。
                            #   代わりにn_points（段3で集めた点の数）を足す。
                            "n_points", "n_blobs", "n_unexplained", "ec_res_shift",
-                           "ec_res_noshift", "ec_moving", "cohesion"])
+                           "ec_res_noshift", "ec_moving", "cohesion",
+                           # 【2026-09-09・追記1「直し」3】当て付きの点の数／
+                           #   当てに合う大きさが無くて捨てた点の数。
+                           "n_points_expect", "n_reject_scale"])
                 for r in self.rows:
                     w.writerow([r["step"], r["sim_time"], r["n_dets"], r["n_files"],
                                r["file_id"], r["x"], r["y"], r["area"], r["event"],
@@ -1036,7 +1064,8 @@ class ObjectFiles(Plugin):
                                r["mode"], r.get("n_points", ""), r.get("n_blobs", ""),
                                r.get("n_unexplained", ""),
                                r.get("ec_res_shift", ""), r.get("ec_res_noshift", ""),
-                               r.get("ec_moving", ""), r.get("cohesion", "")])
+                               r.get("ec_moving", ""), r.get("cohesion", ""),
+                               r.get("n_points_expect", ""), r.get("n_reject_scale", "")])
         if self.attend_rows and self.attend_out:
             os.makedirs(os.path.dirname(self.attend_out) or ".", exist_ok=True)
             with open(self.attend_out, "w", newline="", encoding="utf-8") as fp:
@@ -1046,13 +1075,17 @@ class ObjectFiles(Plugin):
                            "nearest_cos", "target_word", "target_cos",
                            # 【2026-09-09・仕様_見る側の段構成_実装 5節】末尾に追加した列
                            #（priority無効時は空文字。既存列は変えない＝追加のみ）。
-                           "priority", "switch", "explore_x", "explore_y", "ior"])
+                           "priority", "switch", "explore_x", "explore_y", "ior",
+                           # 【2026-09-09・追記2「直し」3】決めたコマ（実際に移った
+                           #   コマは従来どおりswitch列）。
+                           "switch_decided"])
                 for r in self.attend_rows:
                     w.writerow([r["step"], r["sim_time"], r["attended_id"], r["visible"],
                                r["misses"], r["vanished"], r["dist_center"], r["area"],
                                r["nearest_word"], r["nearest_cos"], r["target_word"],
                                r["target_cos"], r.get("priority", ""), r.get("switch", ""),
-                               r.get("explore_x", ""), r.get("explore_y", ""), r.get("ior", "")])
+                               r.get("explore_x", ""), r.get("explore_y", ""), r.get("ior", ""),
+                               r.get("switch_decided", "")])
         return {
             "検出回数": self._detect_n,
             "処理ms_平均": (round(self._detect_ms_sum / self._detect_n, 2)

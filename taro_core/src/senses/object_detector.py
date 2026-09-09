@@ -310,13 +310,30 @@ def segment_at_points(predictor, img224, points, patch_feats, n, img_size=224,
     同じマスクを指す複数の点（例：カードの予測位置と探索点が同じ物に当たった）
     は`_dedup_masks`で1枚にまとめる。
 
+    【2026-09-09・追記1「直し」】SAMは1点につき部品/物/場面の3段階マスクを
+    返し、これまでは常にSAM自身の自信（iou_pred）が最大のものを選んでいた。
+    小さい物の上の点でも自信最大は場面ぜんたいのマスクであることが多く、
+    それは端に届くので背景の足切りで捨てられ、結果を何も返さない事故が
+    起きた（F2-107pre実測：n_dets平均0.52）。直しは「採るべき大きさの当て」
+    を点ごとに渡すこと。`points` の各要素は `{"pos": (x, y),
+    "expect_area": float|None}`。
+      - `expect_area` があるとき：3段階のマスクのうち、端に届かないものの中で
+        面積比が `expect_area` に最も近いものを選ぶ。ただし
+        `0.5 <= 面積/expect_area <= 2.0` を満たすものが1枚も無ければ、
+        その点は捨てる（`n_reject_scale` として数える）。
+      - `expect_area` が None のとき：`min_area_frac`〜`max_area_frac` に
+        入るもののうち面積が最大のものを選ぶ（従来の探索点の扱いに近い）。
+
     Args:
         predictor: `make_point_predictor()` で得た `SamPredictor`。
         img224: (224, 224, 3) の uint8 RGB画像。
-        points: [(x, y), ...] 切り出したい座標（img224の画素基準）。
+        points: `[{"pos": (x, y), "expect_area": float|None}, ...]`
+            切り出したい座標（img224の画素基準）と、そこにあるはずの
+            大きさの当て（画面全体に対する面積比。無ければNone）。
         patch_feats, n: `patch_features()` の戻り値（見た目ベクトル計算用）。
-        min_area_frac, max_area_frac: 採用するマスクの面積比の範囲
-            （範囲外は捨てる）。
+        min_area_frac, max_area_frac: `expect_area` が None の点に使う
+            採用面積比の範囲（範囲外は捨てる）。`expect_area` がある点には
+            使わない（上記の比 0.5〜2.0 判定を使う）。
         blobs: 段1の`blobs`（各要素に"bbox"を持つ）。Noneなら凝集しない。
             渡すと`_cohesion_groups`で「同じblobに入る点から出たマスクは
             1つの物」としてまとめる（仕様3節「共通運動の凝集」）。
@@ -325,46 +342,86 @@ def segment_at_points(predictor, img224, points, patch_feats, n, img_size=224,
         emb`）。`emb`は常にNone（点プロンプトのMobileSAM埋め込みは計算しない
         ＝仕様に無かった判断。`ObjectFile.emb`は次の見回りで埋まる）。
         `cohesion_reason`は"motion"（同じblobでまとめられた）または""。
+        `n_points_expect`・`n_reject_scale`（呼び出し側のCSV記録用）は検出
+        リストにはぶら下げず、`(dets, stats)` のタプルの2つめとして返す
+        （`stats = {"n_points_expect": int, "n_reject_scale": int}`）。
     """
     img224 = np.asarray(img224)
     h, w = img224.shape[0], img224.shape[1]
     feats_grid = patch_feats.reshape(n, n, -1)
     scale = img_size / n
+    total_px = float(h * w)
+
+    n_points_expect = 0
+    n_reject_scale = 0
 
     predictor.set_image(img224)
     raw = []
-    for (x, y) in points:
+    for p in points:
+        x, y = p["pos"]
+        expect_area = p.get("expect_area")
         masks, iou_preds, _ = predictor.predict(
             point_coords=np.array([[float(x), float(y)]], dtype=np.float64),
             point_labels=np.array([1]),
             multimask_output=True,
         )
-        best_i, best_iou = None, None
+        # 【2026-09-09・追記1「直し」2】候補ごとに端接触を先に足切りし、
+        # そのうえで当ての有無に応じて選び方を変える（規則は1つ：
+        # 「当てがあれば面積が最も近いもの、無ければ許容範囲内で最大」）。
+        candidates = []
         for i in range(masks.shape[0]):
-            iou = float(iou_preds[i])
-            if best_iou is None or iou > best_iou:
-                best_iou, best_i = iou, i
-        if best_i is None:
+            mask_i = masks[i].astype(bool)
+            ys, xs = np.where(mask_i)
+            if len(ys) == 0:
+                continue
+            bx0, bx1 = int(xs.min()), int(xs.max())
+            by0, by1 = int(ys.min()), int(ys.max())
+            bbox_i = (bx0, by0, bx1 - bx0 + 1, by1 - by0 + 1)
+            if _mask_touches_edge(bbox_i, w, h):
+                continue
+            area_i = float(mask_i.sum()) / total_px
+            candidates.append({"mask": mask_i, "bbox": bbox_i, "area": area_i})
+        if not candidates:
             continue
-        mask = masks[best_i].astype(bool)
-        ys, xs = np.where(mask)
-        if len(ys) == 0:
-            continue
-        bx0, bx1 = int(xs.min()), int(xs.max())
-        by0, by1 = int(ys.min()), int(ys.max())
-        bbox = (bx0, by0, bx1 - bx0 + 1, by1 - by0 + 1)
-        if _mask_touches_edge(bbox, w, h):
-            # 【2026-09-09・道を1本にする 後半1節（中3）】背景の足切り。
-            continue
-        raw.append({"mask": mask, "bbox": bbox})
+
+        if expect_area is not None:
+            n_points_expect += 1
+            best = None
+            best_diff = None
+            for c in candidates:
+                if expect_area <= 0:
+                    continue
+                ratio = c["area"] / expect_area
+                if ratio < 0.5 or ratio > 2.0:
+                    continue
+                diff = abs(c["area"] - expect_area)
+                if best_diff is None or diff < best_diff:
+                    best_diff, best = diff, c
+            if best is None:
+                n_reject_scale += 1
+                continue
+        else:
+            best = None
+            best_area = None
+            for c in candidates:
+                if c["area"] < min_area_frac or c["area"] > max_area_frac:
+                    continue
+                if best_area is None or c["area"] > best_area:
+                    best_area, best = c["area"], c
+            if best is None:
+                continue
+
+        raw.append({"mask": best["mask"], "bbox": best["bbox"]})
     predictor.reset_image()
 
+    stats = {"n_points_expect": n_points_expect, "n_reject_scale": n_reject_scale}
+
     if not raw:
-        return []
+        return [], stats
 
     raw = _dedup_masks(raw)
     if not raw:
-        return []
+        return [], stats
 
     if blobs:
         groups = _cohesion_groups(raw, gap=0, blobs=blobs)
@@ -395,7 +452,7 @@ def segment_at_points(predictor, img224, points, patch_feats, n, img_size=224,
         out.append({"mask": mask, "bbox": (bx, by, bw, bh), "pos": (cx, cy),
                      "area": area, "appearance": appearance, "emb": None,
                      "cohesion_reason": reason})
-    return out
+    return out, stats
 
 
 def _detect_mobilesam(patch_feats, n, img, mask_generator, img_size=224, min_area_frac=0.01,
