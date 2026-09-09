@@ -2,21 +2,23 @@
 """物体ファイル（`物体ファイル.csv`）の枚数・分裂・寿命を集計する。
 
 【仕様】F/docs/二語文/仕様_物体ファイルの人間寄せ_凝集性・連続性・上限_2026-09-09.md
-「後半」3節、および仕様_予測して確かめる検出_2026-09-09「後半」3節（mode列の追加分）・
-追記3「直し」3節（conf_iou/conf_area_ratio/conf_emb_cosの分布）。
+「後半」3節、および仕様_見る側_道を1本にする_2026-09-09.md「後半」6節
+（conf_*集計の廃止・mode列のframe/first一本化・n_pointsの平均を追加）。
 
 引数：ログディレクトリ（例 F/logs/F2-100pre_物体ファイル人間寄せ_短い走行）。
 
 【読むだけ】<ログディレクトリ>/物体ファイル.csv（`run/plugins/common/object_files.py`
   が書く。列：step, sim_time, n_dets, n_files, file_id, x, y, area, event,
-  misses, since_seen, app_cos_created, mode）。mode列が無い旧形式のCSVでも
-  読めるようにする（無ければ全行"scan"扱い＝旧ログとの互換）。
+  misses, since_seen, app_cos_created, mode, n_points, ...）。mode列が無い
+  旧形式のCSVでも読めるようにする（無ければ全行"scan"扱い＝旧ログとの互換）。
   <ログディレクトリ>/run.csv（あれば）。mode別の処理時間
-  （object_files_confirm_ms・object_files_scan_ms 列）を平均する。
+  （object_files_confirm_ms・object_files_scan_ms 列）を平均する
+  （道を1本にした後の走行ではこの2列自体が出ないためNoneのまま）。
 
 【出す数値】
   1. 同時カード数（n_files）の平均・最大（検出コマ単位。同じstepの行は同じ
-     n_files を持つので、step単位で重複を除いて平均する）
+     n_files を持つので、step単位で重複を除いて平均する）。合わせてn_points
+     （段3で集めた点の数）の平均も出す。
   2. 検出で確認中（misses==0）の平均枚数（検出コマごとに event が
      matched/created/revived の行数を数え、その平均。misses==0はこの3イベント
      に限られるので同値）
@@ -25,12 +27,13 @@
   5. カードの寿命の中央値（sim_time単位）＝file_idごとに最初の
      created/revived から、その後の lost までの sim_time差。lostが無い
      （ログ末尾でまだ生きている）file_idは打ち切りなので中央値の計算から除く
-  6.【新設・予測して確かめる検出】mode別の検出コマ件数
-     （confirm/scan/scan_change/scan_miss/scan_empty）
-  7.【新設】見失い率＝確認コマ(mode=="confirm")でのunmatchedの行数の合計
-     ÷確認コマでのn_filesの合計（＝確認したカードの延べ枚数）
-  8.【新設】mode別の処理時間の平均（run.csvのobject_files_confirm_ms・
-     object_files_scan_ms列の非空値平均。run.csvが無い/列が無ければNone）
+  6. mode別の検出コマ件数（道を1本にした後は"frame"／最初のコマだけ"first"。
+     旧ログでは confirm/scan/scan_change/scan_miss/scan_empty/onset/explore
+     も出る）
+  7. 見失い率＝検出コマ(mode=="frame"。旧confirmに相当)でのunmatchedの行数の
+     合計÷検出コマでのn_filesの合計（＝確認したカードの延べ枚数）
+  8. mode別の処理時間の平均（run.csvのobject_files_confirm_ms・
+     object_files_scan_ms列の非空値平均。列が無ければNone）
 
 【出力】<ログディレクトリ>/結果_物体ファイル.json（他のf8x/f9x出力と名前が
   衝突しないよう「物体ファイル」を付ける）
@@ -66,15 +69,22 @@ def main(log_dir):
 
     # ---- 1. 同時カード数（n_files）の平均・最大：検出コマ（step）単位 --------
     n_files_by_step = {}
+    # 【2026-09-09・仕様_見る側_道を1本にする 後半1節】n_points（段3で集めた
+    #   点の数）の平均。n_points列が無い旧ログでは空のまま（互換）。
+    n_points_by_step = {}
     for r in rows:
         step = _to_int(r["step"])
         nf = _to_int(r["n_files"])
-        if step is None or nf is None:
-            continue
-        n_files_by_step[step] = nf   # 同じstepの行は同じn_filesのはず（上書きでよい）
+        if step is not None and nf is not None:
+            n_files_by_step[step] = nf   # 同じstepの行は同じn_filesのはず（上書きでよい）
+        npv = _to_int(r.get("n_points"))
+        if step is not None and npv is not None:
+            n_points_by_step[step] = npv
     n_files_vals = list(n_files_by_step.values())
     n_files_mean = round(sum(n_files_vals) / len(n_files_vals), 3) if n_files_vals else None
     n_files_max = max(n_files_vals) if n_files_vals else None
+    n_points_vals = list(n_points_by_step.values())
+    n_points_mean = round(sum(n_points_vals) / len(n_points_vals), 3) if n_points_vals else None
 
     # ---- 2・3. 検出コマごとの matched+created+revived の件数 -----------------
     confirmed_events = {"matched", "created", "revived"}
@@ -144,20 +154,24 @@ def main(log_dir):
     for m in mode_by_step.values():
         mode_counts[m] = mode_counts.get(m, 0) + 1
 
-    # ---- 7. 見失い率：確認コマ(mode=="confirm")で「直前に見えていた
-    #      （misses==0）カード」のうち、外れた(unmatched)割合 -----------------
+    # ---- 7. 見失い率：検出コマ(mode=="frame"。旧mode=="confirm"に相当)で
+    #      「直前に見えていた（misses==0）カード」のうち、外れた(unmatched)割合
+    # ---------------------------------------------------------------------------
+    # 【2026-09-09・仕様_見る側_道を1本にする】検出コマの処理が1本化された
+    #   （旧confirm/scan/scan_change/scan_miss/onset/explore →
+    #   frame・最初のコマだけfirst）ので、判定はmode=="frame"に一本化する
+    #   （毎コマ既存カードとの照合が起きる点は旧confirmと同じ）。
     # 【2026-09-09・追記「直し」2】隠れた物の確認の失敗（misses>0のカードが
     #   もう一度外れる）は正しい結果であり見失いではない。分母を「直前misses==0
     #   だったカード」に絞る。unmatched行のmisses列は増加後の値（従来必ず+1ずつ
     #   増える）なので misses_after-1 が直前値。matched行はmisses=0（更新後）
     #   なので、直前値を知るには履歴（file_idごとの前回misses）をたどる必要が
     #   ある（rowsをstep順にたどりながら追跡する）。
-    confirm_steps = [s for s, m in mode_by_step.items() if m == "confirm"]
+    confirm_steps = [s for s, m in mode_by_step.items() if m == "frame"]
     confirm_steps_set = set(confirm_steps)
 
-    # 【2026-09-09・追記3「直し」3節】conf_*分布の「注意中」判定に使う
-    #   (step -> attended_id)。注意.csvが無い（attend=False）走行では空のまま
-    #   （conf_dist_attendedは常に空＝そのまま出力される）。
+    # 【2026-09-09・道を1本にする】「注意中」判定に使う(step -> attended_id)。
+    #   注意.csvが無い（attend=False）走行では空のまま。
     attended_by_step = {}
     attend_csv_path = os.path.join(log_dir, "注意.csv")
     # 【2026-09-09・仕様_見る側の段構成_実装 7節】札の混入率＝attended_idごとに
@@ -190,15 +204,6 @@ def main(log_dir):
     _last_misses = {}
     confirm_denom = 0
     confirm_unmatched = 0
-    # 【追記3「直し」3節】注意中かつ直前まで見えていたカード／注意外のカードの
-    #   conf_iou・conf_area_ratio・conf_emb_cosをそれぞれ集める。
-    conf_attended = {"conf_iou": [], "conf_area_ratio": [], "conf_emb_cos": []}
-    conf_other = {"conf_iou": [], "conf_area_ratio": [], "conf_emb_cos": []}
-    # 【2026-09-09・追記4「直し」4節】確認が落ちた理由（iou/area/emb/gate/dedup/
-    #   空＝採用）の件数を、注意中（直前まで見えていた）／注意外で別に数える。
-    #   conf_reject列が無い旧ログでは全行""扱い（互換）。
-    reject_counts_attended = {}
-    reject_counts_other = {}
     # 【追記3「合否」節】見失い率＝「注意中で直前まで見えていたカード」限定版。
     attended_confirm_denom = 0
     attended_confirm_unmatched = 0
@@ -230,30 +235,14 @@ def main(log_dir):
             confirm_denom += 1
             if ev == "unmatched":
                 confirm_unmatched += 1
-        # conf_* 分布：確認コマの matched/unmatched 行（conf_iou等はこの2つの
-        # イベントにしか書かれない。仕様「後半」2節）。注意中＝その時点の
-        # attended_idがこのfile_idと一致、かつ「直前まで見えていた」(prior==0)。
-        # 注意外＝attended_idがこのfile_idと不一致（priorは問わない＝「大半は偽」
-        # の記述どおり、隠れていたカードの確認失敗も含める）。
+        # 注意中＝その時点のattended_idがこのfile_idと一致、かつ
+        # 「直前まで見えていた」(prior==0)。
         if is_confirm_step and ev in ("matched", "unmatched"):
             is_attended = (attended_by_step.get(step, "") == fid)
-            group = None
             if is_attended and prior == 0:
-                group = conf_attended
                 attended_confirm_denom += 1
                 if ev == "unmatched":
                     attended_confirm_unmatched += 1
-            elif not is_attended:
-                group = conf_other
-            if group is not None:
-                for col in ("conf_iou", "conf_area_ratio", "conf_emb_cos"):
-                    v = _to_float(r.get(col))
-                    if v is not None:
-                        group[col].append(v)
-                reject_group = (reject_counts_attended if group is conf_attended
-                                 else reject_counts_other)
-                reason = r.get("conf_reject", "") or ""
-                reject_group[reason] = reject_group.get(reason, 0) + 1
         if misses_after is not None:
             _last_misses[fid] = misses_after
     confirm_card_total = confirm_denom
@@ -264,29 +253,6 @@ def main(log_dir):
     #   問わない全カード版で従来どおり残す）。
     miss_rate_attended = (round(attended_confirm_unmatched / attended_confirm_denom, 4)
                            if attended_confirm_denom else None)
-
-    def _pctl(vals, p):
-        if not vals:
-            return None
-        s = sorted(vals)
-        idx = min(int(round(p * (len(s) - 1))), len(s) - 1)
-        return round(s[idx], 4)
-
-    def _dist_summary(group):
-        out = {"n": len(group["conf_iou"]) or len(group["conf_area_ratio"])
-               or len(group["conf_emb_cos"])}
-        for col in ("conf_iou", "conf_area_ratio", "conf_emb_cos"):
-            vals = group[col]
-            out[col] = {
-                "n": len(vals),
-                "median": _pctl(vals, 0.5),
-                "p10": _pctl(vals, 0.1),
-                "p90": _pctl(vals, 0.9),
-            }
-        return out
-
-    conf_dist_attended = _dist_summary(conf_attended)
-    conf_dist_other = _dist_summary(conf_other)
 
     # ---- 8. mode別処理時間（run.csvのobject_files_confirm_ms/scan_ms列） ------
     confirm_ms_vals, scan_ms_vals = [], []
@@ -359,6 +325,9 @@ def main(log_dir):
     result = {
         "n_files_mean": n_files_mean,
         "n_files_max": n_files_max,
+        # 【2026-09-09・仕様_見る側_道を1本にする 後半6節】段3で集めた点の数
+        #   （n_points列）の平均。n_points列が無い旧ログではNoneのまま。
+        "n_points_mean": n_points_mean,
         "confirmed_mean": confirmed_mean,
         "split_rate": split_rate,
         "n_created": n_created,
@@ -379,21 +348,9 @@ def main(log_dir):
         "attend_persistence_median_steps": attend_persistence_median,
         "attend_switch_count": attend_switch_count,
         "attend_switch_close_rate": attend_switch_close_rate,
-        # 【2026-09-09・追記3「直し」3節】注意中かつ直前まで見えていたカード
-        #   （正しく「いた」はず）／注意外のカード（大半は偽）のconf_iou・
-        #   conf_area_ratio・conf_emb_cosの分布（中央値・10%/90%点）。
-        #   conf_iou等の列が無い旧ログ（confirm_emb_cos未使用の走行）では
-        #   全てNone・n=0のまま。
-        "conf_dist_attended": conf_dist_attended,
-        "conf_dist_other": conf_dist_other,
         "miss_rate_confirm_attended": miss_rate_attended,
         "attended_confirm_card_total": attended_confirm_denom,
         "attended_confirm_unmatched_total": attended_confirm_unmatched,
-        # 【2026-09-09・追記4「直し」4節】確認が落ちた理由の件数
-        #   （iou/area/emb/gate/dedup/空=採用）。注意中／注意外で別集計。
-        #   conf_reject列が無い旧ログでは全て{"":件数}になる（互換）。
-        "conf_reject_counts_attended": reject_counts_attended,
-        "conf_reject_counts_other": reject_counts_other,
         # 【2026-09-09・仕様_見る側の段構成_実装 7節】札の混入率。
         #   注意.csvが無い/target_wordが一度も無い走行ではNone・0のまま。
         "label_mix_rate": label_mix_rate,

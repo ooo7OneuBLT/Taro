@@ -135,35 +135,10 @@ class ObjectFiles(Plugin):
         coast_min_speed_px_s = self.config.get("coast_min_speed_px_s")
         self.coast_min_speed_px_s = (None if coast_min_speed_px_s is None
                                       else float(coast_min_speed_px_s))
-        # 【2026-09-09・仕様_予測して確かめる検出】確認・見回り・横取り。既定は
-        #   全てNone（scan_interval_s=None）＝従来どおり毎回全体切り出し（既定不変）。
-        scan_interval_s = self.config.get("scan_interval_s")
-        self.scan_interval_s = None if scan_interval_s is None else float(scan_interval_s)
-        self.confirm_iou_thresh = float(self.config.get("confirm_iou_thresh", 0.7))
-        self.confirm_area_tol = float(self.config.get("confirm_area_tol", 0.5))
-        # 【2026-09-09・予測して確かめる検出「追記3」1節】確認に見た目の照合を
-        #   足す。既定None＝照合しない（従来どおり）＝既定不変。埋め込みの
-        #   計算(get_image_embedding/set_image)自体、Noneのときは一切呼ばれない。
-        confirm_emb_cos = self.config.get("confirm_emb_cos")
-        self.confirm_emb_cos = None if confirm_emb_cos is None else float(confirm_emb_cos)
-        # 【2026-09-09・追記4「直し」1節】確認の位置ゲートの種類。既定"mahal"＝
-        #   ObjectFileSystemの既定と同じなので無条件で渡してよい（既定不変）。
-        self.confirm_gate = self.config.get("confirm_gate", "mahal")
-        scan_change_thresh = self.config.get("scan_change_thresh")
-        self.scan_change_thresh = None if scan_change_thresh is None else float(scan_change_thresh)
-        scan_on_misses = self.config.get("scan_on_misses")
-        self.scan_on_misses = None if scan_on_misses is None else int(scan_on_misses)
-        self._last_scan_t = float("-inf")
-        self._prev_small = None
+        # 【2026-09-09・仕様_見る側_道を1本にする】確認と切り出しの2本の道を
+        #   `_detect_frame` 1本にまとめた（旧「予測して確かめる検出」の見回り
+        #   タイマー・確認専用の設定は全て廃止。後方互換の分岐は残さない）。
         self._point_predictor = None
-        # 【2026-09-09・追記「直し」1】見失い横取りは「立ち上がり」で1回だけ。
-        #   misses>=scan_on_missesに“なった瞬間”のfile.idだけをここに入れ、matched/
-        #   revived/lost（=misses==0に戻った）で外す。空のままなら従来と挙動不変。
-        self._miss_fired = set()
-        # 【2026-09-09・追記「直し」4】scan_changeの連続発火を防ぐ不応期（秒）。
-        scan_change_refractory_s = self.config.get("scan_change_refractory_s", 1.0)
-        self.scan_change_refractory_s = float(scan_change_refractory_s)
-        self._last_scan_change_t = float("-inf")
         # 【2026-09-07・メモリ削減候補(a)】既定None＝SamAutomaticMaskGeneratorの
         #   既定値(64)のまま＝1ビットも変わらない。渡したときだけ上書きする。
         self.points_per_batch = self.config.get("points_per_batch")
@@ -184,11 +159,19 @@ class ObjectFiles(Plugin):
         appearance_gate_cos = self.config.get("appearance_gate_cos")
         self.appearance_gate_cos = (None if appearance_gate_cos is None
                                      else float(appearance_gate_cos))
+        # 【2026-09-09・仕様_見る側_道を1本にする 後半2節】旧・確認専用の位置
+        #   ゲート設定を統合した（確認の道自体を削除。ハンガリアン法の門に
+        #   一本化）。既定"mahal"＝ObjectFileSystem側の既定と一致するので
+        #   無条件で渡してよい（既定不変）。
+        self.pos_gate = self.config.get("pos_gate", "mahal")
         self._ec = None
         self._pre = None
         self._priority = None
         self._first_scan_done = False
         self._warned_no_orienting = False
+        # 【2026-09-09・仕様_見る側_道を1本にする 後半1節】前コマの探索点
+        #   （段3c）。まだ無ければNone。
+        self._prev_explore_point = None
 
         self._lazy_import()
 
@@ -246,7 +229,7 @@ class ObjectFiles(Plugin):
             uncertainty_penalty=self.uncertainty_penalty,
             exclusive_dist_px=self.exclusive_dist_px,
             exclusive_cos=self.exclusive_cos,
-            confirm_gate=self.confirm_gate,
+            pos_gate=self.pos_gate,
             # 【2026-09-09・追記「直し」1〜2節】既定値がObjectFileSystem側の既定と
             #   一致する（exclusive_scale_by_size=False・coast_min_speed_px_s=None）
             #   ので無条件で渡してよい（既定不変）。frame_dt_s は「1コマ＝検出周期」
@@ -308,11 +291,9 @@ class ObjectFiles(Plugin):
         self._seg_n_files = []
         self._seg_n_dets = []
         self._seg_detect_ms = []
-        # 【2026-09-09・仕様_予測して確かめる検出】mode別の直近値（confirm_ms・scan_ms）。
-        #   scan_interval_s=Noneのときは常にmode="scan"のままなのでobject_files_scan_ms
-        #   ＝従来のobject_files_detect_msと同じ値になる（既定不変・新しい列が増えるだけ）。
-        self._seg_confirm_ms = []
-        self._seg_scan_ms = []
+        # 【2026-09-09・仕様_見る側_道を1本にする】検出コマの処理を1本化した
+        #   ので、mode別（旧confirm_ms/scan_ms）の内訳は無くなった
+        #   （mode_countsで「frame」「first」の件数だけ数える）。
         self._mode_counts = {}
 
     def _lazy_import(self):
@@ -323,8 +304,7 @@ class ObjectFiles(Plugin):
                 sys.path.insert(0, p)
         # 旧パス brain.object_files は転送のみなので使わない。
         from object_detector import (patch_features, detect, load_mobilesam,
-                                      make_point_predictor, confirm_points,
-                                      segment_at_points)
+                                      make_point_predictor, segment_at_points)
         from brain.cerebral_cortex.parietal_lobe.intraparietal_sulcus import ObjectFileSystem
         from brain.midbrain.efference_copy import EfferenceCopy
         from brain.midbrain.preattentive_map import PreattentiveMap
@@ -333,7 +313,6 @@ class ObjectFiles(Plugin):
         self._detect = detect
         self._load_mobilesam = load_mobilesam
         self._make_point_predictor = make_point_predictor
-        self._confirm_points = confirm_points
         self._segment_at_points = segment_at_points
         self._ObjectFileSystem = ObjectFileSystem
         self._EfferenceCopy = EfferenceCopy
@@ -341,8 +320,8 @@ class ObjectFiles(Plugin):
         self._PriorityMap = PriorityMap
 
     def _get_point_predictor(self):
-        """【2026-09-09・追記3「直し」1節】confirm_emb_cosがNoneのときは一度も
-        呼ばれない（既定不変）。呼ばれたら1回だけ作って使い回す。"""
+        """段2（`segment_at_points`）で使う点プロンプト用の`SamPredictor`。
+        1回だけ作って使い回す。"""
         if self._point_predictor is None:
             self._point_predictor = self._make_point_predictor(self._mgen)
         return self._point_predictor
@@ -392,7 +371,7 @@ class ObjectFiles(Plugin):
         if self.efference_copy_cfg is not None:
             shift_pred = (getattr(ctx, "efference", None) or {}).get("shift_pred")
 
-        # prev_by_id は confirm_update()/step() が呼ばれる**前**（＝削除される
+        # prev_by_id は _detect_frame()（内部でofs.stepを呼ぶ）が呼ばれる**前**（＝削除される
         # 前）に確定させる（predict_only()等が位置を書き換えても同じ参照な
         # ので値は変わらない＝既存の呼び出し順と1ビットも変わらない）。
         prev_by_id = {f.id: f for f in self.ofs.files}
@@ -401,68 +380,12 @@ class ObjectFiles(Plugin):
         # 前コマの注意状態を使う。attend=Falseなら常にNone＝従来どおり）。
         protect_id = self._attended_id if self.attend else None
 
-        onset_extra = {}
-        confirm_debug = None
-        if self.scan_interval_s is not None and self.preattentive_cfg is not None:
-            # 【2026-09-09・仕様_見る側の段構成_実装 2・3節】段1・段2。
-            mode, res, dt_ms, confirm_debug, conf_diag, onset_extra = (
-                self._detect_predictive_preattentive(ctx, img224, t, protect_id))
-            dets = onset_extra.get("new_dets", [])
-        elif self.scan_interval_s is None:
-            # 従来どおり：常に全体切り出し（既定不変）。mode は新規の"scan"固定
-            # （CSV・metrics に列が増えるだけで、判定・タイミングは一切変えない）。
-            t0 = time.perf_counter()
-            p, n = self._patch_features(self._model, img224, self.device)
-            point_predictor = (self._get_point_predictor()
-                                if self.confirm_emb_cos is not None else None)
-            dets = self._detect(p, n, img=img224, mask_generator=self._mgen,
-                                 cohesion_gap_px=self.cohesion_gap_px,
-                                 point_predictor=point_predictor)
-            if self.empty_cache_after_detect:
-                # 【2026-09-07・メモリ削減候補(c)】既定Falseでは1行も実行されない。
-                import torch
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-            dt_ms = (time.perf_counter() - t0) * 1000.0
-            mode = "scan"
-            payload = dets
-            conf_diag = {}
-            res = self.ofs.step(dets, t=t, protect_id=protect_id, shift=shift_pred)
-        else:
-            # 【2026-09-09・仕様_予測して確かめる検出】確認・見回り・横取りの分岐。
-            # confirmのときpayload＝confirm_update()用のカードごとの判定リスト
-            #（追記2「直し」1節）、それ以外＝ofs.step()用のdetsリスト（従来どおり）。
-            mode, payload, dt_ms, confirm_debug, conf_diag = self._detect_predictive(
-                img224, t, shift=shift_pred)
-            if mode == "confirm":
-                # 【2026-09-09・追記2「直し」1節】確認は頼んだカードにだけ結ぶ
-                # （ofs.step()のハンガリアン法には渡さない＝別カードへの誤結合や
-                #  新規カード作成を起こさない）。predict()はpredict_only()で
-                #  済んでいるのでconfirm_updateは呼ばない（内部でも呼ばない）。
-                res = self.ofs.confirm_update(payload, t=t)
-                # n_dets（下のn_dets = len(dets)で使う）＝「一致した結果の数」
-                #（追記2「直し」3節）。matched=Trueのものだけを数える。
-                dets = [p for p in payload if p.get("matched")]
-                # 【2026-09-09・追記4「直し」4節】confirm_pointsは通ったが
-                #   confirm_updateの位置ゲートで落ちたfile_id＝reject_reason="gate"
-                #   で上書きする（confirm_diagはdictなのでここで直接書き換える）。
-                for fid in res.get("gate_rejected", []):
-                    conf_diag.setdefault(fid, {})["reject_reason"] = "gate"
-            else:
-                dets = payload
-                res = self.ofs.step(dets, t=t, protect_id=protect_id, shift=shift_pred)
-        # 【2026-09-09・追記「直し」1】このコマで一致(matched)・復活(revived)・
-        #   削除(lost)されたfile_idは、見失いの立ち上がり判定から外す
-        #   （misses==0に戻った/カード自体が無くなった＝再発火の資格を得る）。
-        self._miss_fired -= set(fid for fid, _det_idx, _residual in res["matched"])
-        self._miss_fired -= set(res.get("revived", []))
-        self._miss_fired -= set(res.get("lost", []))
+        # 【2026-09-09・仕様_見る側_道を1本にする】検出コマの処理は_detect_frame
+        #   1本（旧「確認」道・旧「切り出し」道の2本を統合）。
+        mode, res, dt_ms, onset_extra = self._detect_frame(ctx, img224, t, protect_id)
+        dets = onset_extra.pop("new_dets", [])
 
         self._mode_counts[mode] = self._mode_counts.get(mode, 0) + 1
-        if mode == "confirm":
-            self._seg_confirm_ms.append(dt_ms)
-        else:
-            self._seg_scan_ms.append(dt_ms)
 
         if self.attend:
             # 【M3】検出・対応づけ結果（res・self.ofs.files）を読むだけ。
@@ -471,8 +394,7 @@ class ObjectFiles(Plugin):
             self._process_attention(ctx, t, res)
 
         if self.frames_out:
-            self._save_detection_frame(ctx, t, img224, dets, res, prev_by_id,
-                                        mode=mode, confirm_debug=confirm_debug)
+            self._save_detection_frame(ctx, t, img224, dets, res, prev_by_id, mode=mode)
 
         self._detect_ms_sum += dt_ms
         self._detect_n += 1
@@ -579,20 +501,14 @@ class ObjectFiles(Plugin):
             events.append(("", "", "", "", "", "", "", ""))
 
         for file_id, x, y, area, event, misses, since_seen, app_cos_created in events:
-            # 【2026-09-09・追記3「直し」2節】確認コマ(mode=="confirm")の行にだけ
-            #   conf_iou/conf_area_ratio/conf_emb_cosを書く（他の行・従来の走行
-            #   （scan固定）では空欄のまま＝既定不変）。失敗した結果（emb_cosで
-            #   落ちたunmatched）も最良候補の値を書く（conf_diagは`_detect_predictive`
-            #   がokに関わらずiou/area_ratio/emb_cosを持つ結果を集めたもの）。
-            diag = conf_diag.get(file_id, {}) if mode == "confirm" else {}
-            # 【2026-09-09・仕様_見る側の段構成_実装 3節・段4】cohesion列は
-            #   event=="created"の行にだけ書く。app_conf列はappearance_gate_cos
-            #   /appearance_conf自体は既存カードなら常に持つ値なので、efference等
-            #   が無効でも既存カードのEMA(appearance_conf初期0.0)がそのまま出る
-            #   （新しい列が増えるだけ・既存の意味は変えない）。
+            # 【2026-09-09・仕様_見る側_道を1本にする 後半1節】検出コマの処理を
+            #   1本化したので、conf_iou/conf_area_ratio/conf_emb_cos/conf_reject
+            #   （確認専用の診断列）は無い。app_conf（appearance_confのEMA）も
+            #   フィールドごと削除したので出さない（中5）。
+            # 【2026-09-09・仕様_見る側の段構成_実装 3節】cohesion列は
+            #   event=="created"の行にだけ書く。
             f_for_row = (prev_by_id.get(file_id) if event == "lost"
                          else cur_by_id.get(file_id))
-            app_conf = round(float(f_for_row.appearance_conf), 6) if f_for_row is not None else ""
             cohesion = _cohesion_for(f_for_row) if (event == "created" and f_for_row is not None) else ""
             self.rows.append({
                 "step": ctx.step, "sim_time": round(t, 3),
@@ -600,170 +516,163 @@ class ObjectFiles(Plugin):
                 "file_id": file_id, "x": x, "y": y, "area": area, "event": event,
                 "misses": misses, "since_seen": since_seen,
                 "app_cos_created": app_cos_created,
-                # 【2026-09-09・仕様_予測して確かめる検出】末尾に追加した列。
-                #   scan_interval_s=Noneのときは常に"scan"（既定不変・列が増えるだけ）。
+                # 【2026-09-09・仕様_見る側_道を1本にする】mode列は"frame"
+                #   （最初のコマだけ"first"）に一本化。
                 "mode": mode,
-                "conf_iou": diag.get("iou", ""),
-                "conf_area_ratio": diag.get("area_ratio", ""),
-                "conf_emb_cos": diag.get("emb_cos", ""),
-                # 【2026-09-09・追記4「直し」4節】確認が落ちた理由
-                #   （iou/area/emb/gate/dedup/空＝採用）。mode!="confirm"の行、
-                #   旧走行（confirm_gate等を使わない）では常に空欄（既定不変）。
-                "conf_reject": diag.get("reject_reason", ""),
-                # 【2026-09-09・仕様_見る側の段構成_実装】段1・段4の列。
-                #   preattentive/efference_copy無効時は空文字のまま（既定不変）。
+                # 【2026-09-09・道を1本にする 後半1節】段1・段2・段4の列。
+                #   preattentive/efference_copy無効時は空文字のまま。
+                "n_points": onset_extra.get("n_points", ""),
                 "n_blobs": onset_extra.get("n_blobs", ""),
                 "n_unexplained": onset_extra.get("n_unexplained", ""),
                 "ec_res_shift": onset_extra.get("ec_res_shift", ""),
                 "ec_res_noshift": onset_extra.get("ec_res_noshift", ""),
                 "ec_moving": onset_extra.get("ec_moving", ""),
                 "cohesion": cohesion,
-                "app_conf": app_conf,
             })
 
-    def _detect_predictive(self, img224, t, shift=None):
-        """【2026-09-09・仕様_予測して確かめる検出_2026-09-09「後半」2節】
-        確認（confirm）・見回り（scan）・横取り（scan_change/scan_miss）の分岐。
-        `scan_interval_s` が指定されているときだけ呼ばれる（既定不変）。
+    def _detect_frame(self, ctx, img224, t, protect_id):
+        """【2026-09-09・仕様_見る側_道を1本にする 後半1節】検出コマの処理
+        1本（旧「確認」道・旧「切り出し」道を統合）。
 
-        `shift`（【2026-09-09・仕様_見る側の段構成_実装「後半」段0・段3】）：
-        None（既定）＝従来どおり（既定不変）。段0が有効なときの`shift_pred`を
-        `predict_only()`に渡す（確認コマの予測位置の先回り）。
+        0. eff = ctx.efference（無効なら shift=(0,0)・moving=False）
+        1. pre = self._pre.update(...)（段1。無効なら blobs=[]）
+        2. self.ofs.predict_only(t, shift=eff["shift_pred"])（shiftを必ず渡す＝重大1の直し）
+        3. points を集める：3a カードの予測位置、3b onset（misses==0のカードの
+           予測bboxに入らない塊の重心）、3c 前コマの探索点、3d 最初のコマだけは
+           全体切り出しに差し替え
+        4. dets = segment_at_points(...)（set_imageは1回、背景の足切り・
+           重複除けはsegment_at_points側で行う）
+        5. res = self.ofs.step(dets, t=t, protect_id=protect_id, skip_predict=True)
+        6. priority = self._priority.update(candidates, ...)
+           （candidatesは「見えていて中央attend_radius以内」のカードだけ＝重大2の直し）
 
         Returns:
-            (mode, payload, dt_ms, confirm_debug, conf_diag)
-            mode: "scan"/"scan_change"/"scan_miss"/"scan_empty"/"confirm"
-            payload: mode=="confirm"のときは `ObjectFileSystem.confirm_update()`
-                に渡すカードごとの判定リスト（追記2「直し」1節）。それ以外は
-                `ObjectFileSystem.step()` に渡す検出のリスト（従来どおり）。
-            dt_ms: この呼び出しにかかった時間（ミリ秒）
-            confirm_debug: mode=="confirm"のときだけ、点ごとの結果のリスト
-                （`_save_detection_frame` の描画用）。それ以外はNone。
-            conf_diag: 【2026-09-09・追記3「直し」2節】mode=="confirm"のときだけ、
-                file_id -> {"iou","area_ratio","emb_cos"}（`confirm_points`の
-                結果をそのまま。okに関わらず値がある結果は全部入れる＝
-                「失敗した結果も最良候補の値を書く」）。それ以外は空辞書。
+            (mode, res, dt_ms, onset_extra)
+            mode: "first"（最初のコマ）または"frame"（それ以外・一本化）
+            onset_extra: CSV追加列用の辞書（n_points, n_blobs, n_unexplained,
+                ec_res_shift, ec_res_noshift, ec_moving, new_dets）
         """
         import numpy as np
         from PIL import Image
 
-        # ---- 横取り条件（安い順）：①見失いの連続 ②粗い画像差分 ------------------
-        # 【安い順、仕様「後半」2節】まずmisses（既に持っている値、計算コスト0）を
-        # 見て、それで決まらないときだけ32x32グレースケールの差分を計算する。
-        force_scan_reason = None
-        if len(self.ofs.files) == 0:
-            force_scan_reason = "empty"
-        elif self.scan_on_misses is not None:
-            # 【2026-09-09・追記「直し」1】立ち上がりで1回だけ：misses>=kに
-            #   “なった瞬間”のカードだけを数える（self._miss_firedに無いもの）。
-            #   同じカードは次に一致する(matched/revived)かlostになるまで
-            #   再発火しない（on_step側で_miss_firedから外す）。
-            newly_fired = [f.id for f in self.ofs.files
-                           if f.misses >= self.scan_on_misses and f.id not in self._miss_fired]
-            if newly_fired:
-                force_scan_reason = "miss"
-                self._miss_fired.update(newly_fired)
+        t0 = time.perf_counter()
+        onset_extra = {"n_points": "", "n_blobs": "", "n_unexplained": "",
+                        "ec_res_shift": "", "ec_res_noshift": "", "ec_moving": ""}
 
-        small = np.asarray(
-            Image.fromarray(np.clip(img224, 0, 255).astype(np.uint8))
-            .convert("L").resize((32, 32)), dtype=np.float64)
-        if (force_scan_reason is None and self.scan_change_thresh is not None
-                and self._prev_small is not None
-                # 【2026-09-09・追記「直し」4】不応期：発火後scan_change_refractory_s
-                #   秒は再発火しない（既定1.0秒）。
-                and (t - self._last_scan_change_t) >= self.scan_change_refractory_s):
-            diff = np.abs(small - self._prev_small)
-            # 既存カードの周り（半径 = sqrt(area)*224*1.5 px、32x32尺度に換算）を除く。
-            mask = np.ones((32, 32), dtype=bool)
-            yy, xx = np.ogrid[:32, :32]
-            for f in self.ofs.files:
-                fx, fy = f.pos
-                r_px = (max(f.area, 0.0) ** 0.5) * 224.0 * 1.5
-                r32 = r_px / 224.0 * 32.0
-                gx, gy = fx / 224.0 * 32.0, fy / 224.0 * 32.0
-                mask &= ((xx + 0.5 - gx) ** 2 + (yy + 0.5 - gy) ** 2) > (r32 ** 2)
-            vals = diff[mask]
-            if vals.size and float(vals.mean()) > self.scan_change_thresh:
-                force_scan_reason = "change"
-                self._last_scan_change_t = t
-        self._prev_small = small
+        # ---- 0. 遠心性コピー（無効ならshift=(0,0)・moving=False） --------------
+        eff = getattr(ctx, "efference", None) or {}
+        shift_actual = eff.get("shift_actual", (0.0, 0.0))
+        shift_pred = eff.get("shift_pred")
+        moving = bool(eff.get("moving", False))
 
-        do_scan = force_scan_reason is not None or (t - self._last_scan_t >= self.scan_interval_s)
-
-        if do_scan:
-            t0 = time.perf_counter()
+        # ---- 3d. 最初のコマだけ全体切り出し -------------------------------------
+        if not self._first_scan_done:
+            self._first_scan_done = True
             p, n = self._patch_features(self._model, img224, self.device)
-            point_predictor = (self._get_point_predictor()
-                                if self.confirm_emb_cos is not None else None)
             dets = self._detect(p, n, img=img224, mask_generator=self._mgen,
-                                 cohesion_gap_px=self.cohesion_gap_px,
-                                 point_predictor=point_predictor)
+                                 cohesion_gap_px=self.cohesion_gap_px)
             if self.empty_cache_after_detect:
                 import torch
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
+            # 段1・段6の状態（前コマ画像・探索地図）だけは最初のコマでも更新して
+            # おく（無効なら中身は空のまま）。
+            if self._pre is not None:
+                gray = np.array(Image.fromarray(np.clip(img224, 0, 255).astype(np.uint8))
+                                 .convert("L"), dtype=np.float32)
+                self._pre.update(gray, shift_actual, moving)
+            self.ofs.predict_only(t, shift=shift_pred)
+            res = self.ofs.step(dets, t=t, protect_id=protect_id, skip_predict=True)
+            onset_extra["new_dets"] = dets
             dt_ms = (time.perf_counter() - t0) * 1000.0
-            self._last_scan_t = t
-            mode = {"change": "scan_change", "miss": "scan_miss",
-                    "empty": "scan_empty"}.get(force_scan_reason, "scan")
-            return mode, dets, dt_ms, None, {}
+            return "first", res, dt_ms, onset_extra
 
-        # ---- 確認：既存カードの予測位置を1点ずつ聞く（画像埋め込みは1回だけ）------
-        t0 = time.perf_counter()
-        self.ofs.predict_only(t, shift=shift)
-        points = [f.pos for f in self.ofs.files]
-        expected_areas = [f.area for f in self.ofs.files]
-        file_ids = [f.id for f in self.ofs.files]
-        # 【2026-09-09・追記3「直し」1節】カードのembを渡す。emb=Noneのカード
-        #   （古い保存・まだ見回りが1回も無い）はconfirm_points内で従来どおり
-        #   照合されない。confirm_emb_cosがNoneなら全カード渡してもconfirm_points
-        #   側で埋め込み自体を読まないので既定不変。
-        card_embs = [f.emb for f in self.ofs.files]
-        pos_by_id = {f.id: f.pos for f in self.ofs.files}
-        point_predictor = self._get_point_predictor()
-        # 【2026-09-09・追記2「直し」1節】結果にfile_idを付けて返してもらう
-        #（confirm_updateで頼んだカードにだけ結ぶため）。
-        results = self._confirm_points(point_predictor, img224, points, expected_areas,
-                                        file_ids=file_ids,
-                                        iou_thresh=self.confirm_iou_thresh,
-                                        area_tol=self.confirm_area_tol,
-                                        card_embs=card_embs,
-                                        emb_cos_thresh=self.confirm_emb_cos)
-        # 【2026-09-09・追記2「直し」2節】同じ物を複数のカードが確認したら1枚だけ
-        #（固体性を確認にも適用）。IoU>=0.5 または重心距離<=10px を重複とみなし、
-        # 注意中のカード＞古いidの順で1枚だけ残す。残りはmisses+=1（confirm_update
-        # 側で"matched": False扱いになる）。
-        kept_ids = self._dedup_confirm(results)
-        payload = []
-        confirm_debug = []
-        conf_diag = {}
-        for r in results:
-            fid = r.get("file_id")
-            # 【追記3「直し」2節】ok/失敗に関わらず、iou/area_ratio/emb_cosが
-            #   あれば記録する（「何で落ちたかが分かるように」）。
-            # 【追記4「直し」4節】reject_reason（confirm_pointsが返す
-            #   iou/area/emb）もここに載せる。dedup・gateはこの後で上書きする
-            #   （confirm_pointsの外で起きる棄却のため）。
-            if "iou" in r:
-                conf_diag[fid] = {"iou": r.get("iou"), "area_ratio": r.get("area_ratio"),
-                                   "emb_cos": r.get("emb_cos"),
-                                   "reject_reason": r.get("reject_reason", "")}
-            if r.get("ok") and fid in kept_ids:
-                payload.append({"file_id": fid, "matched": True,
-                                 "pos": r["pos"], "area": r["area"]})
-                confirm_debug.append({"pos": r["pos"], "ok": True})
-            else:
-                # 【仕様「見失い」】okでなかった、または重複で外れたカードは
-                # matched=False（confirm_update側でmisses+=1が起きる）。
-                payload.append({"file_id": fid, "matched": False})
-                confirm_debug.append({"pos": r.get("pos", pos_by_id.get(fid)), "ok": False})
-                if r.get("ok") and fid not in kept_ids:
-                    # 【追記4「直し」4節】confirm_pointsはokだが重複整理で外れた
-                    #   ＝理由は"dedup"（confirm_points自身のreject_reasonより
-                    #   優先する。この場合confirm_pointsはreject_reasonを持たない）。
-                    conf_diag.setdefault(fid, {})["reject_reason"] = "dedup"
+        # ---- 1. 段1：前注意の地図（無効ならblobs=[]） ---------------------------
+        if self._pre is not None:
+            gray = np.array(Image.fromarray(np.clip(img224, 0, 255).astype(np.uint8))
+                             .convert("L"), dtype=np.float32)
+            pre_res = self._pre.update(gray, shift_actual, moving)
+        else:
+            pre_res = {"blobs": [], "motion_mean": 0.0, "motion_mean_noshift": 0.0,
+                       "static_sal": None, "valid": False}
+        onset_extra["n_blobs"] = len(pre_res["blobs"])
+        onset_extra["ec_res_shift"] = round(pre_res["motion_mean"], 4)
+        onset_extra["ec_res_noshift"] = round(pre_res["motion_mean_noshift"], 4)
+        onset_extra["ec_moving"] = moving
+
+        # ---- 2. カードを予測位置へ進める（★shiftを必ず渡す・重大1の直し） -------
+        self.ofs.predict_only(t, shift=shift_pred)
+
+        # ---- 3. 点を集める -------------------------------------------------------
+        points = []
+        # 3a. カードの予測位置（misses に関わらず全カード）
+        for f in self.ofs.files:
+            points.append(f.pos)
+        # 3b. onset：misses==0のカードの予測bboxに重心が入らない塊
+        unexplained = []
+        for b in pre_res["blobs"]:
+            cx, cy = b["cx"], b["cy"]
+            in_file = False
+            for f in self.ofs.files:
+                if f.misses != 0:
+                    continue
+                fx, fy = f.pos
+                r = (max(f.area, 0.0) ** 0.5) * 224.0 * 0.75 + 8.0
+                if ((cx - fx) ** 2 + (cy - fy) ** 2) ** 0.5 <= r:
+                    in_file = True
+                    break
+            if not in_file:
+                unexplained.append(b)
+        onset_extra["n_unexplained"] = len(unexplained)
+        for b in unexplained:
+            points.append((b["cx"], b["cy"]))
+        # 3c. 前コマの探索点（あれば）
+        if self._prev_explore_point is not None:
+            points.append(self._prev_explore_point)
+        onset_extra["n_points"] = len(points)
+
+        # ---- 4. 集めた点をSAMに1回だけ渡して切り出す -----------------------------
+        dets = []
+        if points:
+            p, n = self._patch_features(self._model, img224, self.device)
+            pp = self._get_point_predictor()
+            dets = self._segment_at_points(pp, img224, points, p, n,
+                                            blobs=pre_res["blobs"])
+            if self.empty_cache_after_detect:
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+        onset_extra["new_dets"] = dets
+
+        # ---- 5. 全部まとめて1つの照合にかける -----------------------------------
+        res = self.ofs.step(dets, t=t, protect_id=protect_id, skip_predict=True)
+
+        # ---- 6. 優先度地図（見えていて中央attend_radius以内のカードだけ・重大2の直し） --
+        explore_point = None
+        if self._priority is not None:
+            CENTER_X, CENTER_Y = 112.0, 112.0
+            candidates = [f for f in self.ofs.files
+                          if f.misses == 0
+                          and ((f.pos[0] - CENTER_X) ** 2 + (f.pos[1] - CENTER_Y) ** 2) ** 0.5
+                          <= self.attend_radius]
+            motion_by_id = {}
+            for f in self.ofs.files:
+                fx, fy = f.pos
+                for b in pre_res["blobs"]:
+                    bx, by, bw, bh = b["bbox"]
+                    if bx <= fx <= bx + bw and by <= fy <= by + bh:
+                        motion_by_id[f.id] = motion_by_id.get(f.id, 0.0) + b["mean_abs_diff"]
+            surprise_trace = getattr(ctx, "surprise_trace", {}) or {}
+            priority_result = self._priority.update(
+                candidates, t, motion_by_id, pre_res["static_sal"], surprise_trace,
+                {}, {}, moving, self.interval_s)
+            explore_point = priority_result.get("explore_point")
+            ctx.priority_map_result = priority_result
+            ctx.priority_map_result_t = t
+        self._prev_explore_point = explore_point
+
         dt_ms = (time.perf_counter() - t0) * 1000.0
-        return "confirm", payload, dt_ms, confirm_debug, conf_diag
+        return "frame", res, dt_ms, onset_extra
 
     def _ensure_efference_copy(self, ctx):
         """【2026-09-09・仕様_見る側の段構成_実装 1節】fovyはenv側から読む
@@ -792,253 +701,8 @@ class ObjectFiles(Plugin):
             sign_v=float(cfg.get("sign_v", 1.0)),
             moving_extra_ticks=int(cfg.get("moving_extra_ticks", 1)))
 
-    def _detect_predictive_preattentive(self, ctx, img224, t, protect_id):
-        """【2026-09-09・仕様_見る側の段構成_実装「後半」2・3節】段1
-        （PreattentiveMap）が有効なときの検出。旧`_detect_predictive`の
-        横取り(scan_change/scan_miss/scan_empty)・scan_interval_sのタイマーは
-        使わない（探索は段6、見失いは段5に任せる）。最初の1コマだけ全体切り出し
-        をする。それ以外は確認(confirm)＋onset/exploreの点プロンプト切り出しを
-        毎コマ行う。
-
-        Returns:
-            (mode, res, dt_ms, confirm_debug, conf_diag, onset_extra)
-            mode: "scan"（最初の1コマ）/"confirm"（onset/explore無し）/
-                  "onset"（unexplainedが有った）/"explore"（探索点だけ）
-            res: `step()`/`confirm_update()`と同じ形（確認＋onset/exploreの
-                 結果を合成）
-            onset_extra: CSV追加列用の辞書（n_blobs, n_unexplained,
-                 ec_res_shift, ec_res_noshift, ec_moving, new_dets）
-        """
-        import numpy as np
-        from PIL import Image
-
-        onset_extra = {"n_blobs": "", "n_unexplained": "", "ec_res_shift": "",
-                        "ec_res_noshift": "", "ec_moving": "", "new_dets": []}
-
-        if not self._first_scan_done:
-            self._first_scan_done = True
-            t0 = time.perf_counter()
-            p, n = self._patch_features(self._model, img224, self.device)
-            point_predictor = (self._get_point_predictor()
-                                if self.confirm_emb_cos is not None else None)
-            dets = self._detect(p, n, img=img224, mask_generator=self._mgen,
-                                 cohesion_gap_px=self.cohesion_gap_px,
-                                 point_predictor=point_predictor)
-            if self.empty_cache_after_detect:
-                import torch
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-            dt_ms = (time.perf_counter() - t0) * 1000.0
-            res = self.ofs.step(dets, t=t, protect_id=protect_id)
-            onset_extra["new_dets"] = dets
-            return "scan", res, dt_ms, None, {}, onset_extra
-
-        t0 = time.perf_counter()
-        # ---- 確認：既存カードの予測位置を1点ずつ聞く（従来の確認と同じやり方）----
-        self.ofs.predict_only(t)
-        points = [f.pos for f in self.ofs.files]
-        expected_areas = [f.area for f in self.ofs.files]
-        file_ids = [f.id for f in self.ofs.files]
-        card_embs = [f.emb for f in self.ofs.files]
-        pos_by_id = {f.id: f.pos for f in self.ofs.files}
-        point_predictor = self._get_point_predictor()
-        results = self._confirm_points(point_predictor, img224, points, expected_areas,
-                                        file_ids=file_ids,
-                                        iou_thresh=self.confirm_iou_thresh,
-                                        area_tol=self.confirm_area_tol,
-                                        card_embs=card_embs,
-                                        emb_cos_thresh=self.confirm_emb_cos)
-        kept_ids = self._dedup_confirm(results)
-        payload = []
-        confirm_debug = []
-        conf_diag = {}
-        # 【2026-09-09・追記1「直し」2】確認が「マスクは見つかったが見た目が
-        #   合わない」（reject_reason=="emb"＝emb_cosがconfirm_emb_cos未満）で
-        #   外れたカードのpos。同じ場所に別の物が置かれたとき、古いカードには
-        #   結ばれない（=confirm_update側では見えない）ので、ここでonsetの
-        #   要求点として拾い、段2でsegment_at_pointsに流す。
-        #   confirm_pointsはok=Falseのとき"pos"を返さないので、確認自体が
-        #   使った点（=カードの予測位置pos_by_id）を代用する（同じ点で
-        #   見た目照合をしたのだから、見つけ直す点として妥当）。
-        visual_reject_points = []
-        for r in results:
-            fid = r.get("file_id")
-            if "iou" in r:
-                conf_diag[fid] = {"iou": r.get("iou"), "area_ratio": r.get("area_ratio"),
-                                   "emb_cos": r.get("emb_cos"),
-                                   "reject_reason": r.get("reject_reason", "")}
-            if r.get("ok") and fid in kept_ids:
-                payload.append({"file_id": fid, "matched": True,
-                                 "pos": r["pos"], "area": r["area"]})
-                confirm_debug.append({"pos": r["pos"], "ok": True})
-            else:
-                payload.append({"file_id": fid, "matched": False})
-                confirm_debug.append({"pos": r.get("pos", pos_by_id.get(fid)), "ok": False})
-                if r.get("ok") and fid not in kept_ids:
-                    conf_diag.setdefault(fid, {})["reject_reason"] = "dedup"
-                if not r.get("ok") and r.get("reject_reason") == "emb":
-                    p = r.get("pos", pos_by_id.get(fid))
-                    if p is not None:
-                        visual_reject_points.append(p)
-        res_confirm = self.ofs.confirm_update(payload, t=t)
-        for fid in res_confirm.get("gate_rejected", []):
-            conf_diag.setdefault(fid, {})["reject_reason"] = "gate"
-
-        # ---- 段1：前注意の地図 --------------------------------------------------
-        gray = np.array(Image.fromarray(np.clip(img224, 0, 255).astype(np.uint8))
-                         .convert("L"), dtype=np.float32)
-        ec = getattr(ctx, "efference", None) or {}
-        shift_actual = ec.get("shift_actual", (0.0, 0.0))
-        moving = bool(ec.get("moving", False))
-        pre_res = self._pre.update(gray, shift_actual, moving)
-        onset_extra["n_blobs"] = len(pre_res["blobs"])
-        onset_extra["ec_res_shift"] = round(pre_res["motion_mean"], 4)
-        onset_extra["ec_res_noshift"] = round(pre_res["motion_mean_noshift"], 4)
-        onset_extra["ec_moving"] = moving
-
-        unexplained = []
-        for b in pre_res["blobs"]:
-            cx, cy = b["cx"], b["cy"]
-            in_file = False
-            for f in self.ofs.files:
-                # 【2026-09-09・追記1「直し」1】見失い中（misses>0）のカードは
-                #   「変化を説明した」と数えない。同じ場所に別の物が置かれた
-                #   とき、見失っている古い札がonsetを握りつぶすのを防ぐ。
-                if f.misses != 0:
-                    continue
-                fx, fy = f.pos
-                r = (max(f.area, 0.0) ** 0.5) * 224.0 * 0.75 + 8.0
-                if ((cx - fx) ** 2 + (cy - fy) ** 2) ** 0.5 <= r:
-                    in_file = True
-                    break
-            if not in_file:
-                unexplained.append(b)
-        onset_extra["n_unexplained"] = len(unexplained)
-
-        # 【1.3節・自己検査】shift_actualの大きさが2px以上だった検出コマで、
-        #   「ずらして取った差分の平均」と「ずらさずに取った差分の平均」を比べる。
-        #   ずらした方が大きい回数が10回連続したらWARNINGを1回出す（止めない）。
-        shift_mag = (shift_actual[0] ** 2 + shift_actual[1] ** 2) ** 0.5
-        if pre_res["valid"] and shift_mag >= 2.0:
-            if pre_res["motion_mean"] > pre_res["motion_mean_noshift"]:
-                self._ec_selfcheck_bad_streak = getattr(self, "_ec_selfcheck_bad_streak", 0) + 1
-            else:
-                self._ec_selfcheck_bad_streak = 0
-            if getattr(self, "_ec_selfcheck_bad_streak", 0) == 10:
-                print("[efference] WARNING sign?")
-
-        # ---- 段6：注意の優先度地図（探索点） -------------------------------------
-        explore_point = None
-        if self._priority is not None:
-            motion_by_id = {}
-            for f in self.ofs.files:
-                fx, fy = f.pos
-                for b in pre_res["blobs"]:
-                    bx, by, bw, bh = b["bbox"]
-                    if bx <= fx <= bx + bw and by <= fy <= by + bh:
-                        motion_by_id[f.id] = motion_by_id.get(f.id, 0.0) + b["mean_abs_diff"]
-            surprise_trace = getattr(ctx, "surprise_trace", {}) or {}
-            z_vec_by_id = {}
-            priority_result = self._priority.update(
-                self.ofs.files, t, motion_by_id, pre_res["static_sal"], surprise_trace,
-                z_vec_by_id, {}, moving, self.interval_s)
-            explore_point = priority_result.get("explore_point")
-            ctx.priority_map_result = priority_result
-            ctx.priority_map_result_t = t
-
-        # ---- 段2：点プロンプトで切り出し ------------------------------------------
-        points_to_segment = []
-        has_onset = False
-        for b in unexplained:
-            points_to_segment.append((b["cx"], b["cy"]))
-            has_onset = True
-        # 【2026-09-09・追記1「直し」2】見た目不一致で外れたカードの点も
-        #   onsetと同じ扱いでsegment_at_points→skip_predict=Trueに流す。
-        #   段4のappearance_gate_cosで古いカードには結ばれず、individuated
-        #   として新カードになる（mode="onset"）。
-        for p in visual_reject_points:
-            points_to_segment.append(p)
-            has_onset = True
-        if explore_point is not None:
-            points_to_segment.append(explore_point)
-
-        new_dets = []
-        if points_to_segment:
-            p, n = self._patch_features(self._model, img224, self.device)
-            pp = self._get_point_predictor()
-            new_dets = self._segment_at_points(pp, img224, points_to_segment, p, n,
-                                                blobs=pre_res["blobs"])
-        res_seg = (self.ofs.step(new_dets, t=t, protect_id=protect_id, skip_predict=True)
-                   if new_dets else
-                   {"matched": [], "created": [], "revived": [], "lost": [],
-                    "prediction_violations": [], "absorbed": [], "individuated": []})
-
-        res = {
-            "matched": res_confirm["matched"] + res_seg["matched"],
-            "created": res_confirm["created"] + res_seg["created"],
-            "revived": res_confirm["revived"] + res_seg["revived"],
-            "lost": res_confirm["lost"] + res_seg["lost"],
-            "prediction_violations": (res_confirm["prediction_violations"]
-                                       + res_seg["prediction_violations"]),
-            "absorbed": res_confirm["absorbed"] + res_seg["absorbed"],
-            "individuated": res_confirm.get("individuated", []) + res_seg.get("individuated", []),
-            "gate_rejected": res_confirm.get("gate_rejected", []),
-        }
-        onset_extra["new_dets"] = new_dets
-
-        if has_onset:
-            mode = "onset"
-        elif points_to_segment:
-            mode = "explore"
-        else:
-            mode = "confirm"
-
-        dt_ms = (time.perf_counter() - t0) * 1000.0
-        return mode, res, dt_ms, confirm_debug, conf_diag, onset_extra
-
-    def _dedup_confirm(self, results):
-        """【2026-09-09・仕様_予測して確かめる検出_2026-09-09「追記2」2節】
-        `results`（`confirm_points` の生の戻り値、"ok"でないものも含む）の中で
-        "ok" なもの同士を比べ、マスクのIoUが0.5以上、または重心の距離が10px
-        以内なら「同じ物を見ている」とみなし、注意中のカード＞古いid(小さい方)
-        の順で1枚だけ残す。残りのfile_idは戻り値の集合に含めない
-        （＝呼び出し元でmatched=False扱いになり、自然に消える）。
-
-        Returns: 残す（一致として採用する）file_idの集合。
-        """
-        import math
-        import numpy as np
-        ok = [r for r in results if r.get("ok")]
-        if len(ok) <= 1:
-            return set(r["file_id"] for r in ok)
-
-        def _is_dup(a, b):
-            ma, mb = a.get("mask"), b.get("mask")
-            if ma is not None and mb is not None:
-                inter = float(np.logical_and(ma, mb).sum())
-                union = float(np.logical_or(ma, mb).sum())
-                if union > 0 and (inter / union) >= 0.5:
-                    return True
-            ax, ay = a["pos"]
-            bx, by = b["pos"]
-            return math.hypot(ax - bx, ay - by) <= 10.0
-
-        attended_id = self._attended_id if self.attend else None
-        order = sorted(range(len(ok)),
-                        key=lambda i: (ok[i]["file_id"] != attended_id, ok[i]["file_id"]))
-        excluded = set()
-        for pos_a, i in enumerate(order):
-            if i in excluded:
-                continue
-            for j in order[pos_a + 1:]:
-                if j in excluded:
-                    continue
-                if _is_dup(ok[i], ok[j]):
-                    excluded.add(j)
-        return set(ok[i]["file_id"] for i in range(len(ok)) if i not in excluded)
-
     def _save_detection_frame(self, ctx, sim_time, img224, dets, res, prev_by_id,
-                               mode="scan", confirm_debug=None):
+                               mode="frame"):
         """目視用：検出（黄丸）と物体ファイル（色つき四角）をimg224へ重ねてPNG保存する。
         検出・対応づけ・既存CSVには一切触れない（読むだけ）。"""
         import math
@@ -1083,21 +747,10 @@ class ObjectFiles(Plugin):
             if self._last_vanished:
                 dr.text((4, 28), "VANISHED #%s" % self._attended_id,
                          fill=(255, 0, 0), font=self._frame_font)
-        # 【2026-09-09・仕様_予測して確かめる検出「後半」2節】左上にmodeのラベル。
-        #   scan_empty はSCANの見た目のまま（ラベル一覧に無い＝そのまま"SCAN"扱い）。
-        _mode_label = {"confirm": "CONFIRM", "scan": "SCAN",
-                       "scan_change": "SCAN(change)", "scan_miss": "SCAN(miss)"
-                       }.get(mode, "SCAN")
+        # 【2026-09-09・仕様_見る側_道を1本にする】左上にmodeのラベル
+        #   （"frame"/"first"の2種に一本化）。
+        _mode_label = {"first": "FIRST"}.get(mode, "FRAME")
         dr.text((4, 2), _mode_label, fill=(255, 255, 0), font=self._frame_font)
-        # 確認(confirm)で当たった点は緑の小さい点、外れた予測位置は赤の×。
-        if mode == "confirm" and confirm_debug:
-            for d in confirm_debug:
-                px, py = d["pos"]
-                if d["ok"]:
-                    dr.ellipse([px - 2, py - 2, px + 2, py + 2], fill=(0, 255, 0))
-                else:
-                    dr.line([px - 4, py - 4, px + 4, py + 4], fill=(255, 0, 0), width=2)
-                    dr.line([px - 4, py + 4, px + 4, py - 4], fill=(255, 0, 0), width=2)
         # 【2026-09-09・重複をなくす「後半」4節】吸収された検出＝紫の小さい丸
         #   （そのカードの現在位置に描く。revivedの箱と違う形なので区別できる）。
         for _det_idx, file_id in res.get("absorbed", []):
@@ -1358,17 +1011,6 @@ class ObjectFiles(Plugin):
                 sum(self._seg_detect_ms) / len(self._seg_detect_ms), 2),
         }
         self._seg_n_files, self._seg_n_dets, self._seg_detect_ms = [], [], []
-        # 【2026-09-09・仕様_予測して確かめる検出】mode別の直近値の平均。
-        #   scan_interval_s=Noneのときはmode="scan"固定なので、この2つの列は
-        #   常に「confirm_ms列は出ない・scan_ms==detect_ms」になる（既定不変）。
-        if self._seg_confirm_ms:
-            out["object_files_confirm_ms"] = round(
-                sum(self._seg_confirm_ms) / len(self._seg_confirm_ms), 2)
-            self._seg_confirm_ms = []
-        if self._seg_scan_ms:
-            out["object_files_scan_ms"] = round(
-                sum(self._seg_scan_ms) / len(self._seg_scan_ms), 2)
-            self._seg_scan_ms = []
         return out
 
     def line(self, ctx):
@@ -1382,21 +1024,19 @@ class ObjectFiles(Plugin):
                 w.writerow(["step", "sim_time", "n_dets", "n_files",
                            "file_id", "x", "y", "area", "event",
                            "misses", "since_seen", "app_cos_created", "mode",
-                           "conf_iou", "conf_area_ratio", "conf_emb_cos", "conf_reject",
-                           # 【2026-09-09・仕様_見る側の段構成_実装】末尾に追加した列
-                           #（無効時は空文字。既存列は変えない＝追加のみ）。
-                           "n_blobs", "n_unexplained", "ec_res_shift", "ec_res_noshift",
-                           "ec_moving", "cohesion", "app_conf"])
+                           # 【2026-09-09・仕様_見る側_道を1本にする 後半1節】
+                           #   確認専用の診断列(conf_iou等)・app_confは廃止（中5）。
+                           #   代わりにn_points（段3で集めた点の数）を足す。
+                           "n_points", "n_blobs", "n_unexplained", "ec_res_shift",
+                           "ec_res_noshift", "ec_moving", "cohesion"])
                 for r in self.rows:
                     w.writerow([r["step"], r["sim_time"], r["n_dets"], r["n_files"],
                                r["file_id"], r["x"], r["y"], r["area"], r["event"],
                                r["misses"], r["since_seen"], r["app_cos_created"],
-                               r["mode"], r.get("conf_iou", ""), r.get("conf_area_ratio", ""),
-                               r.get("conf_emb_cos", ""), r.get("conf_reject", ""),
-                               r.get("n_blobs", ""), r.get("n_unexplained", ""),
+                               r["mode"], r.get("n_points", ""), r.get("n_blobs", ""),
+                               r.get("n_unexplained", ""),
                                r.get("ec_res_shift", ""), r.get("ec_res_noshift", ""),
-                               r.get("ec_moving", ""), r.get("cohesion", ""),
-                               r.get("app_conf", "")])
+                               r.get("ec_moving", ""), r.get("cohesion", "")])
         if self.attend_rows and self.attend_out:
             os.makedirs(os.path.dirname(self.attend_out) or ".", exist_ok=True)
             with open(self.attend_out, "w", newline="", encoding="utf-8") as fp:

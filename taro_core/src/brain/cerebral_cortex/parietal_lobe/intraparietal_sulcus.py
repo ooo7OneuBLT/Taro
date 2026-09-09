@@ -88,10 +88,9 @@ class ObjectFile:
         self.hits = 1            # 対応がついた回数
         self.misses = 0          # 連続して対応がつかなかったコマ数
         self.since_seen = 0      # 直近で対応がついてから何コマ経ったか
-        # 【2026-09-09・仕様_見る側の段構成_実装「後半」段4】確認で一致するたび
-        #   0.9・conf+0.1、外れたら0.9・confのEMA。段4の判定には今回は使わない
-        #   （記録だけ。CSV app_conf列）。既定0.0スタート＝新設カードは無関心。
-        self.appearance_conf = 0.0
+        # 【2026-09-09・仕様_見る側_道を1本にする 後半2節】appearance_conf
+        #   （確認(confirm)専用のEMA、記録専用で誰も読んでいなかった）は削除した。
+        #   確認と切り出しの道を1本にまとめた仕様書の指示による。
         # 【2026-09-09・仕様_物体ファイルの重複をなくす「後半」1節】最後に一致した
         #   （＝実際に見えた）sim時刻。coast_max_s の「最後に一致した時刻から
         #   何秒まで等速で延長するか」の起点。coast_max_s=None（既定）では
@@ -187,9 +186,6 @@ class ObjectFile:
         self.hits += 1
         self.misses = 0
         self.since_seen = 0
-        # 【2026-09-09・仕様_見る側の段構成_実装「後半」段4】確認で一致するたび
-        #   0.9・conf+0.1（記録だけ。段4の判定には使わない）。
-        self.appearance_conf = 0.9 * self.appearance_conf + 0.1
         if t is not None:
             # 【2026-09-09・重複をなくす「後半」1節】実際に一致した＝見えた時刻。
             self.last_seen_t = t
@@ -248,17 +244,17 @@ class ObjectFileSystem:
             （既定不変）。
         frame_dt_s: 1コマ（predict()の1呼び出し）が何秒に相当するか。
             coast_min_speed_px_sをpx/秒に換算するために使う。既定1.0。
-        confirm_gate: 【2026-09-09・仕様_予測して確かめる検出「追記4」1節】
-            `confirm_update()` が結果を採用するかどうかの位置ゲートの種類。
-            "mahal"（既定・既定不変）＝従来どおりマハラノビス距離
-            （`f.mahalanobis(pos) <= mahal_gate`）。一致が続いてPが小さくなると
-            マスク重心の数画素の揺れでゲートを超えてしまう問題がF2-104pre実測
-            （追記4「実測」）で見つかった。"size"＝物の大きさで決める
-            （`dist(重心, 予測位置) <= sqrt(area)*224*0.75 + 8px`。確認のマスクは
-            頼んだカードの予測位置に打った点から出たものなので、位置の同一性は
-            構造上ほぼ担保される＝人間側は見ている物が数画素ずれても同じ物と
-            扱う、位置の許容は物の大きさに比例という近似）。"mahal"以外・"size"
-            以外の値は仕様に無いためValueErrorにする。
+        pos_gate: 【2026-09-09・仕様_見る側_道を1本にする 後半2節（旧・確認専用の
+            位置ゲート引数を統合）】`step()` のハンガリアン法に足す、位置だけの
+            追加の門。
+            "mahal"（既定・既定不変）＝追加の門を足さない（従来どおりコスト
+            行列のマハラノビス距離だけで判断）。"size"＝
+            `dist(検出の重心, 予測位置) <= sqrt(area)*224*0.75 + 8px` を超えたら
+            対応づけを禁止する（コストを1e6にする）。一致が続いてPが小さくなると
+            マスク重心の数画素の揺れでマハラノビス距離のゲートを超えてしまう
+            問題がF2-104pre実測（旧・追記4「実測」）で見つかった。物の大きさに
+            位置の許容を比例させる近似（人間側は数画素のずれを同じ物として
+            扱う）。"mahal"以外・"size"以外の値は仕様に無いためValueErrorにする。
         appearance_gate_cos: 【2026-09-09・仕様_見る側の段構成_実装「後半」段4】
             ハンガリアン法のコスト行列で、cos(appearance) < appearance_gate_cos
             の組をコスト1e6にして対応づけを禁止する（見た目が離れすぎている
@@ -269,10 +265,10 @@ class ObjectFileSystem:
                  reappear_gap=4, process_noise=4.0, meas_noise=6.0, gate=1.0,
                  revive_window_s=None, revive_cos=0.8, revive_dist_px=40.0, max_files=None,
                  coast_max_s=None, uncertainty_penalty=0.0, exclusive_dist_px=None,
-                 exclusive_cos=0.7, confirm_gate="mahal", exclusive_scale_by_size=False,
+                 exclusive_cos=0.7, pos_gate="mahal", exclusive_scale_by_size=False,
                  coast_min_speed_px_s=None, frame_dt_s=1.0, appearance_gate_cos=None):
-        if confirm_gate not in ("mahal", "size"):
-            raise ValueError("confirm_gate は 'mahal' か 'size' のどちらか（%r）" % (confirm_gate,))
+        if pos_gate not in ("mahal", "size"):
+            raise ValueError("pos_gate は 'mahal' か 'size' のどちらか（%r）" % (pos_gate,))
         self.appearance_weight = float(appearance_weight)
         self.mahal_gate = float(mahal_gate)
         self.max_missed = int(max_missed)
@@ -296,7 +292,7 @@ class ObjectFileSystem:
         self.frame_dt_s = float(frame_dt_s)
         self.appearance_gate_cos = (None if appearance_gate_cos is None
                                      else float(appearance_gate_cos))
-        self.confirm_gate = confirm_gate
+        self.pos_gate = pos_gate
         self.files = []
         self._next_id = 0
         # 【2026-09-09・連続性】消えたカードの控え。revive_window_sがNoneのままなら
@@ -344,95 +340,6 @@ class ObjectFileSystem:
                       coast_min_speed_px_s=self.coast_min_speed_px_s,
                       frame_dt_s=self.frame_dt_s, shift=shift)
             f.age += 1
-
-    def confirm_update(self, results, t=None):
-        """【2026-09-09・仕様_予測して確かめる検出_2026-09-09「追記2」1節】
-        確認（confirm）専用の更新。`predict_only()` で既に1コマぶん進めた
-        予測位置を、点プロンプトの確認結果と突き合わせる。`step()` と違い
-        ハンガリアン法は使わない —— 各結果は呼び出し元（object_files.py）が
-        どの `file_id` への問い合わせだったかを既に知っているので、1対1で
-        そのカードにだけ結ぶ。**確認から新しいカードは作らない**（作成は
-        見回り・横取りの全体切り出し＝`step()` だけ）。
-
-        【なぜ、2026-09-09】F2-101pre2/F2-102pre の実測：確認コマで4枚の
-        カードが全部同じボールを検出し、`step()`（ハンガリアン法）に渡すと
-        1つの検出を1枚のカードにしか対応づけられないため、残り3枚が
-        「対応がつかなかった」として新規カード作成に回っていた（確認モードで
-        作成25／消滅25、寿命の中央値4.65秒）。頼んだカードにだけ結べば、
-        この事故は起きない。
-
-        Args:
-            results: [{"file_id": id, "matched": bool,
-                       "pos": (x,y)（matched時のみ）, "area": float（matched時
-                       のみ）}, ...]（呼び出し元が「同じ物を複数のカードが確認
-                       したら1枚だけ」の重複整理を済ませたあとの、カードごとの
-                       最終判定。file_idはself.filesのidと対応する）。
-            t: sim秒（last_seen_tの更新用。coast_max_sを使うときの起点）。
-        Returns:
-            `step()` と同じ形の辞書。created/revived/absorbedは常に空リスト
-            （確認からは新規作成しない）。matchedのdet_idxはNone固定
-            （呼び出し元はfile_idしか読まないため）。加えて
-            `gate_rejected`（【2026-09-09・追記4】matched=Trueで来たが位置の
-            ゲートで落ちたfile_idのリスト。呼び出し元がCSVの
-            `conf_reject`="gate"を書くために使う。既定"mahal"のときも従来どおり
-            返る＝新しいキーが増えるだけで既定不変）。
-        """
-        by_id = {f.id: f for f in self.files}
-        matched = []
-        gate_rejected = []
-        for r in results:
-            f = by_id.get(r.get("file_id"))
-            if f is None:
-                continue
-            if r.get("matched"):
-                # 【追記2「直し」1節→追記4「直し」1節】自分のカードのゲート内か
-                #   だけを見る。ハンガリアン法のコスト最小化とは別の、
-                #   「この点はこのカードのものか」という単純な足切り。
-                #   confirm_gate="mahal"（既定）は従来どおりマハラノビス距離。
-                #   "size"は物の大きさ基準（追記4「直し」1節）：確認のマスクは
-                #   頼んだカードの予測位置に打った点から出たものなので、位置の
-                #   同一性は構造上ほぼ担保される＝人間側は数画素のずれを同じ物
-                #   として扱う（位置の許容は物の大きさに比例）。
-                if self.confirm_gate == "size":
-                    dx = r["pos"][0] - f.pos[0]
-                    dy = r["pos"][1] - f.pos[1]
-                    dist = float(np.hypot(dx, dy))
-                    # 【仕様に無かった判断】「物の大きさ」に使うareaは、確認で
-                    #   実際に測れたr["area"]ではなくカード自身のf.area
-                    #   （＝confirm_pointsに期待面積として渡した値）にした。
-                    #   r["area"]は測定ノイズを含み、ゲートの基準がコマごとに
-                    #   揺れるのを避けるため。差があるなら作業記録に書く。
-                    allowed = float(np.sqrt(max(f.area, 0.0))) * 224.0 * 0.75 + 8.0
-                    gate_ok = dist <= allowed
-                else:
-                    gate_ok = f.mahalanobis(r["pos"]) <= self.mahal_gate
-                if gate_ok:
-                    residual = f.update(r["pos"], f.appearance, r["area"], t=t)
-                    matched.append((f.id, None, residual))
-                    continue
-                gate_rejected.append(f.id)
-            f.misses += 1
-            f.since_seen += 1
-            f.appearance_conf *= 0.9
-
-        lost = [f.id for f in self.files if f.misses > self.max_missed]
-        if lost:
-            lost_set = set(lost)
-            if self.revive_window_s is not None and t is not None:
-                for f in self.files:
-                    if f.id in lost_set:
-                        self._graveyard.append({
-                            "id": f.id, "pos": f.pos,
-                            "appearance": np.array(f.appearance, dtype=np.float64, copy=True),
-                            "area": f.area, "hits": f.hits, "age": f.age,
-                            "t_lost": t,
-                        })
-            self.files = [f for f in self.files if f.id not in lost_set]
-
-        self.last_revived = []
-        return {"matched": matched, "created": [], "revived": [], "lost": lost,
-                "prediction_violations": [], "absorbed": [], "gate_rejected": gate_rejected,
-                "individuated": []}
 
     def step(self, detections, t=None, protect_id=None, skip_predict=False, shift=None):
         """detections = [{"pos": (x,y), "area": float, "appearance": vec}, ...]（1コマぶん）。
@@ -503,6 +410,16 @@ class ObjectFileSystem:
                         #   見た目が離れすぎている組は対応づけを禁止する
                         #   （コストを実質無限大にしてハンガリアン法から外す）。
                         cost[i, j] = 1e6
+                    if self.pos_gate == "size":
+                        # 【2026-09-09・仕様_見る側_道を1本にする 後半2節】旧・
+                        #   確認専用だった位置ゲート（物の大きさ基準）を、
+                        #   ハンガリアン法の対応づけそのものの門にする。
+                        dx = d["pos"][0] - f.pos[0]
+                        dy = d["pos"][1] - f.pos[1]
+                        dist = float(np.hypot(dx, dy))
+                        allowed = float(np.sqrt(max(f.area, 0.0))) * 224.0 * 0.75 + 8.0
+                        if dist > allowed:
+                            cost[i, j] = 1e6
             ri, ci = linear_sum_assignment(cost)
             used_f, used_d = set(), set()
             for i, j in zip(ri, ci):
@@ -520,7 +437,6 @@ class ObjectFileSystem:
         for i in unmatched_f:
             self.files[i].misses += 1
             self.files[i].since_seen += 1
-            self.files[i].appearance_conf *= 0.9
 
         # ---- 固体性：既存カードに近い検出は新規作成せず吸収する（重複をなくす
         #      「後半」3節。exclusive_dist_pxがNoneなら従来どおり何もしない＝

@@ -1002,7 +1002,12 @@ class Trainer:
             }
             # 【同6節】maskedのtickはz_stateを0として候補に渡す（z_max・attend_port
             #   から外す代わり、常に候補には入れる＝0を渡す、が仕様の文言）。
-            z_for_candidate = 0.0 if masked else d.get("z_state")
+            # 【2026-09-09・仕様_見る側_道を1本にする 後半4節（中6の直し）】
+            #   元のz_state自体がNone（この物体ファイルにまだ驚きの予測値が
+            #   無い）なら、maskedでもNoneのまま（候補に入れない）。0を渡すのは
+            #   「元は値があったがmaskedで隠す」場合だけ。
+            _z_state = d.get("z_state")
+            z_for_candidate = None if _z_state is None else (0.0 if masked else _z_state)
             if z_for_candidate is not None:
                 z_candidates.append((z_for_candidate, f.id))
             if d.get("z_vec") is not None:
