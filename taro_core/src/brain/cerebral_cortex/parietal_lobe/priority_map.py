@@ -92,10 +92,17 @@ class PriorityMap:
         if moving:
             # 動作中は候補の更新だけ行い、切り替えはしない（仕様5節）。
             pass
-        elif self._current_id is not None and self._current_id not in priority:
-            # 候補から消えた（misses>0になった等）＝従来どおり保持（消えた物を追う）。
+        elif (self._current_id is not None and self._current_id not in priority
+                and not priority):
+            # 【2026-09-09・追記3】今見ていた物が候補から消え、**ほかに見えている
+            #   物も無い**ときだけ保持する（消えた物を追い続ける＝「ないね」の
+            #   引き金になる）。ほかに見えている物があるなら、そちらへ移る
+            #   （下の `self._current_id is None` と同じ扱い＝待たずに即時）。
+            #   F2-107pre 実測：この条件が「候補から消えたら常に保持」だったため、
+            #   注意が更新されないカードに貼り付き、注意対象が見えていたのは
+            #   262 コマ中 13（F2-106pre は 149）だった。
             pass
-        elif self._current_id is None:
+        elif self._current_id is None or self._current_id not in priority:
             if best_id is not None:
                 self._current_id = best_id
                 self._hab_start_t[best_id] = t
