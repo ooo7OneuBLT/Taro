@@ -115,6 +115,15 @@ class ObjectFiles(Plugin):
         self.max_files = None if max_files is None else int(max_files)
         max_missed = self.config.get("max_missed")
         self.max_missed = None if max_missed is None else int(max_missed)
+        # 【2026-09-09・仕様_物体ファイルの重複をなくす「後半」4節】既定は全て
+        #   ObjectFileSystemの既定値と同じ（coast_max_s=None・uncertainty_penalty=0.0・
+        #   exclusive_dist_px=None・exclusive_cos=0.7）＝既定不変。
+        coast_max_s = self.config.get("coast_max_s")
+        self.coast_max_s = None if coast_max_s is None else float(coast_max_s)
+        self.uncertainty_penalty = float(self.config.get("uncertainty_penalty", 0.0))
+        exclusive_dist_px = self.config.get("exclusive_dist_px")
+        self.exclusive_dist_px = None if exclusive_dist_px is None else float(exclusive_dist_px)
+        self.exclusive_cos = float(self.config.get("exclusive_cos", 0.7))
         # 【2026-09-09・仕様_予測して確かめる検出】確認・見回り・横取り。既定は
         #   全てNone（scan_interval_s=None）＝従来どおり毎回全体切り出し（既定不変）。
         scan_interval_s = self.config.get("scan_interval_s")
@@ -128,6 +137,14 @@ class ObjectFiles(Plugin):
         self._last_scan_t = float("-inf")
         self._prev_small = None
         self._point_predictor = None
+        # 【2026-09-09・追記「直し」1】見失い横取りは「立ち上がり」で1回だけ。
+        #   misses>=scan_on_missesに“なった瞬間”のfile.idだけをここに入れ、matched/
+        #   revived/lost（=misses==0に戻った）で外す。空のままなら従来と挙動不変。
+        self._miss_fired = set()
+        # 【2026-09-09・追記「直し」4】scan_changeの連続発火を防ぐ不応期（秒）。
+        scan_change_refractory_s = self.config.get("scan_change_refractory_s", 1.0)
+        self.scan_change_refractory_s = float(scan_change_refractory_s)
+        self._last_scan_change_t = float("-inf")
         # 【2026-09-07・メモリ削減候補(a)】既定None＝SamAutomaticMaskGeneratorの
         #   既定値(64)のまま＝1ビットも変わらない。渡したときだけ上書きする。
         self.points_per_batch = self.config.get("points_per_batch")
@@ -167,6 +184,12 @@ class ObjectFiles(Plugin):
             revive_cos=self.revive_cos,
             revive_dist_px=self.revive_dist_px,
             max_files=self.max_files,
+            # 【2026-09-09・重複をなくす「後半」4節】既定値がObjectFileSystem側の
+            #   既定と一致するので、max_missedと違い無条件で渡してよい（既定不変）。
+            coast_max_s=self.coast_max_s,
+            uncertainty_penalty=self.uncertainty_penalty,
+            exclusive_dist_px=self.exclusive_dist_px,
+            exclusive_cos=self.exclusive_cos,
         )
         if self.max_missed is not None:
             # 既定Noneのときは渡さない＝ObjectFileSystemの既定値(20)のまま（既定不変）。
@@ -292,7 +315,16 @@ class ObjectFiles(Plugin):
         # （_process_attentionはこのofs.stepより後に呼ぶので、ここではまだ
         # 前コマの注意状態を使う。attend=Falseなら常にNone＝従来どおり）。
         protect_id = self._attended_id if self.attend else None
-        res = self.ofs.step(dets, t=t, protect_id=protect_id)
+        # 【2026-09-09・追記「直し」3】確認(confirm)コマは_detect_predictive内で
+        #   predict_only()を先に呼んでいるので、step()側のpredict()は飛ばす
+        #   （1コマにpredict()が2回進むのを防ぐ）。それ以外のmodeは従来どおりFalse。
+        res = self.ofs.step(dets, t=t, protect_id=protect_id, skip_predict=(mode == "confirm"))
+        # 【2026-09-09・追記「直し」1】このコマで一致(matched)・復活(revived)・
+        #   削除(lost)されたfile_idは、見失いの立ち上がり判定から外す
+        #   （misses==0に戻った/カード自体が無くなった＝再発火の資格を得る）。
+        self._miss_fired -= set(fid for fid, _det_idx, _residual in res["matched"])
+        self._miss_fired -= set(res.get("revived", []))
+        self._miss_fired -= set(res.get("lost", []))
 
         self._mode_counts[mode] = self._mode_counts.get(mode, 0) + 1
         if mode == "confirm":
@@ -359,12 +391,22 @@ class ObjectFiles(Plugin):
                 events.append((file_id, f.pos[0], f.pos[1], f.area, "revived",
                                f.misses, f.since_seen, _app_cos(file_id, f.appearance)))
         revived_ids = set(res.get("revived", []))
+        # 【2026-09-09・重複をなくす「後半」4節・新イベント absorbed】既存カードに
+        #   吸収された検出。そのカードの行として記録する（misses=0に更新済み）。
+        absorbed_pairs = res.get("absorbed", [])
+        absorbed_ids = set(file_id for _det_idx, file_id in absorbed_pairs)
+        for _det_idx, file_id in absorbed_pairs:
+            f = cur_by_id.get(file_id)
+            if f is not None:
+                events.append((file_id, f.pos[0], f.pos[1], f.area, "absorbed",
+                               f.misses, f.since_seen, _app_cos(file_id, f.appearance)))
         # 【M1.5・新イベント unmatched】このコマで対応がつかず、まだ削除されていない
         #   ファイル全部（＝matched でも created でもない、いま self.ofs.files に
         #   残っているファイル）。x/y/area は predict() 後の予測値
         #   （ObjectFile.pos が返すのはその値。step()冒頭で毎ファイルpredict()済み）。
         for f in self.ofs.files:
-            if f.id in matched_ids or f.id in created_ids or f.id in revived_ids:
+            if (f.id in matched_ids or f.id in created_ids or f.id in revived_ids
+                    or f.id in absorbed_ids):
                 continue
             events.append((f.id, f.pos[0], f.pos[1], f.area, "unmatched",
                            f.misses, f.since_seen, _app_cos(f.id, f.appearance)))
@@ -416,15 +458,25 @@ class ObjectFiles(Plugin):
         force_scan_reason = None
         if len(self.ofs.files) == 0:
             force_scan_reason = "empty"
-        elif self.scan_on_misses is not None and any(
-                f.misses >= self.scan_on_misses for f in self.ofs.files):
-            force_scan_reason = "miss"
+        elif self.scan_on_misses is not None:
+            # 【2026-09-09・追記「直し」1】立ち上がりで1回だけ：misses>=kに
+            #   “なった瞬間”のカードだけを数える（self._miss_firedに無いもの）。
+            #   同じカードは次に一致する(matched/revived)かlostになるまで
+            #   再発火しない（on_step側で_miss_firedから外す）。
+            newly_fired = [f.id for f in self.ofs.files
+                           if f.misses >= self.scan_on_misses and f.id not in self._miss_fired]
+            if newly_fired:
+                force_scan_reason = "miss"
+                self._miss_fired.update(newly_fired)
 
         small = np.asarray(
             Image.fromarray(np.clip(img224, 0, 255).astype(np.uint8))
             .convert("L").resize((32, 32)), dtype=np.float64)
         if (force_scan_reason is None and self.scan_change_thresh is not None
-                and self._prev_small is not None):
+                and self._prev_small is not None
+                # 【2026-09-09・追記「直し」4】不応期：発火後scan_change_refractory_s
+                #   秒は再発火しない（既定1.0秒）。
+                and (t - self._last_scan_change_t) >= self.scan_change_refractory_s):
             diff = np.abs(small - self._prev_small)
             # 既存カードの周り（半径 = sqrt(area)*224*1.5 px、32x32尺度に換算）を除く。
             mask = np.ones((32, 32), dtype=bool)
@@ -438,6 +490,7 @@ class ObjectFiles(Plugin):
             vals = diff[mask]
             if vals.size and float(vals.mean()) > self.scan_change_thresh:
                 force_scan_reason = "change"
+                self._last_scan_change_t = t
         self._prev_small = small
 
         do_scan = force_scan_reason is not None or (t - self._last_scan_t >= self.scan_interval_s)
@@ -459,7 +512,7 @@ class ObjectFiles(Plugin):
 
         # ---- 確認：既存カードの予測位置を1点ずつ聞く（画像埋め込みは1回だけ）------
         t0 = time.perf_counter()
-        self.ofs.predict_only()
+        self.ofs.predict_only(t)
         points = [f.pos for f in self.ofs.files]
         expected_areas = [f.area for f in self.ofs.files]
         if self._point_predictor is None:
@@ -541,6 +594,13 @@ class ObjectFiles(Plugin):
                 else:
                     dr.line([px - 4, py - 4, px + 4, py + 4], fill=(255, 0, 0), width=2)
                     dr.line([px - 4, py + 4, px + 4, py - 4], fill=(255, 0, 0), width=2)
+        # 【2026-09-09・重複をなくす「後半」4節】吸収された検出＝紫の小さい丸
+        #   （そのカードの現在位置に描く。revivedの箱と違う形なので区別できる）。
+        for _det_idx, file_id in res.get("absorbed", []):
+            f = next((ff for ff in self.ofs.files if ff.id == file_id), None)
+            if f is not None:
+                x, y = f.pos
+                dr.ellipse([x - 3, y - 3, x + 3, y + 3], fill=(180, 60, 220))
         dr.text((4, 14), "t=%.1fs dets=%d files=%d" % (sim_time, len(dets), len(self.ofs.files)),
                  fill=(255, 255, 255), font=self._frame_font)
         img.save(os.path.join(self.frames_out, "frame_%05d.png" % ctx.step))

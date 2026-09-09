@@ -69,7 +69,7 @@ _H = np.array([[1, 0, 0, 0],
 class ObjectFile:
     """1つの物体ファイル。位置・速度（カルマン状態）と見た目を持つ。名前は持たない。"""
 
-    def __init__(self, id_, pos, appearance, area, process_noise, meas_noise):
+    def __init__(self, id_, pos, appearance, area, process_noise, meas_noise, t=None):
         self.id = id_
         self.x = np.array([pos[0], pos[1], 0.0, 0.0], dtype=np.float64)
         self.P = np.eye(4) * 30.0
@@ -81,12 +81,32 @@ class ObjectFile:
         self.hits = 1            # 対応がついた回数
         self.misses = 0          # 連続して対応がつかなかったコマ数
         self.since_seen = 0      # 直近で対応がついてから何コマ経ったか
+        # 【2026-09-09・仕様_物体ファイルの重複をなくす「後半」1節】最後に一致した
+        #   （＝実際に見えた）sim時刻。coast_max_s の「最後に一致した時刻から
+        #   何秒まで等速で延長するか」の起点。coast_max_s=None（既定）では
+        #   一度も参照されない＝既定不変。
+        self.last_seen_t = t
 
     @property
     def pos(self):
         return float(self.x[0]), float(self.x[1])
 
-    def predict(self):
+    def predict(self, t=None, coast_max_s=None):
+        """coast_max_s（【2026-09-09・仕様_物体ファイルの重複をなくす「後半」1節】）：
+        Noneなら従来どおり永遠に等速（既定不変）。秒数を渡すと、`misses>0`（隠れて
+        いる）かつ「最後に一致した時刻(last_seen_t)からt秒」がcoast_max_sを超えた
+        カードは、この呼び出し以降 vx=vy=0 にして位置を止める（Pの増加だけ続く）。
+        文献（von Hofsten & Rosander、Bremner 2005）：可視区間の速度をそのまま
+        延長して再出現を予期し、減速は支持されない。延長の上限は規格（1秒）。"""
+        if coast_max_s is not None:
+            if t is None:
+                # 【仕様「後半」1節】「tが無ければ検出コマ数×interval_s相当で近似
+                #   しない」＝coast_max_sを使うなら呼び出し元は必ずtを渡すこと。
+                raise ValueError("coast_max_s を使うときは t が必須")
+            if (self.misses > 0 and self.last_seen_t is not None
+                    and (t - self.last_seen_t) > coast_max_s):
+                self.x[2] = 0.0
+                self.x[3] = 0.0
         self.x = _F @ self.x
         self.P = _F @ self.P @ _F.T + self.Q
 
@@ -106,7 +126,7 @@ class ObjectFile:
         S = self.innovation_cov()
         return float(np.sqrt(y @ np.linalg.inv(S) @ y))
 
-    def update(self, pos, appearance, area, appearance_lr=0.3):
+    def update(self, pos, appearance, area, appearance_lr=0.3, t=None):
         z = np.asarray(pos, dtype=np.float64)
         y = z - _H @ self.x
         S = _H @ self.P @ _H.T + self.R
@@ -120,6 +140,9 @@ class ObjectFile:
         self.hits += 1
         self.misses = 0
         self.since_seen = 0
+        if t is not None:
+            # 【2026-09-09・重複をなくす「後半」1節】実際に一致した＝見えた時刻。
+            self.last_seen_t = t
         return mahal      # 予測とのずれ（不確実性で正規化・単位なし）＝マハラノビス距離
 
 
@@ -154,11 +177,23 @@ class ObjectFileSystem:
         max_files: 【2026-09-09・枚数の上限】同時に持てるファイル数。None＝
             従来どおり無制限（既定不変）。Feigenson & Carey（乳児3個）・
             Pylyshyn（成人4個）[Tier1]の近似。
+        coast_max_s: 【2026-09-09・仕様_物体ファイルの重複をなくす「後半」1節】
+            隠れた物が等速で進む延長の上限（秒）。None＝従来どおり永遠に等速
+            （既定不変）。超えたら位置を止めてPの増加だけ続ける。
+        uncertainty_penalty: 【同「後半」2節】照合コストに不確かさの大きさ
+            （0.5*log(det(S)/det(R))）を足す係数。0.0＝従来どおり（既定不変）。
+            不確かな（長く一致していない）カードほど選ばれやすくなる計算間違いの修正。
+        exclusive_dist_px: 【同「後半」3節】固体性：新規作成（復活を含む）の前に、
+            生きているカードのうちこの距離(px)以内かつ見た目が近いものがあれば
+            作らず、その検出をそのカードに吸収させる。None＝従来どおり（既定不変）。
+        exclusive_cos: exclusive_dist_px と併用する見た目のコサイン類似度の下限。
     """
 
     def __init__(self, appearance_weight=0.4, mahal_gate=MAHAL_GATE95, max_missed=20,
                  reappear_gap=4, process_noise=4.0, meas_noise=6.0, gate=1.0,
-                 revive_window_s=None, revive_cos=0.8, revive_dist_px=40.0, max_files=None):
+                 revive_window_s=None, revive_cos=0.8, revive_dist_px=40.0, max_files=None,
+                 coast_max_s=None, uncertainty_penalty=0.0, exclusive_dist_px=None,
+                 exclusive_cos=0.7):
         self.appearance_weight = float(appearance_weight)
         self.mahal_gate = float(mahal_gate)
         self.max_missed = int(max_missed)
@@ -170,6 +205,10 @@ class ObjectFileSystem:
         self.revive_cos = float(revive_cos)
         self.revive_dist_px = float(revive_dist_px)
         self.max_files = None if max_files is None else int(max_files)
+        self.coast_max_s = None if coast_max_s is None else float(coast_max_s)
+        self.uncertainty_penalty = float(uncertainty_penalty)
+        self.exclusive_dist_px = None if exclusive_dist_px is None else float(exclusive_dist_px)
+        self.exclusive_cos = float(exclusive_cos)
         self.files = []
         self._next_id = 0
         # 【2026-09-09・連続性】消えたカードの控え。revive_window_sがNoneのままなら
@@ -201,17 +240,19 @@ class ObjectFileSystem:
             })
         return victim.id
 
-    def predict_only(self):
+    def predict_only(self, t=None):
         """【2026-09-09・仕様_予測して確かめる検出】確認（confirm）専用：対応づけは
         せず、各ファイルの予測位置だけを1コマぶん進める。`step()` 冒頭の2行
         （`f.predict()`・`f.age += 1`）と同じ処理を切り出しただけで、`step()`
         自体は無改修（既存の呼び出し元の挙動は不変）。呼び出し元（object_files.py）
-        が確認用の点プロンプトを作る前に、いまの予測位置 `f.pos` を得るために使う。"""
+        が確認用の点プロンプトを作る前に、いまの予測位置 `f.pos` を得るために使う。
+        `t` は coast_max_s（重複をなくす「後半」1節）を使うときに必要（Noneなら
+        従来どおり coast_max_s も渡らないので使われない＝既定不変）。"""
         for f in self.files:
-            f.predict()
+            f.predict(t=t, coast_max_s=self.coast_max_s)
             f.age += 1
 
-    def step(self, detections, t=None, protect_id=None):
+    def step(self, detections, t=None, protect_id=None, skip_predict=False):
         """detections = [{"pos": (x,y), "area": float, "appearance": vec}, ...]（1コマぶん）。
         `t`（sim秒。連続性の墓場の期限管理に使う）と `protect_id`（注意中の
         file_id。枚数の上限で押し出さない）は任意引数（省略すれば従来どおり）。
@@ -225,11 +266,19 @@ class ObjectFileSystem:
                   CSV等の「lost」イベントとして自然に見えるようにするため）,
                   prediction_violations=[(file_id, residual, gap)]
                   （空白が reappear_gap 以上あった後に対応がつき、かつ
-                   予測とのずれが mahal_gate を超えたもの＝見た目で救われた組）
+                   予測とのずれが mahal_gate を超えたもの＝見た目で救われた組）,
+                  absorbed=[(det_idx, file_id), ...]（【2026-09-09・重複をなくす
+                  「後半」3節】固体性：既存カードに吸収された検出。exclusive_dist_px
+                  がNone（既定）なら常に空リスト＝既定不変）
+        `skip_predict`（【2026-09-09・仕様_予測して確かめる検出「追記」3節】）：
+            Trueなら冒頭の predict() を飛ばす（呼び出し元が `predict_only()` で
+            既に1コマぶん進めている確認(confirm)コマ用。1コマにpredict()が
+            2回進むのを防ぐ）。既定False＝従来どおり（既定不変）。
         """
-        for f in self.files:
-            f.predict()
-            f.age += 1
+        if not skip_predict:
+            for f in self.files:
+                f.predict(t=t, coast_max_s=self.coast_max_s)
+                f.age += 1
 
         n_f, n_d = len(self.files), len(detections)
         matched, unmatched_f, unmatched_d = [], list(range(n_f)), list(range(n_d))
@@ -239,7 +288,19 @@ class ObjectFileSystem:
             cost = np.zeros((n_f, n_d))
             for i, f in enumerate(self.files):
                 for j, d in enumerate(detections):
-                    pos_cost = f.mahalanobis(d["pos"]) / self.mahal_gate  # 上限で切り詰めない
+                    mahal = f.mahalanobis(d["pos"])
+                    if self.uncertainty_penalty:
+                        # 【2026-09-09・重複をなくす「後半」2節】採用済みのベイズ
+                        #   模型の計算間違いの修正：不確かさの大きさ(log|S|)の項を
+                        #   足す。確率として正しい形（S=innovation_cov, Rは観測雑音）。
+                        #   uncertainty_penalty=0.0（既定）なら従来と1ビットも
+                        #   変わらない（既定不変）。
+                        S = f.innovation_cov()
+                        penalty = self.uncertainty_penalty * 0.5 * float(
+                            np.log(np.linalg.det(S) / np.linalg.det(f.R)))
+                    else:
+                        penalty = 0.0
+                    pos_cost = (mahal + penalty) / self.mahal_gate  # 上限で切り詰めない
                     av = d["appearance"] / (np.linalg.norm(d["appearance"]) + 1e-9)
                     fv = f.appearance / (np.linalg.norm(f.appearance) + 1e-9)
                     app_cost = 1.0 - float(av @ fv)
@@ -250,7 +311,7 @@ class ObjectFileSystem:
                 if cost[i, j] <= self.gate:
                     f, d = self.files[i], detections[j]
                     gap = f.since_seen
-                    residual = f.update(d["pos"], d["appearance"], d["area"])
+                    residual = f.update(d["pos"], d["appearance"], d["area"], t=t)
                     matched.append((f.id, j, residual))
                     if gap >= self.reappear_gap and residual > self.mahal_gate:
                         violations.append((f.id, residual, gap))
@@ -261,6 +322,34 @@ class ObjectFileSystem:
         for i in unmatched_f:
             self.files[i].misses += 1
             self.files[i].since_seen += 1
+
+        # ---- 固体性：既存カードに近い検出は新規作成せず吸収する（重複をなくす
+        #      「後半」3節。exclusive_dist_pxがNoneなら従来どおり何もしない＝
+        #      既定不変）。新規作成（revive含む）の前に行う。 ---------------------
+        absorbed = []
+        if self.exclusive_dist_px is not None and unmatched_d:
+            still_remaining = []
+            for j in unmatched_d:
+                d = detections[j]
+                dv = np.asarray(d["appearance"], dtype=np.float64)
+                dv_n = dv / (np.linalg.norm(dv) + 1e-9)
+                best_f, best_dist = None, None
+                for f in self.files:
+                    dist = float(np.hypot(d["pos"][0] - f.pos[0], d["pos"][1] - f.pos[1]))
+                    if dist > self.exclusive_dist_px:
+                        continue
+                    fv = f.appearance / (np.linalg.norm(f.appearance) + 1e-9)
+                    cos = float(dv_n @ fv)
+                    if cos < self.exclusive_cos:
+                        continue
+                    if best_dist is None or dist < best_dist:
+                        best_f, best_dist = f, dist
+                if best_f is not None:
+                    best_f.update(d["pos"], d["appearance"], d["area"], t=t)
+                    absorbed.append((j, best_f.id))
+                else:
+                    still_remaining.append(j)
+            unmatched_d = still_remaining
 
         # ---- 連続性：墓場の期限切れを捨てる（revive_window_sがNoneなら墓場は空のまま）----
         if self.revive_window_s is not None and t is not None and self._graveyard:
@@ -296,7 +385,7 @@ class ObjectFileSystem:
                     used_grave.add(best_idx)
                     self._make_room(protect_id, t)
                     nf = ObjectFile(g["id"], d["pos"], d["appearance"], d["area"],
-                                    self.process_noise, self.meas_noise)
+                                    self.process_noise, self.meas_noise, t=t)
                     nf.hits = g["hits"]
                     nf.age = g["age"]
                     self.files.append(nf)
@@ -315,7 +404,7 @@ class ObjectFileSystem:
             if ev is not None:
                 evicted.append(ev)
             nf = ObjectFile(self._next_id, d["pos"], d["appearance"], d["area"],
-                            self.process_noise, self.meas_noise)
+                            self.process_noise, self.meas_noise, t=t)
             self._next_id += 1
             self.files.append(nf)
             created.append(nf.id)
@@ -338,4 +427,4 @@ class ObjectFileSystem:
         self.last_revived = revived
 
         return {"matched": matched, "created": created, "revived": revived,
-                "lost": lost, "prediction_violations": violations}
+                "lost": lost, "prediction_violations": violations, "absorbed": absorbed}

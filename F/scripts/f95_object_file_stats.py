@@ -92,10 +92,13 @@ def main(log_dir):
     split_steps = sum(1 for c in confirmed_counts if c >= 2)
     split_rate = round(split_steps / len(all_steps), 4) if all_steps else None
 
-    # ---- 4. created/revived/lost の件数（ログ全体） --------------------------
+    # ---- 4. created/revived/lost/absorbed の件数（ログ全体） ------------------
     n_created = sum(1 for r in rows if r["event"] == "created")
     n_revived = sum(1 for r in rows if r["event"] == "revived")
     n_lost = sum(1 for r in rows if r["event"] == "lost")
+    # 【2026-09-09・重複をなくす「後半」5節】absorbed（既存カードに吸収された検出）
+    #   の件数。absorbed列が無い旧ログでは0のまま（互換）。
+    n_absorbed = sum(1 for r in rows if r["event"] == "absorbed")
 
     # ---- 5. カードの寿命の中央値（sim_time、created/revivedからlostまで） -----
     birth = {}      # file_id -> 最初のcreated/revivedのsim_time
@@ -132,15 +135,50 @@ def main(log_dir):
     for m in mode_by_step.values():
         mode_counts[m] = mode_counts.get(m, 0) + 1
 
-    # ---- 7. 見失い率：確認コマ(mode=="confirm")でのunmatched行 / n_filesの延べ --
+    # ---- 7. 見失い率：確認コマ(mode=="confirm")で「直前に見えていた
+    #      （misses==0）カード」のうち、外れた(unmatched)割合 -----------------
+    # 【2026-09-09・追記「直し」2】隠れた物の確認の失敗（misses>0のカードが
+    #   もう一度外れる）は正しい結果であり見失いではない。分母を「直前misses==0
+    #   だったカード」に絞る。unmatched行のmisses列は増加後の値（従来必ず+1ずつ
+    #   増える）なので misses_after-1 が直前値。matched行はmisses=0（更新後）
+    #   なので、直前値を知るには履歴（file_idごとの前回misses）をたどる必要が
+    #   ある（rowsをstep順にたどりながら追跡する）。
     confirm_steps = [s for s, m in mode_by_step.items() if m == "confirm"]
     confirm_steps_set = set(confirm_steps)
+    _sorted_rows = sorted(rows, key=lambda r: (_to_int(r["step"]) if _to_int(r["step"]) is not None else -1))
+    _last_misses = {}
+    confirm_denom = 0
     confirm_unmatched = 0
-    for r in rows:
+    for r in _sorted_rows:
+        fid = r["file_id"]
+        if fid == "":
+            continue
+        ev = r["event"]
         step = _to_int(r["step"])
-        if step in confirm_steps_set and r["event"] == "unmatched":
-            confirm_unmatched += 1
-    confirm_card_total = sum(n_files_by_step.get(s, 0) for s in confirm_steps)
+        if ev == "lost":
+            _last_misses.pop(fid, None)
+            continue
+        if ev in ("matched", "created", "revived", "absorbed"):
+            misses_after = 0
+        elif ev == "unmatched":
+            mv = _to_int(r["misses"])
+            misses_after = mv
+        else:
+            continue
+        prior = None
+        if ev == "unmatched":
+            prior = (misses_after - 1) if misses_after is not None else None
+        elif ev in ("matched", "absorbed"):
+            prior = _last_misses.get(fid)
+        # created/revived は「直前に見えていた」の定義に当てはまらない
+        # （新規/復活の瞬間で、直前状態が無いか別物）ので分母に数えない。
+        if step in confirm_steps_set and ev in ("matched", "unmatched", "absorbed") and prior == 0:
+            confirm_denom += 1
+            if ev == "unmatched":
+                confirm_unmatched += 1
+        if misses_after is not None:
+            _last_misses[fid] = misses_after
+    confirm_card_total = confirm_denom
     miss_rate = (round(confirm_unmatched / confirm_card_total, 4)
                  if confirm_card_total else None)
 
@@ -161,6 +199,57 @@ def main(log_dir):
     scan_ms_mean = (round(sum(scan_ms_vals) / len(scan_ms_vals), 3)
                      if scan_ms_vals else None)
 
+    # ---- 9. 注意の持続・切り替え（重複をなくす「後半」5節） -------------------
+    # 【仕様に無かった判断】注意.csvのdist_centerは画面中心からの距離であって
+    #   旧attended_idとの位置差ではないため、「切り替え先が20px以内だったか」は
+    #   注意.csv単独では計算できない。物体ファイル.csv（同じstep・file_idの
+    #   x,y、matched/created/revived/absorbed行）と突き合わせて位置差を求めた。
+    attend_persistence_median = None
+    attend_switch_count = None
+    attend_switch_close_rate = None
+    attend_csv_path = os.path.join(log_dir, "注意.csv")
+    if os.path.exists(attend_csv_path):
+        with open(attend_csv_path, "r", encoding="utf-8", newline="") as fp:
+            arows = [r for r in csv.DictReader(fp)]
+        arows.sort(key=lambda r: (_to_int(r["step"]) if _to_int(r["step"]) is not None else -1))
+        seq = [(r.get("attended_id") or "", _to_int(r["step"])) for r in arows]
+        # 持続：連続して同じattended_id（空文字＝注意対象なしは除く）が続くコマ数。
+        runs = []
+        i = 0
+        while i < len(seq):
+            j = i
+            while j < len(seq) and seq[j][0] == seq[i][0]:
+                j += 1
+            runs.append((seq[i][0], j - i))
+            i = j
+        persistence_lengths = [ln for aid, ln in runs if aid != ""]
+        attend_persistence_median = (round(median(persistence_lengths), 3)
+                                      if persistence_lengths else None)
+        # 位置の突き合わせ用：(step, file_id) -> (x, y)（物体ファイル.csvから）
+        pos_by_step_fid = {}
+        for r in rows:
+            if r["event"] in ("matched", "created", "revived", "absorbed"):
+                step = _to_int(r["step"])
+                fid = r["file_id"]
+                x, y = _to_float(r["x"]), _to_float(r["y"])
+                if step is not None and fid and x is not None and y is not None:
+                    pos_by_step_fid[(step, fid)] = (x, y)
+        switches = 0
+        switch_close = 0
+        prev_aid, prev_step = None, None
+        for aid, step in seq:
+            if prev_aid is not None and aid != "" and prev_aid != "" and aid != prev_aid:
+                switches += 1
+                p_old = pos_by_step_fid.get((prev_step, prev_aid))
+                p_new = pos_by_step_fid.get((step, aid))
+                if p_old is not None and p_new is not None:
+                    d = ((p_old[0] - p_new[0]) ** 2 + (p_old[1] - p_new[1]) ** 2) ** 0.5
+                    if d <= 20.0:
+                        switch_close += 1
+            prev_aid, prev_step = aid, step
+        attend_switch_count = switches
+        attend_switch_close_rate = (round(switch_close / switches, 4) if switches else None)
+
     result = {
         "n_files_mean": n_files_mean,
         "n_files_max": n_files_max,
@@ -169,6 +258,7 @@ def main(log_dir):
         "n_created": n_created,
         "n_revived": n_revived,
         "n_lost": n_lost,
+        "n_absorbed": n_absorbed,
         "lifespan_median_s": lifespan_median,
         "n_detect_steps": len(all_steps),
         "n_lifespan_samples": len(lifespans),
@@ -179,6 +269,9 @@ def main(log_dir):
         "confirm_unmatched_total": confirm_unmatched,
         "object_files_confirm_ms_mean": confirm_ms_mean,
         "object_files_scan_ms_mean": scan_ms_mean,
+        "attend_persistence_median_steps": attend_persistence_median,
+        "attend_switch_count": attend_switch_count,
+        "attend_switch_close_rate": attend_switch_close_rate,
     }
 
     out_path = os.path.join(log_dir, "結果_物体ファイル.json")
