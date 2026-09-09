@@ -138,6 +138,12 @@ class PriorityMap:
                 cx = (j + 0.5) * cs
                 in_file = False
                 for f in files:
+                    # 【2026-09-09・追記1「直し」1】見失い中（misses>0）のカードは
+                    #   セルを避ける根拠にしない。misses==0のカードだけが
+                    #   「そこに物がある」と主張できる（同じ場所に別の物が
+                    #   置かれても、見失っている古い札のbboxで探索を止めない）。
+                    if getattr(f, "misses", 0) != 0:
+                        continue
                     fx, fy = f.pos
                     r = math.sqrt(max(f.area, 0.0)) * 224.0 * 0.75 + 8.0
                     if math.hypot(cx - fx, cy - fy) <= r:

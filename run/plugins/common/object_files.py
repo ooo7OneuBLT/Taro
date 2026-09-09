@@ -852,6 +852,15 @@ class ObjectFiles(Plugin):
         payload = []
         confirm_debug = []
         conf_diag = {}
+        # 【2026-09-09・追記1「直し」2】確認が「マスクは見つかったが見た目が
+        #   合わない」（reject_reason=="emb"＝emb_cosがconfirm_emb_cos未満）で
+        #   外れたカードのpos。同じ場所に別の物が置かれたとき、古いカードには
+        #   結ばれない（=confirm_update側では見えない）ので、ここでonsetの
+        #   要求点として拾い、段2でsegment_at_pointsに流す。
+        #   confirm_pointsはok=Falseのとき"pos"を返さないので、確認自体が
+        #   使った点（=カードの予測位置pos_by_id）を代用する（同じ点で
+        #   見た目照合をしたのだから、見つけ直す点として妥当）。
+        visual_reject_points = []
         for r in results:
             fid = r.get("file_id")
             if "iou" in r:
@@ -867,6 +876,10 @@ class ObjectFiles(Plugin):
                 confirm_debug.append({"pos": r.get("pos", pos_by_id.get(fid)), "ok": False})
                 if r.get("ok") and fid not in kept_ids:
                     conf_diag.setdefault(fid, {})["reject_reason"] = "dedup"
+                if not r.get("ok") and r.get("reject_reason") == "emb":
+                    p = r.get("pos", pos_by_id.get(fid))
+                    if p is not None:
+                        visual_reject_points.append(p)
         res_confirm = self.ofs.confirm_update(payload, t=t)
         for fid in res_confirm.get("gate_rejected", []):
             conf_diag.setdefault(fid, {})["reject_reason"] = "gate"
@@ -888,6 +901,11 @@ class ObjectFiles(Plugin):
             cx, cy = b["cx"], b["cy"]
             in_file = False
             for f in self.ofs.files:
+                # 【2026-09-09・追記1「直し」1】見失い中（misses>0）のカードは
+                #   「変化を説明した」と数えない。同じ場所に別の物が置かれた
+                #   とき、見失っている古い札がonsetを握りつぶすのを防ぐ。
+                if f.misses != 0:
+                    continue
                 fx, fy = f.pos
                 r = (max(f.area, 0.0) ** 0.5) * 224.0 * 0.75 + 8.0
                 if ((cx - fx) ** 2 + (cy - fy) ** 2) ** 0.5 <= r:
@@ -933,6 +951,13 @@ class ObjectFiles(Plugin):
         has_onset = False
         for b in unexplained:
             points_to_segment.append((b["cx"], b["cy"]))
+            has_onset = True
+        # 【2026-09-09・追記1「直し」2】見た目不一致で外れたカードの点も
+        #   onsetと同じ扱いでsegment_at_points→skip_predict=Trueに流す。
+        #   段4のappearance_gate_cosで古いカードには結ばれず、individuated
+        #   として新カードになる（mode="onset"）。
+        for p in visual_reject_points:
+            points_to_segment.append(p)
             has_onset = True
         if explore_point is not None:
             points_to_segment.append(explore_point)
