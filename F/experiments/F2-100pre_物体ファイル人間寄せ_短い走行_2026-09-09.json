@@ -1,0 +1,111 @@
+{
+  "name": "F2-100pre_物体ファイル人間寄せ_短い走行",
+  "note": "2026-09-09 F2-99の複製。仕様_物体ファイルの人間寄せ_凝集性・連続性・上限_2026-09-09.md「後半」4節。修正後の絵用の短い走行（600歩）。凝集性(cohesion_gap_px=4)・連続性(revive_window_s=30,revive_cos=0.8,revive_dist_px=40)・枚数上限(max_files=4)を追加。世界の予測器の設定はF2-99のまま変更しない。",
+  "scene": "座位_12ヶ月_F2-49_実物8択_r1_個体1_消失発話_気づき待ち_3語黙る_2026-09-06",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 12.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32,
+      "eye": "left",
+      "source": "wide"
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.0,
+    "model": "F/models/F2-84_r2_seed98_2026-09-07.pt",
+    "save": "F/logs/F2-100pre_物体ファイル人間寄せ_短い走行/model.pt",
+    "produce": {
+      "mode": "word",
+      "threshold": 0.5,
+      "cooldown_sec": 2.0,
+      "max_length": 8,
+      "develop_from_age": true,
+      "vocal_tract_decoupled": true,
+      "context": true,
+      "listen_learn": true,
+      "context_lambda": 0.0,
+      "vision_context": true,
+      "listen_lr": 0.001,
+      "hippocampus": {
+        "capacity": 512,
+        "decay": 0.5,
+        "replay_passes": 10,
+        "recent_ratio": 0.7,
+        "sleep_lr": 0.005
+      },
+      "word_choice": "gru_hippo",
+      "hippo_gain": 1.0,
+      "listen_self": false,
+      "listen_eos": true,
+      "segment_mode": "end_prob",
+      "vanish_input": true,
+      "here_input": true,
+      "chunk_level": true,
+      "message_level": true
+    },
+    "world_predictor": {
+      "ports": true,
+      "h_port": 64,
+      "h_slow": 32,
+      "summary_dim": 32,
+      "tau_fast": 5,
+      "tau_slow": 40,
+      "lr": 0.001,
+      "max_files": 4,
+      "min_hits": 2,
+      "appearance_freeze": true,
+      "block_norm": true,
+      "ne_surprise_rate": 0.0,
+      "slow_window": 40,
+      "grad_check_step": 300,
+      "leaky_fast": false,
+      "vec_proj_dim": 32,
+      "loss_balance": true,
+      "baseline_init": "shared"
+    }
+  },
+  "run": {
+    "type": "train",
+    "steps": 600,
+    "seed": 91,
+    "K": 10,
+    "checkpoint": 100,
+    "csv": "F/logs/F2-100pre_物体ファイル人間寄せ_短い走行/run.csv"
+  },
+  "plugins": {
+    "word_production": {
+      "events_out": "F/logs/F2-100pre_物体ファイル人間寄せ_短い走行/太郎の発話.csv"
+    },
+    "word_learning": {
+      "events_out": "F/logs/F2-100pre_物体ファイル人間寄せ_短い走行/発話イベント.csv"
+    },
+    "object_files": {
+      "events_out": "F/logs/F2-100pre_物体ファイル人間寄せ_短い走行/物体ファイル.csv",
+      "points_per_side": 16,
+      "points_per_batch": 16,
+      "empty_cache_after_detect": true,
+      "frames_out": "F/logs/F2-100pre_物体ファイル人間寄せ_短い走行/検出フレーム",
+      "interval_s": 0.5,
+      "attend": true,
+      "attend_out": "F/logs/F2-100pre_物体ファイル人間寄せ_短い走行/注意.csv",
+      "vanish_misses": 2,
+      "attend_surprise_gain": 0.0,
+      "cohesion_gap_px": 4,
+      "revive_window_s": 30,
+      "revive_cos": 0.8,
+      "revive_dist_px": 40,
+      "max_files": 4
+    },
+    "world_predictor_log": {
+      "events_out": "F/logs/F2-100pre_物体ファイル人間寄せ_短い走行/世界の予測器.csv"
+    },
+    "view_video": {
+      "out": "F/logs/F2-100pre_物体ファイル人間寄せ_短い走行/動画_視界.mp4",
+      "until": 600
+    }
+  }
+}

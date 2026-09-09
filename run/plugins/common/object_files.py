@@ -104,6 +104,15 @@ class ObjectFiles(Plugin):
         self.events_out = _abs_path(events_out) if events_out else None
         self.device = self.config.get("device")
         self.points_per_side = self.config.get("points_per_side")
+        # 【2026-09-09・仕様_物体ファイルの人間寄せ_凝集性・連続性・上限】
+        #   既定は全てNone（凝集性・連続性・上限とも従来どおりOFF）＝既定不変。
+        self.cohesion_gap_px = self.config.get("cohesion_gap_px")
+        revive_window_s = self.config.get("revive_window_s")
+        self.revive_window_s = None if revive_window_s is None else float(revive_window_s)
+        self.revive_cos = float(self.config.get("revive_cos", 0.8))
+        self.revive_dist_px = float(self.config.get("revive_dist_px", 40.0))
+        max_files = self.config.get("max_files")
+        self.max_files = None if max_files is None else int(max_files)
         # 【2026-09-07・メモリ削減候補(a)】既定None＝SamAutomaticMaskGeneratorの
         #   既定値(64)のまま＝1ビットも変わらない。渡したときだけ上書きする。
         self.points_per_batch = self.config.get("points_per_batch")
@@ -138,7 +147,12 @@ class ObjectFiles(Plugin):
                 self._mgen.crop_n_layers,
                 self._mgen.crop_n_points_downscale_factor)
 
-        self.ofs = self._ObjectFileSystem()
+        self.ofs = self._ObjectFileSystem(
+            revive_window_s=self.revive_window_s,
+            revive_cos=self.revive_cos,
+            revive_dist_px=self.revive_dist_px,
+            max_files=self.max_files,
+        )
         # 他のプラグイン・今後の脳側の配線から読めるように置く（ctx は属性を自由に足せる）
         ctx.object_files = self.ofs
 
@@ -228,14 +242,19 @@ class ObjectFiles(Plugin):
 
         t0 = time.perf_counter()
         p, n = self._patch_features(self._model, img224, self.device)
-        dets = self._detect(p, n, img=img224, mask_generator=self._mgen)
+        dets = self._detect(p, n, img=img224, mask_generator=self._mgen,
+                             cohesion_gap_px=self.cohesion_gap_px)
         if self.empty_cache_after_detect:
             # 【2026-09-07・メモリ削減候補(c)】既定Falseでは1行も実行されない。
             import torch
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
         prev_by_id = {f.id: f for f in self.ofs.files}
-        res = self.ofs.step(dets)
+        # 【2026-09-09・枚数の上限】押し出し禁止の対象＝現在注意中のファイル
+        # （_process_attentionはこのofs.stepより後に呼ぶので、ここではまだ
+        # 前コマの注意状態を使う。attend=Falseなら常にNone＝従来どおり）。
+        protect_id = self._attended_id if self.attend else None
+        res = self.ofs.step(dets, t=t, protect_id=protect_id)
         dt_ms = (time.perf_counter() - t0) * 1000.0
 
         if self.attend:
@@ -286,12 +305,22 @@ class ObjectFiles(Plugin):
                 self._created_appearance[file_id] = np.array(f.appearance, dtype=np.float64, copy=True)
                 events.append((file_id, f.pos[0], f.pos[1], f.area, "created",
                                f.misses, f.since_seen, _app_cos(file_id, f.appearance)))
+        # 【2026-09-09・連続性・新イベント revived】墓場から復活したファイル。
+        #   created と同じ扱いで「復活した瞬間のappearance」を新しい基準点にする
+        #   （lost時にcreated_appearanceは既にpopされているため、ここが新規登録になる）。
+        for file_id in res.get("revived", []):
+            f = cur_by_id.get(file_id)
+            if f is not None:
+                self._created_appearance[file_id] = np.array(f.appearance, dtype=np.float64, copy=True)
+                events.append((file_id, f.pos[0], f.pos[1], f.area, "revived",
+                               f.misses, f.since_seen, _app_cos(file_id, f.appearance)))
+        revived_ids = set(res.get("revived", []))
         # 【M1.5・新イベント unmatched】このコマで対応がつかず、まだ削除されていない
         #   ファイル全部（＝matched でも created でもない、いま self.ofs.files に
         #   残っているファイル）。x/y/area は predict() 後の予測値
         #   （ObjectFile.pos が返すのはその値。step()冒頭で毎ファイルpredict()済み）。
         for f in self.ofs.files:
-            if f.id in matched_ids or f.id in created_ids:
+            if f.id in matched_ids or f.id in created_ids or f.id in revived_ids:
                 continue
             events.append((f.id, f.pos[0], f.pos[1], f.area, "unmatched",
                            f.misses, f.since_seen, _app_cos(f.id, f.appearance)))
@@ -335,9 +364,12 @@ class ObjectFiles(Plugin):
             dr.ellipse([cx - r, cy - r, cx + r, cy + r], outline=(255, 255, 0))
         matched_ids = set(file_id for file_id, _det_idx, _residual in res["matched"])
         created_ids = set(res["created"])
+        revived_ids = set(res.get("revived", []))
         for f in self.ofs.files:
             if f.id in matched_ids:
                 color = (0, 200, 0)       # matched=緑
+            elif f.id in revived_ids:
+                color = (170, 60, 220)    # 【2026-09-09・連続性】revived=紫
             elif f.id in created_ids:
                 color = (60, 60, 255)     # created=青
             else:

@@ -72,16 +72,22 @@ def figure_mask(patch_feats, n, thresh=0.55):
     return (sim >= t).astype(np.uint8)
 
 
-def detect(patch_feats, n, img_size=224, thresh=0.55, min_cells=1, img=None, mask_generator=None):
+def detect(patch_feats, n, img_size=224, thresh=0.55, min_cells=1, img=None, mask_generator=None,
+           cohesion_gap_px=None):
     """検出の一覧を返す。各検出＝ (中心xy[画素・img_size基準], 面積比[0-1], 見た目ベクトル[384])。
 
     `mask_generator` を渡すとMobileSAM経由（`img`も必須）。渡さなければ既定どおり
     旧来のfigure_mask方式（視野中心を種にする）のまま、完全に後方互換。
+
+    `cohesion_gap_px`（【2026-09-09・凝集性】仕様_物体ファイルの人間寄せ_凝集性・
+    連続性・上限）：Noneなら従来どおり（既定不変）。整数を渡すと、MobileSAM経由の
+    検出だけに効く。詳細は `_detect_mobilesam` 参照。
     """
     if mask_generator is not None:
         if img is None:
             raise ValueError("mask_generator を使うときは img（生のRGB画像）も渡す必要がある")
-        return _detect_mobilesam(patch_feats, n, img, mask_generator, img_size)
+        return _detect_mobilesam(patch_feats, n, img, mask_generator, img_size,
+                                  cohesion_gap_px=cohesion_gap_px)
 
     mask = figure_mask(patch_feats, n, thresh)
     # 均一な面でも1マスぶんのノイズ（グリッド線などの陰影差）で分断されるので、
@@ -148,24 +154,97 @@ def _mask_touches_edge(bbox, w, h, margin=1):
     return x <= margin or y <= margin or (x + bw) >= (w - margin) or (y + bh) >= (h - margin)
 
 
-def _detect_mobilesam(patch_feats, n, img, mask_generator, img_size=224, min_area_frac=0.01):
+def _cohesion_groups(masks, gap):
+    """`masks`（各要素に "bbox" を持つ辞書のリスト）の bbox を `gap` 画素だけ
+    広げた箱同士が重なるものを union-find で連結成分にまとめ、インデックスの
+    グループのリストを返す（1個だけの物は要素1個のグループのまま）。
+
+    【なぜ、2026-09-09・凝集性】Spelke の凝集性の原理（乳児は連結した面の
+    かたまりを1つの物として扱う[Tier1]）を、検出器が出したマスク同士の
+    近さ（隙間が`gap`画素以内）で近似する[Tier3・工学的近似：本当の面の
+    連結ではなく矩形の近さで代用]。"""
+    m = len(masks)
+    parent = list(range(m))
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+
+    boxes = []
+    for mk in masks:
+        x, y, bw, bh = mk["bbox"]
+        boxes.append((x - gap, y - gap, x + bw + gap, y + bh + gap))
+    for i in range(m):
+        ax0, ay0, ax1, ay1 = boxes[i]
+        for j in range(i + 1, m):
+            bx0, by0, bx1, by1 = boxes[j]
+            if ax0 < bx1 and bx0 < ax1 and ay0 < by1 and by0 < ay1:
+                union(i, j)
+    groups = {}
+    for i in range(m):
+        r = find(i)
+        groups.setdefault(r, []).append(i)
+    return list(groups.values())
+
+
+def _detect_mobilesam(patch_feats, n, img, mask_generator, img_size=224, min_area_frac=0.01,
+                       cohesion_gap_px=None):
+    """`cohesion_gap_px`（【2026-09-09・凝集性】仕様_物体ファイルの人間寄せ_
+    凝集性・連続性・上限）：Noneなら従来どおり（マスク1枚＝検出1件、既定不変）。
+    整数を渡すと、端接触・面積の足切りを終えたマスクの bbox を `cohesion_gap_px`
+    画素だけ広げた箱同士が重なるものを1つの物としてまとめる（`_cohesion_groups`）。
+    連結成分が1つだけのマスクは従来の計算式（bbox中心・m["area"]）のまま。
+    まとめる場合だけ、segmentationの論理和を取り、重心・画素数から
+    pos/area を計算し直す（仕様「後半」1節）。"""
     img = np.asarray(img)
     h, w = img.shape[0], img.shape[1]
     raw_masks = mask_generator.generate(img)
     feats_grid = patch_feats.reshape(n, n, -1)
     scale = img_size / n
-    out = []
+
+    # 端に接するマスク・面積が小さすぎるマスクの足切りは従来どおり先に済ませる
+    # （凝集性でまとめる対象は、そもそも検出として有効なマスクだけにする）。
+    kept = []
     for m in raw_masks:
         if _mask_touches_edge(m["bbox"], w, h):
             continue
-        area = m["area"] / (h * w)
-        if area < min_area_frac:
+        if m["area"] / (h * w) < min_area_frac:
             continue
-        seg = m["segmentation"]
-        bx, by, bw, bh = m["bbox"]
-        cx = float(bx) + float(bw) / 2.0
-        cy = float(by) + float(bh) / 2.0
-        # マスクの範囲に半分以上重なるDINOv2のマスだけを、この物体の見た目とする
+        kept.append(m)
+
+    if cohesion_gap_px is not None and len(kept) > 1:
+        groups = _cohesion_groups(kept, int(cohesion_gap_px))
+    else:
+        groups = [[i] for i in range(len(kept))]
+
+    out = []
+    for group in groups:
+        if len(group) == 1:
+            # 従来どおり（マスク1枚だけなら挙動を一切変えない）
+            m = kept[group[0]]
+            area = m["area"] / (h * w)
+            seg = m["segmentation"]
+            bx, by, bw, bh = m["bbox"]
+            cx = float(bx) + float(bw) / 2.0
+            cy = float(by) + float(bh) / 2.0
+        else:
+            # 凝集性：複数マスクを論理和でまとめ、pos＝union重心、
+            # area＝unionの画素数/(h*w)（従来のareaと同じ尺度）で計算し直す。
+            seg = kept[group[0]]["segmentation"].copy()
+            for gi in group[1:]:
+                seg = seg | kept[gi]["segmentation"]
+            ys, xs = np.where(seg)
+            cx = float(xs.mean())
+            cy = float(ys.mean())
+            area = float(seg.sum()) / (h * w)
+        # マスクの範囲に半分以上重なるDINOv2のマスだけを、この物体の見た目とする（従来どおり）
         patch_ids = []
         for i in range(n):
             y0, y1 = int(i * scale), int((i + 1) * scale)

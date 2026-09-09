@@ -146,10 +146,19 @@ class ObjectFileSystem:
             知覚的な判断ではなくメモリ管理。値は寛容にとる。
         reappear_gap: これ以上コマが空いた後の再対応を「戻ってきた」として
             予測違反の候補にする閾値。
+        revive_window_s: 【2026-09-09・連続性】消えたカードを覚えておく秒数。
+            None＝従来どおり墓場を使わない（既定不変）。Kahneman & Treisman の
+            物体ファイル・Spelke の時空間連続性[Tier1]の近似。
+        revive_cos: 復活を許す見た目のコサイン類似度の下限。
+        revive_dist_px: 復活を許す、消えた位置からの距離の上限（画素）。
+        max_files: 【2026-09-09・枚数の上限】同時に持てるファイル数。None＝
+            従来どおり無制限（既定不変）。Feigenson & Carey（乳児3個）・
+            Pylyshyn（成人4個）[Tier1]の近似。
     """
 
     def __init__(self, appearance_weight=0.4, mahal_gate=MAHAL_GATE95, max_missed=20,
-                 reappear_gap=4, process_noise=4.0, meas_noise=6.0, gate=1.0):
+                 reappear_gap=4, process_noise=4.0, meas_noise=6.0, gate=1.0,
+                 revive_window_s=None, revive_cos=0.8, revive_dist_px=40.0, max_files=None):
         self.appearance_weight = float(appearance_weight)
         self.mahal_gate = float(mahal_gate)
         self.max_missed = int(max_missed)
@@ -157,15 +166,53 @@ class ObjectFileSystem:
         self.process_noise = float(process_noise)
         self.meas_noise = float(meas_noise)
         self.gate = float(gate)          # 対応づけを許すコストの上限（大きいほど甘い）
+        self.revive_window_s = None if revive_window_s is None else float(revive_window_s)
+        self.revive_cos = float(revive_cos)
+        self.revive_dist_px = float(revive_dist_px)
+        self.max_files = None if max_files is None else int(max_files)
         self.files = []
         self._next_id = 0
+        # 【2026-09-09・連続性】消えたカードの控え。revive_window_sがNoneのままなら
+        # 一度も使われない（要素を足す箇所が全てrevive_window_s is not Noneで
+        # 守られている）＝既定不変。
+        self._graveyard = []
+        self.last_revived = []   # 直近のstep()で復活したfile_idのリスト（属性で公開）
 
-    def step(self, detections):
+    def _make_room(self, protect_id, t):
+        """【2026-09-09・枚数の上限】max_filesがNoneなら何もしない（既定不変）。
+        上限に達していたら、protect_id以外でmissesが最大（同点ならsince_seenが
+        大きい）ファイルを1枚削除し、revive_window_sがNoneでなければ墓場に送る。
+        削除したfile_idを返す（削除しなければNone）。"""
+        if self.max_files is None or len(self.files) < self.max_files:
+            return None
+        candidates = [f for f in self.files if f.id != protect_id]
+        if not candidates:
+            # 【仕様に無かった判断】全ファイルがprotect_id（1枚しか無くそれが
+            # 注意中）なら押し出せない。この稀なケースでは上限を一時的に超える。
+            return None
+        victim = max(candidates, key=lambda f: (f.misses, f.since_seen))
+        self.files = [f for f in self.files if f.id != victim.id]
+        if self.revive_window_s is not None:
+            self._graveyard.append({
+                "id": victim.id, "pos": victim.pos,
+                "appearance": np.array(victim.appearance, dtype=np.float64, copy=True),
+                "area": victim.area, "hits": victim.hits, "age": victim.age,
+                "t_lost": t if t is not None else 0.0,
+            })
+        return victim.id
+
+    def step(self, detections, t=None, protect_id=None):
         """detections = [{"pos": (x,y), "area": float, "appearance": vec}, ...]（1コマぶん）。
+        `t`（sim秒。連続性の墓場の期限管理に使う）と `protect_id`（注意中の
+        file_id。枚数の上限で押し出さない）は任意引数（省略すれば従来どおり）。
 
         Returns:
-            dict: matched=[(file_id, det_idx, residual)], created=[file_id,...],
-                  lost=[file_id,...]（このコマで削除された）,
+            dict: matched=[(file_id, det_idx, residual)], created=[file_id,...]
+                  （復活は含まない）, revived=[file_id,...]（連続性で復活した
+                  もの。既存キーではなく新設のキー＝既存の読み手を壊さない）,
+                  lost=[file_id,...]（このコマで削除された。max_missed超過に
+                  加え、枚数の上限で押し出されたものも含む＝仕様に無かった判断。
+                  CSV等の「lost」イベントとして自然に見えるようにするため）,
                   prediction_violations=[(file_id, residual, gap)]
                   （空白が reappear_gap 以上あった後に対応がつき、かつ
                    予測とのずれが mahal_gate を超えたもの＝見た目で救われた組）
@@ -205,9 +252,58 @@ class ObjectFileSystem:
             self.files[i].misses += 1
             self.files[i].since_seen += 1
 
+        # ---- 連続性：墓場の期限切れを捨てる（revive_window_sがNoneなら墓場は空のまま）----
+        if self.revive_window_s is not None and t is not None and self._graveyard:
+            self._graveyard = [g for g in self._graveyard
+                                if (t - g["t_lost"]) <= self.revive_window_s]
+
+        # ---- 連続性：消えたカードの復活 -----------------------------------------
+        revived = []
+        remaining_d = unmatched_d
+        if self.revive_window_s is not None and self._graveyard:
+            used_grave = set()
+            remaining_d = []
+            for j in unmatched_d:
+                d = detections[j]
+                dv = np.asarray(d["appearance"], dtype=np.float64)
+                dv_n = dv / (np.linalg.norm(dv) + 1e-9)
+                best_idx, best_cos = None, None
+                for gi, g in enumerate(self._graveyard):
+                    if gi in used_grave:
+                        continue
+                    gv = np.asarray(g["appearance"], dtype=np.float64)
+                    gv_n = gv / (np.linalg.norm(gv) + 1e-9)
+                    cos = float(dv_n @ gv_n)
+                    if cos < self.revive_cos:
+                        continue
+                    dist = float(np.hypot(d["pos"][0] - g["pos"][0], d["pos"][1] - g["pos"][1]))
+                    if dist > self.revive_dist_px:
+                        continue
+                    if best_cos is None or cos > best_cos:
+                        best_idx, best_cos = gi, cos
+                if best_idx is not None:
+                    g = self._graveyard[best_idx]
+                    used_grave.add(best_idx)
+                    self._make_room(protect_id, t)
+                    nf = ObjectFile(g["id"], d["pos"], d["appearance"], d["area"],
+                                    self.process_noise, self.meas_noise)
+                    nf.hits = g["hits"]
+                    nf.age = g["age"]
+                    self.files.append(nf)
+                    revived.append(nf.id)
+                else:
+                    remaining_d.append(j)
+            if used_grave:
+                self._graveyard = [g for gi, g in enumerate(self._graveyard) if gi not in used_grave]
+
+        # ---- 新規作成（枚数の上限：max_filesがNoneなら従来どおり無制限）----------
         created = []
-        for j in unmatched_d:
+        evicted = []
+        for j in remaining_d:
             d = detections[j]
+            ev = self._make_room(protect_id, t)
+            if ev is not None:
+                evicted.append(ev)
             nf = ObjectFile(self._next_id, d["pos"], d["appearance"], d["area"],
                             self.process_noise, self.meas_noise)
             self._next_id += 1
@@ -217,7 +313,19 @@ class ObjectFileSystem:
         lost = [f.id for f in self.files if f.misses > self.max_missed]
         if lost:
             lost_set = set(lost)
+            if self.revive_window_s is not None and t is not None:
+                for f in self.files:
+                    if f.id in lost_set:
+                        self._graveyard.append({
+                            "id": f.id, "pos": f.pos,
+                            "appearance": np.array(f.appearance, dtype=np.float64, copy=True),
+                            "area": f.area, "hits": f.hits, "age": f.age,
+                            "t_lost": t,
+                        })
             self.files = [f for f in self.files if f.id not in lost_set]
 
-        return {"matched": matched, "created": created, "lost": lost,
-                "prediction_violations": violations}
+        lost = lost + evicted
+        self.last_revived = revived
+
+        return {"matched": matched, "created": created, "revived": revived,
+                "lost": lost, "prediction_violations": violations}
