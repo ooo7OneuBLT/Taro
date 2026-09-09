@@ -123,7 +123,18 @@ class ObjectFiles(Plugin):
         self.uncertainty_penalty = float(self.config.get("uncertainty_penalty", 0.0))
         exclusive_dist_px = self.config.get("exclusive_dist_px")
         self.exclusive_dist_px = None if exclusive_dist_px is None else float(exclusive_dist_px)
-        self.exclusive_cos = float(self.config.get("exclusive_cos", 0.7))
+        # 【2026-09-09・追記_物体ファイルの重複をなくす「追記」1節】JSONの
+        #   null（＝Python側のNone）がそのまま届く。既定は0.7（キー省略時のみ）。
+        #   明示的にnullを渡せば見た目の条件を外す（既定不変：キー省略なら従来と
+        #   1ビットも変わらない）。
+        exclusive_cos = self.config.get("exclusive_cos", 0.7)
+        self.exclusive_cos = None if exclusive_cos is None else float(exclusive_cos)
+        # 【同「追記」1節】既定False＝従来どおりexclusive_dist_pxそのまま（既定不変）。
+        self.exclusive_scale_by_size = bool(self.config.get("exclusive_scale_by_size", False))
+        # 【同「追記」2節】既定None＝従来どおり延長条件は速度を見ない（既定不変）。
+        coast_min_speed_px_s = self.config.get("coast_min_speed_px_s")
+        self.coast_min_speed_px_s = (None if coast_min_speed_px_s is None
+                                      else float(coast_min_speed_px_s))
         # 【2026-09-09・仕様_予測して確かめる検出】確認・見回り・横取り。既定は
         #   全てNone（scan_interval_s=None）＝従来どおり毎回全体切り出し（既定不変）。
         scan_interval_s = self.config.get("scan_interval_s")
@@ -199,6 +210,14 @@ class ObjectFiles(Plugin):
             exclusive_dist_px=self.exclusive_dist_px,
             exclusive_cos=self.exclusive_cos,
             confirm_gate=self.confirm_gate,
+            # 【2026-09-09・追記「直し」1〜2節】既定値がObjectFileSystem側の既定と
+            #   一致する（exclusive_scale_by_size=False・coast_min_speed_px_s=None）
+            #   ので無条件で渡してよい（既定不変）。frame_dt_s は「1コマ＝検出周期」
+            #   の換算に使うのでinterval_sをそのまま渡す
+            #   （coast_min_speed_px_sを使うときだけ参照される＝既定不変）。
+            exclusive_scale_by_size=self.exclusive_scale_by_size,
+            coast_min_speed_px_s=self.coast_min_speed_px_s,
+            frame_dt_s=self.interval_s,
         )
         if self.max_missed is not None:
             # 既定Noneのときは渡さない＝ObjectFileSystemの既定値(20)のまま（既定不変）。

@@ -98,22 +98,42 @@ class ObjectFile:
     def pos(self):
         return float(self.x[0]), float(self.x[1])
 
-    def predict(self, t=None, coast_max_s=None):
+    def predict(self, t=None, coast_max_s=None, coast_min_speed_px_s=None, frame_dt_s=1.0):
         """coast_max_s（【2026-09-09・仕様_物体ファイルの重複をなくす「後半」1節】）：
         Noneなら従来どおり永遠に等速（既定不変）。秒数を渡すと、`misses>0`（隠れて
         いる）かつ「最後に一致した時刻(last_seen_t)からt秒」がcoast_max_sを超えた
         カードは、この呼び出し以降 vx=vy=0 にして位置を止める（Pの増加だけ続く）。
         文献（von Hofsten & Rosander、Bremner 2005）：可視区間の速度をそのまま
-        延長して再出現を予期し、減速は支持されない。延長の上限は規格（1秒）。"""
-        if coast_max_s is not None:
-            if t is None:
-                # 【仕様「後半」1節】「tが無ければ検出コマ数×interval_s相当で近似
-                #   しない」＝coast_max_sを使うなら呼び出し元は必ずtを渡すこと。
-                raise ValueError("coast_max_s を使うときは t が必須")
-            if (self.misses > 0 and self.last_seen_t is not None
-                    and (t - self.last_seen_t) > coast_max_s):
-                self.x[2] = 0.0
-                self.x[3] = 0.0
+        延長して再出現を予期し、減速は支持されない。延長の上限は規格（1秒）。
+
+        coast_min_speed_px_s（【2026-09-09・追記「直し」2節】）：Noneなら従来どおり
+        （既定不変）。値を渡すと、`misses>0`のカードは、カルマン状態の速度
+        `hypot(vx,vy)`を`frame_dt_s`（1コマ何秒か）でpx/秒に換算し、この閾値未満
+        （＝静止物のマスク重心の揺れが生んだ見せかけの速度）なら vx=vy=0 にして
+        位置を保持する（coast_max_sの秒数内でも、動いていなければ延長しない）。
+        文献：静止した物はその場に留まる（Baillargeon 1985）、動く物だけ延長
+        （von Hofsten & Rosander）。F2-105本番の実測（追記「実測」）：確認は0.2秒
+        ごとで、マスク重心の数画素の揺れから15〜25px/秒相当の見せかけの速度が
+        推定され、静止物なのに等速延長で流れていた。"""
+        if self.misses > 0:
+            if coast_min_speed_px_s is not None:
+                speed_px_s = float(np.hypot(self.x[2], self.x[3])) / frame_dt_s
+                if speed_px_s < coast_min_speed_px_s:
+                    self.x[2] = 0.0
+                    self.x[3] = 0.0
+            if coast_max_s is not None:
+                if t is None:
+                    # 【仕様「後半」1節】「tが無ければ検出コマ数×interval_s相当で
+                    #   近似しない」＝coast_max_sを使うなら呼び出し元は必ずtを渡す。
+                    raise ValueError("coast_max_s を使うときは t が必須")
+                if (self.last_seen_t is not None
+                        and (t - self.last_seen_t) > coast_max_s):
+                    self.x[2] = 0.0
+                    self.x[3] = 0.0
+        elif coast_max_s is not None and t is None:
+            # 【既定不変】misses==0でも従来どおりtの必須チェックだけは行う
+            #   （coast_max_sを渡すならtも渡す、という契約自体は変えない）。
+            raise ValueError("coast_max_s を使うときは t が必須")
         self.x = _F @ self.x
         self.P = _F @ self.P @ _F.T + self.Q
 
@@ -201,6 +221,17 @@ class ObjectFileSystem:
             生きているカードのうちこの距離(px)以内かつ見た目が近いものがあれば
             作らず、その検出をそのカードに吸収させる。None＝従来どおり（既定不変）。
         exclusive_cos: exclusive_dist_px と併用する見た目のコサイン類似度の下限。
+            【2026-09-09・追記「直し」1節】Noneを渡すと見た目の条件を外し、位置
+            だけで吸収を決める（人間側：同一性は位置優先＝Xu & Carey 1996）。
+            既定0.7＝従来どおり見た目も条件にする（既定不変）。
+        exclusive_scale_by_size: 【同「追記」1節】Trueなら、吸収を許す距離を
+            `max(exclusive_dist_px, 0.5*sqrt(f.area)*224)`（f＝比較している既存
+            カードの面積。物の半径の近似）に広げる。既定False＝従来どおり
+            exclusive_dist_pxそのまま（既定不変）。
+        coast_min_speed_px_s: ObjectFile.predict()docstring参照。None＝従来どおり
+            （既定不変）。
+        frame_dt_s: 1コマ（predict()の1呼び出し）が何秒に相当するか。
+            coast_min_speed_px_sをpx/秒に換算するために使う。既定1.0。
         confirm_gate: 【2026-09-09・仕様_予測して確かめる検出「追記4」1節】
             `confirm_update()` が結果を採用するかどうかの位置ゲートの種類。
             "mahal"（既定・既定不変）＝従来どおりマハラノビス距離
@@ -218,7 +249,8 @@ class ObjectFileSystem:
                  reappear_gap=4, process_noise=4.0, meas_noise=6.0, gate=1.0,
                  revive_window_s=None, revive_cos=0.8, revive_dist_px=40.0, max_files=None,
                  coast_max_s=None, uncertainty_penalty=0.0, exclusive_dist_px=None,
-                 exclusive_cos=0.7, confirm_gate="mahal"):
+                 exclusive_cos=0.7, confirm_gate="mahal", exclusive_scale_by_size=False,
+                 coast_min_speed_px_s=None, frame_dt_s=1.0):
         if confirm_gate not in ("mahal", "size"):
             raise ValueError("confirm_gate は 'mahal' か 'size' のどちらか（%r）" % (confirm_gate,))
         self.appearance_weight = float(appearance_weight)
@@ -235,7 +267,13 @@ class ObjectFileSystem:
         self.coast_max_s = None if coast_max_s is None else float(coast_max_s)
         self.uncertainty_penalty = float(uncertainty_penalty)
         self.exclusive_dist_px = None if exclusive_dist_px is None else float(exclusive_dist_px)
-        self.exclusive_cos = float(exclusive_cos)
+        # 【2026-09-09・追記「直し」1節】Noneなら見た目の条件を外す（既定0.7＝
+        #   従来どおり見た目も使う＝既定不変）。
+        self.exclusive_cos = None if exclusive_cos is None else float(exclusive_cos)
+        self.exclusive_scale_by_size = bool(exclusive_scale_by_size)
+        self.coast_min_speed_px_s = (None if coast_min_speed_px_s is None
+                                      else float(coast_min_speed_px_s))
+        self.frame_dt_s = float(frame_dt_s)
         self.confirm_gate = confirm_gate
         self.files = []
         self._next_id = 0
@@ -277,7 +315,9 @@ class ObjectFileSystem:
         `t` は coast_max_s（重複をなくす「後半」1節）を使うときに必要（Noneなら
         従来どおり coast_max_s も渡らないので使われない＝既定不変）。"""
         for f in self.files:
-            f.predict(t=t, coast_max_s=self.coast_max_s)
+            f.predict(t=t, coast_max_s=self.coast_max_s,
+                      coast_min_speed_px_s=self.coast_min_speed_px_s,
+                      frame_dt_s=self.frame_dt_s)
             f.age += 1
 
     def confirm_update(self, results, t=None):
@@ -392,7 +432,9 @@ class ObjectFileSystem:
         """
         if not skip_predict:
             for f in self.files:
-                f.predict(t=t, coast_max_s=self.coast_max_s)
+                f.predict(t=t, coast_max_s=self.coast_max_s,
+                          coast_min_speed_px_s=self.coast_min_speed_px_s,
+                          frame_dt_s=self.frame_dt_s)
                 f.age += 1
 
         n_f, n_d = len(self.files), len(detections)
@@ -451,12 +493,23 @@ class ObjectFileSystem:
                 best_f, best_dist = None, None
                 for f in self.files:
                     dist = float(np.hypot(d["pos"][0] - f.pos[0], d["pos"][1] - f.pos[1]))
-                    if dist > self.exclusive_dist_px:
+                    thresh = self.exclusive_dist_px
+                    if self.exclusive_scale_by_size:
+                        # 【2026-09-09・追記「直し」1節】既存カード(f)の面積から
+                        #   物の半径を近似し、吸収を許す距離をそれに合わせて広げる
+                        #   （固体性の範囲は物の大きさに比例させる、という近似）。
+                        radius_px = 0.5 * float(np.sqrt(max(f.area, 0.0))) * 224.0
+                        thresh = max(thresh, radius_px)
+                    if dist > thresh:
                         continue
-                    fv = f.appearance / (np.linalg.norm(f.appearance) + 1e-9)
-                    cos = float(dv_n @ fv)
-                    if cos < self.exclusive_cos:
-                        continue
+                    if self.exclusive_cos is not None:
+                        # 【2026-09-09・追記「直し」1節】exclusive_cos=None（追記の
+                        #   短い走行）では見た目の条件を外し、位置だけで決める
+                        #   （同一性は位置優先＝Xu & Carey 1996）。
+                        fv = f.appearance / (np.linalg.norm(f.appearance) + 1e-9)
+                        cos = float(dv_n @ fv)
+                        if cos < self.exclusive_cos:
+                            continue
                     if best_dist is None or dist < best_dist:
                         best_f, best_dist = f, dist
                 if best_f is not None:
