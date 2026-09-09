@@ -167,6 +167,11 @@ def main(log_dir):
     #   conf_iou・conf_area_ratio・conf_emb_cosをそれぞれ集める。
     conf_attended = {"conf_iou": [], "conf_area_ratio": [], "conf_emb_cos": []}
     conf_other = {"conf_iou": [], "conf_area_ratio": [], "conf_emb_cos": []}
+    # 【2026-09-09・追記4「直し」4節】確認が落ちた理由（iou/area/emb/gate/dedup/
+    #   空＝採用）の件数を、注意中（直前まで見えていた）／注意外で別に数える。
+    #   conf_reject列が無い旧ログでは全行""扱い（互換）。
+    reject_counts_attended = {}
+    reject_counts_other = {}
     # 【追記3「合否」節】見失い率＝「注意中で直前まで見えていたカード」限定版。
     attended_confirm_denom = 0
     attended_confirm_unmatched = 0
@@ -218,6 +223,10 @@ def main(log_dir):
                     v = _to_float(r.get(col))
                     if v is not None:
                         group[col].append(v)
+                reject_group = (reject_counts_attended if group is conf_attended
+                                 else reject_counts_other)
+                reason = r.get("conf_reject", "") or ""
+                reject_group[reason] = reject_group.get(reason, 0) + 1
         if misses_after is not None:
             _last_misses[fid] = misses_after
     confirm_card_total = confirm_denom
@@ -352,6 +361,11 @@ def main(log_dir):
         "miss_rate_confirm_attended": miss_rate_attended,
         "attended_confirm_card_total": attended_confirm_denom,
         "attended_confirm_unmatched_total": attended_confirm_unmatched,
+        # 【2026-09-09・追記4「直し」4節】確認が落ちた理由の件数
+        #   （iou/area/emb/gate/dedup/空=採用）。注意中／注意外で別集計。
+        #   conf_reject列が無い旧ログでは全て{"":件数}になる（互換）。
+        "conf_reject_counts_attended": reject_counts_attended,
+        "conf_reject_counts_other": reject_counts_other,
     }
 
     out_path = os.path.join(log_dir, "結果_物体ファイル.json")

@@ -201,13 +201,26 @@ class ObjectFileSystem:
             生きているカードのうちこの距離(px)以内かつ見た目が近いものがあれば
             作らず、その検出をそのカードに吸収させる。None＝従来どおり（既定不変）。
         exclusive_cos: exclusive_dist_px と併用する見た目のコサイン類似度の下限。
+        confirm_gate: 【2026-09-09・仕様_予測して確かめる検出「追記4」1節】
+            `confirm_update()` が結果を採用するかどうかの位置ゲートの種類。
+            "mahal"（既定・既定不変）＝従来どおりマハラノビス距離
+            （`f.mahalanobis(pos) <= mahal_gate`）。一致が続いてPが小さくなると
+            マスク重心の数画素の揺れでゲートを超えてしまう問題がF2-104pre実測
+            （追記4「実測」）で見つかった。"size"＝物の大きさで決める
+            （`dist(重心, 予測位置) <= sqrt(area)*224*0.75 + 8px`。確認のマスクは
+            頼んだカードの予測位置に打った点から出たものなので、位置の同一性は
+            構造上ほぼ担保される＝人間側は見ている物が数画素ずれても同じ物と
+            扱う、位置の許容は物の大きさに比例という近似）。"mahal"以外・"size"
+            以外の値は仕様に無いためValueErrorにする。
     """
 
     def __init__(self, appearance_weight=0.4, mahal_gate=MAHAL_GATE95, max_missed=20,
                  reappear_gap=4, process_noise=4.0, meas_noise=6.0, gate=1.0,
                  revive_window_s=None, revive_cos=0.8, revive_dist_px=40.0, max_files=None,
                  coast_max_s=None, uncertainty_penalty=0.0, exclusive_dist_px=None,
-                 exclusive_cos=0.7):
+                 exclusive_cos=0.7, confirm_gate="mahal"):
+        if confirm_gate not in ("mahal", "size"):
+            raise ValueError("confirm_gate は 'mahal' か 'size' のどちらか（%r）" % (confirm_gate,))
         self.appearance_weight = float(appearance_weight)
         self.mahal_gate = float(mahal_gate)
         self.max_missed = int(max_missed)
@@ -223,6 +236,7 @@ class ObjectFileSystem:
         self.uncertainty_penalty = float(uncertainty_penalty)
         self.exclusive_dist_px = None if exclusive_dist_px is None else float(exclusive_dist_px)
         self.exclusive_cos = float(exclusive_cos)
+        self.confirm_gate = confirm_gate
         self.files = []
         self._next_id = 0
         # 【2026-09-09・連続性】消えたカードの控え。revive_window_sがNoneのままなら
@@ -292,23 +306,46 @@ class ObjectFileSystem:
         Returns:
             `step()` と同じ形の辞書。created/revived/absorbedは常に空リスト
             （確認からは新規作成しない）。matchedのdet_idxはNone固定
-            （呼び出し元はfile_idしか読まないため）。
+            （呼び出し元はfile_idしか読まないため）。加えて
+            `gate_rejected`（【2026-09-09・追記4】matched=Trueで来たが位置の
+            ゲートで落ちたfile_idのリスト。呼び出し元がCSVの
+            `conf_reject`="gate"を書くために使う。既定"mahal"のときも従来どおり
+            返る＝新しいキーが増えるだけで既定不変）。
         """
         by_id = {f.id: f for f in self.files}
         matched = []
+        gate_rejected = []
         for r in results:
             f = by_id.get(r.get("file_id"))
             if f is None:
                 continue
             if r.get("matched"):
-                # 【追記2「直し」1節】自分のカードのゲート内（mahalanobis<=mahal_gate）
-                #   かだけを見る。ハンガリアン法のコスト最小化とは別の、
+                # 【追記2「直し」1節→追記4「直し」1節】自分のカードのゲート内か
+                #   だけを見る。ハンガリアン法のコスト最小化とは別の、
                 #   「この点はこのカードのものか」という単純な足切り。
-                mahal = f.mahalanobis(r["pos"])
-                if mahal <= self.mahal_gate:
+                #   confirm_gate="mahal"（既定）は従来どおりマハラノビス距離。
+                #   "size"は物の大きさ基準（追記4「直し」1節）：確認のマスクは
+                #   頼んだカードの予測位置に打った点から出たものなので、位置の
+                #   同一性は構造上ほぼ担保される＝人間側は数画素のずれを同じ物
+                #   として扱う（位置の許容は物の大きさに比例）。
+                if self.confirm_gate == "size":
+                    dx = r["pos"][0] - f.pos[0]
+                    dy = r["pos"][1] - f.pos[1]
+                    dist = float(np.hypot(dx, dy))
+                    # 【仕様に無かった判断】「物の大きさ」に使うareaは、確認で
+                    #   実際に測れたr["area"]ではなくカード自身のf.area
+                    #   （＝confirm_pointsに期待面積として渡した値）にした。
+                    #   r["area"]は測定ノイズを含み、ゲートの基準がコマごとに
+                    #   揺れるのを避けるため。差があるなら作業記録に書く。
+                    allowed = float(np.sqrt(max(f.area, 0.0))) * 224.0 * 0.75 + 8.0
+                    gate_ok = dist <= allowed
+                else:
+                    gate_ok = f.mahalanobis(r["pos"]) <= self.mahal_gate
+                if gate_ok:
                     residual = f.update(r["pos"], f.appearance, r["area"], t=t)
                     matched.append((f.id, None, residual))
                     continue
+                gate_rejected.append(f.id)
             f.misses += 1
             f.since_seen += 1
 
@@ -328,7 +365,7 @@ class ObjectFileSystem:
 
         self.last_revived = []
         return {"matched": matched, "created": [], "revived": [], "lost": lost,
-                "prediction_violations": [], "absorbed": []}
+                "prediction_violations": [], "absorbed": [], "gate_rejected": gate_rejected}
 
     def step(self, detections, t=None, protect_id=None, skip_predict=False):
         """detections = [{"pos": (x,y), "area": float, "appearance": vec}, ...]（1コマぶん）。

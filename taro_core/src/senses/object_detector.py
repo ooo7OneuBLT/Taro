@@ -194,6 +194,21 @@ def confirm_points(predictor, img224, points, expected_areas, file_ids=None,
     `card_embs`がNone、または個々のカードのembがNone（emb_cos_threshが
     Noneのとき・古いカード）のときは従来どおり照合しない（既定不変）。
 
+    【なぜ、2026-09-09・追記4「直し」2節】F2-104pre の実測（追記4「実測」）：
+    注意中で直前まで見えていたカードの外れ29件のうち13件は iou・面積比・cos を
+    全部満たす候補があるのに、`confirm_update` の位置ゲートで落ちていた
+    （直し1節でゲート自体は物の大きさ基準に変更）。加えて、候補の選び方が
+    「面積が最も近いもの」のままだと、点が部品や手など別の面に当たって
+    生まれた候補マスクが（たまたま面積が近ければ）選ばれてしまう。人間側は
+    同一性の判断を見た目でも行う（Xu & Carey 1996[Tier1]、追記3と同じ根拠）ので、
+    候補選びそのものも見た目基準に寄せる：`emb_cos_thresh` が指定され、かつ
+    そのカードの `emb`（`card_emb`）が分かっているときだけ、iou_thresh・
+    area_tolを満たす候補の中で `emb_cos` が最大のものを採用する。
+    `emb_cos_thresh` が None、または `card_emb` が None（古いカード・まだ見回りが
+    無い）のときは従来どおり面積が最も近いもの（既定不変。仕様に無かった
+    判断：card_embが個別にNoneの場合の扱いは仕様に明記が無かったため、
+    「照合できないなら面積基準に留める」を選んだ。作業記録に記載）。
+
     Args:
         predictor: `make_point_predictor()` で得た `SamPredictor`。
         img224: (224, 224, 3) の uint8 RGB画像。
@@ -210,11 +225,13 @@ def confirm_points(predictor, img224, points, expected_areas, file_ids=None,
             照合しない（既定不変）。
     Returns:
         pointsと同じ長さ・同じ順のリスト。iou_thresh・area_tolの両方を満たす
-        候補が見つからなければ {"ok": False, "file_id": 対応するfile_id}。
+        候補が見つからなければ {"ok": False, "file_id": 対応するfile_id,
+        "reject_reason": "iou"（iou_thresh以上の候補が1枚も無かった）または
+        "area"（iouは満たす候補があったが面積比で全滅した）}（追記4「直し」4節）。
         見つかれば（emb_cos_threshで最終的に落ちても）
         {"ok": bool, "file_id": fid, "iou": float, "area_ratio": float
          （採用候補の面積÷期待面積）, "emb_cos": float（card_embが無ければ無し）}
-        に加え、ok=Trueのときだけ
+        に加え、ok=Falseならこれに"reject_reason": "emb"を足し、ok=Trueのときだけ
         {"pos": マスク重心(x,y), "area": 面積比, "mask": bool配列(H,W)}
         を足す（失敗の場合もiou/area_ratio/emb_cosは書く＝「何で落ちたか」が
         分かるように。追記3「直し」2節）。appearanceは返さない（呼び出し元が
@@ -239,6 +256,25 @@ def confirm_points(predictor, img224, points, expected_areas, file_ids=None,
     eh = int(emb_np.shape[1]) if emb_np is not None else None
     ew = int(emb_np.shape[2]) if emb_np is not None else None
 
+    def _mask_emb(mask, cx, cy):
+        """マスク領域を埋め込み格子(eh,ew)へ最近傍で縮め、その領域の平均。
+        （追記3「直し」1節と同じやり方。emb_np is not None のときだけ呼ぶ）"""
+        small = np.array(
+            Image.fromarray(mask.astype(np.uint8) * 255).resize((ew, eh), Image.NEAREST))
+        region = small > 0
+        if region.any():
+            return emb_np[:, region].mean(axis=1)
+        # マスクが埋め込み格子で1マスにも満たない極小マスク→中心1マスで代用。
+        gy = min(max(int(cy / h * eh), 0), eh - 1)
+        gx = min(max(int(cx / w * ew), 0), ew - 1)
+        return emb_np[:, gy, gx]
+
+    def _cos(a, b):
+        a = a / (np.linalg.norm(a) + 1e-9)
+        b = np.asarray(b, dtype=np.float64)
+        b = b / (np.linalg.norm(b) + 1e-9)
+        return float(a @ b)
+
     out = []
     for (x, y), expected_area, fid, card_emb in zip(points, expected_areas, file_ids, card_embs):
         masks, iou_preds, _ = predictor.predict(
@@ -246,55 +282,78 @@ def confirm_points(predictor, img224, points, expected_areas, file_ids=None,
             point_labels=np.array([1]),
             multimask_output=True,
         )
-        best = None   # (面積差, マスクindex, 面積)
+        # 【追記4「直し」4節】候補を全部集める（iou_thresh・area_tolの両方を
+        # 満たすもの）。「何で落ちたか」を区別するため、iouだけ満たしたか
+        # どうかも別に覚える。
+        saw_iou_ok = False
+        candidates = []   # [(i, area), ...]
         for i in range(masks.shape[0]):
             if float(iou_preds[i]) < iou_thresh:
                 continue
-            area = float(masks[i].sum()) / (h * w)
+            saw_iou_ok = True
             if expected_area is None or expected_area <= 0:
                 continue
+            area = float(masks[i].sum()) / (h * w)
             if abs(area - expected_area) / expected_area > area_tol:
                 continue
-            diff = abs(area - expected_area)
-            if best is None or diff < best[0]:
-                best = (diff, i, area)
-        if best is None:
-            out.append({"ok": False, "file_id": fid})
+            candidates.append((i, area))
+
+        if not candidates:
+            reason = "area" if saw_iou_ok else "iou"
+            out.append({"ok": False, "file_id": fid, "reject_reason": reason})
             continue
-        _diff, i, area = best
+
+        # 【追記4「直し」2節】候補選び：emb_cos_threshがありcard_embが分かって
+        # いれば「emb_cosが最大」、それ以外は従来どおり「面積が最も近い」。
+        use_emb_selection = emb_np is not None and card_emb is not None
+        if use_emb_selection:
+            best = None   # (emb_cos, i, area, emb)
+            for i, area in candidates:
+                mask_i = masks[i]
+                ys, xs = np.where(mask_i)
+                if len(ys) == 0:
+                    continue
+                cx_i, cy_i = float(xs.mean()), float(ys.mean())
+                emb_i = _mask_emb(mask_i, cx_i, cy_i)
+                cos_i = _cos(emb_i, card_emb)
+                if best is None or cos_i > best[0]:
+                    best = (cos_i, i, area, emb_i)
+            if best is None:
+                out.append({"ok": False, "file_id": fid, "reject_reason": "area"})
+                continue
+            emb_cos, i, area, emb = best
+        else:
+            diff_best = None   # (面積差, i, area)
+            for i, area in candidates:
+                diff = abs(area - expected_area)
+                if diff_best is None or diff < diff_best[0]:
+                    diff_best = (diff, i, area)
+            _diff, i, area = diff_best
+            emb_cos, emb = None, None
+
         mask = masks[i]
         ys, xs = np.where(mask)
         if len(ys) == 0:
-            out.append({"ok": False, "file_id": fid})
+            out.append({"ok": False, "file_id": fid, "reject_reason": "area"})
             continue
         cx = float(xs.mean())
         cy = float(ys.mean())
         area_ratio = area / expected_area
 
-        emb = None
-        emb_cos = None
         ok = True
         if emb_np is not None:
-            small = np.array(
-                Image.fromarray(mask.astype(np.uint8) * 255).resize((ew, eh), Image.NEAREST))
-            region = small > 0
-            if region.any():
-                emb = emb_np[:, region].mean(axis=1)
-            else:
-                # マスクが埋め込み格子で1マスにも満たない極小マスク→中心1マスで代用。
-                gy = min(max(int(cy / h * eh), 0), eh - 1)
-                gx = min(max(int(cx / w * ew), 0), ew - 1)
-                emb = emb_np[:, gy, gx]
+            if emb is None:
+                emb = _mask_emb(mask, cx, cy)
             if card_emb is not None:
-                a = emb / (np.linalg.norm(emb) + 1e-9)
-                b = np.asarray(card_emb, dtype=np.float64)
-                b = b / (np.linalg.norm(b) + 1e-9)
-                emb_cos = float(a @ b)
+                if emb_cos is None:
+                    emb_cos = _cos(emb, card_emb)
                 ok = emb_cos >= emb_cos_thresh
 
         result = {"ok": ok, "file_id": fid, "iou": float(iou_preds[i]), "area_ratio": area_ratio}
         if emb_cos is not None:
             result["emb_cos"] = emb_cos
+        if not ok:
+            result["reject_reason"] = "emb"
         if ok:
             result["pos"] = (cx, cy)
             result["area"] = area

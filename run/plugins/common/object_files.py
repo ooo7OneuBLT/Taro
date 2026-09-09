@@ -135,6 +135,9 @@ class ObjectFiles(Plugin):
         #   計算(get_image_embedding/set_image)自体、Noneのときは一切呼ばれない。
         confirm_emb_cos = self.config.get("confirm_emb_cos")
         self.confirm_emb_cos = None if confirm_emb_cos is None else float(confirm_emb_cos)
+        # 【2026-09-09・追記4「直し」1節】確認の位置ゲートの種類。既定"mahal"＝
+        #   ObjectFileSystemの既定と同じなので無条件で渡してよい（既定不変）。
+        self.confirm_gate = self.config.get("confirm_gate", "mahal")
         scan_change_thresh = self.config.get("scan_change_thresh")
         self.scan_change_thresh = None if scan_change_thresh is None else float(scan_change_thresh)
         scan_on_misses = self.config.get("scan_on_misses")
@@ -195,6 +198,7 @@ class ObjectFiles(Plugin):
             uncertainty_penalty=self.uncertainty_penalty,
             exclusive_dist_px=self.exclusive_dist_px,
             exclusive_cos=self.exclusive_cos,
+            confirm_gate=self.confirm_gate,
         )
         if self.max_missed is not None:
             # 既定Noneのときは渡さない＝ObjectFileSystemの既定値(20)のまま（既定不変）。
@@ -343,6 +347,11 @@ class ObjectFiles(Plugin):
             # n_dets（下のn_dets = len(dets)で使う）＝「一致した結果の数」
             #（追記2「直し」3節）。matched=Trueのものだけを数える。
             dets = [p for p in payload if p.get("matched")]
+            # 【2026-09-09・追記4「直し」4節】confirm_pointsは通ったが
+            #   confirm_updateの位置ゲートで落ちたfile_id＝reject_reason="gate"
+            #   で上書きする（confirm_diagはdictなのでここで直接書き換える）。
+            for fid in res.get("gate_rejected", []):
+                conf_diag.setdefault(fid, {})["reject_reason"] = "gate"
         else:
             dets = payload
             res = self.ofs.step(dets, t=t, protect_id=protect_id)
@@ -470,6 +479,10 @@ class ObjectFiles(Plugin):
                 "conf_iou": diag.get("iou", ""),
                 "conf_area_ratio": diag.get("area_ratio", ""),
                 "conf_emb_cos": diag.get("emb_cos", ""),
+                # 【2026-09-09・追記4「直し」4節】確認が落ちた理由
+                #   （iou/area/emb/gate/dedup/空＝採用）。mode!="confirm"の行、
+                #   旧走行（confirm_gate等を使わない）では常に空欄（既定不変）。
+                "conf_reject": diag.get("reject_reason", ""),
             })
 
     def _detect_predictive(self, img224, t):
@@ -588,9 +601,13 @@ class ObjectFiles(Plugin):
             fid = r.get("file_id")
             # 【追記3「直し」2節】ok/失敗に関わらず、iou/area_ratio/emb_cosが
             #   あれば記録する（「何で落ちたかが分かるように」）。
+            # 【追記4「直し」4節】reject_reason（confirm_pointsが返す
+            #   iou/area/emb）もここに載せる。dedup・gateはこの後で上書きする
+            #   （confirm_pointsの外で起きる棄却のため）。
             if "iou" in r:
                 conf_diag[fid] = {"iou": r.get("iou"), "area_ratio": r.get("area_ratio"),
-                                   "emb_cos": r.get("emb_cos")}
+                                   "emb_cos": r.get("emb_cos"),
+                                   "reject_reason": r.get("reject_reason", "")}
             if r.get("ok") and fid in kept_ids:
                 payload.append({"file_id": fid, "matched": True,
                                  "pos": r["pos"], "area": r["area"]})
@@ -600,6 +617,11 @@ class ObjectFiles(Plugin):
                 # matched=False（confirm_update側でmisses+=1が起きる）。
                 payload.append({"file_id": fid, "matched": False})
                 confirm_debug.append({"pos": r.get("pos", pos_by_id.get(fid)), "ok": False})
+                if r.get("ok") and fid not in kept_ids:
+                    # 【追記4「直し」4節】confirm_pointsはokだが重複整理で外れた
+                    #   ＝理由は"dedup"（confirm_points自身のreject_reasonより
+                    #   優先する。この場合confirm_pointsはreject_reasonを持たない）。
+                    conf_diag.setdefault(fid, {})["reject_reason"] = "dedup"
         dt_ms = (time.perf_counter() - t0) * 1000.0
         return "confirm", payload, dt_ms, confirm_debug, conf_diag
 
@@ -945,13 +967,13 @@ class ObjectFiles(Plugin):
                 w.writerow(["step", "sim_time", "n_dets", "n_files",
                            "file_id", "x", "y", "area", "event",
                            "misses", "since_seen", "app_cos_created", "mode",
-                           "conf_iou", "conf_area_ratio", "conf_emb_cos"])
+                           "conf_iou", "conf_area_ratio", "conf_emb_cos", "conf_reject"])
                 for r in self.rows:
                     w.writerow([r["step"], r["sim_time"], r["n_dets"], r["n_files"],
                                r["file_id"], r["x"], r["y"], r["area"], r["event"],
                                r["misses"], r["since_seen"], r["app_cos_created"],
                                r["mode"], r.get("conf_iou", ""), r.get("conf_area_ratio", ""),
-                               r.get("conf_emb_cos", "")])
+                               r.get("conf_emb_cos", ""), r.get("conf_reject", "")])
         if self.attend_rows and self.attend_out:
             os.makedirs(os.path.dirname(self.attend_out) or ".", exist_ok=True)
             with open(self.attend_out, "w", newline="", encoding="utf-8") as fp:
