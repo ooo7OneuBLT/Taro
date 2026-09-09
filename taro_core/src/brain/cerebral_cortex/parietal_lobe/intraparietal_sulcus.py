@@ -388,7 +388,7 @@ class ObjectFileSystem:
             for i, f in enumerate(self.files):
                 for j, d in enumerate(detections):
                     mahal = f.mahalanobis(d["pos"])
-                    if self.uncertainty_penalty:
+                    if self.uncertainty_penalty and self.pos_gate != "size":
                         # 【2026-09-09・重複をなくす「後半」2節】採用済みのベイズ
                         #   模型の計算間違いの修正：不確かさの大きさ(log|S|)の項を
                         #   足す。確率として正しい形（S=innovation_cov, Rは観測雑音）。
@@ -399,7 +399,23 @@ class ObjectFileSystem:
                             np.log(np.linalg.det(S) / np.linalg.det(f.R)))
                     else:
                         penalty = 0.0
-                    pos_cost = (mahal + penalty) / self.mahal_gate  # 上限で切り詰めない
+                    if self.pos_gate == "size":
+                        # 【2026-09-09・追記4】位置の門を「物の大きさ」で決める
+                        #   ときは、コストの位置の項も同じ物差しにする。
+                        #   マハラノビス距離は見失いが続くと予測の不確かさ P が
+                        #   育って際限なく大きくなり、`cost <= gate` を永久に
+                        #   満たせなくなる（F2-108pre 実測：1つのおもちゃだけの
+                        #   場面で matched が 0 件、カード 3.56 枚、1 コマの検出
+                        #   0.15 件）。旧・確認の道はこのコストを通らなかったので
+                        #   表に出ていなかった。距離を「その物の大きさ」で割れば
+                        #   門の中では必ず 0〜1 に収まり、見失いが続いても
+                        #   結び直せる。
+                        _dx = d["pos"][0] - f.pos[0]
+                        _dy = d["pos"][1] - f.pos[1]
+                        _allowed = float(np.sqrt(max(f.area, 0.0))) * 224.0 * 0.75 + 8.0
+                        pos_cost = float(np.hypot(_dx, _dy)) / max(_allowed, 1e-6)
+                    else:
+                        pos_cost = (mahal + penalty) / self.mahal_gate  # 上限で切り詰めない
                     av = d["appearance"] / (np.linalg.norm(d["appearance"]) + 1e-9)
                     fv = f.appearance / (np.linalg.norm(f.appearance) + 1e-9)
                     cos_af = float(av @ fv)
