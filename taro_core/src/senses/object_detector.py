@@ -146,6 +146,78 @@ def load_mobilesam(weights_path=None, device=None, points_per_batch=None):
     return SamAutomaticMaskGenerator(sam, **kwargs)
 
 
+def make_point_predictor(mask_generator):
+    """点プロンプトによる確認（confirm）用の `SamPredictor` を返す。
+
+    【なぜ、2026-09-09】仕様_予測して確かめる検出_2026-09-09「後半」1節。
+    斥候報告（2026-09-09）で確認済み：点プロンプト `SamPredictor` は自動生成
+    （`SamAutomaticMaskGenerator`）と同じ重み（`mask_generator.predictor.model`）で
+    使える別インスタンス。1回だけ作って呼び出し元で使い回すこと（読み込みは軽いが、
+    毎回作り直す必要は無い）。"""
+    from mobile_sam import SamPredictor
+    return SamPredictor(mask_generator.predictor.model)
+
+
+def confirm_points(predictor, img224, points, expected_areas, iou_thresh=0.7, area_tol=0.5):
+    """点プロンプトで「さっきの場所に、さっきの大きさの物がまだあるか」を確認する。
+
+    【なぜ、2026-09-09】仕様_予測して確かめる検出_2026-09-09「後半」1節。
+    画面全体を256か所走査する重い `SamAutomaticMaskGenerator.generate()` の
+    代わりに、いま追跡中のカードの数（4枚以内）だけ点で問い合わせる軽い経路。
+    画像の埋め込み計算（`set_image`）は1回だけ、`predict()` は点の数だけ呼ぶ。
+
+    Args:
+        predictor: `make_point_predictor()` で得た `SamPredictor`。
+        img224: (224, 224, 3) の uint8 RGB画像。
+        points: [(x, y), ...] 確認したい座標（img224の画素基準）。
+        expected_areas: 各pointに対応する期待面積比[0-1]のリスト（pointsと同じ長さ）。
+        iou_thresh: `predict()` が返す `iou_predictions` の下限。これ未満の候補マスクは
+            採用対象から外す。
+        area_tol: 採用する面積の許容比率（|area-expected|/expected <= area_tol）。
+    Returns:
+        pointsと同じ長さ・同じ順のリスト。採用できれば
+        {"pos": マスク重心(x,y), "area": 面積比, "ok": True, "iou": float}、
+        無ければ {"ok": False}。appearance は返さない（呼び出し元がカードの
+        appearanceをそのまま使う＝見た目は同じなので位置だけで対応がつく）。
+    """
+    import numpy as np
+    img224 = np.asarray(img224)
+    h, w = img224.shape[0], img224.shape[1]
+    predictor.set_image(img224)
+    out = []
+    for (x, y), expected_area in zip(points, expected_areas):
+        masks, iou_preds, _ = predictor.predict(
+            point_coords=np.array([[float(x), float(y)]], dtype=np.float64),
+            point_labels=np.array([1]),
+            multimask_output=True,
+        )
+        best = None   # (面積差, マスクindex, 面積)
+        for i in range(masks.shape[0]):
+            if float(iou_preds[i]) < iou_thresh:
+                continue
+            area = float(masks[i].sum()) / (h * w)
+            if expected_area is None or expected_area <= 0:
+                continue
+            if abs(area - expected_area) / expected_area > area_tol:
+                continue
+            diff = abs(area - expected_area)
+            if best is None or diff < best[0]:
+                best = (diff, i, area)
+        if best is None:
+            out.append({"ok": False})
+            continue
+        _diff, i, area = best
+        ys, xs = np.where(masks[i])
+        if len(ys) == 0:
+            out.append({"ok": False})
+            continue
+        cx = float(xs.mean())
+        cy = float(ys.mean())
+        out.append({"pos": (cx, cy), "area": area, "ok": True, "iou": float(iou_preds[i])})
+    predictor.reset_image()
+    return out
+
+
 def _mask_touches_edge(bbox, w, h, margin=1):
     """背景（壁・床など）は画像の端まで届くことが多く、物体は中央寄りになる
     ことを使った足切り。F2-64実測：物なし画面のマスク3枚は全て端に接触、

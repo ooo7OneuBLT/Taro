@@ -201,6 +201,16 @@ class ObjectFileSystem:
             })
         return victim.id
 
+    def predict_only(self):
+        """【2026-09-09・仕様_予測して確かめる検出】確認（confirm）専用：対応づけは
+        せず、各ファイルの予測位置だけを1コマぶん進める。`step()` 冒頭の2行
+        （`f.predict()`・`f.age += 1`）と同じ処理を切り出しただけで、`step()`
+        自体は無改修（既存の呼び出し元の挙動は不変）。呼び出し元（object_files.py）
+        が確認用の点プロンプトを作る前に、いまの予測位置 `f.pos` を得るために使う。"""
+        for f in self.files:
+            f.predict()
+            f.age += 1
+
     def step(self, detections, t=None, protect_id=None):
         """detections = [{"pos": (x,y), "area": float, "appearance": vec}, ...]（1コマぶん）。
         `t`（sim秒。連続性の墓場の期限管理に使う）と `protect_id`（注意中の

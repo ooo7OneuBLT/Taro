@@ -113,6 +113,21 @@ class ObjectFiles(Plugin):
         self.revive_dist_px = float(self.config.get("revive_dist_px", 40.0))
         max_files = self.config.get("max_files")
         self.max_files = None if max_files is None else int(max_files)
+        max_missed = self.config.get("max_missed")
+        self.max_missed = None if max_missed is None else int(max_missed)
+        # 【2026-09-09・仕様_予測して確かめる検出】確認・見回り・横取り。既定は
+        #   全てNone（scan_interval_s=None）＝従来どおり毎回全体切り出し（既定不変）。
+        scan_interval_s = self.config.get("scan_interval_s")
+        self.scan_interval_s = None if scan_interval_s is None else float(scan_interval_s)
+        self.confirm_iou_thresh = float(self.config.get("confirm_iou_thresh", 0.7))
+        self.confirm_area_tol = float(self.config.get("confirm_area_tol", 0.5))
+        scan_change_thresh = self.config.get("scan_change_thresh")
+        self.scan_change_thresh = None if scan_change_thresh is None else float(scan_change_thresh)
+        scan_on_misses = self.config.get("scan_on_misses")
+        self.scan_on_misses = None if scan_on_misses is None else int(scan_on_misses)
+        self._last_scan_t = float("-inf")
+        self._prev_small = None
+        self._point_predictor = None
         # 【2026-09-07・メモリ削減候補(a)】既定None＝SamAutomaticMaskGeneratorの
         #   既定値(64)のまま＝1ビットも変わらない。渡したときだけ上書きする。
         self.points_per_batch = self.config.get("points_per_batch")
@@ -147,12 +162,16 @@ class ObjectFiles(Plugin):
                 self._mgen.crop_n_layers,
                 self._mgen.crop_n_points_downscale_factor)
 
-        self.ofs = self._ObjectFileSystem(
+        ofs_kwargs = dict(
             revive_window_s=self.revive_window_s,
             revive_cos=self.revive_cos,
             revive_dist_px=self.revive_dist_px,
             max_files=self.max_files,
         )
+        if self.max_missed is not None:
+            # 既定Noneのときは渡さない＝ObjectFileSystemの既定値(20)のまま（既定不変）。
+            ofs_kwargs["max_missed"] = self.max_missed
+        self.ofs = self._ObjectFileSystem(**ofs_kwargs)
         # 他のプラグイン・今後の脳側の配線から読めるように置く（ctx は属性を自由に足せる）
         ctx.object_files = self.ofs
 
@@ -198,6 +217,12 @@ class ObjectFiles(Plugin):
         self._seg_n_files = []
         self._seg_n_dets = []
         self._seg_detect_ms = []
+        # 【2026-09-09・仕様_予測して確かめる検出】mode別の直近値（confirm_ms・scan_ms）。
+        #   scan_interval_s=Noneのときは常にmode="scan"のままなのでobject_files_scan_ms
+        #   ＝従来のobject_files_detect_msと同じ値になる（既定不変・新しい列が増えるだけ）。
+        self._seg_confirm_ms = []
+        self._seg_scan_ms = []
+        self._mode_counts = {}
 
     def _lazy_import(self):
         for sub in ("senses", ""):
@@ -206,11 +231,14 @@ class ObjectFiles(Plugin):
             if p not in sys.path:
                 sys.path.insert(0, p)
         # 旧パス brain.object_files は転送のみなので使わない。
-        from object_detector import patch_features, detect, load_mobilesam
+        from object_detector import (patch_features, detect, load_mobilesam,
+                                      make_point_predictor, confirm_points)
         from brain.cerebral_cortex.parietal_lobe.intraparietal_sulcus import ObjectFileSystem
         self._patch_features = patch_features
         self._detect = detect
         self._load_mobilesam = load_mobilesam
+        self._make_point_predictor = make_point_predictor
+        self._confirm_points = confirm_points
         self._ObjectFileSystem = ObjectFileSystem
 
     def on_step(self, ctx):
@@ -240,22 +268,37 @@ class ObjectFiles(Plugin):
         img224 = np.array(Image.fromarray(np.clip(img, 0, 255).astype(np.uint8))
                            .resize((224, 224)))
 
-        t0 = time.perf_counter()
-        p, n = self._patch_features(self._model, img224, self.device)
-        dets = self._detect(p, n, img=img224, mask_generator=self._mgen,
-                             cohesion_gap_px=self.cohesion_gap_px)
-        if self.empty_cache_after_detect:
-            # 【2026-09-07・メモリ削減候補(c)】既定Falseでは1行も実行されない。
-            import torch
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+        confirm_debug = None
+        if self.scan_interval_s is None:
+            # 従来どおり：常に全体切り出し（既定不変）。mode は新規の"scan"固定
+            # （CSV・metrics に列が増えるだけで、判定・タイミングは一切変えない）。
+            t0 = time.perf_counter()
+            p, n = self._patch_features(self._model, img224, self.device)
+            dets = self._detect(p, n, img=img224, mask_generator=self._mgen,
+                                 cohesion_gap_px=self.cohesion_gap_px)
+            if self.empty_cache_after_detect:
+                # 【2026-09-07・メモリ削減候補(c)】既定Falseでは1行も実行されない。
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            dt_ms = (time.perf_counter() - t0) * 1000.0
+            mode = "scan"
+        else:
+            # 【2026-09-09・仕様_予測して確かめる検出】確認・見回り・横取りの分岐。
+            mode, dets, dt_ms, confirm_debug = self._detect_predictive(img224, t)
+
         prev_by_id = {f.id: f for f in self.ofs.files}
         # 【2026-09-09・枚数の上限】押し出し禁止の対象＝現在注意中のファイル
         # （_process_attentionはこのofs.stepより後に呼ぶので、ここではまだ
         # 前コマの注意状態を使う。attend=Falseなら常にNone＝従来どおり）。
         protect_id = self._attended_id if self.attend else None
         res = self.ofs.step(dets, t=t, protect_id=protect_id)
-        dt_ms = (time.perf_counter() - t0) * 1000.0
+
+        self._mode_counts[mode] = self._mode_counts.get(mode, 0) + 1
+        if mode == "confirm":
+            self._seg_confirm_ms.append(dt_ms)
+        else:
+            self._seg_scan_ms.append(dt_ms)
 
         if self.attend:
             # 【M3】検出・対応づけ結果（res・self.ofs.files）を読むだけ。
@@ -264,7 +307,8 @@ class ObjectFiles(Plugin):
             self._process_attention(ctx, t, res)
 
         if self.frames_out:
-            self._save_detection_frame(ctx, t, img224, dets, res, prev_by_id)
+            self._save_detection_frame(ctx, t, img224, dets, res, prev_by_id,
+                                        mode=mode, confirm_debug=confirm_debug)
 
         self._detect_ms_sum += dt_ms
         self._detect_n += 1
@@ -345,9 +389,99 @@ class ObjectFiles(Plugin):
                 "file_id": file_id, "x": x, "y": y, "area": area, "event": event,
                 "misses": misses, "since_seen": since_seen,
                 "app_cos_created": app_cos_created,
+                # 【2026-09-09・仕様_予測して確かめる検出】末尾に追加した列。
+                #   scan_interval_s=Noneのときは常に"scan"（既定不変・列が増えるだけ）。
+                "mode": mode,
             })
 
-    def _save_detection_frame(self, ctx, sim_time, img224, dets, res, prev_by_id):
+    def _detect_predictive(self, img224, t):
+        """【2026-09-09・仕様_予測して確かめる検出_2026-09-09「後半」2節】
+        確認（confirm）・見回り（scan）・横取り（scan_change/scan_miss）の分岐。
+        `scan_interval_s` が指定されているときだけ呼ばれる（既定不変）。
+
+        Returns:
+            (mode, dets, dt_ms, confirm_debug)
+            mode: "scan"/"scan_change"/"scan_miss"/"scan_empty"/"confirm"
+            dets: `ObjectFileSystem.step()` に渡す検出のリスト
+            dt_ms: この呼び出しにかかった時間（ミリ秒）
+            confirm_debug: mode=="confirm"のときだけ、点ごとの結果のリスト
+                （`_save_detection_frame` の描画用）。それ以外はNone。
+        """
+        import numpy as np
+        from PIL import Image
+
+        # ---- 横取り条件（安い順）：①見失いの連続 ②粗い画像差分 ------------------
+        # 【安い順、仕様「後半」2節】まずmisses（既に持っている値、計算コスト0）を
+        # 見て、それで決まらないときだけ32x32グレースケールの差分を計算する。
+        force_scan_reason = None
+        if len(self.ofs.files) == 0:
+            force_scan_reason = "empty"
+        elif self.scan_on_misses is not None and any(
+                f.misses >= self.scan_on_misses for f in self.ofs.files):
+            force_scan_reason = "miss"
+
+        small = np.asarray(
+            Image.fromarray(np.clip(img224, 0, 255).astype(np.uint8))
+            .convert("L").resize((32, 32)), dtype=np.float64)
+        if (force_scan_reason is None and self.scan_change_thresh is not None
+                and self._prev_small is not None):
+            diff = np.abs(small - self._prev_small)
+            # 既存カードの周り（半径 = sqrt(area)*224*1.5 px、32x32尺度に換算）を除く。
+            mask = np.ones((32, 32), dtype=bool)
+            yy, xx = np.ogrid[:32, :32]
+            for f in self.ofs.files:
+                fx, fy = f.pos
+                r_px = (max(f.area, 0.0) ** 0.5) * 224.0 * 1.5
+                r32 = r_px / 224.0 * 32.0
+                gx, gy = fx / 224.0 * 32.0, fy / 224.0 * 32.0
+                mask &= ((xx + 0.5 - gx) ** 2 + (yy + 0.5 - gy) ** 2) > (r32 ** 2)
+            vals = diff[mask]
+            if vals.size and float(vals.mean()) > self.scan_change_thresh:
+                force_scan_reason = "change"
+        self._prev_small = small
+
+        do_scan = force_scan_reason is not None or (t - self._last_scan_t >= self.scan_interval_s)
+
+        if do_scan:
+            t0 = time.perf_counter()
+            p, n = self._patch_features(self._model, img224, self.device)
+            dets = self._detect(p, n, img=img224, mask_generator=self._mgen,
+                                 cohesion_gap_px=self.cohesion_gap_px)
+            if self.empty_cache_after_detect:
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            dt_ms = (time.perf_counter() - t0) * 1000.0
+            self._last_scan_t = t
+            mode = {"change": "scan_change", "miss": "scan_miss",
+                    "empty": "scan_empty"}.get(force_scan_reason, "scan")
+            return mode, dets, dt_ms, None
+
+        # ---- 確認：既存カードの予測位置を1点ずつ聞く（画像埋め込みは1回だけ）------
+        t0 = time.perf_counter()
+        self.ofs.predict_only()
+        points = [f.pos for f in self.ofs.files]
+        expected_areas = [f.area for f in self.ofs.files]
+        if self._point_predictor is None:
+            self._point_predictor = self._make_point_predictor(self._mgen)
+        results = self._confirm_points(self._point_predictor, img224, points, expected_areas,
+                                        iou_thresh=self.confirm_iou_thresh,
+                                        area_tol=self.confirm_area_tol)
+        dets = []
+        confirm_debug = []
+        for f, r in zip(self.ofs.files, results):
+            if r.get("ok"):
+                dets.append({"pos": r["pos"], "area": r["area"], "appearance": f.appearance})
+                confirm_debug.append({"pos": r["pos"], "ok": True})
+            else:
+                # 【仕様「見失い」】okでなかったカードはdetsに入れない＝
+                # ofs.step()側の従来の経路でmisses+=1が起きる。
+                confirm_debug.append({"pos": f.pos, "ok": False})
+        dt_ms = (time.perf_counter() - t0) * 1000.0
+        return "confirm", dets, dt_ms, confirm_debug
+
+    def _save_detection_frame(self, ctx, sim_time, img224, dets, res, prev_by_id,
+                               mode="scan", confirm_debug=None):
         """目視用：検出（黄丸）と物体ファイル（色つき四角）をimg224へ重ねてPNG保存する。
         検出・対応づけ・既存CSVには一切触れない（読むだけ）。"""
         import math
@@ -390,9 +524,24 @@ class ObjectFiles(Plugin):
                     dr.text((x - 8, y + 9), self._last_nearest_word,
                              fill=(255, 140, 0), font=self._frame_font)
             if self._last_vanished:
-                dr.text((4, 16), "VANISHED #%s" % self._attended_id,
+                dr.text((4, 28), "VANISHED #%s" % self._attended_id,
                          fill=(255, 0, 0), font=self._frame_font)
-        dr.text((4, 2), "t=%.1fs dets=%d files=%d" % (sim_time, len(dets), len(self.ofs.files)),
+        # 【2026-09-09・仕様_予測して確かめる検出「後半」2節】左上にmodeのラベル。
+        #   scan_empty はSCANの見た目のまま（ラベル一覧に無い＝そのまま"SCAN"扱い）。
+        _mode_label = {"confirm": "CONFIRM", "scan": "SCAN",
+                       "scan_change": "SCAN(change)", "scan_miss": "SCAN(miss)"
+                       }.get(mode, "SCAN")
+        dr.text((4, 2), _mode_label, fill=(255, 255, 0), font=self._frame_font)
+        # 確認(confirm)で当たった点は緑の小さい点、外れた予測位置は赤の×。
+        if mode == "confirm" and confirm_debug:
+            for d in confirm_debug:
+                px, py = d["pos"]
+                if d["ok"]:
+                    dr.ellipse([px - 2, py - 2, px + 2, py + 2], fill=(0, 255, 0))
+                else:
+                    dr.line([px - 4, py - 4, px + 4, py + 4], fill=(255, 0, 0), width=2)
+                    dr.line([px - 4, py + 4, px + 4, py - 4], fill=(255, 0, 0), width=2)
+        dr.text((4, 14), "t=%.1fs dets=%d files=%d" % (sim_time, len(dets), len(self.ofs.files)),
                  fill=(255, 255, 255), font=self._frame_font)
         img.save(os.path.join(self.frames_out, "frame_%05d.png" % ctx.step))
 
@@ -601,6 +750,17 @@ class ObjectFiles(Plugin):
                 sum(self._seg_detect_ms) / len(self._seg_detect_ms), 2),
         }
         self._seg_n_files, self._seg_n_dets, self._seg_detect_ms = [], [], []
+        # 【2026-09-09・仕様_予測して確かめる検出】mode別の直近値の平均。
+        #   scan_interval_s=Noneのときはmode="scan"固定なので、この2つの列は
+        #   常に「confirm_ms列は出ない・scan_ms==detect_ms」になる（既定不変）。
+        if self._seg_confirm_ms:
+            out["object_files_confirm_ms"] = round(
+                sum(self._seg_confirm_ms) / len(self._seg_confirm_ms), 2)
+            self._seg_confirm_ms = []
+        if self._seg_scan_ms:
+            out["object_files_scan_ms"] = round(
+                sum(self._seg_scan_ms) / len(self._seg_scan_ms), 2)
+            self._seg_scan_ms = []
         return out
 
     def line(self, ctx):
@@ -613,11 +773,12 @@ class ObjectFiles(Plugin):
                 w = csv.writer(fp)
                 w.writerow(["step", "sim_time", "n_dets", "n_files",
                            "file_id", "x", "y", "area", "event",
-                           "misses", "since_seen", "app_cos_created"])
+                           "misses", "since_seen", "app_cos_created", "mode"])
                 for r in self.rows:
                     w.writerow([r["step"], r["sim_time"], r["n_dets"], r["n_files"],
                                r["file_id"], r["x"], r["y"], r["area"], r["event"],
-                               r["misses"], r["since_seen"], r["app_cos_created"]])
+                               r["misses"], r["since_seen"], r["app_cos_created"],
+                               r["mode"]])
         if self.attend_rows and self.attend_out:
             os.makedirs(os.path.dirname(self.attend_out) or ".", exist_ok=True)
             with open(self.attend_out, "w", newline="", encoding="utf-8") as fp:
