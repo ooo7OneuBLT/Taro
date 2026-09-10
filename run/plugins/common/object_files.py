@@ -118,6 +118,13 @@ class ObjectFiles(Plugin):
         "ec_eye_h", "ec_eye_v",
         # 【2026-09-10】注意が選んだ場所（画素）。目がどこを狙わされているかを見る。
         "attn_x", "attn_y",
+        # 【2026-09-10・入力の総点検】見る側が使う入力を1つずつ実測するための列。
+        #   ec_dx_pred/ec_dy_pred＝遠心性コピーの「これから動く分」（地図をずらす量）
+        #   img_mean/img_std＝目の画像そのもの（止まったら壊れている）
+        #   ch_*＝目立ちの4つの面が、勝った升でそれぞれいくつだったか
+        #   sacc_n＝この検出コマまでに撃たれたサッケードの累計
+        "ec_dx_pred", "ec_dy_pred", "img_mean", "img_std",
+        "ch_明るさ", "ch_色", "ch_向き", "ch_動き", "sacc_n",
         "cohesion",
         # 【2026-09-09・追記1「直し」3】当て付きの点の数／当てに合う大きさが
         #   無くて捨てた点の数。
@@ -604,6 +611,15 @@ class ObjectFiles(Plugin):
                 "ec_eye_v": onset_extra.get("ec_eye_v", ""),
                 "attn_x": onset_extra.get("attn_x", ""),
                 "attn_y": onset_extra.get("attn_y", ""),
+                "ec_dx_pred": onset_extra.get("ec_dx_pred", ""),
+                "ec_dy_pred": onset_extra.get("ec_dy_pred", ""),
+                "img_mean": onset_extra.get("img_mean", ""),
+                "img_std": onset_extra.get("img_std", ""),
+                "ch_明るさ": onset_extra.get("ch_明るさ", ""),
+                "ch_色": onset_extra.get("ch_色", ""),
+                "ch_向き": onset_extra.get("ch_向き", ""),
+                "ch_動き": onset_extra.get("ch_動き", ""),
+                "sacc_n": onset_extra.get("sacc_n", ""),
                 "cohesion": cohesion,
                 # 【2026-09-10・消え方で持ち時間を決める】explained＝消えたことの
                 #   説明のつき具合（0〜1、見失った瞬間に決まる）、budget＝残量。
@@ -707,6 +723,14 @@ class ObjectFiles(Plugin):
         onset_extra["ec_dy_meas"] = round(float(_sm[1]), 2)
         onset_extra["ec_eye_h"] = round(float(eff.get("eye_h", 0.0)), 3)
         onset_extra["ec_eye_v"] = round(float(eff.get("eye_v", 0.0)), 3)
+        _sp = eff.get("shift_pred") or (0.0, 0.0)
+        onset_extra["ec_dx_pred"] = round(float(_sp[0]), 2)
+        onset_extra["ec_dy_pred"] = round(float(_sp[1]), 2)
+        onset_extra["img_mean"] = round(float(np.mean(img224)), 2)
+        onset_extra["img_std"] = round(float(np.std(img224)), 2)
+        _u3 = getattr(getattr(ctx, "env", None), "unwrapped", None)
+        _or3 = getattr(_u3, "_orienting", None) if _u3 is not None else None
+        onset_extra["sacc_n"] = int(getattr(_or3, "n_saccades", 0)) if _or3 else ""
 
         # ---- 1b. 【2026-09-10・見る側1〜2段目】目立ちの地図 → 場所の優先度地図。
         #      attention=None（既定）なら1行も通らない。
@@ -720,6 +744,9 @@ class ObjectFiles(Plugin):
             onset_extra["attn_x"] = round(attn_res["winner_px"][0], 1)
             onset_extra["attn_y"] = round(attn_res["winner_px"][1], 1)
             onset_extra["attn_switched"] = attn_res["switched"]
+            _wc, _wr = attn_res["winner_cell"]
+            for _k, _v in sal_res["channels"].items():
+                onset_extra["ch_" + _k] = round(float(_v[_wr, _wc]), 4)
             # 【2026-09-10・測定】撃った方向を、地図はどう評価していたか。
             _u2 = getattr(getattr(ctx, "env", None), "unwrapped", None)
             _or2 = getattr(_u2, "_orienting", None) if _u2 is not None else None
