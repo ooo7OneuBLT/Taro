@@ -42,13 +42,39 @@ class EfferenceCopy:
         self._prev_eye_h = None
         self._prev_eye_v = None
         self._moving_extra_left = 0
+        # 【2026-09-10】前に使われてから今までの、画像のずれの合計。
+        #   使う側（検出コマ）が consume_shift() で受け取り、そこで 0 に戻す。
+        self._accum = [0.0, 0.0]
+
+    def consume_shift(self):
+        """前に呼ばれてから今までに溜まった「画像の中身のずれ」を返し、0 に戻す。
+
+        【なぜ必要か・2026-09-10】この器官は毎tick呼ばれて **1tickぶん** の
+        ずれを出すが、使う側（物体ファイルの照合・地図のずらし）は
+        **2〜3tickに1回**しか読まない。1tickぶんだけ渡すと、その間に起きた
+        残りのずれが抜け落ちる。実測（F2-112pre）：予告÷実測の中央値が 0.52
+        ＝約半分しか予告できていなかった。検出は600歩で262回なので
+        1÷2.3＝0.43 とほぼ一致する。
+
+        【人間はどうか】補正はサッケードの開始と同時に、**1回のまとまった
+        ジャンプ**として起きる（中間地点を経由しない）。運ばれるのは「動いた」
+        という合図ではなく**振幅そのもの**（Sommer & Wurtz 2006 Nature ほか、
+        `F/docs/二語文/文献調査/2026-09-10_遠心性コピーの大きさと較正_人間側.md`）。
+        ＝「使うときに、その間ぶんをまとめて1回渡す」がこの形にあたる。
+        """
+        out = (float(self._accum[0]), float(self._accum[1]))
+        self._accum[0] = 0.0
+        self._accum[1] = 0.0
+        return out
 
     def update(self, orienting, t):
         if orienting is None:
             self._prev_eye_h = None
             self._prev_eye_v = None
             self._moving_extra_left = 0
+            self._accum = [0.0, 0.0]
             return {"shift_pred": (0.0, 0.0), "shift_actual": (0.0, 0.0),
+                    "shift_accum": (0.0, 0.0),
                     "moving": False, "eye_h": 0.0, "eye_v": 0.0,
                     "d_eye_h": 0.0, "d_eye_v": 0.0}
 
@@ -64,6 +90,9 @@ class EfferenceCopy:
 
         dx_actual = self.sign_h * self.f_px * math.tan(math.radians(d_eye_h))
         dy_actual = self.sign_v * self.f_px * math.tan(math.radians(d_eye_v))
+        # 使われるまで足し合わせておく（consume_shift() で受け取られて 0 に戻る）
+        self._accum[0] += dx_actual
+        self._accum[1] += dy_actual
 
         tgt = getattr(orienting, "_tgt", None) or {}
         tgt_h = tgt.get("eye_h", eye_h)
@@ -84,5 +113,6 @@ class EfferenceCopy:
             moving = False
 
         return {"shift_pred": (dx_pred, dy_pred), "shift_actual": (dx_actual, dy_actual),
+                "shift_accum": (float(self._accum[0]), float(self._accum[1])),
                 "moving": moving, "eye_h": eye_h, "eye_v": eye_v,
                 "d_eye_h": d_eye_h, "d_eye_v": d_eye_v}

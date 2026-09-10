@@ -649,7 +649,13 @@ class ObjectFiles(Plugin):
 
         # ---- 0. 遠心性コピー（無効ならshift=(0,0)・moving=False） --------------
         eff = getattr(ctx, "efference", None) or {}
-        shift_actual = eff.get("shift_actual", (0.0, 0.0))
+        # 【2026-09-10】検出コマは2〜3tickに1回しか来ないので、1tickぶんの
+        #   shift_actual ではなく、**前の検出コマからの合計**を受け取る
+        #   （efference_copy.consume_shift のコメント参照。受け取ると 0 に戻る）。
+        if self._ec is not None:
+            shift_actual = self._ec.consume_shift()
+        else:
+            shift_actual = eff.get("shift_actual", (0.0, 0.0))
         shift_pred = eff.get("shift_pred")
         moving = bool(eff.get("moving", False))
 
