@@ -1261,6 +1261,14 @@ class ObjectFiles(Plugin):
             _or = getattr(_u, "_orienting", None) if _u is not None else None
             if _or is not None:
                 # 【2026-09-10・測定】サッケード1発ごとの記録を書き出す。
+                _at = getattr(_or, "angle_trace", None)
+                if _at:
+                    import json as _json
+                    _pa = os.path.join(os.path.dirname(self.events_out or "."),
+                                        "眼球の角度_毎ステップ.json")
+                    with open(_pa, "w", encoding="utf-8") as _fp:
+                        _json.dump(_at, _fp, ensure_ascii=False)
+                    out["角度の記録"] = _pa
                 _sl = getattr(_or, "sacc_log", None)
                 if _sl:
                     import json as _json
