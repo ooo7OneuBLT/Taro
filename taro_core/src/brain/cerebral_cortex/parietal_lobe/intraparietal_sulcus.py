@@ -53,6 +53,8 @@ Object files: A model for integrating information about objects [Tier1]）。
 再び対応がついた）の中で、予測位置からの実際のずれが大きいものを返す。
 「見た目は同じだがあり得ない場所に現れた」を検出するための最小の形。
 """
+from collections import deque
+
 import numpy as np
 from scipy.optimize import linear_sum_assignment
 
@@ -69,7 +71,8 @@ _H = np.array([[1, 0, 0, 0],
 class ObjectFile:
     """1つの物体ファイル。位置・速度（カルマン状態）と見た目を持つ。名前は持たない。"""
 
-    def __init__(self, id_, pos, appearance, area, process_noise, meas_noise, t=None, emb=None):
+    def __init__(self, id_, pos, appearance, area, process_noise, meas_noise, t=None, emb=None,
+                 budget_look_back=4):
         self.id = id_
         self.x = np.array([pos[0], pos[1], 0.0, 0.0], dtype=np.float64)
         self.P = np.eye(4) * 30.0
@@ -96,6 +99,14 @@ class ObjectFile:
         #   何秒まで等速で延長するか」の起点。coast_max_s=None（既定）では
         #   一度も参照されない＝既定不変。
         self.last_seen_t = t
+        # 【2026-09-10・仕様_消え方で持ち時間を決める】budget＝「あとどれくらい
+        #   探し続けるか」の残量。見えていれば 1.0、見失うコマごとに減り、0 で
+        #   名簿から抜ける。減る量は「消えたことがどれだけ説明できるか」
+        #   （explained、0〜1）で決まる。vanish_budget を渡さない既定では
+        #   ObjectFileSystem がこの値を一度も読まない＝既定不変。
+        self.budget = 1.0
+        self.explained = 0.0        # 見失った瞬間に1度だけ決める（0〜1）
+        self.area_hist = deque([float(area)], maxlen=max(int(budget_look_back), 2))
 
     @property
     def pos(self):
@@ -149,6 +160,45 @@ class ObjectFile:
             self.x[0] += shift[0]
             self.x[1] += shift[1]
 
+    def compute_explained(self, img_size=224.0):
+        """見失った瞬間に1度だけ呼ぶ。「消えたことがどれだけ説明できるか」を
+        0〜1 の連続量で返す（1＝完全に説明がつく＝隠れたとみなせる）。
+
+        【なぜ連続量か、2026-09-10】文献調査
+        `2026-09-10_消え方の手がかりは段階的か_人間側.md`：消え方の質そのものを
+        連続的に振った人間実験は見つからなかったが、隣接する「隠れている量・
+        見えにくさの程度」を段階的に振った実験（Peters 2024、Shinskey 2000、
+        いずれも原文確認）はいずれも閾値なしになだらかに変化した。人間を
+        説明する計算モデル（ADEPT, Smith 2019、原文確認）も2値の場合分けでなく
+        1つの連続確率で書く。ユーザー指摘（2026-09-10「IFでやるのハードコード的
+        じゃない？人間もその二分法なの？」）を受けて、if による2分岐をやめた。
+        なお本ファイル冒頭の2026-09-03の判断「遮蔽は特別扱いしない・場合分けの
+        直書きはしない」とも、この形なら矛盾しない（場合分けではなく連続量1本）。
+
+        2つの手がかりの大きい方を採る：
+          - 縮み：最後に見えた大きさが、直近の最大の何割まで減っていたか。
+            端から食われていく（accretion/deletion）と縮む。履歴が1つしか
+            無ければ 0（判断材料が無い＝説明がつかない側に倒す）。
+          - はみ出し：物の差し渡しのうち画面の外に出ていた割合。画面の枠が
+            隠すものにあたる。
+        """
+        if len(self.area_hist) >= 2:
+            mx = max(self.area_hist)
+            last = self.area_hist[-1]
+            shrink = 0.0 if mx <= 0.0 else 1.0 - (last / mx)
+            shrink = min(max(shrink, 0.0), 1.0)
+        else:
+            shrink = 0.0
+        r = float(np.sqrt(max(self.area, 0.0))) * float(img_size) / 2.0
+        if r <= 0.0:
+            out = 0.0
+        else:
+            x, y = self.pos
+            out_x = (max(0.0, r - x) + max(0.0, r - (img_size - x))) / (2.0 * r)
+            out_y = (max(0.0, r - y) + max(0.0, r - (img_size - y))) / (2.0 * r)
+            out = min(max(max(out_x, out_y), 0.0), 1.0)
+        return max(shrink, out)
+
     def innovation_cov(self):
         """観測前の予測から決まるイノベーション共分散 S = H P H^T + R。
         predict() 済みの P があれば、対応づけを決める前でも計算できる。"""
@@ -186,6 +236,12 @@ class ObjectFile:
         self.hits += 1
         self.misses = 0
         self.since_seen = 0
+        # 【2026-09-10・消え方で持ち時間を決める】見えたので残量は満タンに戻り、
+        #   消え方の説明もいったん白紙に戻す。大きさの履歴はここでだけ伸ばす
+        #   （見えたときの大きさの並び＝「端から食われて縮んだか」の材料）。
+        self.area_hist.append(float(area))
+        self.budget = 1.0
+        self.explained = 0.0
         if t is not None:
             # 【2026-09-09・重複をなくす「後半」1節】実際に一致した＝見えた時刻。
             self.last_seen_t = t
@@ -266,7 +322,37 @@ class ObjectFileSystem:
                  revive_window_s=None, revive_cos=0.8, revive_dist_px=40.0, max_files=None,
                  coast_max_s=None, uncertainty_penalty=0.0, exclusive_dist_px=None,
                  exclusive_cos=0.7, pos_gate="mahal", exclusive_scale_by_size=False,
-                 coast_min_speed_px_s=None, frame_dt_s=1.0, appearance_gate_cos=None):
+                 coast_min_speed_px_s=None, frame_dt_s=1.0, appearance_gate_cos=None,
+                 vanish_budget=None):
+        # 【2026-09-10・仕様_消え方で持ち時間を決める】vanish_budget が None
+        #   （既定）なら、budget は一度も読まれず max_missed で消す従来どおり
+        #   ＝既定不変。辞書 {"abrupt_frames": 5, "occluded_frames": 50,
+        #   "look_back": 4, "img_size": 224} を渡すと、
+        #     ・消す判定は budget<=0（max_missed は使わない）
+        #     ・見失うコマごとに budget から
+        #         drain = a - (a - o) * explained
+        #         a = 1/abrupt_frames（説明がつかない＝すぐ尽きる）
+        #         o = 1/occluded_frames（説明がつく＝長く粘る）
+        #       を引く。explained は見失った瞬間に1度だけ決める（0〜1）
+        #     ・上限に達していても既存のカードを押し出さない（新しい検出は
+        #       席が空くまで待つ）。人間側の実測＝新しい物が既存の追跡を
+        #       追い出す証拠は無く、既存が守られる（文献調査
+        #       2026-09-10_見えている物と保留の物は別の入れ物か_人間側.md）。
+        #       ユーザー指摘（2026-09-10）「上位3つとかだと順位が前後したら
+        #       物体ファイルが頻繁に変わる。人間はそうじゃない」に対応する。
+        self.vanish_budget = None
+        if vanish_budget is not None:
+            _vb = dict(vanish_budget)
+            _a = float(_vb.get("abrupt_frames", 5))
+            _o = float(_vb.get("occluded_frames", 50))
+            if _a <= 0 or _o <= 0:
+                raise ValueError("vanish_budget の abrupt_frames / occluded_frames は正の数")
+            self.vanish_budget = {
+                "drain_abrupt": 1.0 / _a,
+                "drain_occluded": 1.0 / _o,
+                "look_back": int(_vb.get("look_back", 4)),
+                "img_size": float(_vb.get("img_size", 224.0)),
+            }
         if pos_gate not in ("mahal", "size"):
             raise ValueError("pos_gate は 'mahal' か 'size' のどちらか（%r）" % (pos_gate,))
         self.appearance_weight = float(appearance_weight)
@@ -307,6 +393,10 @@ class ObjectFileSystem:
         大きい）ファイルを1枚削除し、revive_window_sがNoneでなければ墓場に送る。
         削除したfile_idを返す（削除しなければNone）。"""
         if self.max_files is None or len(self.files) < self.max_files:
+            return None
+        if self.vanish_budget is not None:
+            # 【2026-09-10】押し出さない。席は残量が尽きて自分で抜けたときだけ
+            #   空く。呼び出し元は「席が無ければ作らない」を守ること。
             return None
         candidates = [f for f in self.files if f.id != protect_id]
         if not candidates:
@@ -451,8 +541,18 @@ class ObjectFileSystem:
             unmatched_d = [j for j in range(n_d) if j not in used_d]
 
         for i in unmatched_f:
-            self.files[i].misses += 1
-            self.files[i].since_seen += 1
+            f = self.files[i]
+            f.misses += 1
+            f.since_seen += 1
+            if self.vanish_budget is not None:
+                # 【2026-09-10・消え方で持ち時間を決める】見失った最初のコマで
+                #   1度だけ「どれだけ説明がつくか」を決め、以後はそれを使って
+                #   毎コマ残量を減らす。場合分けは無く、式は1本。
+                if f.misses == 1:
+                    f.explained = f.compute_explained(self.vanish_budget["img_size"])
+                a = self.vanish_budget["drain_abrupt"]
+                o = self.vanish_budget["drain_occluded"]
+                f.budget -= a - (a - o) * f.explained
 
         # ---- 固体性：既存カードに近い検出は新規作成せず吸収する（重複をなくす
         #      「後半」3節。exclusive_dist_pxがNoneなら従来どおり何もしない＝
@@ -533,10 +633,17 @@ class ObjectFileSystem:
                         best_idx, best_cos = gi, cos
                 if best_idx is not None:
                     g = self._graveyard[best_idx]
+                    if (self.vanish_budget is not None and self.max_files is not None
+                            and len(self.files) >= self.max_files):
+                        # 【2026-09-10】席が無ければ復活もさせない（押し出さない）。
+                        remaining_d.append(j)
+                        continue
                     used_grave.add(best_idx)
                     self._make_room(protect_id, t)
                     nf = ObjectFile(g["id"], d["pos"], d["appearance"], d["area"],
-                                    self.process_noise, self.meas_noise, t=t, emb=d.get("emb"))
+                                    self.process_noise, self.meas_noise, t=t, emb=d.get("emb"),
+                                    budget_look_back=(self.vanish_budget["look_back"]
+                                                      if self.vanish_budget else 4))
                     nf.hits = g["hits"]
                     nf.age = g["age"]
                     self.files.append(nf)
@@ -552,18 +659,29 @@ class ObjectFileSystem:
         individuated = []
         for j in remaining_d:
             d = detections[j]
+            if (self.vanish_budget is not None and self.max_files is not None
+                    and len(self.files) >= self.max_files):
+                # 【2026-09-10】席が無ければ作らない（押し出さない）。
+                continue
             ev = self._make_room(protect_id, t)
             if ev is not None:
                 evicted.append(ev)
             nf = ObjectFile(self._next_id, d["pos"], d["appearance"], d["area"],
-                            self.process_noise, self.meas_noise, t=t, emb=d.get("emb"))
+                            self.process_noise, self.meas_noise, t=t, emb=d.get("emb"),
+                            budget_look_back=(self.vanish_budget["look_back"]
+                                              if self.vanish_budget else 4))
             self._next_id += 1
             self.files.append(nf)
             created.append(nf.id)
             if j in individuated_dets:
                 individuated.append(nf.id)
 
-        lost = [f.id for f in self.files if f.misses > self.max_missed]
+        if self.vanish_budget is not None:
+            # 【2026-09-10】残量が尽きたカードが抜ける。別の閾値は置かない
+            #   （0 が底。ユーザー判断 2026-09-10「A でとりあえず実装して」）。
+            lost = [f.id for f in self.files if f.budget <= 0.0]
+        else:
+            lost = [f.id for f in self.files if f.misses > self.max_missed]
         if lost:
             lost_set = set(lost)
             if self.revive_window_s is not None and t is not None:

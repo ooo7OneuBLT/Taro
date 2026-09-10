@@ -245,6 +245,12 @@ class ObjectFiles(Plugin):
         if self.max_missed is not None:
             # 既定Noneのときは渡さない＝ObjectFileSystemの既定値(20)のまま（既定不変）。
             ofs_kwargs["max_missed"] = self.max_missed
+        # 【2026-09-10・仕様_消え方で持ち時間を決める】vanish_budget（辞書 or None）。
+        #   Noneなら一切渡さない＝従来どおり max_missed で消す（既定不変）。
+        #   例：{"abrupt_frames": 5, "occluded_frames": 50, "look_back": 4}
+        self.vanish_budget = self.config.get("vanish_budget")
+        if self.vanish_budget is not None:
+            ofs_kwargs["vanish_budget"] = self.vanish_budget
         self.ofs = self._ObjectFileSystem(**ofs_kwargs)
         # 他のプラグイン・今後の脳側の配線から読めるように置く（ctx は属性を自由に足せる）
         ctx.object_files = self.ofs
@@ -528,6 +534,14 @@ class ObjectFiles(Plugin):
                 "ec_res_noshift": onset_extra.get("ec_res_noshift", ""),
                 "ec_moving": onset_extra.get("ec_moving", ""),
                 "cohesion": cohesion,
+                # 【2026-09-10・消え方で持ち時間を決める】explained＝消えたことの
+                #   説明のつき具合（0〜1、見失った瞬間に決まる）、budget＝残量。
+                #   vanish_budget 無効時は 0.0/1.0 のまま動かないので空文字にする。
+                "explained": (round(float(f_for_row.explained), 3)
+                              if (self.vanish_budget is not None and f_for_row is not None
+                                  and getattr(f_for_row, "misses", 0) > 0) else ""),
+                "budget": (round(float(f_for_row.budget), 3)
+                           if (self.vanish_budget is not None and f_for_row is not None) else ""),
                 # 【2026-09-09・追記1「直し」3】当て付きの点の数／当てに合う
                 #   大きさが無くて捨てた点の数。
                 "n_points_expect": onset_extra.get("n_points_expect", ""),
@@ -1056,7 +1070,9 @@ class ObjectFiles(Plugin):
                            "ec_res_noshift", "ec_moving", "cohesion",
                            # 【2026-09-09・追記1「直し」3】当て付きの点の数／
                            #   当てに合う大きさが無くて捨てた点の数。
-                           "n_points_expect", "n_reject_scale"])
+                           "n_points_expect", "n_reject_scale",
+                           # 【2026-09-10・消え方で持ち時間を決める】
+                           "explained", "budget"])
                 for r in self.rows:
                     w.writerow([r["step"], r["sim_time"], r["n_dets"], r["n_files"],
                                r["file_id"], r["x"], r["y"], r["area"], r["event"],
@@ -1065,7 +1081,7 @@ class ObjectFiles(Plugin):
                                r.get("n_unexplained", ""),
                                r.get("ec_res_shift", ""), r.get("ec_res_noshift", ""),
                                r.get("ec_moving", ""), r.get("cohesion", ""),
-                               r.get("n_points_expect", ""), r.get("n_reject_scale", "")])
+                               r.get("n_points_expect", ""), r.get("n_reject_scale", ""), r.get("explained", ""), r.get("budget", "")])
         if self.attend_rows and self.attend_out:
             os.makedirs(os.path.dirname(self.attend_out) or ".", exist_ok=True)
             with open(self.attend_out, "w", newline="", encoding="utf-8") as fp:
