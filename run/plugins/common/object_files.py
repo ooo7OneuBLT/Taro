@@ -98,6 +98,29 @@ def _abs_path(p):
 class ObjectFiles(Plugin):
     name = "object_files"
 
+    # 物体ファイル.csv の列。**ここだけに書く**（ヘッダーと行の両方をここから作る）。
+    #   列を足すときは、この表に足して `self.rows` の辞書に同じ名前で入れるだけ。
+    #   2026-09-10：以前はヘッダーと行を別々に並べていたため、列を足したときに
+    #   ヘッダーだけ増えて以降の値が1列ずつずれる事故が起きた。
+    _EVENT_COLUMNS = [
+        "step", "sim_time", "n_dets", "n_files",
+        "file_id", "x", "y", "area", "event",
+        "misses", "since_seen", "app_cos_created", "mode",
+        # 【2026-09-09・仕様_見る側_道を1本にする 後半1節】確認専用の診断列
+        #   (conf_iou等)・app_conf は廃止（中5）。代わりに n_points を足した。
+        "n_points", "n_blobs", "n_unexplained",
+        # 遠心性コピー：残差（ずらした／ずらさない）と、目が動いていたか。
+        "ec_res_shift", "ec_res_noshift", "ec_moving",
+        # 【2026-09-10】遠心性コピーの予告(used)と、画像から測った実測(meas)。
+        "ec_dx_used", "ec_dy_used", "ec_dx_meas", "ec_dy_meas",
+        "cohesion",
+        # 【2026-09-09・追記1「直し」3】当て付きの点の数／当てに合う大きさが
+        #   無くて捨てた点の数。
+        "n_points_expect", "n_reject_scale",
+        # 【2026-09-10・消え方で持ち時間を決める】
+        "explained", "budget",
+    ]
+
     def setup(self, ctx):
         self.interval_s = float(self.config.get("interval_s", 1.0))
         events_out = self.config.get("events_out")
@@ -1198,32 +1221,14 @@ class ObjectFiles(Plugin):
         if self.rows and self.events_out:
             os.makedirs(os.path.dirname(self.events_out) or ".", exist_ok=True)
             with open(self.events_out, "w", newline="", encoding="utf-8") as fp:
+                # 【2026-09-10】列名は**1か所だけ**に書く。以前はヘッダーと行で
+                #   別々に並べていたため、列を足したときにヘッダーだけ増えて
+                #   行がずれる事故が起きた（F2-112pre で発覚）。同じ表から
+                #   両方を作れば、書き忘れが起こりえない。
                 w = csv.writer(fp)
-                w.writerow(["step", "sim_time", "n_dets", "n_files",
-                           "file_id", "x", "y", "area", "event",
-                           "misses", "since_seen", "app_cos_created", "mode",
-                           # 【2026-09-09・仕様_見る側_道を1本にする 後半1節】
-                           #   確認専用の診断列(conf_iou等)・app_confは廃止（中5）。
-                           #   代わりにn_points（段3で集めた点の数）を足す。
-                           "n_points", "n_blobs", "n_unexplained", "ec_res_shift",
-                           "ec_res_noshift", "ec_moving",
-                           # 【2026-09-10】遠心性コピーの予告と実測（測定器の直し）。
-                           "ec_dx_used", "ec_dy_used", "ec_dx_meas", "ec_dy_meas",
-                           "cohesion",
-                           # 【2026-09-09・追記1「直し」3】当て付きの点の数／
-                           #   当てに合う大きさが無くて捨てた点の数。
-                           "n_points_expect", "n_reject_scale",
-                           # 【2026-09-10・消え方で持ち時間を決める】
-                           "explained", "budget"])
+                w.writerow(self._EVENT_COLUMNS)
                 for r in self.rows:
-                    w.writerow([r["step"], r["sim_time"], r["n_dets"], r["n_files"],
-                               r["file_id"], r["x"], r["y"], r["area"], r["event"],
-                               r["misses"], r["since_seen"], r["app_cos_created"],
-                               r["mode"], r.get("n_points", ""), r.get("n_blobs", ""),
-                               r.get("n_unexplained", ""),
-                               r.get("ec_res_shift", ""), r.get("ec_res_noshift", ""),
-                               r.get("ec_moving", ""), r.get("cohesion", ""),
-                               r.get("n_points_expect", ""), r.get("n_reject_scale", ""), r.get("explained", ""), r.get("budget", "")])
+                    w.writerow([r.get(k, "") for k in self._EVENT_COLUMNS])
         if self.attend_rows and self.attend_out:
             os.makedirs(os.path.dirname(self.attend_out) or ".", exist_ok=True)
             with open(self.attend_out, "w", newline="", encoding="utf-8") as fp:
