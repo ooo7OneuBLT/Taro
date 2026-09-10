@@ -113,6 +113,9 @@ class ObjectFiles(Plugin):
         "ec_res_shift", "ec_res_noshift", "ec_moving",
         # 【2026-09-10】遠心性コピーの予告(used)と、画像から測った実測(meas)。
         "ec_dx_used", "ec_dy_used", "ec_dx_meas", "ec_dy_meas",
+        # 【2026-09-10】眼球の角度そのもの。予告が0のとき「目が動いていない」のか
+        #   「動いているのに予告が出ていない」のかを切り分けるため。
+        "ec_eye_h", "ec_eye_v",
         "cohesion",
         # 【2026-09-09・追記1「直し」3】当て付きの点の数／当てに合う大きさが
         #   無くて捨てた点の数。
@@ -390,6 +393,17 @@ class ObjectFiles(Plugin):
                 print("[efference] WARNING _orienting が読めない。全て0/Falseとして続行")
                 self._warned_no_orienting = True
             ctx.efference = self._ec.update(orienting, float(ctx.data.time))
+            # 【2026-09-10】配線が届いているかを走行の頭で1回だけ実測して出す
+            #   （設定が届かず静かに既定値で走る事故が通算5件あったため）。
+            if orienting is not None and not getattr(self, "_ec_reported", False):
+                self._ec_reported = True
+                print("[efference] 配線の確認: data=%s eye_qadr=%s neck=%s "
+                      "version_h=%.4f eye_v=%.4f nu=%d"
+                      % (orienting.data is not None, dict(orienting.eye_qadr),
+                         list(orienting.neck_idx.keys()),
+                         orienting._version_h_deg(),
+                         orienting._angle_deg(orienting.eye_qadr["v"]),
+                         orienting.n_actuator), flush=True)
 
         if self.attend:
             # 【M3】親の発話は検出コマ(interval_s)より細かい頻度で来るので、
@@ -584,6 +598,8 @@ class ObjectFiles(Plugin):
                 "ec_dy_used": onset_extra.get("ec_dy_used", ""),
                 "ec_dx_meas": onset_extra.get("ec_dx_meas", ""),
                 "ec_dy_meas": onset_extra.get("ec_dy_meas", ""),
+                "ec_eye_h": onset_extra.get("ec_eye_h", ""),
+                "ec_eye_v": onset_extra.get("ec_eye_v", ""),
                 "cohesion": cohesion,
                 # 【2026-09-10・消え方で持ち時間を決める】explained＝消えたことの
                 #   説明のつき具合（0〜1、見失った瞬間に決まる）、budget＝残量。
@@ -679,6 +695,8 @@ class ObjectFiles(Plugin):
         onset_extra["ec_dy_used"] = round(float(shift_actual[1]), 2)
         onset_extra["ec_dx_meas"] = round(float(_sm[0]), 2)
         onset_extra["ec_dy_meas"] = round(float(_sm[1]), 2)
+        onset_extra["ec_eye_h"] = round(float(eff.get("eye_h", 0.0)), 3)
+        onset_extra["ec_eye_v"] = round(float(eff.get("eye_v", 0.0)), 3)
 
         # ---- 1b. 【2026-09-10・見る側1〜2段目】目立ちの地図 → 場所の優先度地図。
         #      attention=None（既定）なら1行も通らない。
