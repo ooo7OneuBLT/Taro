@@ -79,6 +79,33 @@ def _normalize(m):
     return m * ((1.0 - m_bar) ** 2)
 
 
+def _dog_competition(m, iters=10, sig_ex_frac=0.02, sig_inh_frac=0.25,
+                     c_ex=0.5, c_inh=1.5, c_bias=0.02):
+    """反復競合による正規化［原文：Itti & Koch 2000 の改良版 N(・)］。
+
+    原文は「もっとも単純な方式（固定範囲に正規化して全部足すだけ）は、複雑な自然
+    画像で性能が非常に悪い」と明記し、代わりにこの式を提案している：
+        M ← [M + M*DoG − Cinh]₀ を10回
+        DoG = c_ex・exp(-r²/2σex²) − c_inh・exp(-r²/2σinh²)
+        σex＝画像幅の2%、σinh＝画像幅の25%、c_ex=0.5、c_inh=1.5、Cinh=0.02
+    強い山が1つなら伸び、似た山が多いと互いに抑制し合って沈む。
+    """
+    w = m.shape[1]
+    sx, si = max(sig_ex_frac * w, 0.5), max(sig_inh_frac * w, 1.0)
+    mx = float(m.max())
+    if mx <= 1e-12:
+        return m
+    m = m / mx
+    for _ in range(int(iters)):
+        conv = c_ex * gaussian_filter(m, sx) - c_inh * gaussian_filter(m, si)
+        m = np.clip(m + conv - c_bias, 0.0, None)
+        mx = float(m.max())
+        if mx <= 1e-12:
+            break
+        m = m / mx
+    return m
+
+
 class SalienceMap:
     """下からの目立ちを1枚にまとめる。
 
@@ -92,13 +119,14 @@ class SalienceMap:
     """
 
     def __init__(self, cell=28, levels=7, cs_pairs=None,
-                 weights=(1.0, 1.0, 1.0, 1.0), blur_cell=0.8):
+                 weights=(1.0, 1.0, 1.0, 1.0), blur_cell=0.8, dog_iters=10):
         self.cell = int(cell)
         self.levels = int(levels)
         self.cs_pairs = tuple(cs_pairs) if cs_pairs else (
             (2, 5), (2, 6), (3, 6), (3, 7), (4, 7), (4, 8))
         self.weights = tuple(float(w) for w in weights)
         self.blur_cell = float(blur_cell)
+        self.dog_iters = int(dog_iters)
         self._prev_gray = None
         # ピラミッドは cs_pairs が指す最大の段まで必要
         self._need = max(max(c, s) for c, s in self.cs_pairs) + 1
@@ -191,9 +219,15 @@ class SalienceMap:
             "向き": self._channel(ori),
             "動き": self._channel(motion),
         }
-        cells = chans          # _channel が升目まで落として返す
+        # 【原文：Itti & Koch 2000】足す前に反復競合をかける（単純な正規化＋
+        #   足し算は性能が非常に悪い、と原文が明記）。dog_iters=0 で従来の
+        #   単純な正規化に戻せる。
+        if self.dog_iters > 0:
+            cells = {k: _dog_competition(v, self.dog_iters) for k, v in chans.items()}
+        else:
+            cells = {k: _normalize(v) for k, v in chans.items()}
         w = dict(zip(("明るさ", "色", "向き", "動き"), self.weights))
-        total = sum(w[k] * _normalize(v) for k, v in cells.items())
+        total = sum(w[k] * v for k, v in cells.items())
         if self.blur_cell > 0:
             total = gaussian_filter(total, sigma=self.blur_cell)
         mx = float(total.max())
