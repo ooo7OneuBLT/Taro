@@ -653,7 +653,8 @@ class ToySupineEnv(SupineMimoEnv):
                  present_slots=None,
                  toy_appear_delay=None, toy_approach_sec=None, toy_approach_from=None,
                  parent_intervene=None, parent_wait_sec=None, parent_lost_deg=None,
-                 plain=None, static_tex=None, orient_v=None, orienting_hold=None,
+                 plain=None, static_tex=None, backdrop=None,
+                 orient_v=None, orienting_hold=None,
                  orienting_static=None, orienting_ior=None, orienting_habituation=None,
                  # 【2026-08-18新設・F1-3】親のfollow-in labeling。既定None→
                  #   ParentLabeling(enabled=False)相当になり1ビットも挙動が変わらない。
@@ -730,6 +731,11 @@ class ToySupineEnv(SupineMimoEnv):
         if static_tex is None:
             static_tex = os.environ.get("E_STATIC_TEX", "0") == "1"
         self._static_tex = bool(static_tex)
+        # 【2026-09-10】背景の壁。None／{"enabled": False} なら1枚も置かない＝既定不変。
+        #   目的：太郎の視線の先に模様のある面を置き、①人が動画を見て何が起きているか
+        #   分かるようにする ②画像から「視界がどれだけ流れたか」を測れるようにする
+        #   （のっぺりした背景だと横方向のずれが測れない。2026-09-10 実測）。
+        self._backdrop = dict(backdrop) if backdrop else None
         # 身体の補正。**必ずON/OFFできるようにする**＝E1で「dampingが創発したのか、
         # 身体を弱めただけか」を切り分けるアブレーションに使う（これが無いと結果を解釈できない）。
         #   newborn_neck  : 首がすわっていない（head lag）の再現。注意恣意的（e_infant_neck.py）
@@ -1267,6 +1273,74 @@ class ToySupineEnv(SupineMimoEnv):
         ceil.contype = 0     # 物理的な衝突はさせない（見えるだけ）＝太郎が触れても動かない・当たらない
         ceil.conaffinity = 0
 
+    def _add_backdrop(self, spec):
+        """太郎のまわりに、模様のある壁を4枚立てる（部屋の内側）。
+
+        【なぜ・2026-09-10】ユーザー指摘「シーンに背景追加したほうがいい。僕が見ても
+        わからない」。加えて実測上の理由が2つある。
+          ① 動画を人が見ても、太郎が今どちらを向いているのか分からなかった。
+             背景が空のグラデーションだけで、目印が無いため。
+          ② 画像から「視界がどれだけ流れたか」を測るとき、のっぺりした面では
+             **横方向のずれが原理的に測れない**（水平の境界線は横にずれても
+             見た目が変わらない）。実測：遠心性コピーの予告と実測の相関が
+             縦 0.62 に対し横 0.30 どまりだった（F2-112pre）。
+
+        【なぜ1枚でなく4枚か】太郎の向きは走行中に変わる。1枚だと、向きを計算して
+        置き直す仕組みが要り、そこが新しいバグの置き場になる。4枚なら向きの計算が
+        要らず、どちらを向いても背景がある。
+
+        【模様の濃さについて】市松は目立ちの地図にとって非常に強い刺激なので、
+        濃くすると注意がおもちゃでなく壁へ吸い寄せられる。既定は**淡い**
+        （rgb1/rgb2 の差を小さく）にして、シーン側で濃くできるようにする。
+        """
+        b = self._backdrop or {}
+        dist = float(b.get("dist", 1.2))          # 太郎の中心から壁までの距離[m]
+        height = float(b.get("height", 2.0))      # 壁の高さ[m]
+        z0 = float(b.get("z0", -0.2))             # 壁の下端の高さ[m]
+        repeat = b.get("repeat", [6, 5])          # 面内で模様を何回繰り返すか
+        rgb1 = list(b.get("rgb1", [0.52, 0.56, 0.64]))
+        rgb2 = list(b.get("rgb2", [0.44, 0.48, 0.58]))
+        tex = spec.add_texture()
+        tex.name = "f_backdrop_tex"
+        # 【2026-09-10・実測でここに落ち着いた】
+        #   ・箱＋2Dテクスチャ → 面内の片方向にしか繰り返されず**縦縞**になる
+        #   ・箱＋CUBEテクスチャ → 市松にはなるが texrepeat が効かず、1面に
+        #     2×2マスしか出せない（マスが視界の半分ぶんの大きさになる）
+        #   ・**平面（plane）＋2Dテクスチャ＋texuniform** → 床と同じ作り。
+        #     texrepeat が「1メートルあたり何回」として効き、細かさを選べる。
+        tex.type = mujoco.mjtTexture.mjTEXTURE_2D
+        tex.builtin = mujoco.mjtBuiltin.mjBUILTIN_CHECKER
+        tex.width = 128
+        tex.height = 128
+        tex.rgb1 = rgb1
+        tex.rgb2 = rgb2
+        mat = spec.add_material()
+        mat.name = "f_backdrop"
+        mat.textures[mujoco.mjtTextureRole.mjTEXROLE_RGB] = "f_backdrop_tex"
+        mat.texuniform = True
+        mat.texrepeat = [float(repeat[0]), float(repeat[1])]
+        half_w = dist * 1.6                        # 視野からはみ出す幅にする
+        half_h = height / 2.0
+        cz = z0 + half_h
+        # 平面の法線は既定で +z。90度回してそれぞれ内側（太郎の側）へ向ける。
+        r2 = 0.70710678
+        walls = [
+            ("f_backdrop_nx", [-dist, 0.0, cz], [r2, 0.0, r2, 0.0]),    # 法線 +x
+            ("f_backdrop_px", [+dist, 0.0, cz], [r2, 0.0, -r2, 0.0]),   # 法線 -x
+            ("f_backdrop_ny", [0.0, -dist, cz], [r2, -r2, 0.0, 0.0]),   # 法線 +y
+            ("f_backdrop_py", [0.0, +dist, cz], [r2, r2, 0.0, 0.0]),    # 法線 -y
+        ]
+        for name, pos, quat in walls:
+            g = spec.worldbody.add_geom()
+            g.name = name
+            g.type = mujoco.mjtGeom.mjGEOM_PLANE
+            g.size = [half_w, half_h, 0.1]
+            g.pos = pos
+            g.quat = quat
+            g.material = "f_backdrop"
+            g.contype = 0        # 見えるだけ。太郎にも物にも当たらない
+            g.conaffinity = 0
+
     def _recline_lift(self):
         """リクライニング時に体（と背もたれ）を持ち上げる量[m]。
 
@@ -1426,6 +1500,8 @@ class ToySupineEnv(SupineMimoEnv):
             self._make_visually_plain(spec)
         if self._static_tex:
             self._add_static_texture(spec)
+        if self._backdrop and self._backdrop.get("enabled", True):
+            self._add_backdrop(spec)
         if not self._fence:
             return
         a, b = self._fence_half_x, self._fence_half_y

@@ -200,6 +200,11 @@ def default_scene(name="無題"):
             #   （合格基準0.03/0.05）。本シーンはk=10.0を採用（さらに余裕をとった値）。
             "floor_emission": 0.0,
             "static_tex": False,         # 背景のテクスチャを固定するか
+            # 【2026-09-10新設】背景の壁。None＝置かない（既定・1ビット不変）。
+            #   {"enabled": true, "dist": 1.2, "height": 2.0, "repeat": [6,5],
+            #    "rgb1": [...], "rgb2": [...]} で太郎のまわりに模様の壁を4枚立てる。
+            #   実体は e_toy_env.ToySupineEnv._add_backdrop。
+            "backdrop": None,
             # 【2026-08-21新設・F1-4h】影スイッチ。既定False＝従来どおり
             #   全光源の影が有効（1ビットも変わらない）。Trueで全光源の
             #   castshadowを切る。根拠：素材md（scratchpad/テスト場面素材.md）
@@ -723,6 +728,7 @@ def build(scene, orient=None, vor=True, seed=0, verbose=False, actuation_model=N
             word_test=(dict(w["word_test"]) if w["word_test"] else None),
             plain=bool(w["plain"]),
             static_tex=bool(w["static_tex"]),
+            backdrop=w.get("backdrop"),
             orient_v=str(b["orienting_version"]),
             orienting_hold=bool(b.get("orienting_hold", False)),
             orienting_static=bool(b.get("orienting_static", False)),

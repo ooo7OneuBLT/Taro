@@ -116,6 +116,8 @@ class ObjectFiles(Plugin):
         # 【2026-09-10】眼球の角度そのもの。予告が0のとき「目が動いていない」のか
         #   「動いているのに予告が出ていない」のかを切り分けるため。
         "ec_eye_h", "ec_eye_v",
+        # 【2026-09-10】注意が選んだ場所（画素）。目がどこを狙わされているかを見る。
+        "attn_x", "attn_y",
         "cohesion",
         # 【2026-09-09・追記1「直し」3】当て付きの点の数／当てに合う大きさが
         #   無くて捨てた点の数。
@@ -600,6 +602,8 @@ class ObjectFiles(Plugin):
                 "ec_dy_meas": onset_extra.get("ec_dy_meas", ""),
                 "ec_eye_h": onset_extra.get("ec_eye_h", ""),
                 "ec_eye_v": onset_extra.get("ec_eye_v", ""),
+                "attn_x": onset_extra.get("attn_x", ""),
+                "attn_y": onset_extra.get("attn_y", ""),
                 "cohesion": cohesion,
                 # 【2026-09-10・消え方で持ち時間を決める】explained＝消えたことの
                 #   説明のつき具合（0〜1、見失った瞬間に決まる）、budget＝残量。
