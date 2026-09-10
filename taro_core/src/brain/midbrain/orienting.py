@@ -671,6 +671,15 @@ class OrientingReflexV2:
         self._t = 0.0                # apply() が刻む内部時刻[秒]
         self._last_saccade_t = -1e9  # 前回サッケードを撃った時刻
         self._sacc_remaining = 0.0   # 今のサッケードの残り時間[秒]
+        # 【2026-09-10・4段目】意思のサッケード（前頭眼野にあたる経路）。
+        #   set_voluntary_target() が呼ばれるまで None のまま＝既定不変。
+        #   撃てる間隔は人間の注視 200〜330ms に合わせて 0.25 秒［原文の範囲］。
+        #   反射の 0.90 秒は「下からの目立ちで撃つ」ための値で、意思の側には掛けない。
+        self._vol_target = None
+        self._vol_t = -1e9
+        self.voluntary_latency = 0.25
+        self.vol_fired = 0           # 記録用：意思で撃った回数
+        self.reflex_fired = 0        # 記録用：反射で撃った回数
         self._sacc_end_t = -1e9      # サッケードが終わった時刻（抑制の起点）
         self._sacc_h = 0.0           # 今のサッケードの方向（撃った瞬間に固定）
         self._sacc_v = 0.0
@@ -784,6 +793,27 @@ class OrientingReflexV2:
     # ------------------------------------------------------------
     # 公開インターフェース
     # ------------------------------------------------------------
+    def set_voluntary_target(self, h_dir, v_dir, t=None, latency_s=None):
+        """【2026-09-10・見る側4段目】外（頭頂の優先度地図）から「ここを見ろ」を渡す。
+
+        人間では、目をどこへ向けるかを決める系統が2つある。上丘の反射（下からの
+        目立ち）と、前頭眼野の意思（優先度地図を見て決める）。どちらも同じ筋へ
+        つながる（`F/docs/二語文/文献調査/2026-09-10_注意と視線の回路_確定版_人間側.md`）。
+        太郎には後者が丸ごと無かったので、ここに口を1つ開ける。
+
+        Args:
+            h_dir, v_dir: 視野の方向（[-1,1]、右・上が正。反射内部の h_dir/v_dir と
+                同じ流儀）。
+            t: 渡した時刻[秒]。None なら反射の内部時計を使う。
+            latency_s: この意思の目標を有効とみなす時間[秒]。None なら既定。
+        意思の目標は「1回撃ったら消える」。撃つまでの間は保持される。
+        一度も渡さなければ、この機構はどこからも参照されない＝既定不変。
+        """
+        self._vol_target = (float(h_dir), float(v_dir))
+        self._vol_t = self._t if t is None else float(t)
+        if latency_s is not None:
+            self.voluntary_latency = float(latency_s)
+
     def set_recognition(self, sim):
         """F1-4b：語から読み出した「思い浮かべているものとの一致度」を渡す。
 
@@ -966,14 +996,25 @@ class OrientingReflexV2:
                     self._chain_count += 1
                     fire = True
             else:
+                # 【2026-09-10・4段目】意思の目標が来ていれば、そちらを先に撃つ。
+                #   下からの目立ちの強さ（strength）や向きの大きさ（far_enough）で
+                #   門を掛けない。決めたのは上の段（優先度地図）だから。
+                if (self._vol_target is not None
+                        and (self._t - self._last_saccade_t) >= self.voluntary_latency):
+                    self._sacc_h, self._sacc_v = self._vol_target
+                    self._vol_target = None
+                    self.vol_fired += 1
+                    fire = True    # _sacc_remaining と _last_saccade_t は
+                                   # 下の共通の経路が設定する
                 ready = (self._t - self._last_saccade_t) >= SACCADE_LATENCY
                 # 中心に十分近ければ撃たない（固視）。自己運動由来の向きは小さいので、
                 #   ここで落ちる。対象があるときは向きが大きく偏るので通る。
                 far_enough = (abs(self.h_dir) >= SACCADE_MIN_DIR
                               or abs(self.v_dir) >= SACCADE_MIN_DIR)
-                if ready and self.strength >= SACCADE_MIN_STRENGTH and far_enough:
+                if (not fire) and ready and self.strength >= SACCADE_MIN_STRENGTH and far_enough:
                     self._sacc_h = self.h_dir
                     self._sacc_v = self.v_dir
+                    self.reflex_fired += 1
                     fire = True
                 elif self.hold and self._should_hold():
                     # ステップ4b（保持）：サッケードは撃たないが、既に定めた目標

@@ -156,6 +156,9 @@ class ObjectFiles(Plugin):
         # 【2026-09-10・見る側3段目】場所の地図で注意を決め、注意が向いた場所に
         #   だけ記録を作る。attention=None（既定）なら1行も通らない＝既定不変。
         self.attention_cfg = self.config.get("attention")
+        # 【2026-09-10・4段目】注意が移った先へ目も向けるか。既定False＝既定不変。
+        self.gaze_from_attention = bool(self.config.get("gaze_from_attention", False))
+        self._gaze_cmd_sent = 0
         self._sal = None
         self._spri = None
         self.efference_copy_cfg = self.config.get("efference_copy")
@@ -652,6 +655,20 @@ class ObjectFiles(Plugin):
             onset_extra["attn_x"] = round(attn_res["winner_px"][0], 1)
             onset_extra["attn_y"] = round(attn_res["winner_px"][1], 1)
             onset_extra["attn_switched"] = attn_res["switched"]
+            # 【2026-09-10・見る側4段目】意思の視線。注意が移った瞬間だけ、
+            #   その場所を反射の「意思の目標」として渡す。反射は残したまま
+            #   （人間も上丘の反射は無くならない）、2系統が同じ筋へつながる形。
+            #   gaze=False（既定）なら1行も通らない。
+            if self.gaze_from_attention and attn_res["switched"]:
+                _u = getattr(getattr(ctx, "env", None), "unwrapped", None)
+                _or = getattr(_u, "_orienting", None) if _u is not None else None
+                if _or is not None and hasattr(_or, "set_voluntary_target"):
+                    wx, wy = attn_res["winner_px"]
+                    # 視野の方向（[-1,1]、右・上が正）へ。画像の y は下向きなので反転。
+                    _or.set_voluntary_target((wx - 112.0) / 112.0,
+                                              (112.0 - wy) / 112.0)
+                    self._gaze_cmd_sent += 1
+                    onset_extra["gaze_cmd"] = 1
 
         # ---- 2. カードを予測位置へ進める（★shiftを必ず渡す・重大1の直し） -------
         self.ofs.predict_only(t, shift=shift_pred)
@@ -1131,6 +1148,14 @@ class ObjectFiles(Plugin):
             "object_files_detect_ms": round(
                 sum(self._seg_detect_ms) / len(self._seg_detect_ms), 2),
         }
+        # 【2026-09-10・4段目】意思で撃った回数と反射で撃った回数（記録用）。
+        if self.gaze_from_attention:
+            _u = getattr(getattr(ctx, "env", None), "unwrapped", None)
+            _or = getattr(_u, "_orienting", None) if _u is not None else None
+            if _or is not None:
+                out["gaze_vol_fired"] = int(getattr(_or, "vol_fired", 0))
+                out["gaze_reflex_fired"] = int(getattr(_or, "reflex_fired", 0))
+                out["gaze_cmd_sent"] = int(self._gaze_cmd_sent)
         self._seg_n_files, self._seg_n_dets, self._seg_detect_ms = [], [], []
         return out
 
