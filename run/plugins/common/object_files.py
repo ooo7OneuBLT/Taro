@@ -556,6 +556,11 @@ class ObjectFiles(Plugin):
                 "ec_res_shift": onset_extra.get("ec_res_shift", ""),
                 "ec_res_noshift": onset_extra.get("ec_res_noshift", ""),
                 "ec_moving": onset_extra.get("ec_moving", ""),
+                # 【2026-09-10】遠心性コピーの予告（used）と実測（meas）。
+                "ec_dx_used": onset_extra.get("ec_dx_used", ""),
+                "ec_dy_used": onset_extra.get("ec_dy_used", ""),
+                "ec_dx_meas": onset_extra.get("ec_dx_meas", ""),
+                "ec_dy_meas": onset_extra.get("ec_dy_meas", ""),
                 "cohesion": cohesion,
                 # 【2026-09-10・消え方で持ち時間を決める】explained＝消えたことの
                 #   説明のつき具合（0〜1、見失った瞬間に決まる）、budget＝残量。
@@ -638,11 +643,19 @@ class ObjectFiles(Plugin):
             pre_res = self._pre.update(gray, shift_actual, moving)
         else:
             pre_res = {"blobs": [], "motion_mean": 0.0, "motion_mean_noshift": 0.0,
-                       "static_sal": None, "valid": False}
+                       "shift_meas": (0.0, 0.0), "static_sal": None, "valid": False}
         onset_extra["n_blobs"] = len(pre_res["blobs"])
         onset_extra["ec_res_shift"] = round(pre_res["motion_mean"], 4)
         onset_extra["ec_res_noshift"] = round(pre_res["motion_mean_noshift"], 4)
         onset_extra["ec_moving"] = moving
+        # 【2026-09-10・測定器の直し】遠心性コピーの予告と、画像から測った実際の
+        #   ずれを、そのまま並べて残す。今までは残差（ec_res_*）だけで、しかも
+        #   目が動いたコマでは常に 0 だったため、当たっているか判断できなかった。
+        _sm = pre_res.get("shift_meas", (0.0, 0.0))
+        onset_extra["ec_dx_used"] = round(float(shift_actual[0]), 2)
+        onset_extra["ec_dy_used"] = round(float(shift_actual[1]), 2)
+        onset_extra["ec_dx_meas"] = round(float(_sm[0]), 2)
+        onset_extra["ec_dy_meas"] = round(float(_sm[1]), 2)
 
         # ---- 1b. 【2026-09-10・見る側1〜2段目】目立ちの地図 → 場所の優先度地図。
         #      attention=None（既定）なら1行も通らない。
@@ -1193,7 +1206,10 @@ class ObjectFiles(Plugin):
                            #   確認専用の診断列(conf_iou等)・app_confは廃止（中5）。
                            #   代わりにn_points（段3で集めた点の数）を足す。
                            "n_points", "n_blobs", "n_unexplained", "ec_res_shift",
-                           "ec_res_noshift", "ec_moving", "cohesion",
+                           "ec_res_noshift", "ec_moving",
+                           # 【2026-09-10】遠心性コピーの予告と実測（測定器の直し）。
+                           "ec_dx_used", "ec_dy_used", "ec_dx_meas", "ec_dy_meas",
+                           "cohesion",
                            # 【2026-09-09・追記1「直し」3】当て付きの点の数／
                            #   当てに合う大きさが無くて捨てた点の数。
                            "n_points_expect", "n_reject_scale",

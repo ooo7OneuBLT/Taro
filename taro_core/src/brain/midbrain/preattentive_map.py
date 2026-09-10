@@ -23,7 +23,18 @@ class PreattentiveMap:
         self._prev = None   # 前コマのグレースケール画像 (H, W) float32
 
     def update(self, img224_gray_f32, shift_actual, moving):
-        """毎検出コマ呼ぶ。`moving`のコマは出力を空にする（前コマの保持だけ更新）。"""
+        """毎検出コマ呼ぶ。`moving`のコマは塊の一覧を空にする（前コマの保持だけ更新）。
+
+        【2026-09-10・測定器の直し】以前は`moving`のコマで**何も計算せずに返して
+        いた**ため、遠心性コピーの効きを見る診断（`motion_mean` /
+        `motion_mean_noshift`）が、**目が動いたコマだけ常に 0.0** になっていた。
+        遠心性コピーが要るのはまさにそのコマだけなので、この診断は一度も
+        効いたことがなかった（F2-110pre/F2-111pre の実測で発覚。目が動いた
+        98コマすべてで両方 0.00）。
+        塊の一覧（blobs）と `valid` は従来どおり空・False のままなので、
+        **走行の挙動は1ビットも変わらない**（`motion_mean` 系は記録専用。
+        `run/plugins/common/object_files.py` の onset_extra だけが読む）。
+        """
         img = np.asarray(img224_gray_f32, dtype=np.float32)
         h, w = img.shape[:2]
         prev = self._prev
@@ -31,8 +42,9 @@ class PreattentiveMap:
 
         static_sal = self._static_saliency(img)
 
-        if prev is None or moving:
+        if prev is None:
             return {"blobs": [], "motion_mean": 0.0, "motion_mean_noshift": 0.0,
+                    "shift_meas": (0.0, 0.0),
                     "static_sal": static_sal, "valid": False}
 
         dx, dy = shift_actual
@@ -58,6 +70,18 @@ class PreattentiveMap:
 
         motion_mean_noshift = float(diff_noshift.mean())
         motion_mean = float(diff_shift[valid_mask].mean()) if valid_mask.any() else 0.0
+        # 【2026-09-10】画像そのものから測った「中身が実際にどれだけ動いたか」。
+        #   遠心性コピーが送ってきた shift_actual と突き合わせれば、
+        #   予告が当たっているかを直接見られる（残差の比較より曖昧さが無い）。
+        shift_meas = self._measure_shift(prev, img)
+
+        if moving:
+            # 目が動いている最中は塊の一覧を出さない（従来どおり）。
+            #   診断の値だけは返す（上の docstring 参照）。
+            return {"blobs": [], "motion_mean": motion_mean,
+                    "motion_mean_noshift": motion_mean_noshift,
+                    "shift_meas": shift_meas,
+                    "static_sal": static_sal, "valid": False}
 
         blob_mask = (diff_shift > self.diff_thresh) & valid_mask
         blob_mask = ndimage.binary_opening(blob_mask, structure=np.ones((3, 3)))
@@ -81,7 +105,33 @@ class PreattentiveMap:
 
         return {"blobs": blobs, "motion_mean": motion_mean,
                 "motion_mean_noshift": motion_mean_noshift,
+                "shift_meas": shift_meas,
                 "static_sal": static_sal, "valid": True}
+
+    @staticmethod
+    def _measure_shift(prev, cur):
+        """2コマの間に画像の中身が何画素動いたかを、位相相関で測る（測定専用）。
+
+        返す (dx, dy) の向きは `np.roll(prev, shift=(dy, dx))` と同じ流儀＝
+        `shift_actual` とそのまま比べられる（合成画像で符号と大きさを確認済み。
+        `F/logs/_机上/遠心性コピーの測定器_机上確認_2026-09-10.txt`）。
+        1画素刻み（副画素の補間はしない）。
+        """
+        h, w = prev.shape[:2]
+        win = np.outer(np.hanning(h), np.hanning(w)).astype(np.float32)
+        a = (prev - prev.mean()) * win
+        b = (cur - cur.mean()) * win
+        A = np.fft.rfft2(a)
+        B = np.fft.rfft2(b)
+        R = np.conj(A) * B
+        R /= (np.abs(R) + 1e-9)
+        r = np.fft.irfft2(R, s=(h, w))
+        iy, ix = np.unravel_index(int(np.argmax(r)), r.shape)
+        if ix > w // 2:
+            ix -= w
+        if iy > h // 2:
+            iy -= h
+        return float(ix), float(iy)
 
     def _static_saliency(self, img):
         """Laplacianの絶対値をcell×cellへ平均する（cv2は使わずnumpyだけで計算。
