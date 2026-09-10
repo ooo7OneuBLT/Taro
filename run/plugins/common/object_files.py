@@ -159,6 +159,7 @@ class ObjectFiles(Plugin):
         # 【2026-09-10・4段目】注意が移った先へ目も向けるか。既定False＝既定不変。
         self.gaze_from_attention = bool(self.config.get("gaze_from_attention", False))
         self._gaze_cmd_sent = 0
+        self._fire_probe = []
         self._sal = None
         self._spri = None
         self.efference_copy_cfg = self.config.get("efference_copy")
@@ -655,6 +656,18 @@ class ObjectFiles(Plugin):
             onset_extra["attn_x"] = round(attn_res["winner_px"][0], 1)
             onset_extra["attn_y"] = round(attn_res["winner_px"][1], 1)
             onset_extra["attn_switched"] = attn_res["switched"]
+            # 【2026-09-10・測定】撃った方向を、地図はどう評価していたか。
+            _u2 = getattr(getattr(ctx, "env", None), "unwrapped", None)
+            _or2 = getattr(_u2, "_orienting", None) if _u2 is not None else None
+            if _or2 is not None and getattr(_or2, "fire_log", None):
+                _sal = sal_res["salience"]; _ior = attn_res["ior"]
+                _cell = _sal.shape[0]; _step = 224.0 / _cell
+                for (_ft, _h, _v, _kind) in _or2.fire_log:
+                    _c = int(min(max((112.0 + _h * 112.0) / _step, 0), _cell - 1))
+                    _r = int(min(max((112.0 - _v * 112.0) / _step, 0), _cell - 1))
+                    self._fire_probe.append((_kind, float(_sal[_r, _c]),
+                                              float(_ior[_r, _c])))
+                _or2.fire_log = []
             # 【2026-09-10・見る側4段目】意思の視線。注意が移った瞬間だけ、
             #   その場所を反射の「意思の目標」として渡す。反射は残したまま
             #   （人間も上丘の反射は無くならない）、2系統が同じ筋へつながる形。
@@ -1156,6 +1169,12 @@ class ObjectFiles(Plugin):
                 out["gaze_vol_fired"] = int(getattr(_or, "vol_fired", 0))
                 out["gaze_reflex_fired"] = int(getattr(_or, "reflex_fired", 0))
                 out["gaze_cmd_sent"] = int(self._gaze_cmd_sent)
+                if self.events_out and self._fire_probe:
+                    import json as _json, os as _os
+                    _json.dump(self._fire_probe,
+                               open(_os.path.join(_os.path.dirname(self.events_out),
+                                                   "撃った方向の地図の値.json"),
+                                    "w", encoding="utf-8"))
         self._seg_n_files, self._seg_n_dets, self._seg_detect_ms = [], [], []
         return out
 

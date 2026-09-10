@@ -679,6 +679,8 @@ class OrientingReflexV2:
         self._vol_t = -1e9
         self.voluntary_latency = 0.25
         self.vol_fired = 0           # 記録用：意思で撃った回数
+        # 【2026-09-10・測定用】撃った履歴 (時刻, 方向h, 方向v, 種類)。読んだ側が消す。
+        self.fire_log = []
         self.reflex_fired = 0        # 記録用：反射で撃った回数
         self._sacc_end_t = -1e9      # サッケードが終わった時刻（抑制の起点）
         self._sacc_h = 0.0           # 今のサッケードの方向（撃った瞬間に固定）
@@ -981,6 +983,7 @@ class OrientingReflexV2:
 
         if self._sacc_remaining <= 0.0:
             fire = False
+            _vol_used = False
             # F1-4g：連射中は選挙結果(h_dir/v_dir)を使わず、_chain_goal から
             #   次の1発を撃つ。連射待ちの間は通常の発火判定（SACCADE_LATENCY待ち等）
             #   をスキップする（連射が状態機械を占有する）。既定OFF時は
@@ -1004,6 +1007,7 @@ class OrientingReflexV2:
                     self._sacc_h, self._sacc_v = self._vol_target
                     self._vol_target = None
                     self.vol_fired += 1
+                    _vol_used = True
                     fire = True    # _sacc_remaining と _last_saccade_t は
                                    # 下の共通の経路が設定する
                 ready = (self._t - self._last_saccade_t) >= SACCADE_LATENCY
@@ -1016,7 +1020,13 @@ class OrientingReflexV2:
                     self._sacc_v = self.v_dir
                     self.reflex_fired += 1
                     fire = True
-                elif self.hold and self._should_hold():
+                elif (not fire) and self.hold and self._should_hold():
+                    # 【2026-09-10・4段目のバグ修正】ここは elif が
+                    #   「反射で撃たなかったとき」に繋がっていたため、意思で
+                    #   撃つと決めた（fire=True）あとでも保持の経路に入り、
+                    #   共通の測定へ届かず**目が動かなかった**。
+                    #   実測：意思 236 回と数えたのに目の動きは増えず、
+                    #   撃った履歴に vol が 1 件も残らなかった（2026-09-10）。
                     # ステップ4b（保持）：サッケードは撃たないが、既に定めた目標
                     #   （self._tgt）へ向けた位置フィードバックだけは続ける。
                     #   本体のサッケード実行中ブロック（この if の外）とは独立の
@@ -1029,6 +1039,10 @@ class OrientingReflexV2:
             self._sacc_remaining = SACCADE_DURATION
             self._last_saccade_t = self._t
             self.n_saccades += 1
+            if len(self.fire_log) < 400:
+                self.fire_log.append((float(self._t), float(self._sacc_h),
+                                       float(self._sacc_v),
+                                       "vol" if _vol_used else "reflex"))
             # F1-4g：発火の直後（選挙発の初弾のみ。連射中の継続弾は _chain_goal が
             #   既に立っているのでここには入らない）、連射の目標を登録する。
             if USE_SACC_CHAIN and self._chain_goal is None:
