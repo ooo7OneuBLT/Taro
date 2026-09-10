@@ -301,6 +301,24 @@ class VergenceReflex:
         from spinal_cord.cpg import write_joint_command
         self._write = write_joint_command
 
+    def __deepcopy__(self, memo):
+        """複製しても `self.data`（シミュレーションへの繋がり）は複製しない。
+
+        理由は `taro_core/src/brain/midbrain/orienting.py` の同名メソッドと同じ。
+        この反射は今のところ `run/trainer.py` の控えの対象に入っていないが、
+        同じ形で data を握っているので、あらかじめ同じ守りを入れておく。
+        """
+        import copy as _copy
+        cls = self.__class__
+        new = cls.__new__(cls)
+        memo[id(self)] = new
+        for k, v in self.__dict__.items():
+            if k == "data":
+                new.data = v
+            else:
+                setattr(new, k, _copy.deepcopy(v, memo))
+        return new
+
     def reset(self):
         """前エピソードの状態を持ち越さない（e_orienting_v2.reset()と同じ流儀）。"""
         self._delay_buf = []

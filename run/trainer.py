@@ -2393,6 +2393,15 @@ class Trainer:
                 setattr(u, nm, v)
         for nm, v in snap.get("reflex", {}).items():
             setattr(u, nm, v)
+            # 【2026-09-10】控えから戻した反射が、シミュレーションから切り離されて
+            #   いないことを毎回確かめる。切れても例外も警告も出ないまま何日も
+            #   走り続けた事故があったため、文書の注意書きではなく門で止める
+            #   （反射側の __deepcopy__ が繋がりを守る。ここはその見張り）。
+            _dref = getattr(v, "data", None)
+            if _dref is not None and _dref is not u.data:
+                raise RuntimeError(
+                    f"{nm} が控えから戻したあとシミュレーションから切り離されている"
+                    "（deepcopy が data まで複製した）。反射側の __deepcopy__ を確認すること")
         for nm, v in snap.get("vis", {}).items():
             setattr(u, nm, v)          # 視覚のキャッシュと描画時刻
         if "vis_out" in snap and getattr(u, "vision", None) is not None:

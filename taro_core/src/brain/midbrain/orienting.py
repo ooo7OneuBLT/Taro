@@ -748,6 +748,36 @@ class OrientingReflexV2:
                           ((k, _qposadr_of(model, i)) for k, i in self.neck_idx.items())
                           if a is not None}
 
+    def __deepcopy__(self, memo):
+        """複製しても、シミュレーションへの繋がり（`self.data`）だけは複製しない。
+
+        【なぜ・2026-09-10】`run/trainer.py` は学習の途中で太郎に喋らせて測るとき、
+        測定が学習を汚さないよう反射を `copy.deepcopy` で控え、あとで戻している。
+        素直に複製すると **MuJoCo の状態（data）まで複製され**、戻したあとの反射は
+        「もう誰も更新しない偽物の状態」を握り続ける。切れても例外も警告も出ない。
+
+        実測（F2-112pre、2026-09-10）：眼球は実際に -4.15 度まで回っているのに、
+        反射は自分の目の角度を 0.0000 度と読んでいた。その結果、
+          ・遠心性コピーの予告が全 441 コマで 0（地図の抑制も溜めもずれたまま）
+          ・サッケードが目標に届いたと判定できず、時間いっぱい筋を押し続ける
+            （筋への指令が 0.93 まで出ていた）
+          ・眼球の角速度で「今動いている」を見る判定が常に False
+        が同時に起きていた。
+
+        シミュレーションは反射の**内部状態ではなく、反射が見ている外の世界**なので、
+        複製の対象から外し、同じものを指したままにする。
+        """
+        import copy as _copy
+        cls = self.__class__
+        new = cls.__new__(cls)
+        memo[id(self)] = new
+        for k, v in self.__dict__.items():
+            if k == "data":
+                new.data = v          # 繋がりは複製しない（同じ物を指し続ける）
+            else:
+                setattr(new, k, _copy.deepcopy(v, memo))
+        return new
+
     def reset(self):
         self._frame_buffer = []
         self.motion_map = None
