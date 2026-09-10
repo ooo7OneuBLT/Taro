@@ -1260,6 +1260,15 @@ class ObjectFiles(Plugin):
             _u = getattr(getattr(ctx, "env", None), "unwrapped", None)
             _or = getattr(_u, "_orienting", None) if _u is not None else None
             if _or is not None:
+                # 【2026-09-10・測定】サッケード1発ごとの記録を書き出す。
+                _sl = getattr(_or, "sacc_log", None)
+                if _sl:
+                    import json as _json
+                    _pp = os.path.join(os.path.dirname(self.events_out or "."),
+                                        "サッケード1発ごと.json")
+                    with open(_pp, "w", encoding="utf-8") as _fp:
+                        _json.dump(_sl, _fp, ensure_ascii=False)
+                    out["サッケード記録"] = _pp
                 out["gaze_map_fired"] = int(getattr(_or, "map_fired", 0))
                 out["gaze_own_fired"] = int(getattr(_or, "own_fired", 0))
                 out["gaze_cmd_sent"] = int(self._gaze_cmd_sent)

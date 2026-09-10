@@ -688,6 +688,11 @@ class OrientingReflexV2:
         # 【2026-09-10・測定用】撃った履歴 (時刻, 方向h, 方向v, 種類)。読んだ側が消す。
         #   種類は "map"（地図を読んだ）／"own"（自前で見つけた）。
         self.fire_log = []
+        # 【2026-09-10・測定用】サッケード1発ごとの記録。読んだ側が消す。
+        #   {撃った時刻, 撃った瞬間の角度, 命令した目標, 終わった時刻, 終わった角度}
+        #   走行の挙動には一切使わない（記録するだけ）。
+        self.sacc_log = []
+        self._sacc_rec = None
         self.own_fired = 0        # 記録用：自前で見つけて撃った回数
         self._sacc_end_t = -1e9      # サッケードが終わった時刻（抑制の起点）
         self._sacc_h = 0.0           # 今のサッケードの方向（撃った瞬間に固定）
@@ -1110,8 +1115,14 @@ class OrientingReflexV2:
             half = VISION_FOVY_DEG / 2.0
             dh = EYE_SIGN_H * SACCADE_FRAC * self._sacc_h * half
             dv = EYE_SIGN_V * SACCADE_FRAC * self._sacc_v * half
-            self._tgt["eye_h"] = self._version_h_deg() + EYE_SHARE * dh
-            self._tgt["eye_v"] = self._angle_deg(self.eye_qadr["v"]) + EYE_SHARE * dv
+            _h0 = self._version_h_deg()
+            _v0 = self._angle_deg(self.eye_qadr["v"])
+            self._tgt["eye_h"] = _h0 + EYE_SHARE * dh
+            self._tgt["eye_v"] = _v0 + EYE_SHARE * dv
+            if len(self.sacc_log) < 400:
+                self._sacc_rec = {"t": float(self._t), "h0": float(_h0), "v0": float(_v0),
+                                   "tgt_h": float(self._tgt["eye_h"]),
+                                   "tgt_v": float(self._tgt["eye_v"])}
             if "h" in self.neck_qadr:
                 self._tgt["neck_h"] = self._angle_deg(self.neck_qadr["h"]) + NECK_SHARE * dh
             if "v" in self.neck_qadr:
@@ -1153,6 +1164,12 @@ class OrientingReflexV2:
                 self._sacc_remaining = 0.0
             if self._sacc_remaining <= 0.0:
                 self._sacc_end_t = self._t      # 終わった時刻を記録
+                if self._sacc_rec is not None:
+                    self._sacc_rec["t_end"] = float(self._t)
+                    self._sacc_rec["h1"] = float(self._version_h_deg())
+                    self._sacc_rec["v1"] = float(self._angle_deg(self.eye_qadr["v"]))
+                    self.sacc_log.append(self._sacc_rec)
+                    self._sacc_rec = None
                 if USE_SACC_CHAIN and self._chain_goal is not None:
                     # F1-4g：連射中の完了点。撃った分（SACCADE_FRAC）を残り目標
                     #   から引く＝残り目標を (1-SACCADE_FRAC) 倍に縮める
