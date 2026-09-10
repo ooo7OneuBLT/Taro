@@ -5,8 +5,8 @@
   E/scripts/e_toy_env.py:2171-2180  step() で action を書き換える順番
     ①_vor.override(action)  ②_orienting.apply(action)  ③_vergence.apply(action)
   taro_core/src/brain/brainstem/vor.py:195,258  方策の眼球出力を上書きする
-  taro_core/src/brain/midbrain/orienting.py     自前の動き検出＋set_voluntary_target
-  run/plugins/common/object_files.py:675-681    優先度地図の勝者→set_voluntary_target
+  taro_core/src/brain/midbrain/orienting.py     自前の動き検出＋set_map_target
+  run/plugins/common/object_files.py:675-681    優先度地図の勝者→set_map_target
 """
 import os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

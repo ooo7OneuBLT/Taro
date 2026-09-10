@@ -671,17 +671,24 @@ class OrientingReflexV2:
         self._t = 0.0                # apply() が刻む内部時刻[秒]
         self._last_saccade_t = -1e9  # 前回サッケードを撃った時刻
         self._sacc_remaining = 0.0   # 今のサッケードの残り時間[秒]
-        # 【2026-09-10・4段目】意思のサッケード（前頭眼野にあたる経路）。
-        #   set_voluntary_target() が呼ばれるまで None のまま＝既定不変。
+        # 【2026-09-10・4段目】地図を読んで撃つ経路（前頭眼野にあたる場所を通る）。
+        #   【呼び名の訂正・2026-09-10】当初これを「意思」と呼んだが誤り。
+        #   この経路に流れているのは下からの目立ちだけで、上からの目的
+        #   （goal）は一度も渡されていない。人間でこの場所が意思のサッケードを
+        #   担うからといって、太郎で流れている中身が意思になるわけではない。
+        #   ＝**器官の名前を中身の名前として使っていた**。以後は
+        #   「地図を読む方」「自前で見つける方」と呼ぶ。
+        #   set_map_target() が呼ばれるまで None のまま＝既定不変。
         #   撃てる間隔は人間の注視 200〜330ms に合わせて 0.25 秒［原文の範囲］。
-        #   反射の 0.90 秒は「下からの目立ちで撃つ」ための値で、意思の側には掛けない。
-        self._vol_target = None
-        self._vol_t = -1e9
-        self.voluntary_latency = 0.25
-        self.vol_fired = 0           # 記録用：意思で撃った回数
+        #   自前で見つける方の 0.90 秒は別に持つ。
+        self._map_target = None
+        self._map_t = -1e9
+        self.map_latency = 0.25
+        self.map_fired = 0           # 記録用：地図を読んで撃った回数
         # 【2026-09-10・測定用】撃った履歴 (時刻, 方向h, 方向v, 種類)。読んだ側が消す。
+        #   種類は "map"（地図を読んだ）／"own"（自前で見つけた）。
         self.fire_log = []
-        self.reflex_fired = 0        # 記録用：反射で撃った回数
+        self.own_fired = 0        # 記録用：自前で見つけて撃った回数
         self._sacc_end_t = -1e9      # サッケードが終わった時刻（抑制の起点）
         self._sacc_h = 0.0           # 今のサッケードの方向（撃った瞬間に固定）
         self._sacc_v = 0.0
@@ -825,13 +832,19 @@ class OrientingReflexV2:
     # ------------------------------------------------------------
     # 公開インターフェース
     # ------------------------------------------------------------
-    def set_voluntary_target(self, h_dir, v_dir, t=None, latency_s=None):
+    def set_map_target(self, h_dir, v_dir, t=None, latency_s=None):
         """【2026-09-10・見る側4段目】外（頭頂の優先度地図）から「ここを見ろ」を渡す。
 
-        人間では、目をどこへ向けるかを決める系統が2つある。上丘の反射（下からの
-        目立ち）と、前頭眼野の意思（優先度地図を見て決める）。どちらも同じ筋へ
-        つながる（`F/docs/二語文/文献調査/2026-09-10_注意と視線の回路_確定版_人間側.md`）。
+        人間では、目をどこへ向けるかを決める系統が2つある。上丘が自分で見つけて
+        撃つ道と、優先度地図を読んで撃つ道。どちらも同じ筋へつながる
+        （`F/docs/二語文/文献調査/2026-09-10_注意と視線の回路_確定版_人間側.md`）。
         太郎には後者が丸ごと無かったので、ここに口を1つ開ける。
+
+        【呼び名の訂正・2026-09-10】このメソッドは当初 set_voluntary_target
+        （意思の目標）という名前だった。**誤りなので改名した。** 人間でこの道を
+        担う場所（前頭眼野）が意思のサッケードを出すからといって、太郎でここを
+        流れている中身が意思になるわけではない。実際には上からの目的（goal）は
+        一度も渡されておらず、流れているのは下からの目立ちだけである。
 
         Args:
             h_dir, v_dir: 視野の方向（[-1,1]、右・上が正。反射内部の h_dir/v_dir と
@@ -841,10 +854,10 @@ class OrientingReflexV2:
         意思の目標は「1回撃ったら消える」。撃つまでの間は保持される。
         一度も渡さなければ、この機構はどこからも参照されない＝既定不変。
         """
-        self._vol_target = (float(h_dir), float(v_dir))
-        self._vol_t = self._t if t is None else float(t)
+        self._map_target = (float(h_dir), float(v_dir))
+        self._map_t = self._t if t is None else float(t)
         if latency_s is not None:
-            self.voluntary_latency = float(latency_s)
+            self.map_latency = float(latency_s)
 
     def set_recognition(self, sim):
         """F1-4b：語から読み出した「思い浮かべているものとの一致度」を渡す。
@@ -1013,7 +1026,7 @@ class OrientingReflexV2:
 
         if self._sacc_remaining <= 0.0:
             fire = False
-            _vol_used = False
+            _map_used = False
             # F1-4g：連射中は選挙結果(h_dir/v_dir)を使わず、_chain_goal から
             #   次の1発を撃つ。連射待ちの間は通常の発火判定（SACCADE_LATENCY待ち等）
             #   をスキップする（連射が状態機械を占有する）。既定OFF時は
@@ -1032,12 +1045,12 @@ class OrientingReflexV2:
                 # 【2026-09-10・4段目】意思の目標が来ていれば、そちらを先に撃つ。
                 #   下からの目立ちの強さ（strength）や向きの大きさ（far_enough）で
                 #   門を掛けない。決めたのは上の段（優先度地図）だから。
-                if (self._vol_target is not None
-                        and (self._t - self._last_saccade_t) >= self.voluntary_latency):
-                    self._sacc_h, self._sacc_v = self._vol_target
-                    self._vol_target = None
-                    self.vol_fired += 1
-                    _vol_used = True
+                if (self._map_target is not None
+                        and (self._t - self._last_saccade_t) >= self.map_latency):
+                    self._sacc_h, self._sacc_v = self._map_target
+                    self._map_target = None
+                    self.map_fired += 1
+                    _map_used = True
                     fire = True    # _sacc_remaining と _last_saccade_t は
                                    # 下の共通の経路が設定する
                 ready = (self._t - self._last_saccade_t) >= SACCADE_LATENCY
@@ -1048,7 +1061,7 @@ class OrientingReflexV2:
                 if (not fire) and ready and self.strength >= SACCADE_MIN_STRENGTH and far_enough:
                     self._sacc_h = self.h_dir
                     self._sacc_v = self.v_dir
-                    self.reflex_fired += 1
+                    self.own_fired += 1
                     fire = True
                 elif (not fire) and self.hold and self._should_hold():
                     # 【2026-09-10・4段目のバグ修正】ここは elif が
@@ -1072,7 +1085,7 @@ class OrientingReflexV2:
             if len(self.fire_log) < 400:
                 self.fire_log.append((float(self._t), float(self._sacc_h),
                                        float(self._sacc_v),
-                                       "vol" if _vol_used else "reflex"))
+                                       "map" if _map_used else "own"))
             # F1-4g：発火の直後（選挙発の初弾のみ。連射中の継続弾は _chain_goal が
             #   既に立っているのでここには入らない）、連射の目標を登録する。
             if USE_SACC_CHAIN and self._chain_goal is None:

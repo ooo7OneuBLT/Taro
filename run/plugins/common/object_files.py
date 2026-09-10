@@ -732,17 +732,20 @@ class ObjectFiles(Plugin):
                     self._fire_probe.append((_kind, float(_sal[_r, _c]),
                                               float(_ior[_r, _c])))
                 _or2.fire_log = []
-            # 【2026-09-10・見る側4段目】意思の視線。注意が移った瞬間だけ、
-            #   その場所を反射の「意思の目標」として渡す。反射は残したまま
-            #   （人間も上丘の反射は無くならない）、2系統が同じ筋へつながる形。
+            # 【2026-09-10・見る側4段目】地図を読んで目を向ける道。注意が移った
+            #   瞬間だけ、その場所を目標として渡す。自前で見つける道は残したまま
+            #   （人間も上丘が自分で撃つ道は無くならない）、2つが同じ筋へつながる形。
+            #   【呼び名の訂正・2026-09-10】当初この道を「意思の視線」と呼んだが誤り。
+            #   上からの目的（goal）はここでも下でも一度も渡していない。流れている
+            #   のは下からの目立ちだけ。器官の名前を中身の名前として使っていた。
             #   gaze=False（既定）なら1行も通らない。
             if self.gaze_from_attention and attn_res["switched"]:
                 _u = getattr(getattr(ctx, "env", None), "unwrapped", None)
                 _or = getattr(_u, "_orienting", None) if _u is not None else None
-                if _or is not None and hasattr(_or, "set_voluntary_target"):
+                if _or is not None and hasattr(_or, "set_map_target"):
                     wx, wy = attn_res["winner_px"]
                     # 視野の方向（[-1,1]、右・上が正）へ。画像の y は下向きなので反転。
-                    _or.set_voluntary_target((wx - 112.0) / 112.0,
+                    _or.set_map_target((wx - 112.0) / 112.0,
                                               (112.0 - wy) / 112.0)
                     self._gaze_cmd_sent += 1
                     onset_extra["gaze_cmd"] = 1
@@ -1230,8 +1233,8 @@ class ObjectFiles(Plugin):
             _u = getattr(getattr(ctx, "env", None), "unwrapped", None)
             _or = getattr(_u, "_orienting", None) if _u is not None else None
             if _or is not None:
-                out["gaze_vol_fired"] = int(getattr(_or, "vol_fired", 0))
-                out["gaze_reflex_fired"] = int(getattr(_or, "reflex_fired", 0))
+                out["gaze_map_fired"] = int(getattr(_or, "map_fired", 0))
+                out["gaze_own_fired"] = int(getattr(_or, "own_fired", 0))
                 out["gaze_cmd_sent"] = int(self._gaze_cmd_sent)
                 if self.events_out and self._fire_probe:
                     import json as _json, os as _os
