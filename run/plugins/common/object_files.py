@@ -153,6 +153,11 @@ class ObjectFiles(Plugin):
         # 【2026-09-09・仕様_見る側の段構成_実装】段0・段1・段6。既定は全てNone
         #   （無効）＝既定不変（仕様書10節「既定不変」）。段4の
         #   appearance_gate_cosもここでまとめて読む。
+        # 【2026-09-10・見る側3段目】場所の地図で注意を決め、注意が向いた場所に
+        #   だけ記録を作る。attention=None（既定）なら1行も通らない＝既定不変。
+        self.attention_cfg = self.config.get("attention")
+        self._sal = None
+        self._spri = None
         self.efference_copy_cfg = self.config.get("efference_copy")
         self.preattentive_cfg = self.config.get("preattentive")
         self.priority_cfg = self.config.get("priority")
@@ -180,6 +185,20 @@ class ObjectFiles(Plugin):
                 diff_thresh=float(self.preattentive_cfg.get("diff_thresh", 20.0)),
                 min_blob_area_px=int(self.preattentive_cfg.get("min_blob_area_px", 30)),
                 max_blobs=int(self.preattentive_cfg.get("max_blobs", 8)))
+        if self.attention_cfg is not None:
+            from brain.midbrain.salience_map import SalienceMap
+            from brain.cerebral_cortex.parietal_lobe.spatial_priority_map import (
+                SpatialPriorityMap)
+            _c = int(self.attention_cfg.get("cell", 28))
+            self._sal = SalienceMap(
+                cell=_c,
+                weights=tuple(self.attention_cfg.get("weights", (1.0, 1.0, 1.0, 1.0))),
+                dog_iters=int(self.attention_cfg.get("dog_iters", 10)))
+            self._spri = SpatialPriorityMap(
+                cell=_c, img_size=224.0,
+                ior_tau_s=float(self.attention_cfg.get("ior_tau_s", 0.7)),
+                ior_gain=float(self.attention_cfg.get("ior_gain", 1.0)),
+                acc_tau_s=float(self.attention_cfg.get("acc_tau_s", 0.11)))
         if self.priority_cfg is not None:
             explore_interval_s = self.priority_cfg.get("explore_interval_s")
             self._priority = self._PriorityMap(
@@ -621,6 +640,19 @@ class ObjectFiles(Plugin):
         onset_extra["ec_res_noshift"] = round(pre_res["motion_mean_noshift"], 4)
         onset_extra["ec_moving"] = moving
 
+        # ---- 1b. 【2026-09-10・見る側1〜2段目】目立ちの地図 → 場所の優先度地図。
+        #      attention=None（既定）なら1行も通らない。
+        attn_res = None
+        if self._spri is not None:
+            sal_res = self._sal.update(img224, shift_actual, moving)
+            attn_res = self._spri.update(sal_res["salience"], shift_px=shift_pred,
+                                          dt=self.interval_s)
+            ctx.salience_map = sal_res["salience"]
+            ctx.attention_point = attn_res["winner_px"]
+            onset_extra["attn_x"] = round(attn_res["winner_px"][0], 1)
+            onset_extra["attn_y"] = round(attn_res["winner_px"][1], 1)
+            onset_extra["attn_switched"] = attn_res["switched"]
+
         # ---- 2. カードを予測位置へ進める（★shiftを必ず渡す・重大1の直し） -------
         self.ofs.predict_only(t, shift=shift_pred)
 
@@ -631,8 +663,12 @@ class ObjectFiles(Plugin):
         #   そのカードの面積、動きの塊はその塊の面積比、探索点は当てが無い）。
         points = []
         # 3a. カードの予測位置（misses に関わらず全カード）：当て＝f.area
+        #     【2026-09-10・3段目】これは「追い続ける」ための点。ここからは
+        #     新しい記録を作らない（can_create=False）。
+        _atten = self._spri is not None
         for f in self.ofs.files:
-            points.append({"pos": f.pos, "expect_area": max(float(f.area), 0.0)})
+            points.append({"pos": f.pos, "expect_area": max(float(f.area), 0.0),
+                           "can_create": not _atten})
         # 3b. onset：misses==0のカードの予測bboxに重心が入らない塊：当て＝塊の面積比
         unexplained = []
         for b in pre_res["blobs"]:
@@ -654,8 +690,24 @@ class ObjectFiles(Plugin):
             blob_area = (float(bw) * float(bh)) / (224.0 * 224.0)
             points.append({"pos": (b["cx"], b["cy"]), "expect_area": blob_area})
         # 3c. 前コマの探索点（あれば）：当て無し（None）
-        if self._prev_explore_point is not None:
+        if self._prev_explore_point is not None and not _atten:
             points.append({"pos": self._prev_explore_point, "expect_area": None})
+        # 3d. 【2026-09-10・3段目】注意が向いた1点。ここからだけ新しい記録を作る。
+        #     すでにその場所に見えているカードがあるなら足さない（既に記録済み）。
+        if _atten and attn_res is not None:
+            wx, wy = attn_res["winner_px"]
+            covered = False
+            for f in self.ofs.files:
+                if f.misses != 0:
+                    continue
+                r = (max(f.area, 0.0) ** 0.5) * 224.0 * 0.75 + 8.0
+                if ((wx - f.pos[0]) ** 2 + (wy - f.pos[1]) ** 2) ** 0.5 <= r:
+                    covered = True
+                    break
+            if not covered:
+                points.append({"pos": (wx, wy), "expect_area": None,
+                               "can_create": True})
+            onset_extra["attn_covered"] = covered
         onset_extra["n_points"] = len(points)
 
         # ---- 4. 集めた点をSAMに1回だけ渡して切り出す -----------------------------
@@ -679,6 +731,28 @@ class ObjectFiles(Plugin):
 
         # ---- 5. 全部まとめて1つの照合にかける -----------------------------------
         res = self.ofs.step(dets, t=t, protect_id=protect_id, skip_predict=True)
+
+        # ---- 6b. 【2026-09-10・3段目】注意するカード＝注意が向いた点にいちばん
+        #      近い、見えているカード（注意の半径の中）。人間は場所を選び、
+        #      そこにある物が記録になる（順序は場所が先）。
+        if self._spri is not None and attn_res is not None:
+            wx, wy = attn_res["winner_px"]
+            foa_r = self._spri.foa_radius_px
+            best, best_d = None, None
+            for f in self.ofs.files:
+                if f.misses != 0:
+                    continue
+                d = ((wx - f.pos[0]) ** 2 + (wy - f.pos[1]) ** 2) ** 0.5
+                if d <= foa_r and (best_d is None or d < best_d):
+                    best, best_d = f.id, d
+            ctx.priority_map_result = {
+                "attended_id": best, "switch_signal": attn_res["switched"],
+                "priority": {}, "explore_point": None, "ior": {},
+                "switch_decided": attn_res["switched"]}
+            ctx.priority_map_result_t = t
+            if attn_res["switched"]:
+                ctx.attention_switch_t = t
+            onset_extra["attn_id"] = "" if best is None else best
 
         # ---- 6. 優先度地図（見えていて中央attend_radius以内のカードだけ・重大2の直し） --
         explore_point = None
@@ -882,7 +956,15 @@ class ObjectFiles(Plugin):
                       if math.hypot(f.pos[0] - CENTER_X, f.pos[1] - CENTER_Y)
                       <= self.attend_radius]
         priority_result = None
-        if self._priority is not None:
+        if (self._spri is not None
+                and getattr(ctx, "priority_map_result_t", None) == t
+                and getattr(ctx, "priority_map_result", None) is not None):
+            # 【2026-09-10・見る側3段目】場所の地図が決めた注意をそのまま使う。
+            #   物の一覧から選び直さない（順序は「場所が先、物が後」）。
+            priority_result = ctx.priority_map_result
+            if priority_result["attended_id"] is not None:
+                self._attended_id = priority_result["attended_id"]
+        elif self._priority is not None:
             # 【2026-09-09・仕様_見る側の段構成_実装 5節】段6。priority設定が
             #   有効なときだけ置き換える（無効時は下のelseで従来どおり1行も
             #   変えない）。中央56pxの絞りはPriorityMapの外（上のcandidates）で

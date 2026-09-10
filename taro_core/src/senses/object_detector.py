@@ -411,7 +411,11 @@ def segment_at_points(predictor, img224, points, patch_feats, n, img_size=224,
             if best is None:
                 continue
 
-        raw.append({"mask": best["mask"], "bbox": best["bbox"]})
+        # 【2026-09-10・見る側3段目】この点から新しい記録を作ってよいか。
+        #   注意が向いた点だけ True。カードの維持のために打つ点は False。
+        #   キーが無ければ True＝従来どおり（既定不変）。
+        raw.append({"mask": best["mask"], "bbox": best["bbox"],
+                    "can_create": bool(p.get("can_create", True))})
     predictor.reset_image()
 
     stats = {"n_points_expect": n_points_expect, "n_reject_scale": n_reject_scale}
@@ -443,6 +447,7 @@ def segment_at_points(predictor, img224, points, patch_feats, n, img_size=224,
             by, by1 = int(ys.min()), int(ys.max())
             bw, bh = bx1 - bx + 1, by1 - by + 1
             reason = "motion"
+        can_create = any(bool(raw[gi].get("can_create", True)) for gi in group)
         area = float(mask.sum()) / (h * w)
         if area < min_area_frac or area > max_area_frac:
             continue
@@ -451,7 +456,7 @@ def segment_at_points(predictor, img224, points, patch_feats, n, img_size=224,
         appearance = _mask_appearance(mask, feats_grid, n, scale)
         out.append({"mask": mask, "bbox": (bx, by, bw, bh), "pos": (cx, cy),
                      "area": area, "appearance": appearance, "emb": None,
-                     "cohesion_reason": reason})
+                     "cohesion_reason": reason, "can_create": can_create})
     return out, stats
 
 

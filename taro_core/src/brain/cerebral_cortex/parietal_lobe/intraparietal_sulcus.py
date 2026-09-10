@@ -659,6 +659,13 @@ class ObjectFileSystem:
         individuated = []
         for j in remaining_d:
             d = detections[j]
+            # 【2026-09-10・見る側3段目】新しい記録を作れるのは、注意が向いた
+            #   場所から出た検出だけ。カードの維持のために打った点から出た検出は
+            #   作らない（キーが無ければ True＝従来どおり・既定不変）。
+            #   人間は注意が向いて初めて中身の入った物体ファイルができる
+            #   （Scholl 2001 総説、原文確認）。
+            if not d.get("can_create", True):
+                continue
             if (self.vanish_budget is not None and self.max_files is not None
                     and len(self.files) >= self.max_files):
                 # 【2026-09-10】席が無ければ作らない（押し出さない）。
