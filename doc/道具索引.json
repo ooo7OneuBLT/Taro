@@ -1508,18 +1508,6 @@
   "last_commit": "2026-09-11"
  },
  {
-  "path": "F/scripts/f107_gaze_command_response.py",
-  "doc": "K0の読み：命令した方向へ、目は実際に何度動いたか（大きさ別）。",
-  "defs": [
-   "_load",
-   "_angle_at",
-   "main"
-  ],
-  "lines": 126,
-  "goal": "F",
-  "last_commit": ""
- },
- {
   "path": "F/scripts/f14_direct_readout.py",
   "doc": "F1-4/F1-6 直接読み出しテスト（2026-08-21 初版 → 2026-08-22 改修）。",
   "defs": [
@@ -2862,18 +2850,6 @@
   "last_commit": "2026-08-11"
  },
  {
-  "path": "run/plugins/common/gaze_command.py",
-  "doc": "**操作する道具**：外から「そこを見ろ」を送り、目が実際にどう動いたかを残す。",
-  "defs": [
-   "_abs_path",
-   "_orienting",
-   "GazeCommand"
-  ],
-  "lines": 132,
-  "goal": "",
-  "last_commit": ""
- },
- {
   "path": "run/plugins/common/gaze_probe.py",
   "doc": "測る道具：太郎の視線が的（おもちゃ）にどれだけ・どう留まるかを記録する。",
   "defs": [
@@ -2882,7 +2858,7 @@
   ],
   "lines": 106,
   "goal": "",
-  "last_commit": "2026-08-27"
+  "last_commit": "2026-09-11"
  },
  {
   "path": "run/plugins/common/hand_in_view.py",
