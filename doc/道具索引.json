@@ -1235,7 +1235,7 @@
   ],
   "lines": 2655,
   "goal": "E",
-  "last_commit": "2026-09-10"
+  "last_commit": "2026-09-11"
  },
  {
   "path": "E/scripts/e_toy_in_view.py",
@@ -1495,6 +1495,29 @@
   "lines": 92,
   "goal": "F",
   "last_commit": "2026-09-11"
+ },
+ {
+  "path": "F/scripts/f106_small_saccade_probe.py",
+  "doc": "小さいサッケードに**直接命令を出して**、命令と実際の動きを突き合わせる。",
+  "defs": [
+   "main",
+   "report"
+  ],
+  "lines": 200,
+  "goal": "F",
+  "last_commit": "2026-09-11"
+ },
+ {
+  "path": "F/scripts/f107_gaze_command_response.py",
+  "doc": "K0の読み：命令した方向へ、目は実際に何度動いたか（大きさ別）。",
+  "defs": [
+   "_load",
+   "_angle_at",
+   "main"
+  ],
+  "lines": 126,
+  "goal": "F",
+  "last_commit": ""
  },
  {
   "path": "F/scripts/f14_direct_readout.py",
@@ -2839,13 +2862,25 @@
   "last_commit": "2026-08-11"
  },
  {
+  "path": "run/plugins/common/gaze_command.py",
+  "doc": "**操作する道具**：外から「そこを見ろ」を送り、目が実際にどう動いたかを残す。",
+  "defs": [
+   "_abs_path",
+   "_orienting",
+   "GazeCommand"
+  ],
+  "lines": 132,
+  "goal": "",
+  "last_commit": ""
+ },
+ {
   "path": "run/plugins/common/gaze_probe.py",
   "doc": "測る道具：太郎の視線が的（おもちゃ）にどれだけ・どう留まるかを記録する。",
   "defs": [
    "_abs_path",
    "GazeProbe"
   ],
-  "lines": 103,
+  "lines": 106,
   "goal": "",
   "last_commit": "2026-08-27"
  },
@@ -2886,7 +2921,7 @@
    "_abs_path",
    "ObjectFiles"
   ],
-  "lines": 1333,
+  "lines": 1341,
   "goal": "",
   "last_commit": "2026-09-11"
  },
@@ -2927,7 +2962,7 @@
   ],
   "lines": 263,
   "goal": "",
-  "last_commit": "2026-08-28"
+  "last_commit": "2026-09-11"
  },
  {
   "path": "run/plugins/common/reach_success.py",
@@ -3797,7 +3832,7 @@
   ],
   "lines": 263,
   "goal": "",
-  "last_commit": ""
+  "last_commit": "2026-09-11"
  },
  {
   "path": "run/tools/memory_guard.py",
@@ -4572,7 +4607,7 @@
   ],
   "lines": 287,
   "goal": "",
-  "last_commit": "2026-09-05"
+  "last_commit": "2026-09-11"
  },
  {
   "path": "taro_core/src/brain/cerebellum.py",
@@ -4678,9 +4713,9 @@
   "defs": [
    "SpatialPriorityMap"
   ],
-  "lines": 166,
+  "lines": 176,
   "goal": "",
-  "last_commit": "2026-09-10"
+  "last_commit": "2026-09-11"
  },
  {
   "path": "taro_core/src/brain/cerebral_cortex/recurrent_core.py",
@@ -4965,7 +5000,7 @@
    "_qposadr_of",
    "OrientingReflexV2"
   ],
-  "lines": 1656,
+  "lines": 1688,
   "goal": "",
   "last_commit": "2026-09-11"
  },
@@ -5111,7 +5146,7 @@
   ],
   "lines": 369,
   "goal": "",
-  "last_commit": "2026-08-11"
+  "last_commit": "2026-09-11"
  },
  {
   "path": "taro_core/src/brain/spinal_cord/grasp_reflex.py",
@@ -5258,9 +5293,9 @@
    "segment_at_points",
    "_detect_mobilesam"
   ],
-  "lines": 552,
+  "lines": 563,
   "goal": "",
-  "last_commit": "2026-09-10"
+  "last_commit": "2026-09-11"
  },
  {
   "path": "taro_core/src/senses/otolith_organs.py",
