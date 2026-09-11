@@ -496,11 +496,18 @@ def main():
     ap.add_argument("spec", help="実験ファイル（JSON）のパス")
     ap.add_argument("--steps", type=int, default=None, help="ステップ数を上書きする")
     ap.add_argument("--verbose", action="store_true", help="環境構築のログも出す")
+    ap.add_argument("--skip-preflight", action="store_true",
+                    help="走行前点検を飛ばす（事故の分かっている場合だけ）")
     a = ap.parse_args()
     _check_texture_resolution()
     _register()
     spec = load_spec(a.spec)
     _check_toy_distance(spec)
+    # 【2026-09-11・ユーザー指示】構造のミスは走る前に止める。走行後に発覚して
+    #   1本（9〜15分）を捨てるのを避ける。詳細は run/tools/preflight.py
+    from run.tools.preflight import run_check
+    if not run_check(spec, a.spec, skip=a.skip_preflight):
+        return 1
     run(spec, steps_override=a.steps, verbose=a.verbose)
     return 0
 

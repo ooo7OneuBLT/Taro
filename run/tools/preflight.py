@@ -1,133 +1,168 @@
 # -*- coding: utf-8 -*-
-"""起動前チェック：一連の実験を回す前に、止まる原因を先に潰す。
+"""走行前点検（1段目）── 走らせなくても分かる構造のミスで、走る前に止める。
 
-【なぜ要るか・2026-08-27】2026-08-26に、実験の起動そのものが3回失敗した。
-  ① ログの保存先フォルダが無くて起動直後に停止（ABAB1周目）
-  ② 別のworld.xmlを使う古いシーンから複製したため姿勢データが不一致でエラー
-  ③ 4本同時起動でメモリ不足（Could not allocate memory）
-  どれも走らせる前に分かることだった。文書の注意書きではなく機械で防ぐ
-  （CLAUDE.md「同じミスが2回起きたら機械で防ぐ」）。
+【なぜ、2026-09-11・ユーザー指示】
+「構造的にミスが起きてたら走行前に止まるようにできないの？走行後発覚するのだけ避けて。
+これは今回だけじゃなくてすべてに共通すること」。
 
-【使い方】
-  python run/tools/preflight.py F/experiments/F2-10_*.json
-  → 実行順（モデルのチェーン）と、見つかった問題を並べて出す。
-     問題があれば終了コード1。フォルダは作るが、それ以外は何も変えない。
+実際に走行を捨てた事故（走行後に発覚したもの）：
+
+| 起きたこと | 捨てた時間 |
+|---|---|
+| 出力先が別の実験を指していて、その実験のファイルを上書き（F2-129） | 9分＋基準データ1件 |
+| 列を見出しにだけ足して行に足し忘れ（F2-129） | 9分 |
+| `taro.save` を書き忘れてモデルが消えた（3回） | その都度 |
+| 場面が違うものを比べていた | 複数本 |
+
+このうち**走らせなくても分かるもの**をここで止める。走らせないと分からないものは
+2段目（試し走行＋出るはずのものの宣言）が受け持つ。
+
+【方針】
+- 止める（ERROR）＝ほぼ確実に事故になるもの。`--skip-preflight` で無視できる
+- 知らせる（WARN）＝意図的なこともあるもの。止めない
+- **偽陽性で作業を止めない**こと。迷ったら WARN 側にする
+
+【使い方】`run/main.py` が走行の前に自動で呼ぶ。単体でも動く：
+    python run/tools/preflight.py F/experiments/<実験>.json
 """
-import glob
 import json
 import os
 import sys
 
-try:
-    sys.stdout.reconfigure(encoding="utf-8")
-except Exception:
-    pass
-
-ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir, os.pardir))
+_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                      os.pardir, os.pardir))
 
 
-def _p(rel):
-    return rel if os.path.isabs(rel) else os.path.join(ROOT, rel)
+def _abs(p):
+    return p if os.path.isabs(p) else os.path.join(_ROOT, p)
 
 
-def check(paths):
-    errs, warns, made = [], [], []
-    exps = []
-    for p in paths:
+def _collect_out_paths(spec):
+    """実験ファイルの中の「書き出す先」を全部集める。(どこで指定されたか, パス)。"""
+    found = []
+    r = spec.get("run") or {}
+    if r.get("csv"):
+        found.append(("run.csv", str(r["csv"])))
+    t = spec.get("taro") or {}
+    if t.get("save"):
+        found.append(("taro.save", str(t["save"])))
+
+    def walk(node, where):
+        if isinstance(node, dict):
+            for k, v in node.items():
+                walk(v, "%s.%s" % (where, k))
+        elif isinstance(node, list):
+            for i, v in enumerate(node):
+                walk(v, "%s[%d]" % (where, i))
+        elif isinstance(node, str):
+            s = node.replace("\\", "/")
+            if ("/logs/" in s or "/models/" in s) and not s.startswith("http"):
+                found.append((where, node))
+    walk(spec.get("plugins") or {}, "plugins")
+    return found
+
+
+def _log_dir_of(path):
+    """`F/logs/<実験名>/xxx.csv` → `F/logs/<実験名>`。logs 配下でなければ None。"""
+    s = path.replace("\\", "/")
+    i = s.find("/logs/")
+    if i < 0:
+        return None
+    rest = s[i + len("/logs/"):]
+    if "/" not in rest:
+        return None            # F/logs/直下のファイル（_F2-129.log など）は対象外
+    return s[:i + len("/logs/")] + rest.split("/", 1)[0]
+
+
+def check(spec, spec_path=""):
+    """(errors, warns) を返す。どちらも文字列のリスト。"""
+    errors, warns = [], []
+    name = str(spec.get("name") or "")
+    outs = _collect_out_paths(spec)
+
+    # --- 1. 出力先が2つ以上の実験フォルダに散らばっていないか -----------------
+    #   F2-129：plugins のパスは書き換えたのに run.csv だけ F2-126 のままで、
+    #   F2-126 の run.csv・ダッシュボードを上書きした。
+    dirs = {}
+    for where, p in outs:
+        d = _log_dir_of(p)
+        if d:
+            dirs.setdefault(d, []).append(where)
+    if len(dirs) > 1:
+        detail = " / ".join("%s ← %s" % (d, "・".join(w)) for d, w in sorted(dirs.items()))
+        errors.append(
+            "書き出す先が2つ以上の実験フォルダに分かれている（別の実験を上書きする）：\n"
+            "      %s" % detail)
+
+    # --- 2. 他の実験のフォルダへ書こうとしていないか ---------------------------
+    #   そのフォルダの run.meta.json に別の実験名が入っていれば、それは他人の場所。
+    for d in dirs:
+        meta = _abs(os.path.join(d, "run.meta.json"))
+        if not os.path.exists(meta):
+            continue
         try:
-            exps.append((p, json.load(open(p, encoding="utf-8"))))
-        except Exception as e:
-            errs.append("%s: 読めない (%s)" % (os.path.basename(p), e))
-    # この一連で作られる予定のモデル
-    will_make = set()
-    for p, d in exps:
-        s = d.get("taro", {}).get("save")
-        if s:
-            will_make.add(os.path.normpath(_p(s)))
+            with open(meta, encoding="utf-8") as f:
+                other = str(json.load(f).get("name") or "")
+        except Exception:
+            continue
+        if other and name and other != name:
+            errors.append(
+                "%s は別の実験『%s』のフォルダ（run.meta.json の名前が違う）。"
+                "この走行『%s』の出力で上書きされる" % (d, other, name))
 
-    for p, d in exps:
-        n = d.get("name") or os.path.basename(p)
-        t, r = d.get("taro", {}), d.get("run", {})
-        # ① シーン
-        sc = d.get("scene")
-        if sc:
-            sp = _p(os.path.join("run", "scenes", sc + ".json"))
-            if not os.path.exists(sp):
-                errs.append("%s: シーンが無い → run/scenes/%s.json" % (n, sc))
-            else:
-                w = json.load(open(sp, encoding="utf-8")).get("world_xml")
-                if w and not os.path.exists(_p(w)):
-                    errs.append("%s: シーンが指すworld.xmlが無い → %s" % (n, w))
-        # ② 起点モデル（この一連で作られるものはOK）
-        m = t.get("model")
-        if m:
-            mp = os.path.normpath(_p(m))
-            if not os.path.exists(mp) and mp not in will_make:
-                errs.append("%s: 起点モデルが無い → %s" % (n, m))
-        # ③ 保存先の衝突（既存モデルを上書きしない）
-        s = t.get("save")
-        if not s:
-            errs.append("%s: taro.save が無い（学習結果が消える）" % n)
-        elif os.path.exists(_p(s)) and os.path.normpath(_p(s)) not in will_make:
-            warns.append("%s: 保存先が既にある（上書きになる） → %s" % (n, s))
-        # ④ 出力フォルダを作る
-        outs = [r.get("csv")] + [v.get("events_out") for v in
-                                 (d.get("plugins") or {}).values() if isinstance(v, dict)]
-        for o in outs + ([s] if s else []):
-            if not o:
-                continue
-            dirn = os.path.dirname(_p(o))
-            if dirn and not os.path.isdir(dirn):
-                os.makedirs(dirn, exist_ok=True)
-                made.append(os.path.relpath(dirn, ROOT))
-    return exps, errs, warns, made
+    # --- 3. 学習ありなのにモデルの保存先が無い -------------------------------
+    r = spec.get("run") or {}
+    if str(r.get("type", "measure")).lower() == "train" and not (spec.get("taro") or {}).get("save"):
+        errors.append("学習ありの走行なのに taro.save が無い（走り終わってもモデルが残らない）")
+
+    # --- 4. 読み込むものが実在するか ------------------------------------------
+    model = (spec.get("taro") or {}).get("model")
+    if model and not os.path.exists(_abs(str(model))):
+        errors.append("出発モデルが無い: %s" % model)
+    scene = spec.get("scene")
+    if scene and not os.path.exists(_abs(os.path.join("run/scenes", str(scene) + ".json"))):
+        warns.append("run/scenes に %s.json が見当たらない（別の探し方をしているなら無視してよい）"
+                     % scene)
+
+    # --- 5. 既にあるものを上書きするか（同じ実験名なら意図的なことが多い）------
+    #   1件1行にすると再走行のたびに10行出てうるさいので、まとめて1行にする。
+    exist = [p for _w, p in outs if os.path.exists(_abs(p))]
+    if exist:
+        warns.append("既にあるものを %d 件上書きする（同じ実験の撮り直しなら想定どおり）: %s%s"
+                     % (len(exist), exist[0],
+                        " ほか%d件" % (len(exist) - 1) if len(exist) > 1 else ""))
+
+    return errors, warns
 
 
-def chain_order(exps):
-    """save→model の連鎖から実行順を決める。連鎖でないものは末尾へ。"""
-    by_save = {os.path.normpath(_p(d["taro"]["save"])): (p, d)
-               for p, d in exps if d.get("taro", {}).get("save")}
-    remaining = list(exps)
-    order, made = [], set()
-    while remaining:
-        ready = [(p, d) for p, d in remaining
-                 if not d.get("taro", {}).get("model")
-                 or os.path.normpath(_p(d["taro"]["model"])) not in by_save
-                 or os.path.normpath(_p(d["taro"]["model"])) in made]
-        if not ready:
-            order.extend(remaining)
-            break
-        ready.sort(key=lambda x: x[0])
-        p, d = ready[0]
-        order.append((p, d)); remaining.remove((p, d))
-        made.add(os.path.normpath(_p(d["taro"]["save"])))
-    return order
-
-
-def main(argv):
-    paths = []
-    for a in argv:
-        paths.extend(sorted(glob.glob(a)) or [a])
-    if not paths:
-        print("使い方: python run/tools/preflight.py <実験ファイル...>")
-        return 2
-    exps, errs, warns, made = check(paths)
-    order = chain_order(exps)
-    print("=== 実行順（モデルの受け渡しから決定）===")
-    for i, (p, d) in enumerate(order, 1):
-        print("  %2d. %s" % (i, os.path.basename(p)))
-    if made:
-        print("\n作ったフォルダ: %d個" % len(set(made)))
+def run_check(spec, spec_path="", skip=False):
+    """点検して表示する。ERROR があれば False を返す（走らせない）。"""
+    if skip:
+        print("走行前点検：--skip-preflight のため飛ばした")
+        return True
+    errors, warns = check(spec, spec_path)
     for w in warns:
-        print("\n[注意] " + w)
-    if errs:
-        print("\n=== 止まる原因 %d件 ===" % len(errs))
-        for e in errs:
-            print("  [NG] " + e)
-        return 1
-    print("\n✓ 起動前チェック OK（%d本）" % len(exps))
-    return 0
+        print("  [注意] %s" % w)
+    if not errors:
+        print("走行前点検：問題なし（%d 件の注意）" % len(warns))
+        return True
+    print("\n" + "=" * 70)
+    print(" 走行前点検で止めました（走らせる前に直せるものです）")
+    print("=" * 70)
+    for e in errors:
+        print("  [止めた] %s" % e)
+    print("\n  どうしても走らせたいなら --skip-preflight を付ける")
+    print("=" * 70)
+    return False
+
+
+def main():
+    if len(sys.argv) < 2:
+        sys.exit(__doc__)
+    with open(sys.argv[1], encoding="utf-8") as f:
+        spec = json.load(f)
+    return 0 if run_check(spec, sys.argv[1]) else 1
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+    sys.exit(main())
