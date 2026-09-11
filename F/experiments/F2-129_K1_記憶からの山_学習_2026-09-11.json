@@ -75,7 +75,7 @@
     "seed": 91,
     "K": 10,
     "checkpoint": 100,
-    "csv": "F/logs/F2-126_注意の作り直しを揃えた条件で/run.csv"
+    "csv": "F/logs/F2-129_K1_記憶からの山/run.csv"
   },
   "plugins": {
     "word_production": {

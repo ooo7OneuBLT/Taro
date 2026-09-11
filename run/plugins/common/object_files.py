@@ -656,7 +656,28 @@ class ObjectFiles(Plugin):
                 "n_reject_edge": onset_extra.get("n_reject_edge", ""),
                 "n_reject_area": onset_extra.get("n_reject_area", ""),
                 "n_reject_dedup": onset_extra.get("n_reject_dedup", ""),
+                # 【2026-09-11・K1】上からの目的と、その内訳。
+                #   注意：この行を作る辞書は**キーを1つずつ明示して**書く形なので、
+                #   上の _EVENT_COLUMNS（見出しの一覧）に足しただけでは常に空になる。
+                #   F2-129 で実際にこれをやって走行1本（9分）を無駄にした。
+                **{k: onset_extra.get(k, "") for k in (
+                    "goal_id", "goal_cx", "goal_cy", "goal_repick",
+                    "g_at_goal", "sal_at_goal", "ior_at_goal", "acc_at_goal",
+                    "g_at_win", "sal_at_win", "ior_at_win", "acc_at_win")},
             })
+            # 【2026-09-11・機械で防ぐ】見出しの一覧にあるのに、行の辞書に
+            #   キーが無い列は、CSV では `r.get(k, "")` で**静かに空欄**になる。
+            #   F2-112pre で「ヘッダーだけ増えて行がずれる」事故を直したとき、
+            #   この形（キーごと無い）は残っていた。F2-129 で再発し、走行1本
+            #   （9分）を捨てた＝2回目なので、文書でなくここで止める。
+            #   最初の1行で見るので、事故は走り出して数秒で分かる。
+            if len(self.rows) == 1:
+                _missing = [k for k in self._EVENT_COLUMNS if k not in self.rows[0]]
+                if _missing:
+                    raise RuntimeError(
+                        "物体ファイルCSV：見出しにあるのに行に入っていない列がある "
+                        "→ %s（_EVENT_COLUMNS に足したら、行を作る辞書にも足す）"
+                        % _missing)
 
     def _log_goal_terms(self, onset_extra, goal_info, goal_map, salience, attn_res):
         """【2026-09-11・K1】的の升と勝った升で、各項がいくらだったかを残す。
