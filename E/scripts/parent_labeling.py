@@ -84,7 +84,8 @@ class ParentLabeling:
                  vanish_utterance=False, vanish_template="{word}ないね",
                  vanish_gap_before_sec=1.0, vanish_gap_after_sec=1.5,
                  vanish_wait_notice=False, vanish_notice_delay_sec=0.5,
-                 vanish_notice_max_sec=3.0, vanish_silent_targets=()):
+                 vanish_notice_max_sec=3.0, vanish_silent_targets=(),
+                 park_after_sec=None, park_offset_deg=20.0):
         self.enabled = bool(enabled)
         self.shake_amp_m = float(shake_amp_m)
         self.shake_hz = float(shake_hz)
@@ -197,6 +198,11 @@ class ParentLabeling:
         #   代わりにenv.unwrapped._parent_silent_vanishへ(時刻,的)を置く（採点用の
         #   目印。読む側は無い。発話イベント.csvへの記録は無い＝仕様書の指示どおり）。
         self.vanish_silent_targets = set(vanish_silent_targets)
+        # 【2026-09-11・K1の場面】差し出して park_after_sec 秒たったら、その時の
+        #   視線から park_offset_deg 度だけ横へずらした所に固定する（追従をやめる）。
+        #   None（既定）なら1行も通らない＝既定不変。状態は reset() 側。
+        self.park_after_sec = (None if park_after_sec is None else float(park_after_sec))
+        self.park_offset_deg = float(park_offset_deg)
         self.reset()
 
     def reset(self):
@@ -219,6 +225,15 @@ class ParentLabeling:
         self._speech_burst_t = 0.0
         # 【F2-9C】差し出し中の物の現在位置（親の手の位置に相当）。Noneなら未開始。
         self._follow_pos = None
+        # 【2026-09-11・K1の場面】差し出してから park_after_sec 秒たったら、
+        #   その時の視線から park_offset_deg 度だけ横へずらした所に**固定**する
+        #   （追従をやめる）。ユーザーの設計「生成できたらわざと視界の中央から
+        #   ずらして、コップを見るように命令する」の『ずらす』にあたる。
+        #   None（既定）なら1行も通らない＝既定不変。
+        #   水平にずらすのにおもちゃ2個は要らない（位置を直接置くため。
+        #   toy の angle_deg は e_toy_env:1716 の if self._toy2 の中でしか効かない）。
+        self._park_pos = None
+        self._follow_t = 0.0
         # 【F2-9】fit-check用の観測値：注視カウントが始まった回数と、
         #   gaze_hold_sec まで完走した回数（3秒が長すぎないかの判定材料）。
         self.n_hold_starts = 0
@@ -424,6 +439,8 @@ class ParentLabeling:
             self._hold_t = 0.0
             self._holding_prev = False   # 試行ごとに注視開始を数え直す（F2-9観測用）
             self._follow_pos = None      # 新しい的は今の視線の先から差し出し直す
+            self._park_pos = None        # 【2026-09-11】ずらして固定した位置も解く
+            self._follow_t = 0.0
             self._repeat_attempt = False
 
         # ここに来るのは常に SHAKE 状態（振っている最中）
@@ -511,6 +528,17 @@ class ParentLabeling:
         fwd = -np.array(env.data.cam_xmat[cid], dtype=float).reshape(3, 3)[:, 2]
         goal = eye + fwd * self.follow_dist
         goal[2] = max(goal[2], 0.05)
+        # 【2026-09-11・K1の場面】「ずらして固定」。park_after_sec が None なら素通り。
+        if self.park_after_sec is not None:
+            self._follow_t += float(env.dt)
+            if self._park_pos is None and self._follow_t >= self.park_after_sec:
+                right = np.array(env.data.cam_xmat[cid], dtype=float).reshape(3, 3)[:, 0]
+                a = np.radians(self.park_offset_deg)
+                fwd2 = fwd * np.cos(a) + right * np.sin(a)   # 今の視線から横へ a 度
+                self._park_pos = eye + fwd2 * self.follow_dist
+                self._park_pos[2] = max(self._park_pos[2], 0.05)
+            if self._park_pos is not None:
+                return self._park_pos        # 追従をやめてそこに置き続ける
         if self._follow_pos is None:
             self._follow_pos = goal.copy()      # 初回は視線の先に直接現れる
             return self._follow_pos

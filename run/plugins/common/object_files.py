@@ -728,9 +728,13 @@ class ObjectFiles(Plugin):
         sigma = float(cfg.get("sigma", 1.5))      # 山の広がり［升］
         hold_s = float(cfg.get("hold_s", 3.0))    # 同じ的を保つ時間［秒］
 
-        # 見失い中のカード。id の若い順で固定する（乱数を使わない＝再現する）
+        # 見失い中のカード。**よく見えていたカードを優先**する（hits の多い順、
+        #   同数なら id の若い順＝乱数を使わない・再現する）。
+        #   【2026-09-11】以前は id 順だけだったので、壁や机にできた幽霊カードが
+        #   的になりうる。実測（F2-129）：的にした66枚のうち6枚は一度も見えた
+        #   ことがないカードだった。物を狙いたいので hits を先に見る。
         cands = sorted([f for f in self.ofs.files if getattr(f, "misses", 0) > 0],
-                       key=lambda f: f.id)
+                       key=lambda f: (-int(getattr(f, "hits", 0)), f.id))
         if not cands:
             self._goal_id = None
             return None, info
