@@ -779,6 +779,16 @@ class OrientingReflexV2:
         self.v_dir = 0.0
         self.strength = 0.0              # 反応の強さ（0〜1相当）
         self.n_actuator = int(model.nu)
+        # 【2026-09-11・測定】頭のボディ番号。保持中に頭がどれだけ動いているかを
+        #   記録するためだけに持つ（VOR と同じ読み方＝data.cvel[bid][:3]）。
+        #   保持と VOR は 87% の時間、逆を向いて引っ張り合っているが（F2-121pre）、
+        #   これは「片方が壊れている」のか「頭が動いていて、保持は頭に対する角度・
+        #   VOR は空間に対する視線という**別の座標**を見ているだけ」なのかが
+        #   区別できていない。頭の角速度を測れば分かれる。
+        try:
+            self._head_bid = int(model.body("head").id)
+        except Exception:
+            self._head_bid = None
         # 目・首アクチュエータのインデックス（現行 e_orienting.py と同じ）
         self.neck_idx = {}
         # 【2026-08-28】水平の眼球だけ左右で回転軸の符号が逆
@@ -980,6 +990,20 @@ class OrientingReflexV2:
         r = float(self.data.qpos[self.eye_qadr["h_right"][0]])
         return float(np.degrees(l - r) / 2.0)
 
+    def _head_omega_deg(self):
+        """頭の角速度 [度/秒]。(全体の大きさ, 鉛直軸まわり) を返す（測定専用）。
+
+        VOR と同じ読み方（`data.cvel[head_bid][:3]` が角速度・世界座標）。
+        鉛直軸まわり（z）が水平の眼球運動に対応する成分。
+        """
+        if self.data is None or self._head_bid is None:
+            return (0.0, 0.0)
+        try:
+            w = np.asarray(self.data.cvel[self._head_bid][:3], dtype=float)
+            return (float(np.degrees(np.linalg.norm(w))), float(np.degrees(w[2])))
+        except Exception:
+            return (0.0, 0.0)
+
     def _incoming_eye_h(self, action):
         """apply() に渡ってきた時点の水平の眼球指令（＝VOR が書いたぶん）。
 
@@ -1033,6 +1057,7 @@ class OrientingReflexV2:
 
     def apply(self, action, dt=None):
         if self.data is not None and len(self.angle_trace) < 60000:
+            _hw = self._head_omega_deg()      # 1行で2回呼ばない（毎ステップ走る）
             self.angle_trace.append((
                 round(float(self._t), 4),
                 round(float(self._version_h_deg()), 4),
@@ -1053,7 +1078,10 @@ class OrientingReflexV2:
                 #   保持中に目が目標から中央値3.98度も振れる理由として、VOR は
                 #   今日まで一度も調べていない（輻輳とバネはアブレーション済み）。
                 #   記録専用。挙動は1ビットも変えない。
-                round(float(self._incoming_eye_h(action)), 4)))
+                round(float(self._incoming_eye_h(action)), 4),
+                # 11・12列目：頭の角速度[度/秒]（全体の大きさ と 水平回りの成分）。
+                round(float(_hw[0]), 3),
+                round(float(_hw[1]), 3)))
         """action に階段状サッケードを加算して返す（ステップ4）。
 
         2026-07-27：1発の大きさを「位置の指令」にした。
