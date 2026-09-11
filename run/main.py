@@ -112,7 +112,9 @@ def load_spec(path):
     """実験ファイルを読む。書き間違いをここで止める。"""
     with open(path, encoding="utf-8") as fp:
         spec = json.load(fp)
-    known = {"name", "note", "scene", "taro", "run", "plugins"}
+    # 【2026-09-11】expect＝「この走行は何を出すはずか」の宣言。走行そのものには
+    #   使わない（run/tools/smoke.py が試し走行の結果と突き合わせる）。
+    known = {"name", "note", "scene", "taro", "run", "plugins", "expect"}
     unknown = set(spec) - known
     if unknown:
         raise ValueError(f"実験ファイルに知らない欄がある: {sorted(unknown)}\n"

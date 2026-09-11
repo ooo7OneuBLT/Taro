@@ -146,5 +146,17 @@
       "until": 0,
       "third_person": true
     }
+  },
+  "expect": {
+    "物体ファイル.csv": [
+      "goal_id",
+      "goal_cx",
+      "g_at_goal",
+      "sal_at_goal",
+      "ior_at_goal"
+    ],
+    "注意.csv": [
+      "attended_id"
+    ]
   }
 }
