@@ -132,6 +132,13 @@ class ObjectFiles(Plugin):
         "n_reject_edge", "n_reject_area", "n_reject_dedup",
         # 【2026-09-10・消え方で持ち時間を決める】
         "explained", "budget",
+        # 【2026-09-11・K1「記憶からの山」】上からの目的。goal未設定なら全部空。
+        #   内訳（的の升と勝った升での各項）を出さないと、効かなかったとき
+        #   「山が小さい」「復帰抑制に消された」「溜めが目立ちに埋もれた」の
+        #   区別がつかない（仕様 後半4節）。
+        "goal_id", "goal_cx", "goal_cy", "goal_repick",
+        "g_at_goal", "sal_at_goal", "ior_at_goal", "acc_at_goal",
+        "g_at_win", "sal_at_win", "ior_at_win", "acc_at_win",
     ]
 
     def setup(self, ctx):
@@ -194,6 +201,18 @@ class ObjectFiles(Plugin):
         self.attention_cfg = self.config.get("attention")
         # 【2026-09-10・4段目】注意が移った先へ目も向けるか。既定False＝既定不変。
         self.gaze_from_attention = bool(self.config.get("gaze_from_attention", False))
+        # 【2026-09-11・K1「記憶からの山」】上からの目的（5段目）。
+        #   仕様 `F/docs/二語文/仕様_K1_記憶からの山_2026-09-11.md`。
+        #   優先度地図には goal の受け口が前からあるのに、コード全体で誰も
+        #   渡していなかった（2026-09-11 確認）。ここが唯一の渡し元。
+        #   goal=None（既定）なら山を作らず `goal=None` のまま渡す＝
+        #   `spatial_priority_map` 側も `if goal is not None` で素通り＝既定不変。
+        #   **見た目の照合はしない**：カードは自分の位置を知っているので
+        #   比べる必要がない（仕様 後半2節）。
+        self.goal_cfg = self.config.get("goal")
+        self._goal_id = None          # いま的にしているカードの id
+        self._goal_until = -1.0       # この時刻まで同じ的を保つ［sim秒］
+        self._goal_repick = 0         # このコマで選び直したか（2＝的が死んだので）
         self._gaze_cmd_sent = 0
         self._fire_probe = []
         self._sal = None
@@ -639,6 +658,88 @@ class ObjectFiles(Plugin):
                 "n_reject_dedup": onset_extra.get("n_reject_dedup", ""),
             })
 
+    def _log_goal_terms(self, onset_extra, goal_info, goal_map, salience, attn_res):
+        """【2026-09-11・K1】的の升と勝った升で、各項がいくらだったかを残す。
+
+        これが無いと「効かなかった」の原因を分けられない（仕様 後半4節）。
+        山が小さいのか／復帰抑制に消されたのか／溜めが目立ちに埋もれたのか。
+        """
+        import numpy as np
+        cell = goal_map.shape[0]
+        ior = attn_res["ior"]
+        acc = getattr(self._spri, "acc", None)
+
+        def at(cx, cy, tag):
+            c = int(min(max(cx, 0), cell - 1))
+            r = int(min(max(cy, 0), cell - 1))
+            onset_extra["g_at_" + tag] = round(float(goal_map[r, c]), 4)
+            onset_extra["sal_at_" + tag] = round(float(np.asarray(salience)[r, c]), 4)
+            onset_extra["ior_at_" + tag] = round(float(np.asarray(ior)[r, c]), 4)
+            onset_extra["acc_at_" + tag] = ("" if acc is None
+                                             else round(float(np.asarray(acc)[r, c]), 4))
+
+        if goal_info.get("goal_cx") != "":
+            at(goal_info["goal_cx"], goal_info["goal_cy"], "goal")
+        wc, wr = attn_res["winner_cell"]
+        at(wc, wr, "win")
+
+    def _goal_map(self, t, cell):
+        """【2026-09-11・K1】上からの目的を cell×cell の地図にする。
+
+        的にするのは**見失い中のカード**＝生きているが直近の照合で対応が
+        つかなかったもの（`misses > 0`）。記憶だけが位置を知っている状態で、
+        画像をいくら照らしても見つからない＝記憶の項にしかできないこと。
+
+        位置はカードが自分で持っているので、**見た目の照合はしない**。
+        選んだカードの位置に山（ガウス）を1つ置くだけ。
+
+        注意：この関数は照合より**前**に走るので、`misses` は前コマまでの値。
+        それでよい（「直近の検出時点で見失っていた」が的の定義）。
+
+        Returns: (goal地図 or None, 記録用の辞書)
+        """
+        import numpy as np
+        info = {"goal_id": "", "goal_cx": "", "goal_cy": "", "goal_repick": 0}
+        if not self.goal_cfg:
+            return None, info
+        cfg = self.goal_cfg if isinstance(self.goal_cfg, dict) else {}
+        g = float(cfg.get("g", 1.0))              # 山の高さ（目立ちは0〜1）
+        sigma = float(cfg.get("sigma", 1.5))      # 山の広がり［升］
+        hold_s = float(cfg.get("hold_s", 3.0))    # 同じ的を保つ時間［秒］
+
+        # 見失い中のカード。id の若い順で固定する（乱数を使わない＝再現する）
+        cands = sorted([f for f in self.ofs.files if getattr(f, "misses", 0) > 0],
+                       key=lambda f: f.id)
+        if not cands:
+            self._goal_id = None
+            return None, info
+
+        alive = {f.id: f for f in self.ofs.files}
+        cur = alive.get(self._goal_id)
+        if self._goal_id is not None and cur is None:
+            self._goal_repick = 2          # 的が死んだ（lost）ので選び直す
+            self._goal_id = None
+        if (self._goal_id is None or cur is None
+                or getattr(cur, "misses", 0) <= 0 or t >= self._goal_until):
+            if self._goal_repick != 2:
+                self._goal_repick = 1
+            self._goal_id = cands[0].id
+            self._goal_until = t + hold_s
+        target = alive.get(self._goal_id)
+        if target is None:
+            return None, info
+
+        step = 224.0 / float(cell)
+        px, py = float(target.pos[0]), float(target.pos[1])
+        cx, cy = px / step, py / step
+        ys, xs = np.mgrid[0:cell, 0:cell]
+        gmap = g * np.exp(-(((xs + 0.5) - cx) ** 2 + ((ys + 0.5) - cy) ** 2)
+                          / (2.0 * sigma * sigma))
+        info = {"goal_id": target.id, "goal_cx": round(cx, 2),
+                "goal_cy": round(cy, 2), "goal_repick": self._goal_repick}
+        self._goal_repick = 0
+        return gmap.astype(np.float32), info
+
     def _detect_frame(self, ctx, img224, t, protect_id):
         """【2026-09-09・仕様_見る側_道を1本にする 後半1節】検出コマの処理
         1本（旧「確認」道・旧「切り出し」道を統合）。
@@ -671,7 +772,12 @@ class ObjectFiles(Plugin):
                         #   segment_at_pointsを通らないので空文字のまま（既定不変）。
                         "n_points_expect": "", "n_reject_scale": "",
                         "n_reject_edge": "", "n_reject_area": "",
-                        "n_reject_dedup": ""}
+                        "n_reject_dedup": "",
+                        # 【2026-09-11・K1】最初のコマは優先度地図を通らない
+                        "goal_id": "", "goal_cx": "", "goal_cy": "", "goal_repick": "",
+                        "g_at_goal": "", "sal_at_goal": "", "ior_at_goal": "",
+                        "acc_at_goal": "", "g_at_win": "", "sal_at_win": "",
+                        "ior_at_win": "", "acc_at_win": ""}
 
         # ---- 0. 遠心性コピー（無効ならshift=(0,0)・moving=False） --------------
         eff = getattr(ctx, "efference", None) or {}
@@ -743,8 +849,14 @@ class ObjectFiles(Plugin):
         attn_res = None
         if self._spri is not None:
             sal_res = self._sal.update(img224, shift_actual, moving)
+            # 【2026-09-11・K1】5段目。goal 未設定なら None のまま＝既定不変。
+            goal_map, goal_info = self._goal_map(t, self._spri.ior.shape[0])
             attn_res = self._spri.update(sal_res["salience"], shift_px=shift_pred,
-                                          dt=self.interval_s)
+                                          dt=self.interval_s, goal=goal_map)
+            onset_extra.update(goal_info)
+            if goal_map is not None:
+                self._log_goal_terms(onset_extra, goal_info, goal_map,
+                                      sal_res["salience"], attn_res)
             ctx.salience_map = sal_res["salience"]
             ctx.attention_point = attn_res["winner_px"]
             onset_extra["attn_x"] = round(attn_res["winner_px"][0], 1)

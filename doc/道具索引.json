@@ -1508,6 +1508,18 @@
   "last_commit": "2026-09-11"
  },
  {
+  "path": "F/scripts/f108_k1_goal_reach.py",
+  "doc": "K1の読み：探し物を教えたとき、太郎はそこへ届いたか。",
+  "defs": [
+   "_load",
+   "_per_frame",
+   "main"
+  ],
+  "lines": 193,
+  "goal": "F",
+  "last_commit": ""
+ },
+ {
   "path": "F/scripts/f14_direct_readout.py",
   "doc": "F1-4/F1-6 直接読み出しテスト（2026-08-21 初版 → 2026-08-22 改修）。",
   "defs": [
@@ -2897,7 +2909,7 @@
    "_abs_path",
    "ObjectFiles"
   ],
-  "lines": 1341,
+  "lines": 1453,
   "goal": "",
   "last_commit": "2026-09-11"
  },
