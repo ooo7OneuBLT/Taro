@@ -850,7 +850,7 @@ class ObjectFiles(Plugin):
         if self._spri is not None:
             sal_res = self._sal.update(img224, shift_actual, moving)
             # 【2026-09-11・K1】5段目。goal 未設定なら None のまま＝既定不変。
-            goal_map, goal_info = self._goal_map(t, self._spri.ior.shape[0])
+            goal_map, goal_info = self._goal_map(t, self._spri.cell)
             attn_res = self._spri.update(sal_res["salience"], shift_px=shift_pred,
                                           dt=self.interval_s, goal=goal_map)
             onset_extra.update(goal_info)
