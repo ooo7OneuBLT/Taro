@@ -35,6 +35,7 @@ _CORE_BRAIN = _os.path.abspath(_os.path.join(
 if _CORE_BRAIN not in _sys.path:
     _sys.path.insert(0, _CORE_BRAIN)
 from spinal_cord.cpg import write_joint_command as _write_joint_command
+from spinal_cord.cpg import read_joint_command as _read_joint_command
 
 # 網膜の中心-周辺抑制（背景の流れと対象の動きを分ける）
 _CORE_SENSES = _os.path.abspath(_os.path.join(
@@ -979,6 +980,29 @@ class OrientingReflexV2:
         r = float(self.data.qpos[self.eye_qadr["h_right"][0]])
         return float(np.degrees(l - r) / 2.0)
 
+    def _incoming_eye_h(self, action):
+        """apply() に渡ってきた時点の水平の眼球指令（＝VOR が書いたぶん）。
+
+        【2026-09-11・直し】最初 `(action[left] - action[right]) / 2` と書いたが
+        **誤り**。筋モデル（拮抗筋形式）では `action[i]` は負方向筋の収縮度[0,1]で、
+        符号つきの指令ではない（符号つきは `action[i+n] - action[i]`）。
+        そのため測った値は必ず ±0.5 に収まり、実測でも最大がぴったり 0.500 だった。
+        `read_joint_command` が**まさにこの用途で既に用意されていた**ので、それを使う。
+        左右で回転軸が逆なので、_version_h_deg と同じ流儀で差の半分を取る。
+        読むだけ。action は書き換えない（測定専用）。
+        """
+        try:
+            li = self.eye_idx.get("h_left") or []
+            ri = self.eye_idx.get("h_right") or []
+            if not li or not ri:
+                return 0.0
+            l = _read_joint_command(action, li[0], self.n_actuator, co_activation=0.0)
+            r = _read_joint_command(action, ri[0], self.n_actuator, co_activation=0.0)
+            # _write_eye_h は左に +c、右に -c を書く（回転軸が逆）。その逆写像。
+            return (float(l) - float(r)) / 2.0
+        except Exception:
+            return 0.0
+
     def _version_h_vel_deg(self):
         """水平の共同運動の角速度[度/秒]。_version_h_deg と同じ理由で差の半分。"""
         if (self.data is None or not self.eye_dadr.get("h_left")
@@ -1021,7 +1045,15 @@ class OrientingReflexV2:
                 round(float(HOLD_FB_GAIN * (self._tgt.get("eye_h", 0.0)
                                              - self._version_h_deg())), 4),
                 round(float(-HOLD_DAMP_GAIN * self._version_h_vel_deg()), 4),
-                round(float(HOLD_I_GAIN * self._hold_i_h), 4)))
+                round(float(HOLD_I_GAIN * self._hold_i_h), 4),
+                # 【2026-09-11・測定】この時点で action に既に入っている水平の
+                #   眼球指令＝**VOR が書いたぶん**。定位反射は additive=True で
+                #   これに足し算するので、眼球には両方の合計がかかる
+                #   （E/scripts/e_toy_env.py の step 順：VOR → 定位 → 輻輳）。
+                #   保持中に目が目標から中央値3.98度も振れる理由として、VOR は
+                #   今日まで一度も調べていない（輻輳とバネはアブレーション済み）。
+                #   記録専用。挙動は1ビットも変えない。
+                round(float(self._incoming_eye_h(action)), 4)))
         """action に階段状サッケードを加算して返す（ステップ4）。
 
         2026-07-27：1発の大きさを「位置の指令」にした。
