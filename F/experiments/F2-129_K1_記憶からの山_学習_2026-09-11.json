@@ -144,7 +144,9 @@
     "view_video": {
       "out": "F/logs/F2-129_K1_記憶からの山/動画_視界.mp4",
       "until": 0,
-      "third_person": true
+      "third_person": true,
+      "third_track": true,
+      "overlay": true
     }
   },
   "expect": {

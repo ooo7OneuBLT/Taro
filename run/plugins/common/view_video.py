@@ -40,6 +40,12 @@ class ViewVideo(Plugin):
         self.out = c.get("out") or "F/logs/view_video.mp4"
         self.until = int(c.get("until", 0) or 0)
         self.third = bool(c.get("third_person", True))
+        # 【2026-09-11】第三者視点を「頭と対象物が両方入る」画角にする。既定False＝従来不変。
+        self.third_track = bool(c.get("third_track", False))
+        # 【2026-09-11】目の映像に、上からの目的（赤○）と注意の行き先（水色＋）を
+        #   重ねる。K1 のとき「動画にはK1が写っていない」とユーザーに指摘された
+        #   （目的も注意も描いていなかったので、見えるはずがなかった）。既定False。
+        self.overlay = bool(c.get("overlay", False))
         self.eye = "eye_left" if str(c.get("eye", "left")).startswith("l") else "eye_right"
         dt = float(getattr(ctx, "dt", 0.1) or 0.1)
         self.fps = int(c.get("fps", 0) or 0) or max(1, int(round(1.0 / dt)))
@@ -68,10 +74,28 @@ class ViewVideo(Plugin):
         u = ctx.env.unwrapped
         d = u.data
         look = d.xpos[self._head] if self._head >= 0 else d.qpos[:3]
-        self.cam.lookat[:] = [look[0] + 0.15, look[1], look[2] - 0.05]
-        self.cam.distance = 1.1
-        self.cam.azimuth = 150
-        self.cam.elevation = -12
+        # 【2026-09-11・ユーザー指示「第三者視点は太郎の顔と対象物が映るように」】
+        #   third_track=True（既定False＝従来と1ビットも変わらない）なら、
+        #   固定の画角をやめて「頭と対象物の**中点**」を狙い、2つの距離に合わせて
+        #   引く。見る方向も、頭→物の線に**直交**する側から見る（そうしないと
+        #   物が頭の真後ろに隠れる）。対象物の位置は親が物を持つ場所（_rest_pos）。
+        toy = getattr(u, "_rest_pos", None) if self.third_track else None
+        if toy is not None:
+            import math
+            head = np.asarray(look, dtype=float)
+            toy = np.asarray(toy, dtype=float)
+            mid = (head + toy) / 2.0
+            sep = float(np.linalg.norm(head - toy))
+            self.cam.lookat[:] = mid
+            self.cam.distance = max(0.55, sep * 2.4)
+            self.cam.azimuth = math.degrees(math.atan2(toy[1] - head[1],
+                                                        toy[0] - head[0])) + 90.0
+            self.cam.elevation = -12
+        else:
+            self.cam.lookat[:] = [look[0] + 0.15, look[1], look[2] - 0.05]
+            self.cam.distance = 1.1
+            self.cam.azimuth = 150
+            self.cam.elevation = -12
         self.ren.update_scene(d, camera=self.cam)
         return self.ren.render().copy()
 
@@ -122,6 +146,20 @@ class ViewVideo(Plugin):
             x_eye = 560
         canvas.paste(Image.fromarray(eye).resize((E, E), Image.NEAREST), (x_eye, 0))
         dr = ImageDraw.Draw(canvas)
+        # 【2026-09-11】目的（赤○）と注意の行き先（水色＋）を目の映像に重ねる。
+        #   どちらも 224px 系の座標で置かれているので、表示の大きさへ拡大する。
+        if self.overlay:
+            k = E / float(eye.shape[0])
+            g = getattr(ctx, "goal_point", None)
+            if g is not None:
+                gx, gy = x_eye + g[0] * k, g[1] * k
+                dr.ellipse([gx - 26, gy - 26, gx + 26, gy + 26], outline=(255, 70, 70), width=4)
+                dr.text((gx + 30, gy - 10), "探し物", fill=(255, 110, 110), font=self.font_s)
+            a = getattr(ctx, "attention_point", None)
+            if a is not None:
+                ax, ay = x_eye + a[0] * k, a[1] * k
+                dr.line([ax - 18, ay, ax + 18, ay], fill=(0, 230, 255), width=4)
+                dr.line([ax, ay - 18, ax, ay + 18], fill=(0, 230, 255), width=4)
         if self.third:
             dr.text((6, 4), "第三者視点", fill=(255, 255, 255), font=self.font_s)
         dr.text((x_eye + 6, 4), "太郎の%s目の実入力 %dpx" % ("左" if self.eye == "eye_left" else "右", eye.shape[0]),

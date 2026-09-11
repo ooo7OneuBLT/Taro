@@ -875,6 +875,12 @@ class ObjectFiles(Plugin):
             attn_res = self._spri.update(sal_res["salience"], shift_px=shift_pred,
                                           dt=self.interval_s, goal=goal_map)
             onset_extra.update(goal_info)
+            # 【2026-09-11】目的の場所を画素で外へ出す（view_video が重ねて描く）。
+            #   目的が無いコマは None にして、前のコマの印が残らないようにする。
+            _step_px = 224.0 / float(self._spri.cell)
+            ctx.goal_point = (None if goal_info.get("goal_cx") == "" else
+                              (goal_info["goal_cx"] * _step_px,
+                               goal_info["goal_cy"] * _step_px))
             if goal_map is not None:
                 self._log_goal_terms(onset_extra, goal_info, goal_map,
                                       sal_res["salience"], attn_res)
