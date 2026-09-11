@@ -382,10 +382,55 @@ USE_HOLD = _os.environ.get("E_ORIENT_HOLD", "0") == "1"
 #     0.25×0.02          平均0.19度 最大0.98度
 #     0.25×0.05          平均1.59度 最大3.92度（強すぎて悪化）
 #     0.10×0.02          平均0.14度 最大0.82度 ← 採用（最小）
+#
+#   【2026-09-11・この較正表は検証できない】出どころの f13_hold_gain_sweep.py は
+#     作業ツリーにも git 履歴にも**存在しない**（`git log --all --diff-filter=A` で0件）。
+#     さらに測った時期（2026-08-19）は、定位反射がシミュレーションの複製を握って
+#     いた期間（2026-07-30 `acb329b` 〜 2026-09-10 `69651bb`）の中にある。この期間、
+#     反射が読む眼球角度は全コマ 0.0000 度だった。よってこの表の数値、とくに
+#     「0.25×0.05 は強すぎて悪化」「P>0.10 で振動」は**根拠として使えない**。
+#     制動を 0.02 より**上げる**方向は、直った系では一度も試していない。
 HOLD_FB_GAIN = float(_os.environ.get("E_HOLD_GAIN", "0.10"))
 # 角速度に比例する制動項（PDのD項）。[Tier3・ARBITRARY] 工学的な安定化であり、
 #   神経系のdamping機構そのものの模倣ではない。値の根拠は上のHOLD_FB_GAINと同じ実測。
 HOLD_DAMP_GAIN = float(_os.environ.get("E_HOLD_DAMP", "0.02"))
+# 【2026-09-11】積み上げの項（PIDのI項）。人間の保持は脳幹の**神経積分器**が作る
+#   （F/docs/二語文/文献調査/2026-09-11_サッケード後の保持_人間側.md）。名前のとおり
+#   積分なので、ずれが残っている限り力が増え続け、最後はずれが 0 になる。
+#
+# 【なぜ足したか・実測（F2-116pre、600歩）】位置と制動の2項だけでは、
+#   保持は**ブレーキとしてしか働いていなかった**：
+#     ・撃っていない間の動きは 9391度 → 2054度 に減った（制動は効いている）
+#     ・しかし「残りと次の動きの相関 −0.033」「残りが＋のとき次に＋へ動く割合 45%」
+#       ＝ずれを詰める方向には**まったく動いていない**（偶然と同じ）
+#     ・目標との残りが 2.1 度で頭打ちになり、時間をかけても縮まらない
+#   典型値での大きさを比べると、位置の項 0.10×2度＝0.20 に対し
+#   制動の項 0.02×26度/秒＝0.52 で、**制動が 2.6 倍**だった。
+#
+# 【7月の較正となぜ食い違ったか】7月は目標を固定して2秒間で測り、残り0.14度だった。
+#   今は目標が 0.25 秒ごとに変わるため、届く前に次の命令が来る。
+#   **較正した条件と、使っている条件が違っていた。**
+#
+# 注意：[Tier3・ARBITRARY] 積み上げの強さと上限に文献値は無い。人間の神経積分器の
+#   時定数は文献間で幅が大きい（10〜70秒）。ここでは「0.25秒の間に残り2度を詰める」
+#   という太郎側の要求から出発して実測で選ぶ。E_HOLD_I=0 で切れる（アブレーション用）。
+#
+# 【2026-09-11・既定を 0.5 → 0.0 に戻した。実測で効果が無かったため】
+#   F2-117pre で 0.2 / 0.5 / 1.0 の3段階を振ったが、目標との残りは
+#   2.01 / 2.29 / 2.01 度で**変化しなかった**。保持の指令に占める割合も
+#   中央値 7%（制動 64%・位置 29%）で、実質的に仕事をしていない。
+#   効かない項を既定ONのまま残すと、以後の実験の土台が汚れるので既定OFFにする。
+#   コードと E_HOLD_I は残すので、いつでも戻せる（E_HOLD_I=0.5）。
+#
+#   なぜ効かなかったか（2026-09-11に判明）：残り2.4度の主因は積分で詰められる
+#   定常のずれではなく、**発射時にすでに乗っている勢い**だった。
+#   「勢いが50msで運ぶ距離 ÷ 命令の大きさ」で並べると、命令どおりの向きに
+#   動いた割合は 92% → 90% → 74% → 72% → 54% → 25% と単調に落ちる（379発）。
+#   詳細：F/logs/_机上/保持の残り_原因の切り分け_2026-09-11.md
+HOLD_I_GAIN = float(_os.environ.get("E_HOLD_I", "0.0"))
+# 積み上げの上限（暴走止め）。筋の指令は [-1,1] なので、その範囲を超えて
+#   溜め込んでも意味が無い。[Tier3・ARBITRARY]
+HOLD_I_LIMIT = float(_os.environ.get("E_HOLD_I_LIMIT", "1.0"))
 # 「目標が視野内にある限り」の近似：動き検出が最近 SACCADE_MIN_STRENGTH 以上の
 #   信号を出したか（＝対象が実際に動いて見えているか）で判定する。
 #   本物の「視野内にあるか」（対象位置と眼球可動域・カメラ画角からの幾何判定）は
@@ -697,6 +742,10 @@ class OrientingReflexV2:
         #   どんな形で起きているかを見るため（0.1秒ごとの記録では 0.04秒の
         #   サッケードと 0.22秒の間を分けられない）。走行の挙動には使わない。
         self.angle_trace = []
+        # 【2026-09-11】保持の積み上げ（I項）。サッケードを撃つたびに 0 に戻す
+        #   （目標が変わるので、前の目標ぶんの溜めを持ち越さない）。
+        self._hold_i_h = 0.0
+        self._hold_i_v = 0.0
         self.own_fired = 0        # 記録用：自前で見つけて撃った回数
         self._sacc_end_t = -1e9      # サッケードが終わった時刻（抑制の起点）
         self._sacc_h = 0.0           # 今のサッケードの方向（撃った瞬間に固定）
@@ -820,6 +869,8 @@ class OrientingReflexV2:
         self._chain_count = 0
         self._chain_wait = 0.0
         self._hold_last_seen_t = -1e9
+        self._hold_i_h = 0.0
+        self._hold_i_v = 0.0
         self.n_saccades = 0
         # F1-4b：認識信号もreset()でクリアする（前の走行・エピソードの値を持ち越さない）。
         self._recognition = 0.0
@@ -963,7 +1014,14 @@ class OrientingReflexV2:
                 round(float(self._version_h_deg()), 4),
                 round(float(self._angle_deg(self.eye_qadr["v"])), 4),
                 1 if self._sacc_remaining > 0.0 else 0,
-                round(float(self._tgt.get("eye_h", 0.0)), 3)))
+                round(float(self._tgt.get("eye_h", 0.0)), 3),
+                # 【2026-09-11・測定】保持の内訳（水平）。積み上げが本当に
+                #   仕事をしているかを見る。溜め・位置の項・制動の項・合計。
+                round(float(self._hold_i_h), 4),
+                round(float(HOLD_FB_GAIN * (self._tgt.get("eye_h", 0.0)
+                                             - self._version_h_deg())), 4),
+                round(float(-HOLD_DAMP_GAIN * self._version_h_vel_deg()), 4),
+                round(float(HOLD_I_GAIN * self._hold_i_h), 4)))
         """action に階段状サッケードを加算して返す（ステップ4）。
 
         2026-07-27：1発の大きさを「位置の指令」にした。
@@ -1091,6 +1149,8 @@ class OrientingReflexV2:
             _v0 = self._angle_deg(self.eye_qadr["v"])
             self._tgt["eye_h"] = _h0 + EYE_SHARE * dh
             self._tgt["eye_v"] = _v0 + EYE_SHARE * dv
+            self._hold_i_h = 0.0
+            self._hold_i_v = 0.0
             if len(self.sacc_log) < 400:
                 self._sacc_rec = {"t": float(self._t), "h0": float(_h0), "v0": float(_v0),
                                    "tgt_h": float(self._tgt["eye_h"]),
@@ -1492,8 +1552,19 @@ class OrientingReflexV2:
         ev = self._tgt["eye_v"] - self._angle_deg(self.eye_qadr["v"])
         vh = self._version_h_vel_deg()
         vv = self._angle_vel_deg(self.eye_dadr["v"])
-        cmd_h = HOLD_FB_GAIN * eh - HOLD_DAMP_GAIN * vh
-        cmd_v = HOLD_FB_GAIN * ev - HOLD_DAMP_GAIN * vv
+        # 【2026-09-11】積み上げの項。ずれが残っている限り溜まり続けるので、
+        #   位置と制動の釣り合いで残っていた 2.1 度の残りが 0 へ向かう。
+        #   撃った瞬間に 0 に戻す（目標が変わるため）。HOLD_I_GAIN=0 で従来どおり。
+        if HOLD_I_GAIN > 0.0:
+            dt_i = self.dt
+            self._hold_i_h = float(np.clip(self._hold_i_h + eh * dt_i,
+                                            -HOLD_I_LIMIT, HOLD_I_LIMIT))
+            self._hold_i_v = float(np.clip(self._hold_i_v + ev * dt_i,
+                                            -HOLD_I_LIMIT, HOLD_I_LIMIT))
+        cmd_h = (HOLD_FB_GAIN * eh - HOLD_DAMP_GAIN * vh
+                 + HOLD_I_GAIN * self._hold_i_h)
+        cmd_v = (HOLD_FB_GAIN * ev - HOLD_DAMP_GAIN * vv
+                 + HOLD_I_GAIN * self._hold_i_v)
         self._write_eye_h(out, cmd_h)
         for i in self.eye_idx["v"]:
             _write_joint_command(out, i, float(np.clip(cmd_v, -1, 1)),

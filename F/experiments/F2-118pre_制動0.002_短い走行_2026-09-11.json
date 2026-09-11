@@ -1,0 +1,144 @@
+{
+  "name": "F2-118pre_制動0.002",
+  "note": "保持の制動を 0.002 に弱めた効果（積み上げは0.5のまま）。基準 F2-117pre_積み上げ0.5：制動0.02／残り2.29度／相関0.03／撃っていない間2296度／眼球の反転501回／席の見失い49.6%／照合211。他は全て同じ・種91・600歩。",
+  "scene": "座位_12ヶ月_F2-49_実物8択_r1_個体1_消失発話_気づき待ち_3語黙る_2026-09-06_背景あり_2026-09-10",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 12.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32,
+      "eye": "left",
+      "source": "wide"
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.0,
+    "model": "F/models/F2-84_r2_seed98_2026-09-07.pt",
+    "save": "F/logs/F2-118pre_制動0.002/model.pt",
+    "produce": {
+      "mode": "word",
+      "threshold": 0.5,
+      "cooldown_sec": 2.0,
+      "max_length": 8,
+      "develop_from_age": true,
+      "vocal_tract_decoupled": true,
+      "context": true,
+      "listen_learn": true,
+      "context_lambda": 0.0,
+      "vision_context": true,
+      "listen_lr": 0.001,
+      "hippocampus": {
+        "capacity": 512,
+        "decay": 0.5,
+        "replay_passes": 10,
+        "recent_ratio": 0.7,
+        "sleep_lr": 0.005
+      },
+      "word_choice": "gru_hippo",
+      "hippo_gain": 1.0,
+      "listen_self": false,
+      "listen_eos": true,
+      "segment_mode": "end_prob",
+      "vanish_input": true,
+      "here_input": true,
+      "chunk_level": true,
+      "message_level": true
+    },
+    "world_predictor": {
+      "ports": true,
+      "h_port": 64,
+      "h_slow": 32,
+      "summary_dim": 32,
+      "tau_fast": 5,
+      "tau_slow": 40,
+      "lr": 0.001,
+      "max_files": 4,
+      "min_hits": 2,
+      "appearance_freeze": true,
+      "block_norm": true,
+      "ne_surprise_rate": 0.0,
+      "slow_window": 40,
+      "grad_check_step": 300,
+      "leaky_fast": false,
+      "vec_proj_dim": 32,
+      "loss_balance": true,
+      "baseline_init": "shared",
+      "switch_refractory_s": 0.4
+    }
+  },
+  "run": {
+    "type": "train",
+    "steps": 600,
+    "seed": 91,
+    "K": 10,
+    "checkpoint": 100,
+    "csv": "F/logs/F2-118pre_制動0.002/run.csv"
+  },
+  "plugins": {
+    "word_production": {
+      "events_out": "F/logs/F2-118pre_制動0.002/太郎の発話.csv"
+    },
+    "word_learning": {
+      "events_out": "F/logs/F2-118pre_制動0.002/発話イベント.csv"
+    },
+    "object_files": {
+      "events_out": "F/logs/F2-118pre_制動0.002/物体ファイル.csv",
+      "points_per_side": 16,
+      "points_per_batch": 16,
+      "empty_cache_after_detect": true,
+      "frames_out": "F/logs/F2-118pre_制動0.002/検出フレーム",
+      "interval_s": 0.2,
+      "attend": true,
+      "attend_out": "F/logs/F2-118pre_制動0.002/注意.csv",
+      "vanish_misses": 5,
+      "attend_surprise_gain": 0.0,
+      "cohesion_gap_px": 4,
+      "revive_window_s": 30,
+      "revive_cos": 0.5,
+      "revive_dist_px": 40,
+      "max_files": 4,
+      "max_missed": 50,
+      "coast_max_s": 1.0,
+      "uncertainty_penalty": 1.0,
+      "exclusive_dist_px": 20,
+      "exclusive_cos": 0.4,
+      "exclusive_scale_by_size": true,
+      "coast_min_speed_px_s": 30,
+      "pos_gate": "size",
+      "appearance_gate_cos": 0.4,
+      "efference_copy": {
+        "sign_h": 1,
+        "sign_v": 1,
+        "moving_extra_ticks": 1
+      },
+      "preattentive": {
+        "diff_thresh": 20,
+        "min_blob_area_px": 30,
+        "max_blobs": 8
+      },
+      "vanish_budget": {
+        "abrupt_frames": 5,
+        "occluded_frames": 50,
+        "look_back": 4
+      },
+      "attention": {
+        "cell": 28,
+        "ior_tau_s": 0.7,
+        "ior_gain": 1.0,
+        "acc_tau_s": 0.11,
+        "dog_iters": 10
+      },
+      "gaze_from_attention": true
+    },
+    "world_predictor_log": {
+      "events_out": "F/logs/F2-118pre_制動0.002/世界の予測器.csv"
+    },
+    "view_video": {
+      "out": "F/logs/F2-118pre_制動0.002/動画_視界.mp4",
+      "until": 600
+    }
+  }
+}
