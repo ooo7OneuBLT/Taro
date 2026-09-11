@@ -87,8 +87,18 @@ class SpatialPriorityMap:
         elif cy < 0:
             self.ior[cy:, :] = 0.0
         if self.last_winner is not None:
-            c, r = self.last_winner
-            self.last_winner = (c + cx, r + cy)
+            c, r = self.last_winner[0] + cx, self.last_winner[1] + cy
+            # 【2026-09-11・直し】ここだけ範囲を見ていなかった（地図は上で帯を0に戻し、
+            #   `_bump` は clip している）。覚えている勝者が 0〜cell-1 の外へ出ると、
+            #   `winner_px` が画像の外を指し、`gaze_from_attention` がその外へ目を
+            #   向ける命令を出す。さらに `_v[_wr, _wc]` は +側で落ち、−側では numpy が
+            #   末尾に回り込んで黙って別の升を読む（F2-126 が3分で IndexError）。
+            #   丸めると注意が端に貼り付くので、**上の帯と同じ扱い＝「知らない場所」**
+            #   にして覚えるのをやめ、次のコマで選び直させる。
+            #   選び直す側に入ると溜めが大域リセットされ抑制がかかり、`switched` も
+            #   True になる（視野外への脱落が切り替えに数えられる。解析時は注意）。
+            self.last_winner = ((c, r) if 0 <= c < self.cell and 0 <= r < self.cell
+                                else None)
 
     def _remap_acc(self, shift_px):
         """溜めの層も、目が動いた分だけずらす（抑制と同じ理由）。"""

@@ -1,0 +1,144 @@
+{
+  "name": "F2-126_注意の作り直しを揃えた条件で",
+  "note": "【比較の範囲】これは『現行の系（2026-09-11）』対『F2-106 の系（2026-09-09）』であって、『注意の作り直し』だけの比較ではない。間に、消え方で持ち時間（F2-109pre）・注意の作り直し1〜4段目（09-10）・保持の無条件化・VOR抑制・SACC_MIN_ON_S が全部入っている。良くても悪くても注意だけに帰属させないこと。\n【1回目は3分で落ちた】2026-09-11。注意の作り直し（09-10）に最初からあったバグ＝spatial_priority_map._remap() が、覚えている勝者の升を目のずれでずらすときに0〜27 の範囲を見ていなかった。注意の行き先が画像の外を指し、_v[_wr,_wc] が落ちた（−側は numpy が回り込んで黙って別の升を読んでいた）。範囲外なら選び直す形に直した（机上確認 5/5、F/logs/_机上/注意の勝者が視野外へ出る_机上確認_2026-09-11.txt）。この修正も比較の差に入る。\n【条件】F2-106／F2-107 と揃えた：4000歩・種91・背景の壁なしの場面・同じ出発モデル F2-84_r2_seed98。場面ファイルの差分は backdrop の7件のみで、orienting_version=2／orienting_hold=true／vergence=true／hold_deg=20.0 は両方同じ（確認済み）。環境変数 E_* は未設定＝コード既定（VOR抑制ON・SACC_MIN_ON=0.02・SUM_BEFORE_MUSCLE=0）。\n【走行後に必ず両方出す計器】注意.csv の visible を\n  (a) 注意ありのコマで平均 … F2-106=54.0%／F2-107=51.7%／F2-111pre=67.5%(600歩)\n  (b) 全コマで平均（注意なしを0と数える） … 旧設計は attended_id が全コマ非空なので (a)=(b)。\n      新設計は場所に注意が向くため注意なしコマが出る（壁なしで21〜24%）。(a) だけ見ると      注意しなかったコマが分母から外れて有利になる。(b) を見ないと区別できない。\n【使ってはいけない値】日誌 2026-09-09 の表の『注意した物が見えていた率 83.5%／65.8%』は分母が『直前に見えていたカード』の別指標。検算すると F2-106 側は 84.0% で一致するが、F2-107 側は 80.1% で日誌の 65.8% と合わない。再現できないので比較に使わない。",
+  "scene": "座位_12ヶ月_F2-49_実物8択_r1_個体1_消失発話_気づき待ち_3語黙る_2026-09-06",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 12.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32,
+      "eye": "left",
+      "source": "wide"
+    },
+    "lexicon_mode": "contrast",
+    "lexicon_eta_pull": 0.05,
+    "lexicon_eta_push": 0.0,
+    "model": "F/models/F2-84_r2_seed98_2026-09-07.pt",
+    "save": "F/models/F2-126_注意の作り直しを揃えた条件で_2026-09-11.pt",
+    "produce": {
+      "mode": "word",
+      "threshold": 0.5,
+      "cooldown_sec": 2.0,
+      "max_length": 8,
+      "develop_from_age": true,
+      "vocal_tract_decoupled": true,
+      "context": true,
+      "listen_learn": true,
+      "context_lambda": 0.0,
+      "vision_context": true,
+      "listen_lr": 0.001,
+      "hippocampus": {
+        "capacity": 512,
+        "decay": 0.5,
+        "replay_passes": 10,
+        "recent_ratio": 0.7,
+        "sleep_lr": 0.005
+      },
+      "word_choice": "gru_hippo",
+      "hippo_gain": 1.0,
+      "listen_self": false,
+      "listen_eos": true,
+      "segment_mode": "end_prob",
+      "vanish_input": true,
+      "here_input": true,
+      "chunk_level": true,
+      "message_level": true
+    },
+    "world_predictor": {
+      "ports": true,
+      "h_port": 64,
+      "h_slow": 32,
+      "summary_dim": 32,
+      "tau_fast": 5,
+      "tau_slow": 40,
+      "lr": 0.001,
+      "max_files": 4,
+      "min_hits": 2,
+      "appearance_freeze": true,
+      "block_norm": true,
+      "ne_surprise_rate": 0.0,
+      "slow_window": 40,
+      "grad_check_step": 300,
+      "leaky_fast": false,
+      "vec_proj_dim": 32,
+      "loss_balance": true,
+      "baseline_init": "shared",
+      "switch_refractory_s": 0.4
+    }
+  },
+  "run": {
+    "type": "train",
+    "steps": 4000,
+    "seed": 91,
+    "K": 10,
+    "checkpoint": 100,
+    "csv": "F/logs/F2-126_注意の作り直しを揃えた条件で/run.csv"
+  },
+  "plugins": {
+    "word_production": {
+      "events_out": "F/logs/F2-126_注意の作り直しを揃えた条件で/太郎の発話.csv"
+    },
+    "word_learning": {
+      "events_out": "F/logs/F2-126_注意の作り直しを揃えた条件で/発話イベント.csv"
+    },
+    "object_files": {
+      "events_out": "F/logs/F2-126_注意の作り直しを揃えた条件で/物体ファイル.csv",
+      "points_per_side": 16,
+      "points_per_batch": 16,
+      "empty_cache_after_detect": true,
+      "frames_out": "F/logs/F2-126_注意の作り直しを揃えた条件で/検出フレーム",
+      "interval_s": 0.2,
+      "attend": true,
+      "attend_out": "F/logs/F2-126_注意の作り直しを揃えた条件で/注意.csv",
+      "vanish_misses": 5,
+      "attend_surprise_gain": 0.0,
+      "cohesion_gap_px": 4,
+      "revive_window_s": 30,
+      "revive_cos": 0.5,
+      "revive_dist_px": 40,
+      "max_files": 4,
+      "max_missed": 50,
+      "coast_max_s": 1.0,
+      "uncertainty_penalty": 1.0,
+      "exclusive_dist_px": 20,
+      "exclusive_cos": 0.4,
+      "exclusive_scale_by_size": true,
+      "coast_min_speed_px_s": 30,
+      "pos_gate": "size",
+      "appearance_gate_cos": 0.4,
+      "efference_copy": {
+        "sign_h": 1,
+        "sign_v": 1,
+        "moving_extra_ticks": 1
+      },
+      "preattentive": {
+        "diff_thresh": 20,
+        "min_blob_area_px": 30,
+        "max_blobs": 8
+      },
+      "vanish_budget": {
+        "abrupt_frames": 5,
+        "occluded_frames": 50,
+        "look_back": 4
+      },
+      "attention": {
+        "cell": 28,
+        "ior_tau_s": 0.7,
+        "ior_gain": 1.0,
+        "acc_tau_s": 0.11,
+        "dog_iters": 10
+      },
+      "gaze_from_attention": true
+    },
+    "world_predictor_log": {
+      "events_out": "F/logs/F2-126_注意の作り直しを揃えた条件で/世界の予測器.csv"
+    },
+    "view_video": {
+      "out": "F/logs/F2-126_注意の作り直しを揃えた条件で/動画_視界.mp4",
+      "until": 600
+    }
+  }
+}
