@@ -188,10 +188,31 @@ class VOR:
         """頭部の角速度（ワールド基準）。cvelは[角速度3, 線速度3]の順。"""
         return np.array(data.cvel[self.head_bid][:3], dtype=float)
 
-    def override(self, action, model, data, dt):
-        """方策の行動から眼球ぶんを取り除き、VORの指令に差し替えて返す。"""
+    def override(self, action, model, data, dt, suppress=1.0):
+        """方策の行動から眼球ぶんを取り除き、VORの指令に差し替えて返す。
+
+        Args:
+            suppress: VORの出力に掛ける係数。1.0でそのまま（従来）、0.0で完全に止める。
+                サッケードの最中だけ下げるために使う。
+
+        【なぜ・2026-09-11】人間ではVORは**サッケード開始時に利得が下がり、
+          終了前に元に戻る**（能動的な抑制であって単純加算ではない。
+          Daye, Roberts, Zee & Optican 2015, J Neurosci【原文確認】）。
+          太郎にはこれが無く、サッケード中もVORが同じ強さで働き続けていた。
+          実測（F2-122pre・190発）：サッケード中のVORの指令とサッケードの指令を
+          比べると、**1度未満の命令では90%の発でVORの方が大きい**
+          （VOR 0.77 対 サッケード 0.24）。命令が4度以上だとVORが勝つのは0%。
+          これは向きの一致率と完全に対応する（1度未満0%・1〜2度78%・
+          2〜4度86%・4〜8度100%・8度以上97%）。
+          ＝**小さいサッケードがVORに埋もれていた。**
+          調査：F/docs/二語文/文献調査/2026-09-11_VORとサッケードの合成_人間側.md
+        """
         if not self.units:
             return action
+        # 抑制が 0 でも**早期 return してはいけない**。override の役目は
+        #   「方策（皮質）の眼球出力を捨てる」ことなので、抜けると方策の生の
+        #   眼球指令が残ってしまう。0 を書き込む形で下のループを通す。
+        suppress = float(suppress)
         out = np.array(action, dtype=float).copy()
         w_world = self._head_omega_world(data)
 
@@ -242,7 +263,7 @@ class VOR:
             #
             # 注意：これでVORの利得が変わるので、gain の較正はやり直しが要る。
             #   （人間でもVORの利得較正は小脳が担う別の仕組み）
-            torque_ratio = self.kv * w_des
+            torque_ratio = self.kv * w_des * suppress
             # 可動域の端では戻す向きにだけ力を出す（端に押し付け続けない）
             ang = float(data.qpos[u["qposadr"]])
             if ang >= u["jhi"] and torque_ratio > 0:

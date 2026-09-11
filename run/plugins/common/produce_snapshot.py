@@ -16,8 +16,11 @@
     ctx.taro.vision_backend     … 視覚の特徴を取り出す器（既に生成済みのものを借りる）
 
 【出すもの】
-  ① 発話ごとの中心窩画像PNG … 何と言ったか・確信度・通し番号をファイル名に入れる
+  ① 発話ごとの「脳に渡した画像」PNG … 何と言ったか・確信度・通し番号をファイル名に入れる
      例: 0007_りんご_sim0.267.png
+     lexicon_vision.source="wide" なら周辺60度まるごと（無クロップ・元の画素のまま）、
+     中心窩カメラありなら中心窩15度、それ以外は周辺から fovea_px で中央切り出し
+     （trainer._vision_backend_encode と同じ選び方・2026-09-05修正）。
   ② 発話ごとの視覚ベクトル … npz（散布図を描くため。keyは画像と同じ通し番号）
 
   実験ファイルでの書き方:
@@ -68,6 +71,26 @@ class ProduceSnapshot(Plugin):
             import matplotlib.pyplot as plt
             self._imwrite = plt
 
+    @staticmethod
+    def _is_wide_source(ctx, taro):
+        """lexicon_vision.source == "wide" か（trainer._vision_backend_encode と同じ判定）。
+
+        取り方も trainer に倣う：`taro.cfg.lexicon_vision`（trainer の self.cfg と
+        同一の Config オブジェクト）。cfg が無い／属性が無いときは実験ファイルの
+        taro 欄（ctx.spec["taro"]["lexicon_vision"]）から読む。どちらにも無ければ False
+        ＝従来どおり（fovea 経路の挙動は1ビットも変わらない）。
+        """
+        lv = None
+        cfg = getattr(taro, "cfg", None) if taro is not None else None
+        if cfg is not None:
+            lv = getattr(cfg, "lexicon_vision", None)
+        if lv is None:
+            spec = getattr(ctx, "spec", None)
+            if isinstance(spec, dict):
+                lv = (spec.get("taro") or {}).get("lexicon_vision")
+        lv = lv or {}
+        return (lv.get("source") == "wide") if isinstance(lv, dict) else False
+
     def on_step(self, ctx):
         ev = getattr(ctx, "last_produce", None)
         if not ev:
@@ -85,15 +108,32 @@ class ProduceSnapshot(Plugin):
         sim = float(ev.get("sim", 0.0))
 
         # ① DINOv2 が実際に受け取る画像を、trainer._vision_backend_encode と
-        #    まったく同じ選び方で取る（2026-08-28訂正）。
+        #    まったく同じ選び方で取る（2026-08-28訂正、2026-09-05再訂正）。
         #    中心窩カメラ（eye_left_fovea・視野15度）があればそれを**切り出さずに**
         #    そのまま渡すのが本体の挙動。周辺カメラ(eye_left)から32px切り出すのは
         #    fovea_camera=False のシーンだけ。ここを取り違えると、見せる絵が
         #    「太郎が実際に見ているもの」でなくなる。
-        has_fovea = "eye_left_fovea" in obs and "eye_right_fovea" in obs
+        #
+        # 【2026-09-05・F2-74cで判明した不整合の修正】lexicon_vision.source=="wide"
+        #   （F2-49系以降の全実験）のとき、本体は中心窩カメラを使わず
+        #   **周辺60度の eye_left/eye_right をまるごと・無クロップで** encode に渡す
+        #   （trainer は encode() の間だけ backend.fovea_px を 10**9 にして crop を
+        #   no-op化）。ここは has_fovea を「観測に eye_left_fovea があるか」だけで
+        #   決めていたので、wide のときも設定値 fovea_px=32 で中央を切り出して
+        #   保存・符号化していた＝脳が語の選択に使った画像・ベクトルと別物だった。
+        #   設定の取り方は trainer と同じ（taro.cfg は Taro.__init__ が受け取る
+        #   trainer と同一の Config）。cfg が取れないときは実験ファイルの taro 欄
+        #   （ctx.spec["taro"]）から読む。
+        wide_src = self._is_wide_source(ctx, taro)
+        has_fovea = ((not wide_src) and "eye_left_fovea" in obs
+                     and "eye_right_fovea" in obs)
         if has_fovea:
             img = np.asarray(obs["eye_left_fovea"])
             crop = img                      # 撮影時点で視野15度に切り出し済み
+            fovea_px = None
+        elif wide_src:
+            img = np.asarray(obs["eye_left"])
+            crop = img                      # 周辺60度まるごと・無クロップ（本体と同じ）
             fovea_px = None
         else:
             fovea_px = getattr(backend, "fovea_px", None)
@@ -103,13 +143,16 @@ class ProduceSnapshot(Plugin):
 
         # ② 視覚ベクトル（散布図用）。backendが無ければ切り出しを平坦化して代用する
         if backend is not None:
-            if has_fovea:
+            if has_fovea or wide_src:
+                # 本体（trainer._vision_backend_encode）と同じく、encode の間だけ
+                # fovea_px を no-op 値にして、渡した画像をそのまま符号化させる
+                enc_l, enc_r = ((obs["eye_left_fovea"], obs["eye_right_fovea"])
+                                if has_fovea else (obs["eye_left"], obs["eye_right"]))
                 _old = getattr(backend, "fovea_px", None)
                 if _old is not None:
                     backend.fovea_px = 10 ** 9      # 本体と同じくcropをno-op化
                 try:
-                    vec = np.asarray(backend.encode(obs["eye_left_fovea"],
-                                                    obs["eye_right_fovea"]),
+                    vec = np.asarray(backend.encode(enc_l, enc_r),
                                      dtype=np.float32).reshape(-1)
                 finally:
                     if _old is not None:
@@ -124,12 +167,18 @@ class ProduceSnapshot(Plugin):
         if self.n <= self.max_images:
             path = os.path.join(self.out_dir, "%04d_%s_sim%.3f.png" % (self.n, word, sim))
             plt = self._imwrite
-            fig = plt.figure(figsize=(2.2, 2.2), dpi=110)
-            ax = fig.add_axes([0, 0, 1, 1])
-            ax.imshow(np.clip(crop, 0, 255).astype(np.uint8), interpolation="nearest")
-            ax.set_xticks([]); ax.set_yticks([])
-            fig.savefig(path)
-            plt.close(fig)
+            if wide_src:
+                # 脳に渡した画像そのもの（周辺60度・無クロップ）を**元の画素のまま**
+                # 残す（拡大・再標本化しない）。full_dir の「左目・周辺(60度)」区画と
+                # 画素単位で突き合わせられるようにするため。
+                plt.imsave(path, np.clip(crop, 0, 255).astype(np.uint8))
+            else:
+                fig = plt.figure(figsize=(2.2, 2.2), dpi=110)
+                ax = fig.add_axes([0, 0, 1, 1])
+                ax.imshow(np.clip(crop, 0, 255).astype(np.uint8), interpolation="nearest")
+                ax.set_xticks([]); ax.set_yticks([])
+                fig.savefig(path)
+                plt.close(fig)
 
         # 【2026-08-28】両目ぶんの視界を1枚にまとめて残す（full_dir 指定時のみ）。
         #   上段＝周辺カメラ（視野60度・左右）、下段＝中心窩カメラ（視野15度・左右）。
@@ -143,12 +192,21 @@ class ProduceSnapshot(Plugin):
                 fr = np.asarray(obs.get("eye_right_fovea", fl))
                 r = (math.tan(math.radians(15.0 / 2))
                      / math.tan(math.radians(60.0 / 2)))
+                lo_ttl = ("左目・中心窩(15度)", "右目・中心窩(15度)")
+            elif wide_src:
+                # source="wide"：符号化に渡すのは周辺60度そのもの（中心窩は使わない）。
+                # 下段は「脳に渡した画像」＝上段と同じ絵になる。赤枠（中心窩15度）は描かない
+                fl, fr = wl, wr
+                r = None
+                lo_ttl = ("左目・符号化入力(60度・無クロップ)",
+                          "右目・符号化入力(60度・無クロップ)")
             else:
                 fl = fr = crop
                 r = None
+                lo_ttl = ("左目・中心窩(15度)", "右目・中心窩(15度)")
             fig, axes = plt.subplots(2, 2, figsize=(5.0, 5.2))
             panels = ((wl, "左目・周辺(60度)"), (wr, "右目・周辺(60度)"),
-                      (fl, "左目・中心窩(15度)"), (fr, "右目・中心窩(15度)"))
+                      (fl, lo_ttl[0]), (fr, lo_ttl[1]))
             for ax, (im, ttl) in zip(axes.ravel(), panels):
                 ax.imshow(np.clip(im, 0, 255).astype(np.uint8), interpolation="nearest")
                 ax.set_title(ttl, fontsize=8.5, pad=2)

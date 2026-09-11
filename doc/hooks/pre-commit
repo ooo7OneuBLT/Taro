@@ -1,0 +1,133 @@
+#!/bin/sh
+# コミットの直前に個人情報を自動で調べる。
+#
+# 【なぜ、2026-07-31】太郎のリポジトリは公開前提（github.com/ooo7OneuBLT/Taro）。
+# コミットすると履歴に残り、あとから消すのが難しい。
+# 「コミット前に必ずgrepする」という約束があったが（落とし穴チェックリスト 項31）、
+# 手作業なので守られていなかった。実際この日は7回コミットして一度も走らせていない。
+# ⇒ 手作業の約束は守られない。機械にやらせる。
+#
+# 見るのは**追加された行だけ**（先頭が + の行）。既存の行は関係ない。
+#
+# 引っかかったときに、それが誤検知なら:
+#     git commit --no-verify -m "..."
+# で飛ばせる。ただし飛ばす理由を必ず考えること。
+
+added=$(git diff --cached -U0 --diff-filter=ACM | grep '^+' | grep -v '^+++')
+[ -z "$added" ] && exit 0
+
+hit=0
+report() {
+  echo ""
+  echo "  [$1]"
+  echo "$2" | head -5 | sed 's/^/      /'
+  hit=1
+}
+
+# 1. ユーザー名の入った絶対パス
+m=$(printf '%s\n' "$added" | grep -iE '[cC]:[\\/]+[uU]sers[\\/]+[a-z0-9_]' )
+[ -n "$m" ] && report "ユーザー名の入った絶対パス" "$m"
+
+# 2. メールアドレス
+m=$(printf '%s\n' "$added" | grep -iE '（非公開）|outlook\.jp|[a-z0-9._%-]+@[a-z0-9.-]+\.[a-z]{2,}' | grep -v 'noreply@anthropic.com')
+[ -n "$m" ] && report "メールアドレス" "$m"
+
+# 3. 個人に固有の語（doc/_private/ に集約する方針）
+m=$(printf '%s\n' "$added" | grep -E '（非公開のパターンファイルを参照）')
+[ -n "$m" ] && report "個人に固有の語" "$m"
+
+# 4. 家族への言及（誰の家族かを書かない方針。「育児経験者」と書く）
+#    【2026-08-18 ユーザー承認のうえ精密化】文献調査フォルダは対象外。
+#    発達心理の文献メモは「母親が〜」（研究参加者の記述）を必然的に含み誤検知するため。
+#    意図は「ユーザーの家族」の検出であり、他のルール（ユーザー名・メール等）は
+#    文献調査フォルダにも引き続き適用される。
+added_nolit=$(git diff --cached -U0 --diff-filter=ACM -- . ':(exclude)*文献調査*' | grep '^+' | grep -v '^+++')
+m=$(printf '%s\n' "$added_nolit" | grep -E '私の家族|ユーザーの家族|お母さん|お父さん|母親が|父親が')
+[ -n "$m" ] && report "家族への言及" "$m"
+
+# 5. 非公開フォルダの中身の引用
+m=$(printf '%s\n' "$added" | grep -E 'doc/_private/[^ ）」`]+\.(md|txt|json)')
+[ -n "$m" ] && report "非公開フォルダのファイルへの言及" "$m"
+
+# ------------------------------------------------------------------
+# 6. 反射が action を直接インデックスしていないか（2026-09-11追加）
+#
+# 【なぜ、2026-09-11】筋モデル（拮抗筋形式）では action[i] は「負方向筋の
+#   収縮度 [0,1]」で、符号つきの指令ではない（符号つきは action[i+n]-action[i]）。
+#   直接読み書きすると値が ±0.5 に丸まり、符号まで逆になる。
+#   同じ種類のミスを2回踏んだので、注意書きではなく機械で止める（CLAUDE.md の約束）。
+#     2026-07-26 書く側：VOR・視線誘導反射・口の探索が out[aid]=cmd と直接書き、
+#                眼が片方向にしか動かなかった → write_joint_command を作って解決
+#     2026-09-11 読む側：VORの指令を (action[左]-action[右])/2 で測り、大きさも
+#                符号も違う値で1本走らせた → read_joint_command が既にあったのに未使用
+#
+#   正しい入り口：write_joint_command / read_joint_command（brain/spinal_cord/cpg.py）
+reflex_dirs="taro_core/src/brain/midbrain taro_core/src/brain/brainstem"
+add_reflex=$(git diff --cached -U0 --diff-filter=ACM -- $reflex_dirs | grep '^+' | grep -v '^+++')
+if [ -n "$add_reflex" ]; then
+  m=$(printf '%s
+' "$add_reflex" | grep -vE '^\+[[:space:]]*#'       | grep -E '(action|out)\[[^],]*(aid|idx|index|\[0\])')
+  if [ -n "$m" ]; then
+    report "反射が action/out を直接インデックスしている（write_joint_command / read_joint_command を使う）" "$m"
+  fi
+fi
+
+# ------------------------------------------------------------------
+# 7. 新しい .py を足すとき、似た道具が既にないか必ず目を通す（2026-09-11追加）
+#
+# 【なぜ】「実はこの機能もう作られていた」という事故が繰り返し起きる。
+#   2026-09-11 だけで3回：f105_eye_force_probe.py（e_eye_power_probe.py が既存）／
+#   action を直接読んで計器を壊した（read_joint_command が既存）／
+#   「advisor は存在しません」と回答（最初から存在）。
+#   共通点は「探す前に作った」。
+#   doc/道具一覧.md が**まさにこの事故のために**2026-08-05 に作られ、
+#   「作ったら1項目追記する」という運用ルールまであるのに守られていない
+#   （実測の網羅率 418本中149本＝36%。F/scripts は 98本中0本）。
+#
+# 【なぜ点数で自動判定しないか】実測すると、重複しているものの最高点 0.30 に対し、
+#   重複していないものが 0.27〜0.39 で、**閾値で分けられない**。
+#   語の一致だけでは無理。そこで「賢い検出」ではなく
+#   **候補を見せて1回止める（強制的に目を通させる）**設計にした。
+#   見れば気づく（2026-09-11 も、見たら気づいた）。
+#
+#   索引は自動生成（run/tools/index_tools.py）なので腐らない。
+#   通すときは git commit --no-verify（使わない理由を1行考えてから）。
+new_py=$(git diff --cached --name-only --diff-filter=A --   'run/tools' 'run/plugins' 'run/scene_tools' 'run/viewer_tools'   'taro_core/src' 'E/scripts' 'F/scripts' | grep -E '\.py$' || true)
+if [ -n "$new_py" ]; then
+  py=".venv/Scripts/python.exe"
+  [ -x "$py" ] || py="python"
+  "$py" run/tools/index_tools.py >/dev/null 2>&1
+  for f in $new_py; do
+    sim=$("$py" run/tools/index_tools.py --find-file "$f" --limit 5 2>/dev/null)
+    if [ -n "$sim" ]; then
+      report "新しい道具を足す前に、この5本を見てください（$f）" "$sim"
+    fi
+  done
+fi
+
+if [ "$hit" = "1" ]; then
+  echo ""
+  echo "=================================================================="
+  echo " コミットを止めました"
+  echo "=================================================================="
+  echo ""
+  echo "  上のどれかが引っかかりました。検査は3種類あります："
+  echo ""
+  echo "  【1〜5】個人情報（落とし穴 項31）"
+  echo "     公開リポジトリなので push すると誰でも読めます。履歴からの削除は困難。"
+  echo "     対処：本当に個人情報なら消すか doc/_private/ へ移す"
+  echo ""
+  echo "  【6】反射が action/out を直接インデックスしている"
+  echo "     筋モデルでは action[i] は負方向筋の収縮度[0,1]で、符号つき指令ではない。"
+  echo "     対処：write_joint_command / read_joint_command を使う"
+  echo ""
+  echo "  【7】新しい .py を足そうとしている"
+  echo "     上に似た道具を5本出しました。**同じものが既にないか確かめてください。**"
+  echo "     探す：python run/tools/index_tools.py --find <語> <語>"
+  echo "     対処：既にあるなら、それを使う。無いなら下の --no-verify で通す"
+  echo ""
+  echo "  どれも誤検知なら → git commit --no-verify で通す（理由を1行考えてから）"
+  echo ""
+  exit 1
+fi
+exit 0

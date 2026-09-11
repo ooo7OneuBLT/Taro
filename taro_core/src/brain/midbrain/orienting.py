@@ -990,6 +990,17 @@ class OrientingReflexV2:
         r = float(self.data.qpos[self.eye_qadr["h_right"][0]])
         return float(np.degrees(l - r) / 2.0)
 
+    def is_saccading(self):
+        """いまサッケードの最中か。VOR を抑制するかの判定に外から使う（2026-09-11）。
+
+        人間ではサッケード中に VOR の利得が下がる（Daye et al. 2015【原文確認】）。
+        step の順序は VOR → 定位反射 なので、VOR が呼ばれる時点では
+        `_sacc_remaining` は**1ステップ前**の値になる（＝抑制が10ms遅れる）。
+        人間の抑制もサッケード開始と同時に瞬間的に切り替わるわけではないので、
+        この遅れは許容する。
+        """
+        return float(self._sacc_remaining) > 0.0
+
     def _head_omega_deg(self):
         """頭の角速度 [度/秒]。(全体の大きさ, 鉛直軸まわり) を返す（測定専用）。
 

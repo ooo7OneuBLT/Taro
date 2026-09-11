@@ -61,8 +61,13 @@ def metrics(name):
         import csv
         rows = list(csv.DictReader(io.open(p, encoding="utf-8-sig")))
         if rows:
-            mt = [x for x in rows if x.get("event") == "match"]
-            out["照合できた回数"] = len(mt)
+            # 【2026-09-11・直し】event の値は "matched"/"unmatched"。
+            #   "match" と書いていたため常に 0 になっていた。
+            m_ = sum(1 for x in rows if x.get("event") == "matched")
+            u_ = sum(1 for x in rows if x.get("event") == "unmatched")
+            out["照合できた回数"] = m_
+            out["見えていた率[%]"] = 100.0 * m_ / (m_ + u_) if (m_ + u_) else float("nan")
+            out["見失った回数"] = sum(1 for x in rows if x.get("event") == "lost")
     p = d + "/発話イベント.csv"
     if os.path.exists(p):
         import csv

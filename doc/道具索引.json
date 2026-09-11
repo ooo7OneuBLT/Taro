@@ -1,0 +1,5384 @@
+[
+ {
+  "path": "E/scripts/e_age_body_audit.py",
+  "doc": "月齢を変えたときに太郎の身体（質量・筋力・バネ）がどう変わるかを実測する。",
+  "defs": [
+   "_descendants",
+   "measure",
+   "main"
+  ],
+  "lines": 233,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_age_body_figure.py",
+  "doc": "月齢を上げたときに何が起きるかを1枚の図にする（2026-07-28の実測から作図）。",
+  "defs": [],
+  "lines": 122,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_age_muscle_check.py",
+  "doc": "MIMoは月齢で「筋肉の力」を変えているのか？ を直接確かめる。",
+  "defs": [
+   "probe",
+   "main"
+  ],
+  "lines": 155,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_age_weight_check.py",
+  "doc": "月齢ごとの体重が人間に合っているかだけを、汚染なしで測る。",
+  "defs": [
+   "main"
+  ],
+  "lines": 77,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_arm_recoil_test.py",
+  "doc": "屈筋トーン（バネ）の強さを、肘の arm recoil（腕の反跳）で較正する。",
+  "defs": [
+   "run",
+   "main"
+  ],
+  "lines": 144,
+  "goal": "E",
+  "last_commit": "2026-08-11"
+ },
+ {
+  "path": "E/scripts/e_axis_summary.py",
+  "doc": "学習前(白紙) vs 学習後 の「動きの軸」の比較を集計する。",
+  "defs": [
+   "parse",
+   "collect",
+   "main"
+  ],
+  "lines": 139,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_baseline2.py",
+  "doc": "【段階2の正しいベースライン】段階1を終えた太郎で「手が視野に入る割合」と「持続の長さ」を測る。",
+  "defs": [
+   "main"
+  ],
+  "lines": 119,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_body_config.py",
+  "doc": "体型補正の「実験設定」— 環境変数から係数を読み、太郎の身体定義（core）へ渡す。",
+  "defs": [
+   "shape_enabled",
+   "newborn_scales_from_env",
+   "head_elongation_from_env",
+   "body_scale_custom_from_env",
+   "body_kwargs_from_env",
+   "limb_scale_from_env",
+   "limb_fix_enabled",
+   "distal_mass_from_env"
+  ],
+  "lines": 142,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_body_fit.py",
+  "doc": "体型の係数を「人間の新生児の実測値」に合わせて探す（項目9.4）。",
+  "defs": [
+   "base",
+   "with_",
+   "row",
+   "header",
+   "interp",
+   "sweep",
+   "main"
+  ],
+  "lines": 152,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_body_gradient.py",
+  "doc": "身体の「近位-遠位の勾配」を測る＝**発達の順序が自然に出る条件**を満たしているか。",
+  "defs": [
+   "subtree_mass",
+   "main"
+  ],
+  "lines": 162,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_body_measure.py",
+  "doc": "身体の寸法・質量の測定器 — 体型補正の効果を人間の新生児と比べる。",
+  "defs": [
+   "_taro_bodies",
+   "_segment_length",
+   "measure",
+   "_fmt",
+   "main"
+  ],
+  "lines": 168,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_body_proportion.py",
+  "doc": "【体格の検証】太郎の身体プロポーションが新生児と合っているかを実測する。",
+  "defs": [
+   "span",
+   "main"
+  ],
+  "lines": 161,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_body_shot.py",
+  "doc": "【目視用】体型の候補を並べた静止画を撮る。",
+  "defs": [
+   "shot",
+   "_label",
+   "main"
+  ],
+  "lines": 158,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_body_wiring_check.py",
+  "doc": "【身体の配線チェック】身体設定が\"設定したつもり\"で終わっていないかを機械的に検証する。",
+  "defs": [
+   "check",
+   "build",
+   "probe",
+   "main"
+  ],
+  "lines": 156,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_clip_handview.py",
+  "doc": "【目視用】手が視野に入った瞬間だけを切り出して動画にする。",
+  "defs": [
+   "label",
+   "main"
+  ],
+  "lines": 156,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_colliculus_test.py",
+  "doc": "上丘の座標変換そのものの単体テスト（環境に持ち込む前に確かめる）。",
+  "defs": [
+   "flat_centroid",
+   "main"
+  ],
+  "lines": 245,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_condition_check.py",
+  "doc": "条件を振った実験で「条件が本当に効いていたか」をモデルの重みから検証する。",
+  "defs": [
+   "load_brain",
+   "max_diff",
+   "compare",
+   "main"
+  ],
+  "lines": 108,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_contact_diag.py",
+  "doc": "【E1の関門・切り分け版】接触が太郎の信号のどこで消えているかを特定する。",
+  "defs": [
+   "ln_prop",
+   "arm_dof_indices",
+   "run",
+   "compare",
+   "main"
+  ],
+  "lines": 184,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_contact_signal.py",
+  "doc": "【E1の関門】おもちゃに触れたとき、太郎の固有感覚の予測誤差は動くか。",
+  "defs": [
+   "ln_prop",
+   "main"
+  ],
+  "lines": 167,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_ctrl_freq_probe.py",
+  "doc": "制御頻度プローブ（測定器）：**学習を一切せず**に「上位の命令間隔Kを短くすると",
+  "defs": [
+   "_head_tilt_deg",
+   "_trunk_rotation_deg",
+   "_tip_positions",
+   "_hand_dist",
+   "_pairwise_corr",
+   "run_condition",
+   "view_condition",
+   "main"
+  ],
+  "lines": 428,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_efference_check.py",
+  "doc": "egomotion実装の前段：太郎ひとりだけで2つを検証する（親も外部の他者も使わない）。",
+  "defs": [
+   "collect",
+   "standardize",
+   "train_eval_reg",
+   "split",
+   "lag1_autocorr",
+   "main"
+  ],
+  "lines": 204,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_encoder_probe.py",
+  "doc": "【関門②の原因切り分け】視覚エンコーダは「手が映っているか」を区別できているか。",
+  "defs": [
+   "hand_geoms",
+   "render",
+   "main"
+  ],
+  "lines": 163,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_eye_camera_axes.py",
+  "doc": "左右の目のカメラ座標系が鏡像になっていないかを確かめる。",
+  "defs": [
+   "main"
+  ],
+  "lines": 149,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_eye_drift_probe.py",
+  "doc": "眼球だけが下に落ちる問題の原因を切り分ける。",
+  "defs": [
+   "eye_joints",
+   "static_report",
+   "run_case",
+   "main"
+  ],
+  "lines": 172,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_eye_input.py",
+  "doc": "【太郎が\"実際に受け取っている\"視覚を見る】視覚obsそのものを画像・動画に出す。",
+  "defs": [
+   "label",
+   "main"
+  ],
+  "lines": 142,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_eye_pair_check.py",
+  "doc": "左右の眼球が同じように動いているかを測る。",
+  "defs": [
+   "main"
+  ],
+  "lines": 191,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_eye_power_probe.py",
+  "doc": "眼球はそもそもどれだけ動かせるのか（筋力と可動域の健康診断）。",
+  "defs": [
+   "main"
+  ],
+  "lines": 120,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_eye_vergence_check.py",
+  "doc": "左右の眼球が「共同して動く」のか「寄り目になる」のかを切り分ける。",
+  "defs": [
+   "_saved_toy_pos",
+   "eye_target_angles",
+   "main"
+  ],
+  "lines": 216,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_fence_fit_check.py",
+  "doc": "柵の内側に太郎が収まっているかを月齢ごとに測る。",
+  "defs": [
+   "probe",
+   "main"
+  ],
+  "lines": 150,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_fidgety_plot.py",
+  "doc": "fidgety移行の結果を1枚のグラフで可視化する。",
+  "defs": [],
+  "lines": 70,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_fidgety_transition.py",
+  "doc": "writhing→fidgety移行を、今の体（筋力バグ修正後）で測り直す。",
+  "defs": [
+   "autocorr_time",
+   "spectral_beta",
+   "cycle_time",
+   "jerk_rms",
+   "run",
+   "main"
+  ],
+  "lines": 238,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_flexion_probe.py",
+  "doc": "生理的屈曲（physiological flexion）を入れるための実測（学習なし・設計の前段）。",
+  "defs": [
+   "joints_of",
+   "measure",
+   "main"
+  ],
+  "lines": 181,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_friction_probe.py",
+  "doc": "床の摩擦が「寝返り」に効くかを測る（学習なし・値を振るだけ）。",
+  "defs": [
+   "set_floor_friction",
+   "trunk_rotation_deg",
+   "run_one",
+   "main"
+  ],
+  "lines": 176,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_friction_summary.py",
+  "doc": "床のころがり摩擦スイープ（学習済みモデル）の集計。",
+  "defs": [
+   "parse",
+   "main"
+  ],
+  "lines": 128,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_gaze_geometry.py",
+  "doc": "【配置の幾何】太郎の視線がどこを向いているかを実測し、おもちゃの正しい置き場所を求める。",
+  "defs": [
+   "gaze_dir",
+   "angle_deg",
+   "main"
+  ],
+  "lines": 124,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_growth_curriculum.py",
+  "doc": "目標E・成長カリキュラム学習：体を少しずつ育てながら、自己モデルと運動を同時に学習する。",
+  "defs": [
+   "run_stage",
+   "main"
+  ],
+  "lines": 115,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_growth_train.py",
+  "doc": "目標E 成長カリキュラム学習ループ【C/scripts/run_c_metrics_ac_lr.py のコピー・改造版】。",
+  "defs": [
+   "age_at",
+   "_touch_params",
+   "hand_in_view_rate",
+   "block_pe",
+   "ln_prop",
+   "run"
+  ],
+  "lines": 1387,
+  "goal": "E",
+  "last_commit": "2026-08-11"
+ },
+ {
+  "path": "E/scripts/e_hand_in_view.py",
+  "doc": "【E1の指標】太郎の手が「両目の視野内」にある割合を測る＝hand regard の測定尺度。",
+  "defs": [
+   "hand_in_view",
+   "eye_angles",
+   "main"
+  ],
+  "lines": 162,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_head_hold.py",
+  "doc": "実験の測定条件 — 実験者が乳児の頭を抑える（視線誘導反射を測るため）。",
+  "defs": [
+   "joint_group",
+   "joints_to_support",
+   "CaregiverHands"
+  ],
+  "lines": 345,
+  "goal": "E",
+  "last_commit": "2026-08-17"
+ },
+ {
+  "path": "E/scripts/e_head_hold_test.py",
+  "doc": "親が頭を支えたとき、本当に頭が固定されるかを測る。",
+  "defs": [
+   "run",
+   "main"
+  ],
+  "lines": 149,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_head_lift_probe.py",
+  "doc": "首すわりの力学ゲート＝首の筋力で頭を持ち上げられるか、を月齢別に測る。",
+  "defs": [
+   "run",
+   "main"
+  ],
+  "lines": 148,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_head_motion.py",
+  "doc": "太郎の「頭の動き」が新生児として妥当かを実測する。",
+  "defs": [
+   "main"
+  ],
+  "lines": 150,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_head_omega_check.py",
+  "doc": "VORが読んでいる「頭の角速度」が本当に頭の回転なのかを検証する（＝計測器の検証）。",
+  "defs": [
+   "quat_to_omega",
+   "main"
+  ],
+  "lines": 138,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_joint_corr.py",
+  "doc": "関節角どうしの連動が「どこから来ているか」を分解する（学習なし）。",
+  "defs": [
+   "joint_dofs",
+   "mean_abs_offdiag",
+   "run_one",
+   "main"
+  ],
+  "lines": 196,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_latent_probe.py",
+  "doc": "【段階1のモデルは段階2に使えるか】潜在変数 z に視覚の情報が残っているかを測る。",
+  "defs": [
+   "get_z",
+   "main"
+  ],
+  "lines": 174,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_limb_strength.py",
+  "doc": "四肢・体幹の「筋力 vs 自重」比を月齢間で比較し、発達の向きが逆転していないか調べる。",
+  "defs": [
+   "descendants",
+   "measure",
+   "main"
+  ],
+  "lines": 127,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_movement_scale.py",
+  "doc": "太郎の動きは writhing なのか fidgety なのかを数値で判定する（学習なし）。",
+  "defs": [
+   "autocorr_time",
+   "spectral_beta",
+   "cycle_time",
+   "run",
+   "main"
+  ],
+  "lines": 214,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_muscle_demo.py",
+  "doc": "筋肉モデル(MuscleModel)の最小デモ：新生児体×色付き筋活性化で太郎を動かし、動きの",
+  "defs": [],
+  "lines": 99,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_neck_force_breakdown.py",
+  "doc": "首を回している力の正体を、MuJoCo の力の内訳から特定する。",
+  "defs": [
+   "main"
+  ],
+  "lines": 136,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_neck_strength_by_pose.py",
+  "doc": "首の「持ち上げ能力比」が姿勢と方向でどう変わるかを測る。",
+  "defs": [
+   "_head_bodies",
+   "run",
+   "main"
+  ],
+  "lines": 174,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_neck_tone_sweep.py",
+  "doc": "首のバネの剛性を3軸それぞれ振って、頭が落ち着く角度と視界を測る。",
+  "defs": [
+   "main"
+  ],
+  "lines": 133,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_oral.py",
+  "doc": "口まわりの原始反射：探索反射（rooting）と吸啜反射（sucking）。",
+  "defs": [
+   "find_mouth_sensor_idx",
+   "OralSystem"
+  ],
+  "lines": 191,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_orient_bias_sweep.py",
+  "doc": "中心視野バイアスの強さを振って、対象の位置をどれだけ正しく出せるかを測る。",
+  "defs": [
+   "main"
+  ],
+  "lines": 148,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_orient_converge_test.py",
+  "doc": "視線誘導反射が「おもちゃを視野の中心へ寄せられるか」を測る（本番の判定）。",
+  "defs": [
+   "run",
+   "main"
+  ],
+  "lines": 366,
+  "goal": "E",
+  "last_commit": "2026-08-11"
+ },
+ {
+  "path": "E/scripts/e_orient_diag.py",
+  "doc": "視線誘導反射が発火しない原因の切り分け。",
+  "defs": [
+   "main"
+  ],
+  "lines": 129,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_orient_env_viewer.py",
+  "doc": "視線誘導反射の環境テストの前に、環境そのものをViewerで目視確認する。",
+  "defs": [
+   "main"
+  ],
+  "lines": 169,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_orient_latency_probe.py",
+  "doc": "サッケードの間隔を変えると暴走が収まるか。あわせて「いつ反応しているか」を分ける。",
+  "defs": [
+   "run",
+   "main"
+  ],
+  "lines": 167,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_orient_motion_probe.py",
+  "doc": "動き検出（ステップ1）が対象の位置をずらす原因を切り分ける。",
+  "defs": [
+   "centroid_x",
+   "fmt",
+   "main"
+  ],
+  "lines": 281,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_orient_multiseed_summary.py",
+  "doc": "複数シードの結果をまとめて、改善が「ばらつきに埋もれていないか」を判定する。",
+  "defs": [
+   "main"
+  ],
+  "lines": 138,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_orient_probe.py",
+  "doc": "視線誘導反射が今の体（筋力バグ修正後）でも機能しているかを確認する。",
+  "defs": [
+   "run",
+   "main"
+  ],
+  "lines": 187,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_orient_reflex_test.py",
+  "doc": "視線誘導反射のテスト（本番）。おもちゃを視野の中心に持ってこられるか。",
+  "defs": [
+   "make_env",
+   "run",
+   "main"
+  ],
+  "lines": 188,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_orient_selfmotion_probe.py",
+  "doc": "視線誘導反射が「自分の動き」に反応していないかを切り分ける。",
+  "defs": [
+   "run",
+   "main"
+  ],
+  "lines": 178,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_orient_shake_probe.py",
+  "doc": "おもちゃの揺れ幅と、中心バイアスの効き方を同時に切り分ける。",
+  "defs": [
+   "flat_centroid_x",
+   "fmt",
+   "main"
+  ],
+  "lines": 194,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_orient_stage_probe.py",
+  "doc": "視線誘導反射の内部を段階ごとに覗いて、左右の情報がどこで失われるかを特定する。",
+  "defs": [
+   "centroid_x",
+   "main"
+  ],
+  "lines": 185,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_orient_test_images.py",
+  "doc": "視線誘導反射の単体テストで使う人工画像を可視化する。",
+  "defs": [
+   "blank",
+   "square",
+   "noise",
+   "make_cases",
+   "plot_cases",
+   "main"
+  ],
+  "lines": 111,
+  "goal": "E",
+  "last_commit": "2026-07-26"
+ },
+ {
+  "path": "E/scripts/e_orient_threshold_probe.py",
+  "doc": "視線誘導反射の「撃つ閾値」を実測で決める。",
+  "defs": [
+   "main"
+  ],
+  "lines": 174,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_orient_v2_noise_sweep.py",
+  "doc": "神経ノイズの大きさを決めるためのスイープ。",
+  "defs": [
+   "osc_single",
+   "osc_pair",
+   "run",
+   "main"
+  ],
+  "lines": 121,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_orient_v2_step1_test.py",
+  "doc": "ステップ1（複数フレーム動き検出）の人工画像テスト。",
+  "defs": [
+   "DummyModel",
+   "run_case",
+   "judge",
+   "main"
+  ],
+  "lines": 155,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_orient_v2_step4_test.py",
+  "doc": "ステップ4（階段状サッケード）の単体テスト。",
+  "defs": [
+   "ActModel",
+   "main"
+  ],
+  "lines": 145,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_orient_v2_test.py",
+  "doc": "視線誘導反射（新版）ステップ1〜3の人工画像テスト。",
+  "defs": [
+   "DummyModel",
+   "blank",
+   "square",
+   "noisy",
+   "make_cases",
+   "run_case",
+   "judge",
+   "check_opposite_pairs",
+   "main"
+  ],
+  "lines": 243,
+  "goal": "E",
+  "last_commit": "2026-07-26"
+ },
+ {
+  "path": "E/scripts/e_orient_viewer.py",
+  "doc": "視線誘導反射の動きを等倍速で見る。サッケードの間隔・閾値をその場で変えて比べる。",
+  "defs": [
+   "main"
+  ],
+  "lines": 242,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_orient_wiring_check.py",
+  "doc": "視線誘導反射の配線チェック（環境テストの前に必ず通す）。",
+  "defs": [
+   "check",
+   "main"
+  ],
+  "lines": 186,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_orienting.py",
+  "doc": "視線誘導反射（Orienting Reflex）：周辺視野の動きへ、首・目を反射的に向ける。",
+  "defs": [
+   "OrientingReflex"
+  ],
+  "lines": 143,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_orienting_v2.py",
+  "doc": "【転送のみ】中身は taro_core/src/brain/midbrain/orienting.py へ移した（2026-08-30の整理）。",
+  "defs": [],
+  "lines": 20,
+  "goal": "E",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "E/scripts/e_own_body_in_view.py",
+  "doc": "自分の体（特に足）が視界にどれだけ入っているか、反射の邪魔になるかを測る。",
+  "defs": [
+   "build",
+   "body_share",
+   "classify",
+   "main"
+  ],
+  "lines": 194,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_phase1_selfmodel.py",
+  "doc": "目標E フェーズ1：誰もいない環境で、視覚版の自己モデル(predict_vision)を確立する。",
+  "defs": [
+   "to_tensor",
+   "ema_update",
+   "encode_target_fusion",
+   "cosine_loss",
+   "main"
+  ],
+  "lines": 275,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_pose_editor.py",
+  "doc": "姿勢とおもちゃ位置の編集ツール（MuJoCo Viewer + スライダーのパネル）。",
+  "defs": [
+   "main"
+  ],
+  "lines": 534,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_probes.py",
+  "doc": "測定器（probe類）— 太郎を外から観察するための計測装置。学習ループ本体からは独立。",
+  "defs": [
+   "ProbeContext",
+   "evaluate",
+   "agency_probe",
+   "inverse_probe",
+   "inverse_exec_probe",
+   "closed_loop_probe",
+   "record_video"
+  ],
+  "lines": 432,
+  "goal": "E",
+  "last_commit": "2026-08-11"
+ },
+ {
+  "path": "E/scripts/e_prone_check.py",
+  "doc": "【うつぶせ検出】太郎が仰向けからどれだけ転がるかを実測する。",
+  "defs": [
+   "belly_angle",
+   "main"
+  ],
+  "lines": 123,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_reach_babble_check.py",
+  "doc": "自発運動で腕がどれだけ動き、おもちゃに触れうるかを測る。",
+  "defs": [
+   "run",
+   "_toy_geoms",
+   "main"
+  ],
+  "lines": 159,
+  "goal": "E",
+  "last_commit": "2026-08-11"
+ },
+ {
+  "path": "E/scripts/e_reach_distance_check.py",
+  "doc": "おもちゃが「手の届く距離」にあるかを月齢ごとに測る。",
+  "defs": [
+   "probe",
+   "main"
+  ],
+  "lines": 154,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_reach_feasibility.py",
+  "doc": "リーチング環境で「そもそも腕が上がるか・おもちゃに届くか」を測る。",
+  "defs": [
+   "_body_pos",
+   "main"
+  ],
+  "lines": 178,
+  "goal": "E",
+  "last_commit": "2026-08-11"
+ },
+ {
+  "path": "E/scripts/e_reach_space.py",
+  "doc": "E1準備：仰向け・新生児体の太郎の「腕が届く範囲」を実測する。",
+  "defs": [
+   "summarize",
+   "main"
+  ],
+  "lines": 154,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_recline_check.py",
+  "doc": "リクライニング環境が成立しているかを測る（Viewerで見る前の数値確認）。",
+  "defs": [
+   "probe",
+   "main"
+  ],
+  "lines": 159,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_recline_debug.py",
+  "doc": "リクライニングで体がどう動くかを時系列で見る（姿勢が保てない原因の切り分け）。",
+  "defs": [
+   "main"
+  ],
+  "lines": 129,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_recline_gaze_check.py",
+  "doc": "リクライニング時に視線がどこを向くかを、首の角度を振って測る。",
+  "defs": [
+   "probe",
+   "main"
+  ],
+  "lines": 152,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_recline_place_search.py",
+  "doc": "リクライニングで「見えて届く」おもちゃの位置を探す。",
+  "defs": [
+   "check_visible",
+   "main"
+  ],
+  "lines": 222,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_recline_rot_probe.py",
+  "doc": "体を「起こす」正しい回転を総当たりで見つける。",
+  "defs": [
+   "main"
+  ],
+  "lines": 143,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_recline_shot.py",
+  "doc": "リクライニングの姿勢を真横から撮って並べる（Viewerを操作せずに姿勢を確かめる）。",
+  "defs": [
+   "shot",
+   "main"
+  ],
+  "lines": 138,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_reset_constraint_probe.py",
+  "doc": "リセット直後の巨大な拘束反力（首に 6.31 Nm）の出どころを特定する。",
+  "defs": [
+   "check",
+   "main"
+  ],
+  "lines": 131,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_reset_replay_viewer.py",
+  "doc": "リセット直後に何が起きているかを、実験とまったく同じ条件で等倍速で見る。",
+  "defs": [
+   "main"
+  ],
+  "lines": 222,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_reset_settle_probe.py",
+  "doc": "リセット直後に首が勝手に64度回る原因を切り分ける。",
+  "defs": [
+   "gaze_angle",
+   "run_case",
+   "main"
+  ],
+  "lines": 158,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_rom_figure.py",
+  "doc": "関節の可動域を「絵」で見せる — どこまで動けるはずかを目で確かめる。",
+  "defs": [
+   "shot",
+   "main"
+  ],
+  "lines": 146,
+  "goal": "E",
+  "last_commit": "2026-08-11"
+ },
+ {
+  "path": "E/scripts/e_saccade_size_probe.py",
+  "doc": "サッケード1発で視線が何度動くかを測る（設計「目標の30%」との突き合わせ）。",
+  "defs": [
+   "load_saved_toy_pos",
+   "gaze_angle",
+   "run_case",
+   "main"
+  ],
+  "lines": 210,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_saved_pos_check.py",
+  "doc": "保存された設定（Viewerで人が調整した位置）が成立しているかを測る。",
+  "defs": [
+   "main"
+  ],
+  "lines": 223,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_scene_audit.py",
+  "doc": "シーンに「入れ忘れ」が無いかを機械的に照合する。",
+  "defs": [
+   "env_vars_read",
+   "scene_coverage",
+   "main"
+  ],
+  "lines": 159,
+  "goal": "E",
+  "last_commit": "2026-08-11"
+ },
+ {
+  "path": "E/scripts/e_scene_selftest.py",
+  "doc": "シーン方式そのものの自己テスト — 「食い違いが本当に止まるか」を確かめる。",
+  "defs": [
+   "check",
+   "main",
+   "_shift_hold_tilt"
+  ],
+  "lines": 156,
+  "goal": "E",
+  "last_commit": "2026-08-11"
+ },
+ {
+  "path": "E/scripts/e_selfmodel_ceiling_figure.py",
+  "doc": "「Aが上」に見えたのは天井の差だった — を1枚の図にする。",
+  "defs": [
+   "curve",
+   "main"
+  ],
+  "lines": 168,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_selfmodel_today_figure.py",
+  "doc": "2026-07-29 に確定したことを1枚にまとめる。",
+  "defs": [
+   "margins",
+   "tail",
+   "main"
+  ],
+  "lines": 171,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_selfmodel_transfer_figure.py",
+  "doc": "「新生児期を経ると自己モデルが良くなる」を1枚の図にする。",
+  "defs": [
+   "load",
+   "tail_mean",
+   "main"
+  ],
+  "lines": 173,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_smoke_all.py",
+  "doc": "【全スクリプトの動作確認】E/scripts の全部を短時間だけ実行し、落ちないかを機械的に確かめる。",
+  "defs": [
+   "main"
+  ],
+  "lines": 101,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_spawn_check.py",
+  "doc": "空中スポーンの確認 — 太郎は「落ちて」から学習を始めていないか。",
+  "defs": [
+   "_lowest_z",
+   "_n_floor_contacts",
+   "snapshot",
+   "build",
+   "main"
+  ],
+  "lines": 152,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_target.py",
+  "doc": "【E1】予測対象（太郎が「次にこう感じるはず」と予測する中身）を作る。",
+  "defs": [
+   "PredictionTarget",
+   "make_frozen_fusion"
+  ],
+  "lines": 89,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_toy_check.py",
+  "doc": "E1環境の動作確認：おもちゃは「届く所にあり・自分が動かすと動く」か。",
+  "defs": [
+   "rollout",
+   "main"
+  ],
+  "lines": 142,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_toy_delay_test.py",
+  "doc": "おもちゃの登場を遅らせる案（ユーザー提案 2026-07-26）の効果を測る。",
+  "defs": [
+   "measure",
+   "main"
+  ],
+  "lines": 155,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_toy_env.py",
+  "doc": "E1環境：仰向けの太郎の「手の届く所」に、押すと動く**おもちゃ**を置く。",
+  "defs": [
+   "_acuity_cpd",
+   "required_px",
+   "_check_resolution_acuity_mismatch",
+   "infant_vision_params",
+   "_box_inertia",
+   "_sphere_inertia",
+   "_cylinder_inertia",
+   "_ellipsoid_inertia",
+   "ToySupineEnv"
+  ],
+  "lines": 2655,
+  "goal": "E",
+  "last_commit": "2026-09-10"
+ },
+ {
+  "path": "E/scripts/e_toy_in_view.py",
+  "doc": "おもちゃが視界に入っている時間の割合を測る。",
+  "defs": [
+   "gaze_angle",
+   "run",
+   "main"
+  ],
+  "lines": 139,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_toy_touch.py",
+  "doc": "おもちゃに手が触れたか・手とおもちゃの距離を測る。判定の実体はここだけ。",
+  "defs": [
+   "_geoms_of_body",
+   "ToyTouchProbe"
+  ],
+  "lines": 148,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_vergence.py",
+  "doc": "【転送のみ】中身は taro_core/src/brain/brainstem/vergence.py へ移した（2026-08-30の整理）。",
+  "defs": [],
+  "lines": 20,
+  "goal": "E",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "E/scripts/e_visibility.py",
+  "doc": "「太郎に見えているか」を判定する共通の道具。",
+  "defs": [
+   "gaze_angle",
+   "visible_by_ray",
+   "red_mask",
+   "visible_in_image",
+   "segment_mask",
+   "visible_by_segment",
+   "close_renderers",
+   "report",
+   "describe"
+  ],
+  "lines": 220,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_vision_signal.py",
+  "doc": "【E1の関門②】視覚を予測対象に入れたとき、それは**信号として存在するか**を測る。",
+  "defs": [
+   "cohens_d",
+   "main"
+  ],
+  "lines": 167,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_vor.py",
+  "doc": "【転送のみ】中身は taro_core/src/brain/brainstem/vor.py へ移した（2026-08-30の整理）。",
+  "defs": [],
+  "lines": 20,
+  "goal": "E",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "E/scripts/e_vor_gain_probe.py",
+  "doc": "VOR（前庭動眼反射）の実効利得を測り直す。",
+  "defs": [
+   "main"
+  ],
+  "lines": 126,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_vor_internals_probe.py",
+  "doc": "VORの中身を1ステップずつ覗いて、なぜ眼が可動域の端まで押されるかを特定する。",
+  "defs": [
+   "main"
+  ],
+  "lines": 137,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/e_wiring_check.py",
+  "doc": "【配線チェック】各感覚・機構が\"繋いだつもり\"で終わっていないかを機械的に検証する。",
+  "defs": [
+   "check",
+   "main"
+  ],
+  "lines": 227,
+  "goal": "E",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "E/scripts/parent_labeling.py",
+  "doc": "親のfollow-in labeling（F1-3） — 太郎の注視に随伴させて、物の名前を言う。",
+  "defs": [
+   "ParentLabeling",
+   "WordSchedule"
+  ],
+  "lines": 895,
+  "goal": "E",
+  "last_commit": "2026-09-06"
+ },
+ {
+  "path": "E/scripts/test_e_vergence.py",
+  "doc": "e_vergence.py の視差測定・制御則の単体テスト（実走行なし・数秒で終わる）。",
+  "defs": [
+   "_make_pair",
+   "test_measure_shift_known_positive",
+   "test_measure_shift_known_negative",
+   "test_measure_shift_zero",
+   "test_disparity_deg_conversion",
+   "test_control_law_deadzone_and_gain"
+  ],
+  "lines": 133,
+  "goal": "E",
+  "last_commit": "2026-08-28"
+ },
+ {
+  "path": "E/scripts/図_7シード_姿勢と報酬.py",
+  "doc": "7シードで見た「姿勢」「立ち上がり」「口元の狙い」の3つ。",
+  "defs": [
+   "load",
+   "stats",
+   "style"
+  ],
+  "lines": 173,
+  "goal": "E",
+  "last_commit": ""
+ },
+ {
+  "path": "E/scripts/図_口元報酬の効果_7シード.py",
+  "doc": "口元に報酬をつけると、頭に触れたうち口元の割合が上がるか。",
+  "defs": [
+   "series",
+   "wilcoxon_exact",
+   "style"
+  ],
+  "lines": 161,
+  "goal": "E",
+  "last_commit": ""
+ },
+ {
+  "path": "E/scripts/図_筋力ではなく受動的な性質.py",
+  "doc": "「腕が開いてしまう」のは筋力の問題ではなかった、という発見を図にする。",
+  "defs": [
+   "baby"
+  ],
+  "lines": 112,
+  "goal": "E",
+  "last_commit": ""
+ },
+ {
+  "path": "E/scripts/図_筋力倍率と肩の角度.py",
+  "doc": "筋力の倍率を変えると、肩の角度がどうなるかを図にする。",
+  "defs": [
+   "style"
+  ],
+  "lines": 118,
+  "goal": "E",
+  "last_commit": ""
+ },
+ {
+  "path": "E/scripts/図_肩183度とはどの姿勢か.py",
+  "doc": "「肩183度」がどの姿勢を指すのかを、寝ている赤ちゃんの絵で示す。",
+  "defs": [
+   "draw_baby"
+  ],
+  "lines": 101,
+  "goal": "E",
+  "last_commit": ""
+ },
+ {
+  "path": "E/scripts/図_肩の角度が何を意味するか.py",
+  "doc": "肩の関節角度が、実際にどの姿勢を指すのかを図にする。",
+  "defs": [
+   "style"
+  ],
+  "lines": 116,
+  "goal": "E",
+  "last_commit": ""
+ },
+ {
+  "path": "E/scripts/図_関節の壁の直し方.py",
+  "doc": "関節が可動域の端で「壁」になる問題と、その直し方を説明する図。",
+  "defs": [
+   "style"
+  ],
+  "lines": 110,
+  "goal": "E",
+  "last_commit": ""
+ },
+ {
+  "path": "F/scripts/f100_motion_fair_probe.py",
+  "doc": "2つの動きの地図を「同じ段階」で比べる（2026-09-10）。",
+  "defs": [
+   "corr"
+  ],
+  "lines": 130,
+  "goal": "F",
+  "last_commit": "2026-09-10"
+ },
+ {
+  "path": "F/scripts/f101_gaze_trace_fig.py",
+  "doc": "目がどう動いたかを、時間の線と視界のコマで見せる（2026-09-10）。",
+  "defs": [],
+  "lines": 58,
+  "goal": "F",
+  "last_commit": "2026-09-10"
+ },
+ {
+  "path": "F/scripts/f102_stay_probe.py",
+  "doc": "注意が「留まれない」のはどこのせいかを切り分ける（太郎は走らせない）。",
+  "defs": [
+   "stay"
+  ],
+  "lines": 63,
+  "goal": "F",
+  "last_commit": "2026-09-10"
+ },
+ {
+  "path": "F/scripts/f103_input_audit_fig.py",
+  "doc": "見る側の入力の総点検を1枚の絵にする（2026-09-10）。",
+  "defs": [],
+  "lines": 51,
+  "goal": "F",
+  "last_commit": "2026-09-10"
+ },
+ {
+  "path": "F/scripts/f104_hold_damp_compare.py",
+  "doc": "保持の制動を変えた走行を、基準と並べて判定する。",
+  "defs": [
+   "load",
+   "segments",
+   "metrics",
+   "main"
+  ],
+  "lines": 101,
+  "goal": "F",
+  "last_commit": "2026-09-11"
+ },
+ {
+  "path": "F/scripts/f105_eye_force_probe.py",
+  "doc": "眼球の「指令1あたりに出る力」を直接測る（走行とは別の、机上のプローブ）。",
+  "defs": [
+   "build",
+   "main"
+  ],
+  "lines": 92,
+  "goal": "F",
+  "last_commit": "2026-09-11"
+ },
+ {
+  "path": "F/scripts/f14_direct_readout.py",
+  "doc": "F1-4/F1-6 直接読み出しテスト（2026-08-21 初版 → 2026-08-22 改修）。",
+  "defs": [
+   "_resolve",
+   "parse_args",
+   "fmt_offset",
+   "build_trainer",
+   "eye_addrs",
+   "set_eye_deg",
+   "cam_frame",
+   "angle_err_deg",
+   "solve_gaze",
+   "get_vision",
+   "imagine_embedding",
+   "capture_views_legacy",
+   "capture_views_isolated",
+   "two_sided_scores",
+   "score_one",
+   "auc_from_scores",
+   "binom_threshold",
+   "main"
+  ],
+  "lines": 805,
+  "goal": "F",
+  "last_commit": "2026-08-27"
+ },
+ {
+  "path": "F/scripts/f14_test_metrics.py",
+  "doc": "F1-4h語彙テストの集計 — WordSchedule（parent_labeling.py）が書き出したCSVを読み、",
+  "defs": [
+   "_read_rows",
+   "_find_events",
+   "_first_look",
+   "_looking_time",
+   "compute_metrics",
+   "_print_table",
+   "main"
+  ],
+  "lines": 144,
+  "goal": "F",
+  "last_commit": "2026-08-27"
+ },
+ {
+  "path": "F/scripts/f16_scene_matrix.py",
+  "doc": "F1-6 100場面マトリクス生成（2026-08-22、改訂版）。",
+  "defs": [
+   "load_base",
+   "_strip_state",
+   "build_variant",
+   "_write_tmp_scene",
+   "_capture_toy2_window",
+   "_luminance_mean",
+   "_capture_toy_masked_luminance",
+   "sweep_luminance",
+   "select_hw_levels",
+   "run_hw_measurement",
+   "generate_hw_matrix",
+   "diff_frac",
+   "sweep_and_capture",
+   "select_levels",
+   "run_5pct_measurement",
+   "all_combos",
+   "generate_matrix",
+   "render_pair",
+   "parse_args",
+   "main"
+  ],
+  "lines": 752,
+  "goal": "F",
+  "last_commit": "2026-08-27"
+ },
+ {
+  "path": "F/scripts/f17_fovea_check.py",
+  "doc": "F1-7 検証スクリプト：中心窩カメラの追加と、解像度の月齢自動化。",
+  "defs": [
+   "_make_scene_variant",
+   "_build",
+   "_laplacian_var",
+   "_band_energy_cpd",
+   "main"
+  ],
+  "lines": 237,
+  "goal": "F",
+  "last_commit": "2026-08-27"
+ },
+ {
+  "path": "F/scripts/f17_fovea_edge_check.py",
+  "doc": "F1-7 追加検証A・B（ユーザー指摘、2026-08-22）。",
+  "defs": [
+   "_make_scene_variant",
+   "_build",
+   "isolate",
+   "restore",
+   "main"
+  ],
+  "lines": 191,
+  "goal": "F",
+  "last_commit": "2026-08-27"
+ },
+ {
+  "path": "F/scripts/f49_learning_order.py",
+  "doc": "F2-49：どの順番で学習したかを記録する（2026-09-03・ユーザー指示）。",
+  "defs": [
+   "summarize",
+   "main"
+  ],
+  "lines": 58,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f49_test.py",
+  "doc": "F2-49 産出テスト（2026-09-03）：初見個体を見せて、太郎（GRU）が自力で言う語で採点する。",
+  "defs": [
+   "test_individual",
+   "build_test_world",
+   "make_scene",
+   "render_stimuli",
+   "load_model",
+   "greedy",
+   "correct",
+   "sheet",
+   "main"
+  ],
+  "lines": 211,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f49_test_2d.py",
+  "doc": "F2-49 2D画像テスト（2026-09-03・ユーザー問い「3Dで学習して2D画像で答えられるか」）。",
+  "defs": [
+   "photo_png",
+   "build_photo_world",
+   "render_stimuli",
+   "main"
+  ],
+  "lines": 137,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f49_test_photos.py",
+  "doc": "ユーザーの実写真で太郎を試す（2026-09-03）。ノイズあり（本物の背景・照明）の認識テスト。",
+  "defs": [
+   "square_png",
+   "board_world",
+   "render_boards",
+   "direct_imgs",
+   "main"
+  ],
+  "lines": 127,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f50_desk_boundary.py",
+  "doc": "机上確認（2026-09-03・分節の第2案）：「沈黙（発話の終わり）を教師にすると、語の切れ目に",
+  "defs": [
+   "load",
+   "ids_of",
+   "p_end",
+   "true_boundary",
+   "evaluate",
+   "relisten",
+   "main"
+  ],
+  "lines": 148,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f50_desk_segment.py",
+  "doc": "机上確認・段3（2026-09-03・分節第2案）：記録済みの親のセリフ908回を新しい切り出し",
+  "defs": [
+   "run_condition",
+   "judge",
+   "main"
+  ],
+  "lines": 101,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f50_lexicon_units.py",
+  "doc": "保存モデルの語彙の表を復号し、切り出された単位の内訳を出す（2026-09-03・F2-50の判定用）。",
+  "defs": [
+   "units_of",
+   "report"
+  ],
+  "lines": 45,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f52_parent_body_probe.py",
+  "doc": "親の体の下見（2026-09-03・段1）：頭・胴・腕・手を操り人形（mocap）として世界に置き、",
+  "defs": [
+   "quat_from_x",
+   "quat_from_z",
+   "main"
+  ],
+  "lines": 112,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f53_hand_shapes.py",
+  "doc": "手の形の確認（2026-09-03）：手だけを取り出して、3つの形を真横と正面から見る。",
+  "defs": [
+   "main"
+  ],
+  "lines": 66,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f53_parent_ik_probe.py",
+  "doc": "親の体の下見・段2（2026-09-03）：関節を計算で解く操り人形。",
+  "defs": [
+   "body_xml",
+   "quat_from_z",
+   "mat_from_xz",
+   "quat_of",
+   "ParentBody",
+   "hand_parts",
+   "parent_geom_ids",
+   "fit_hand",
+   "check_penetration",
+   "apply",
+   "main"
+  ],
+  "lines": 359,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f54_parent_model.py",
+  "doc": "親の体（関節つき）のモデル定義（2026-09-03）。",
+  "defs": [
+   "_finger_geoms",
+   "_hand_geoms",
+   "_arm",
+   "build_xml",
+   "part_geoms",
+   "mocap_xml"
+  ],
+  "lines": 175,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f54_parent_pose.py",
+  "doc": "親の姿勢を「条件」から解く（2026-09-03・段3）。",
+  "defs": [
+   "geom_ids",
+   "solve",
+   "main"
+  ],
+  "lines": 210,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f55_parent_in_world.py",
+  "doc": "条件から解いた親の姿勢を、太郎の世界に持ち込む（2026-09-03・段3の続き）。",
+  "defs": [
+   "quat_of",
+   "penetration",
+   "main"
+  ],
+  "lines": 167,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f56_learning_efficiency.py",
+  "doc": "学習効率の測定（2026-09-03）：太郎は1語を何回聞いて覚えたか。",
+  "defs": [
+   "main"
+  ],
+  "lines": 76,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f57_motion_direction_probe.py",
+  "doc": "動きの向きの検出（2026-09-03・下見）：太郎の目で上下左右を見分けられるか。",
+  "defs": [
+   "gray",
+   "flow",
+   "main"
+  ],
+  "lines": 118,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f58_novelty_probe.py",
+  "doc": "「新しさ」が測れるか（2026-09-03・下見）。",
+  "defs": [
+   "novelty",
+   "main"
+  ],
+  "lines": 88,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f58b_novelty_control.py",
+  "doc": "「新しさ」の対照実験（2026-09-03）：写真が高かったのはノイズのせいではないか。",
+  "defs": [
+   "build_world",
+   "main"
+  ],
+  "lines": 148,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f59_object_segment_probe.py",
+  "doc": "物と背景を分けられるか（2026-09-03・下見）。",
+  "defs": [
+   "patch_features",
+   "split_fg_bg",
+   "main"
+  ],
+  "lines": 93,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f60_object_files_probe.py",
+  "doc": "物体ファイルの検証（2026-09-03）：3つの場面で、追跡が期待どおり振る舞うか。",
+  "defs": [
+   "main"
+  ],
+  "lines": 141,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f60b_identity_while_moving.py",
+  "doc": "物が動いている間、同一性が保てるか（2026-09-03）：F2-60の続き。",
+  "defs": [
+   "main"
+  ],
+  "lines": 91,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f61_timestep_stability.py",
+  "doc": "物理の刻み幅を粗くしても安定するか（2026-09-03）：100Hz（現行）vs 50Hz。",
+  "defs": [
+   "run",
+   "main"
+  ],
+  "lines": 105,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f62_novelty_via_object_files.py",
+  "doc": "新しさの物差しは、物体ファイルで平均すると強くなるか（2026-09-04）。",
+  "defs": [
+   "track_sequence",
+   "main"
+  ],
+  "lines": 154,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f63_multi_object_probe.py",
+  "doc": "離れた場所に2つの物があるとき、両方を検出できるか（2026-09-04）。",
+  "defs": [
+   "main"
+  ],
+  "lines": 88,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f63b_sim_boundary_probe.py",
+  "doc": "figure_mask（object_detector.py）が出す「二値化する前の生のsim値」を、",
+  "defs": [
+   "raw_sim",
+   "patch_labels",
+   "classify",
+   "main"
+  ],
+  "lines": 221,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f63c_sim_boundary_faithful.py",
+  "doc": "f63b_sim_boundary_probe.py の追加調査（2026-09-04）。",
+  "defs": [
+   "raw_sim",
+   "patch_labels",
+   "classify",
+   "fwd_of",
+   "main"
+  ],
+  "lines": 180,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f64_empty_view_probe.py",
+  "doc": "F2-64: 「視野に物が無い」場合のMobileSAMの挙動を調べる下準備（2026-09-04）。",
+  "defs": [
+   "main"
+  ],
+  "lines": 80,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f65_mobilesam_detect_probe.py",
+  "doc": "F2-65: object_detector.detect()にMobileSAM経路を追加した後の入口出口確認",
+  "defs": [],
+  "lines": 52,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f66_context_wiring_check.py",
+  "doc": "F2-66: 文脈の配線修正（hidden=t._context_hidden）が実際に効くかの最小確認",
+  "defs": [],
+  "lines": 54,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f67_appearance_prediction_probe.py",
+  "doc": "「見た目の予測誤差」案の下見（2026-09-04）：本体に組み込む前の安いテスト。",
+  "defs": [
+   "_cos",
+   "appearance_vec",
+   "predict_and_surprisal",
+   "main"
+  ],
+  "lines": 162,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f67b_appearance_prediction_visual_check.py",
+  "doc": "F2-67cで使った画像を実際に並べて見る（2026-09-04）。",
+  "defs": [
+   "main"
+  ],
+  "lines": 96,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f68_word_expectation_probe.py",
+  "doc": "「語が呼ぶ期待」で驚きを測る（2026-09-04夜・ユーザー発案）。",
+  "defs": [
+   "_cos",
+   "main"
+  ],
+  "lines": 136,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f69_pattern_generalization_probe.py",
+  "doc": "F2-69 型の応用テスト（2026-09-04夜）。",
+  "defs": [
+   "Taro69",
+   "build_taro",
+   "enable_listen_learn",
+   "_ensure_brain_capacity",
+   "listen_learn_step",
+   "generate_probe",
+   "build_stimuli",
+   "measure",
+   "summarize",
+   "train_pattern",
+   "_setup_font",
+   "make_plot",
+   "main"
+  ],
+  "lines": 441,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f70_pattern_generalization_via_replay.py",
+  "doc": "F2-70 型の応用テストのやり直し（海馬・睡眠リプレイ経由、2026-09-05）。",
+  "defs": [
+   "Taro70",
+   "build_taro",
+   "enable_listen_learn",
+   "generate_probe",
+   "build_stimuli",
+   "measure",
+   "summarize",
+   "hippo_write_step",
+   "write_new_words",
+   "sleep_replay",
+   "_setup_font",
+   "make_plot",
+   "make_comparison_table",
+   "main"
+  ],
+  "lines": 542,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f71_pattern_generalization_disambiguation.py",
+  "doc": "F2-71 型の応用テストの切り分け（見た目の混同を除いた再検証、2026-09-05）。",
+  "defs": [
+   "Taro71",
+   "build_taro",
+   "enable_listen_learn",
+   "generate_probe",
+   "build_stimuli",
+   "measure",
+   "summarize",
+   "hippo_write_step",
+   "write_new_words",
+   "sleep_replay",
+   "_setup_font",
+   "make_plot",
+   "make_comparison_table",
+   "main"
+  ],
+  "lines": 556,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f72_hippocampus_linked_replay_probe.py",
+  "doc": "F2-72 睡眠リプレイの隣接エピソード連結テスト（がおーへの型の応用、再挑戦）。",
+  "defs": [
+   "extract_cluster",
+   "_step_one_episode",
+   "linked_sleep_replay",
+   "sanity_check",
+   "run_one",
+   "make_plot",
+   "compare_and_save",
+   "main"
+  ],
+  "lines": 405,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f73_object_file_persistence.py",
+  "doc": "F2-73 M1.5 物体ファイルの持続確認の解析。",
+  "defs": [
+   "_setup_font",
+   "_f",
+   "load_rows",
+   "build_table",
+   "load_toy_switch_times",
+   "make_figure",
+   "main"
+  ],
+  "lines": 212,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f73b_stitch_detection_frames.py",
+  "doc": "検出フレーム（`検出フレーム/frame_*.png`）を1秒1コマの動画へつなぐ道具（2026-09-05）。",
+  "defs": [
+   "_imread_unicode",
+   "stitch"
+  ],
+  "lines": 74,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f74_vanish_utterance_check.py",
+  "doc": "F2-74 M2 消失発話の照合。",
+  "defs": [
+   "load_rows",
+   "nearest_n_dets",
+   "main"
+  ],
+  "lines": 135,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f75_empty_desk_probe.py",
+  "doc": "F2-74 空机プローブ（2026-09-05・書き捨て診断・読み取り専用）。",
+  "defs": [
+   "_cos",
+   "load_word_prototypes",
+   "generate_with_top3",
+   "main"
+  ],
+  "lines": 276,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f76_context_replay_probe.py",
+  "doc": "F2-74 文脈プローブ（2026-09-05・書き捨て診断・読み取り専用）。",
+  "defs": [
+   "load_events",
+   "load_frame_index",
+   "nearest_frame_step",
+   "encode_frame",
+   "context_feed",
+   "build_context",
+   "generate_from_context",
+   "build_conditions",
+   "main"
+  ],
+  "lines": 414,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f77_snapshot_probe.py",
+  "doc": "F2-74c 発話瞬間プローブ（2026-09-05・書き捨て診断・読み取り専用）。",
+  "defs": [
+   "extract_wide_left_panel",
+   "main"
+  ],
+  "lines": 292,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f78_vanish_signal_check.py",
+  "doc": "F2-75 M3 注意中の物体ファイルと消失信号の照合。",
+  "defs": [
+   "load_rows",
+   "_to_bool",
+   "find_t1",
+   "find_naming_before",
+   "count_false_vanish",
+   "main"
+  ],
+  "lines": 205,
+  "goal": "F",
+  "last_commit": "2026-09-06"
+ },
+ {
+  "path": "F/scripts/f79_vanish_utterance_score.py",
+  "doc": "F2-76b M4 消えた物について「○○ないね」と言う、の採点。",
+  "defs": [
+   "load_rows",
+   "nearest_row",
+   "contains_dane_dayo",
+   "main"
+  ],
+  "lines": 214,
+  "goal": "F",
+  "last_commit": "2026-09-06"
+ },
+ {
+  "path": "F/scripts/f80_hiragana_scenes.py",
+  "doc": "親のセリフを全部ひらがなにした台本と、鎖の実験JSONを作る（2026-09-06）。",
+  "defs": [
+   "has_katakana_or_onbiki",
+   "load_json",
+   "save_json",
+   "transform_scene",
+   "hiragana_scene_name",
+   "convert_one_scene",
+   "replace_paths",
+   "build_f277",
+   "build_f278",
+   "build_f278b",
+   "main"
+  ],
+  "lines": 242,
+  "goal": "F",
+  "last_commit": "2026-09-06"
+ },
+ {
+  "path": "F/scripts/f81_gru_hippo_static_probe.py",
+  "doc": "F2-78 GRUと海馬の静止測定（「GRUがおかしいのか」を切り分ける、2026-09-06）。",
+  "defs": [
+   "load_prototypes",
+   "project_key",
+   "build_context_h",
+   "generate",
+   "hippo_recall_filtered",
+   "top3_to_str",
+   "strip_gone",
+   "sanity_check",
+   "main"
+  ],
+  "lines": 412,
+  "goal": "F",
+  "last_commit": "2026-09-06"
+ },
+ {
+  "path": "F/scripts/f83_here_gone_static_probe.py",
+  "doc": "F2-81 あるの印・消えたの印の静止測定（f81の複製、2026-09-06）。",
+  "defs": [
+   "load_prototypes",
+   "project_key",
+   "_mark_to_state_id",
+   "build_context_h",
+   "generate",
+   "hippo_recall_filtered",
+   "top3_to_str",
+   "strip_marks",
+   "sanity_check",
+   "main"
+  ],
+  "lines": 475,
+  "goal": "F",
+  "last_commit": "2026-09-07"
+ },
+ {
+  "path": "F/scripts/f84_heldout_vanish_score.py",
+  "doc": "短期B 「ないね」と一緒に聞いたことのない物が消えたとき「○○ないね」と言えるか、の採点。",
+  "defs": [
+   "load_rows",
+   "single_word",
+   "load_scene_info",
+   "compute_correction",
+   "intended_word",
+   "find_vanish_events",
+   "main"
+  ],
+  "lines": 464,
+  "goal": "F",
+  "last_commit": "2026-09-08"
+ },
+ {
+  "path": "F/scripts/f85_chunk_static_probe.py",
+  "doc": "塊レベル層の静止測定（f83の複製、2026-09-07）。",
+  "defs": [
+   "HearingVocabView",
+   "ChunkTaro",
+   "build_taro_chunk",
+   "load_prototypes",
+   "project_key",
+   "build_context_h",
+   "generate_chunk",
+   "hippo_recall_filtered",
+   "strip_marks",
+   "chunk_ids_for_text",
+   "main"
+  ],
+  "lines": 353,
+  "goal": "F",
+  "last_commit": "2026-09-07"
+ },
+ {
+  "path": "F/scripts/f86_naming_accuracy.py",
+  "doc": "名づけ正解率（2026-09-07・仕様_M5_塊レベル層.md 後半「7. 名づけ正解率」節）。",
+  "defs": [
+   "_add_scripts_path",
+   "_read_csv",
+   "_noun_in",
+   "_nearest_parent_noun",
+   "analyze",
+   "main"
+  ],
+  "lines": 154,
+  "goal": "F",
+  "last_commit": "2026-09-07"
+ },
+ {
+  "path": "F/scripts/f87_message_static_probe.py",
+  "doc": "言いたいことの層の静止測定（f85の複製、2026-09-07）。",
+  "defs": [
+   "HearingVocabView",
+   "MsgTaro",
+   "build_taro_message",
+   "load_prototypes",
+   "project_key",
+   "chunk_ids_for_text",
+   "build_context_h",
+   "generate_message",
+   "main"
+  ],
+  "lines": 348,
+  "goal": "F",
+  "last_commit": "2026-09-07"
+ },
+ {
+  "path": "F/scripts/f89_world_predictor_plot.py",
+  "doc": "世界の予測器（M7a）の誤差の推移を図にする。",
+  "defs": [
+   "load_rows",
+   "find_vanish_events",
+   "find_parent_events",
+   "setup_font",
+   "plot_timeline",
+   "_aligned_curve",
+   "plot_aligned",
+   "compute_jumps",
+   "plot_habituation",
+   "main"
+  ],
+  "lines": 300,
+  "goal": "F",
+  "last_commit": "2026-09-08"
+ },
+ {
+  "path": "F/scripts/f90_surprise_ne_plot.py",
+  "doc": "驚き→青斑核（M7b-1）の配線が効いているかを図にする。",
+  "defs": [
+   "load_rows",
+   "find_transitions",
+   "setup_font",
+   "_median_dt",
+   "_aligned_curve",
+   "_mean_std",
+   "plot_aligned",
+   "plot_zoom",
+   "compute_ne_rise_and_recovery",
+   "main"
+  ],
+  "lines": 286,
+  "goal": "F",
+  "last_commit": "2026-09-08"
+ },
+ {
+  "path": "F/scripts/f91_parent_crosstalk.py",
+  "doc": "親の発話が物の予測を乱していないか（混線）を見る図。",
+  "defs": [
+   "load_rows",
+   "find_parent_onset",
+   "setup_font",
+   "_aligned_curve",
+   "compute_jump",
+   "plot",
+   "main"
+  ],
+  "lines": 210,
+  "goal": "F",
+  "last_commit": "2026-09-08"
+ },
+ {
+  "path": "F/scripts/f92_port_attention.py",
+  "doc": "ポートごとの驚き（attend_port）を集計する図。",
+  "defs": [
+   "load_rows",
+   "find_onset_events",
+   "port_kind",
+   "compute_kind_ratio",
+   "_window_rows",
+   "hearing_ratio_around_parent",
+   "vision_match_ratio_around_vanish",
+   "_aligned_indicator_curve",
+   "setup_font",
+   "plot",
+   "main"
+  ],
+  "lines": 282,
+  "goal": "F",
+  "last_commit": "2026-09-08"
+ },
+ {
+  "path": "F/scripts/f93_wp_offline_ablation.py",
+  "doc": "切り分け実験：世界の予測器（ポート型）の入力記録をオフラインで変種に流して比べる。",
+  "defs": [
+   "_bin_label",
+   "load_records",
+   "compute_variance_stats",
+   "act_dim_and_n_chunks",
+   "_patch_v1",
+   "_patch_v2",
+   "_patch_v5",
+   "build_wp",
+   "_var_vec_projected",
+   "_var_vec_unit",
+   "run_variant",
+   "_setup_font",
+   "make_plot",
+   "main"
+  ],
+  "lines": 561,
+  "goal": "F",
+  "last_commit": "2026-09-08"
+ },
+ {
+  "path": "F/scripts/f94_needle_ratio.py",
+  "doc": "出来事の針の比（消失・戻った瞬間の跳ね ÷ 注意の切り替えの瞬間の跳ね）を測る。",
+  "defs": [
+   "_f",
+   "load_main_rows",
+   "load_by_file_rows",
+   "find_masked_steps",
+   "find_vanish_return_events",
+   "find_attend_switch_events",
+   "find_first_last_vanish_per_file",
+   "compute_needle_ratio",
+   "compute_age_stats",
+   "compute_habituation",
+   "setup_font",
+   "plot",
+   "main"
+  ],
+  "lines": 385,
+  "goal": "F",
+  "last_commit": "2026-09-09"
+ },
+ {
+  "path": "F/scripts/f95_object_file_stats.py",
+  "doc": "物体ファイル（`物体ファイル.csv`）の枚数・分裂・寿命を集計する。",
+  "defs": [
+   "_to_float",
+   "_to_int",
+   "main"
+  ],
+  "lines": 374,
+  "goal": "F",
+  "last_commit": "2026-09-09"
+ },
+ {
+  "path": "F/scripts/f96_salience_probe.py",
+  "doc": "目立ちの地図を、録画した視界で試す（太郎は走らせない）。",
+  "defs": [],
+  "lines": 56,
+  "goal": "F",
+  "last_commit": "2026-09-10"
+ },
+ {
+  "path": "F/scripts/f97_priority_probe.py",
+  "doc": "場所の優先度地図（復帰抑制つき）を、録画した視界で試す（太郎は走らせない）。",
+  "defs": [],
+  "lines": 82,
+  "goal": "F",
+  "last_commit": "2026-09-10"
+ },
+ {
+  "path": "F/scripts/f98_gaze_paths_fig.py",
+  "doc": "図：今の太郎で「眼球の筋への指令」を書いている経路を全部並べる（2026-09-10）。",
+  "defs": [],
+  "lines": 49,
+  "goal": "F",
+  "last_commit": "2026-09-10"
+ },
+ {
+  "path": "F/scripts/f99_two_maps_probe.py",
+  "doc": "今の太郎が持っている「2枚の地図」を、同じ録画コマで並べて見せる（2026-09-10）。",
+  "defs": [],
+  "lines": 91,
+  "goal": "F",
+  "last_commit": "2026-09-10"
+ },
+ {
+  "path": "F/scripts/f_analyze_10words.py",
+  "doc": "F2-20（10語）テストの集計。混同行列と、そっくりペアの成績を図にする。",
+  "defs": [
+   "cat_of_individual",
+   "main"
+  ],
+  "lines": 121,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f_compare_ab.py",
+  "doc": "F2-25 A/B の判定：逐次(A)と並列+混合(B)の最終モデルを静止測定で比べる。",
+  "defs": [
+   "load",
+   "probe",
+   "main"
+  ],
+  "lines": 69,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f_gen_10way.py",
+  "doc": "10択の世界を作る（V1c）：1シーンに10物体、親がランダムに1個ずつ見せて名づける。",
+  "defs": [
+   "geoms_of",
+   "replace_body",
+   "build_xml",
+   "main"
+  ],
+  "lines": 137,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f_gen_10words.py",
+  "doc": "10語×5個体の実験一式を作る（F2-20）。XML→シーンJSON→実験ファイルまで一気通貫。",
+  "defs": [
+   "find_object_body",
+   "ascii_stem",
+   "main"
+  ],
+  "lines": 190,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f_gen_f40.py",
+  "doc": "F2-40：経験の多様性増強（訓練個体8体/語・毛の模様・親の連呼）の鎖を生成する。",
+  "defs": [
+   "geoms_of_idx",
+   "build_xml",
+   "main"
+  ],
+  "lines": 109,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f_gen_f41.py",
+  "doc": "F2-41：猫を知らない太郎を喃語直後（F2-6）から9択で通しで育てる（ユーザー指示 2026-09-02）。",
+  "defs": [],
+  "lines": 41,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f_gen_f49.py",
+  "doc": "F2-49：実物スキャン素材（Google Scanned Objects / YCB）で8語を学ぶ鎖を生成する（2026-09-03）。",
+  "defs": [
+   "individuals",
+   "mesh_files",
+   "prep",
+   "asset_and_geom",
+   "build_xml",
+   "remove_body",
+   "utter",
+   "main"
+  ],
+  "lines": 185,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f_gen_listen_learn.py",
+  "doc": "F2-21：聞く学習（GRUの次トークン予測）つきで10語の学習をやり直す。",
+  "defs": [
+   "main"
+  ],
+  "lines": 94,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f_gen_multiindiv_train.py",
+  "doc": "複数個体で学習する実験一式を作る（F2-19）。",
+  "defs": [
+   "scene_name",
+   "make_pair_scene",
+   "main"
+  ],
+  "lines": 138,
+  "goal": "F",
+  "last_commit": "2026-08-30"
+ },
+ {
+  "path": "F/scripts/f_gen_object_scene_json.py",
+  "doc": "基本図形の物体を見せるシーンJSONを個体ごとに作る（F2-17）。",
+  "defs": [
+   "main"
+  ],
+  "lines": 55,
+  "goal": "F",
+  "last_commit": "2026-08-30"
+ },
+ {
+  "path": "F/scripts/f_gen_object_scenes.py",
+  "doc": "基本図形の物体（4語×5個体）を置いたシーンXMLを生成する（F2-17）。",
+  "defs": [
+   "find_object_body",
+   "main"
+  ],
+  "lines": 89,
+  "goal": "F",
+  "last_commit": "2026-08-30"
+ },
+ {
+  "path": "F/scripts/f_gen_pair_probe.py",
+  "doc": "V1b の前提プローブ一式を作る：1つのシーンに3D物体を2つ（犬1＋くつ1）。",
+  "defs": [
+   "build_pair_xml",
+   "main"
+  ],
+  "lines": 120,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f_gen_parallel_ab.py",
+  "doc": "F2-25：学習の並列化のA/B検証の実験一式を作る。",
+  "defs": [
+   "main"
+  ],
+  "lines": 67,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f_gen_segmentation.py",
+  "doc": "F2-23：語の切れ目を自力で見つける（統計的分節）実験一式を作る。",
+  "defs": [
+   "mixture",
+   "main"
+  ],
+  "lines": 107,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f_gso_fetch.py",
+  "doc": "Google Scanned Objects（CC-BY 4.0）から選んだモデルを Gazebo Fuel から取得する（F2-49・2026-09-02）。",
+  "defs": [
+   "fetch"
+  ],
+  "lines": 58,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f_gso_gallery.py",
+  "doc": "取得したGSOモデルを本番の提示条件（0.3m・60度・224px・傾き25度）で描いた一覧図を作る（承認用）。",
+  "defs": [
+   "prep",
+   "render"
+  ],
+  "lines": 99,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f_make_objects.py",
+  "doc": "基本図形だけで、4カテゴリ × 5個体の物体を組み立てる（F2-17 般化テスト用）。",
+  "defs": [
+   "scaled",
+   "dog",
+   "car",
+   "apple",
+   "shoe",
+   "cat",
+   "train",
+   "ball",
+   "banana",
+   "cup",
+   "hat",
+   "_mix_params",
+   "_expand_training_individuals",
+   "_save_png",
+   "ensure_pattern_assets",
+   "pattern_assets_xml",
+   "apply_pattern",
+   "build",
+   "main"
+  ],
+  "lines": 921,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f_merge_models.py",
+  "doc": "並列に学習した複数モデルを1つに混ぜる（F2-25・並列化の検証）。",
+  "defs": [
+   "merge_vocab",
+   "remap_rows",
+   "main"
+  ],
+  "lines": 160,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f_merge_models_v2.py",
+  "doc": "並列学習の混ぜ方 v2（TIES方式）— F2-25の失敗と文献調査を受けた改良版。",
+  "defs": [
+   "merge_vocab",
+   "remap_rows",
+   "plain_mean",
+   "ties",
+   "main"
+  ],
+  "lines": 209,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f_present_angle_probe.py",
+  "doc": "提示角度の静止測定（2026-09-03・F2-49）。本番と同じ環境を組み、親が持つ位置に物を置いて、",
+  "defs": [
+   "present_quat",
+   "main"
+  ],
+  "lines": 114,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f_probe_video.py",
+  "doc": "下見走行の視界ダンプから、ユーザー目視用の動画を作る（2026-09-03・F2-49）。",
+  "defs": [
+   "load_events",
+   "main"
+  ],
+  "lines": 116,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/f_wordreadout_nway.py",
+  "doc": "N語版・直接読み出しテスト（2026-08-24 新規作成。作業B）。",
+  "defs": [
+   "_resolve",
+   "parse_args",
+   "parse_kv_list",
+   "capture_views_nway",
+   "two_sided_scores_nway",
+   "score_nway",
+   "main"
+  ],
+  "lines": 472,
+  "goal": "F",
+  "last_commit": "2026-08-27"
+ },
+ {
+  "path": "F/scripts/f_ycb_fetch.py",
+  "doc": "YCB Object Set（CC-BY 4.0）から選んだ物を取得する（F2-49・2026-09-02）。",
+  "defs": [
+   "fetch"
+  ],
+  "lines": 38,
+  "goal": "F",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "F/scripts/fig_注意の回路比較_2026-09-10.py",
+  "doc": "================= 左：人間（実行の順に上から下） =================",
+  "defs": [],
+  "lines": 73,
+  "goal": "F",
+  "last_commit": ""
+ },
+ {
+  "path": "F/scripts/figkit.py",
+  "doc": "回路図・ブロック図の共通部品（2026-09-10）。",
+  "defs": [
+   "Panel",
+   "figure"
+  ],
+  "lines": 114,
+  "goal": "F",
+  "last_commit": "2026-09-10"
+ },
+ {
+  "path": "F/scripts/run_f2_10_serial.py",
+  "doc": "F2-10（耳の長音展開）の再学習12本＋産出テスト4本を、1本ずつ順に回す。",
+  "defs": [
+   "note",
+   "main"
+  ],
+  "lines": 70,
+  "goal": "F",
+  "last_commit": "2026-08-27"
+ },
+ {
+  "path": "run/plugins/base.py",
+  "doc": "プラグインの規約。測る道具・見る道具はすべてこの形にする。",
+  "defs": [
+   "Plugin"
+  ],
+  "lines": 88,
+  "goal": "",
+  "last_commit": "2026-08-11"
+ },
+ {
+  "path": "run/plugins/common/babble_probe.py",
+  "doc": "測る道具：喃語モード（F2-1）の発話を記録する。",
+  "defs": [
+   "_abs_path",
+   "BabbleProbe"
+  ],
+  "lines": 177,
+  "goal": "",
+  "last_commit": "2026-08-27"
+ },
+ {
+  "path": "run/plugins/common/block_progress_probe.py",
+  "doc": "感覚ブロックごとのprogress（学習進度）を可視化するための、読むだけのプローブ。",
+  "defs": [
+   "BlockProgressProbe"
+  ],
+  "lines": 113,
+  "goal": "",
+  "last_commit": "2026-08-11"
+ },
+ {
+  "path": "run/plugins/common/body_geoms.py",
+  "doc": "自己接触（太郎の体どうし）と外界接触（柵・おもちゃなど）を区別するための共有部品。",
+  "defs": [
+   "geoms_of_body_id",
+   "geoms_of_body",
+   "geoms_by_name_prefix",
+   "contact_pairs_between"
+  ],
+  "lines": 160,
+  "goal": "",
+  "last_commit": "2026-08-11"
+ },
+ {
+  "path": "run/plugins/common/contact_reward.py",
+  "doc": "指定した部位どうしの自己接触の瞬間とそれ以外の瞬間で、太郎の脳がすでに持っている",
+  "defs": [
+   "_label_for_geom",
+   "ContactReward"
+  ],
+  "lines": 504,
+  "goal": "",
+  "last_commit": "2026-08-11"
+ },
+ {
+  "path": "run/plugins/common/dashboard.py",
+  "doc": "学習の様子の絵（HTML）を、記録の区切りごとに自動で作り直す。",
+  "defs": [
+   "Dashboard"
+  ],
+  "lines": 147,
+  "goal": "",
+  "last_commit": "2026-08-27"
+ },
+ {
+  "path": "run/plugins/common/double_touch.py",
+  "doc": "ダブルタッチ（自己接触の一致）を検出する ── 触れた側・触れられた側の",
+  "defs": [
+   "DoubleTouch"
+  ],
+  "lines": 214,
+  "goal": "",
+  "last_commit": "2026-08-11"
+ },
+ {
+  "path": "run/plugins/common/gaze_probe.py",
+  "doc": "測る道具：太郎の視線が的（おもちゃ）にどれだけ・どう留まるかを記録する。",
+  "defs": [
+   "_abs_path",
+   "GazeProbe"
+  ],
+  "lines": 103,
+  "goal": "",
+  "last_commit": "2026-08-27"
+ },
+ {
+  "path": "run/plugins/common/hand_in_view.py",
+  "doc": "手が視界に入っている割合を測る。",
+  "defs": [
+   "HandInView"
+  ],
+  "lines": 57,
+  "goal": "",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "run/plugins/common/model_snapshots.py",
+  "doc": "checkpointごとに脳の途中保存を残す（F2-33②・2026-09-01新設）。",
+  "defs": [
+   "ModelSnapshots"
+  ],
+  "lines": 51,
+  "goal": "",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "run/plugins/common/movement_units.py",
+  "doc": "動きの区切り（movement units）を数える ── 手の動きが滑らかかどうかを測る。",
+  "defs": [
+   "MovementUnits"
+  ],
+  "lines": 232,
+  "goal": "",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "run/plugins/common/object_files.py",
+  "doc": "測る道具（兼・配線係）：MobileSAMの物体切り出し（[既製部品] 逸脱その42・登録済み）",
+  "defs": [
+   "_abs_path",
+   "ObjectFiles"
+  ],
+  "lines": 1333,
+  "goal": "",
+  "last_commit": "2026-09-11"
+ },
+ {
+  "path": "run/plugins/common/plateau_stop.py",
+  "doc": "小脳の予測誤差(cereb_err)が頭打ちに達したら、学習を打ち切る道具。",
+  "defs": [
+   "PlateauStop"
+  ],
+  "lines": 190,
+  "goal": "",
+  "last_commit": "2026-08-17"
+ },
+ {
+  "path": "run/plugins/common/posture_probe.py",
+  "doc": "頭の高さと報酬を記録する。",
+  "defs": [
+   "PostureProbe"
+  ],
+  "lines": 83,
+  "goal": "",
+  "last_commit": "2026-08-17"
+ },
+ {
+  "path": "run/plugins/common/probe_defaults.py",
+  "doc": "測定器（probe類）の既定値を1箇所にまとめたもの。副作用なし・定数のみ。",
+  "defs": [],
+  "lines": 35,
+  "goal": "",
+  "last_commit": "2026-08-11"
+ },
+ {
+  "path": "run/plugins/common/produce_snapshot.py",
+  "doc": "測る道具：太郎が語を言った瞬間に、その目に何が写っていたかを残す。",
+  "defs": [
+   "_abs_path",
+   "ProduceSnapshot"
+  ],
+  "lines": 263,
+  "goal": "",
+  "last_commit": "2026-08-28"
+ },
+ {
+  "path": "run/plugins/common/reach_success.py",
+  "doc": "自己接触が実際に起きているか（頭・胸・反対の手に触れたか）を直接測る。",
+  "defs": [
+   "ReachSuccess"
+  ],
+  "lines": 168,
+  "goal": "",
+  "last_commit": "2026-08-11"
+ },
+ {
+  "path": "run/plugins/common/scene.py",
+  "doc": "環境を作る。環境を組み立てるのはここだけ。",
+  "defs": [
+   "build"
+  ],
+  "lines": 172,
+  "goal": "",
+  "last_commit": "2026-08-13"
+ },
+ {
+  "path": "run/plugins/common/self_model.py",
+  "doc": "自己モデルの質を測る。太郎の脳が要るので、run.type=train のときだけ使える。",
+  "defs": [
+   "SelfModel"
+  ],
+  "lines": 143,
+  "goal": "",
+  "last_commit": "2026-08-11"
+ },
+ {
+  "path": "run/plugins/common/toy_in_view.py",
+  "doc": "おもちゃ（test_object1）が視界に入っている割合を測る。",
+  "defs": [
+   "ToyInView"
+  ],
+  "lines": 72,
+  "goal": "",
+  "last_commit": "2026-08-17"
+ },
+ {
+  "path": "run/plugins/common/toy_touch.py",
+  "doc": "物体（おもちゃ）に手が触れたかを測る。",
+  "defs": [
+   "ToyTouch"
+  ],
+  "lines": 74,
+  "goal": "",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "run/plugins/common/trace.py",
+  "doc": "毎ステップの内部の値の「指紋」を残す。同じシードで結果がばらつく原因を追うため。",
+  "defs": [
+   "_fp",
+   "Trace"
+  ],
+  "lines": 129,
+  "goal": "",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "run/plugins/common/vergence_probe.py",
+  "doc": "測る道具：輻輳反射がいま何度を目標にし、実際に両目が何度ずれているかを記録する。",
+  "defs": [
+   "_abs_path",
+   "VergenceProbe"
+  ],
+  "lines": 97,
+  "goal": "",
+  "last_commit": "2026-08-28"
+ },
+ {
+  "path": "run/plugins/common/view_video.py",
+  "doc": "見る道具：太郎の視界（左目の実入力）と第三者視点を、走行中にそのまま動画にする（2026-09-03）。",
+  "defs": [
+   "ViewVideo"
+  ],
+  "lines": 173,
+  "goal": "",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "run/plugins/common/word_learning.py",
+  "doc": "測る道具：親のfollow-in labeling（F1-3）で語彙がどれだけ育っているかを見る。",
+  "defs": [
+   "_cos",
+   "WordLearning"
+  ],
+  "lines": 138,
+  "goal": "",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "run/plugins/common/word_production.py",
+  "doc": "測る道具：太郎自身の産出（F2「見た物の名前を言う」）を記録する。",
+  "defs": [
+   "WordProduction"
+  ],
+  "lines": 147,
+  "goal": "",
+  "last_commit": "2026-09-07"
+ },
+ {
+  "path": "run/plugins/common/word_similarity_map.py",
+  "doc": "語彙地図：太郎が知っている語同士の見た目の近さ（コサイン類似度）を、",
+  "defs": [
+   "_abs_path",
+   "_cos",
+   "WordSimilarityMap"
+  ],
+  "lines": 182,
+  "goal": "",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "run/plugins/common/world_predictor_log.py",
+  "doc": "測る道具：世界の予測器（M7a／M7b-1）の誤差をCSVに書く。",
+  "defs": [
+   "_abs_path",
+   "_by_file_path",
+   "WorldPredictorLog"
+  ],
+  "lines": 150,
+  "goal": "",
+  "last_commit": "2026-09-09"
+ },
+ {
+  "path": "run/plugins/common/world_predictor_record.py",
+  "doc": "記録する道具：世界の予測器（ポート型）が毎tick受け取った入力を1本のpklに残す。",
+  "defs": [
+   "_abs_path",
+   "_cast_vision",
+   "WorldPredictorRecord"
+  ],
+  "lines": 90,
+  "goal": "",
+  "last_commit": "2026-09-08"
+ },
+ {
+  "path": "run/scene_tools/catalog.py",
+  "doc": "シーン一覧（`E/docs/シーン一覧.md`）を自動生成する道具。",
+  "defs": [
+   "_out_path_for_scene_dir",
+   "_experiments_by_scene",
+   "_settings_jp",
+   "build_rows",
+   "render_markdown",
+   "write_catalog"
+  ],
+  "lines": 198,
+  "goal": "",
+  "last_commit": "2026-08-27"
+ },
+ {
+  "path": "run/scene_tools/e_scene.py",
+  "doc": "シーン方式 — 実験環境を「1つのファイル」で決める唯一の入口。",
+  "defs": [
+   "default_scene",
+   "_merge",
+   "scene_path",
+   "list_scenes",
+   "load",
+   "save",
+   "build",
+   "_apply_limb_tone",
+   "_rehold",
+   "_resolve_free",
+   "constraint_summary",
+   "_disable_self_contact",
+   "_repin",
+   "_body_kwargs",
+   "_apply_setup",
+   "snapshot_state",
+   "reset_to_scene",
+   "place_toy",
+   "apply_state",
+   "fingerprint",
+   "_model_fingerprint",
+   "config_hash",
+   "compare",
+   "cb_get",
+   "_v",
+   "_seen",
+   "verify",
+   "settle_check",
+   "capture_eye",
+   "from_env_var",
+   "open_scene"
+  ],
+  "lines": 1707,
+  "goal": "",
+  "last_commit": "2026-09-10"
+ },
+ {
+  "path": "run/scene_tools/e_scene_make.py",
+  "doc": "既存のプリセットからシーンファイルを作る（シーン方式への引っ越し）。",
+  "defs": [
+   "_scene",
+   "main"
+  ],
+  "lines": 357,
+  "goal": "",
+  "last_commit": "2026-08-07"
+ },
+ {
+  "path": "run/tools/check_12mo_scene_posture.py",
+  "doc": "12ヶ月シーン（座位_12ヶ月_2おもちゃ_F1-3c_1個提示_fovea_2026-08-23）の座位が",
+  "defs": [
+   "main"
+  ],
+  "lines": 101,
+  "goal": "",
+  "last_commit": "2026-08-27"
+ },
+ {
+  "path": "run/tools/check_15mo_scene_posture.py",
+  "doc": "15ヶ月シーン（座位_15ヶ月_2おもちゃ_F2-2_1個提示_fovea_2026-08-23）の座位が",
+  "defs": [
+   "main"
+  ],
+  "lines": 104,
+  "goal": "",
+  "last_commit": "2026-08-27"
+ },
+ {
+  "path": "run/tools/check_babble_probe.py",
+  "doc": "喃語の測定器（babble_probe）の自己検証。",
+  "defs": [
+   "_Collector",
+   "run_once"
+  ],
+  "lines": 201,
+  "goal": "",
+  "last_commit": "2026-08-27"
+ },
+ {
+  "path": "run/tools/check_common_drive.py",
+  "doc": "新しい駆動モジュール（伸張反射＋揺らぐ振動子の共通駆動）の検証。",
+  "defs": [
+   "_hr",
+   "verify1_oscillator_mix",
+   "verify2_rho_zero_no_effect",
+   "verify3_moment_arm_signs_and_sweep",
+   "verify4_no_drift_without_oscillator",
+   "verify_muscle_required",
+   "verify_noise_conflict_rejected",
+   "verify_default_cpg_unchanged",
+   "main"
+  ],
+  "lines": 324,
+  "goal": "",
+  "last_commit": "2026-08-11"
+ },
+ {
+  "path": "run/tools/check_divergence.py",
+  "doc": "同じ設定を2回回して「どこで最初に食い違うか」を突き止める。",
+  "defs": [
+   "_spec",
+   "_read",
+   "main"
+  ],
+  "lines": 164,
+  "goal": "",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "run/tools/check_double_touch.py",
+  "doc": "double_touch プラグイン（run/plugins/common/double_touch.py）の検証。",
+  "defs": [
+   "check_threshold_logic",
+   "check_guards",
+   "check_initial_pose_near_zero",
+   "check_body_change_survives"
+  ],
+  "lines": 311,
+  "goal": "",
+  "last_commit": "2026-08-11"
+ },
+ {
+  "path": "run/tools/check_double_touch_generalized.py",
+  "doc": "二重接触ボーナスの全身一般化（2026-08-05）の検証。",
+  "defs": [
+   "_RewCollector",
+   "_OldVsNewCollector",
+   "_ContactRewardVsDetectorCollector",
+   "check_regression_bonus_zero",
+   "check_old_vs_new_parity",
+   "check_touch_false_free_scene",
+   "check_contact_reward_agreement",
+   "check_unknown_group_raises",
+   "check_growth_rebuild"
+  ],
+  "lines": 431,
+  "goal": "",
+  "last_commit": "2026-08-11"
+ },
+ {
+  "path": "run/tools/check_double_touch_reward.py",
+  "doc": "頭へのダブルタッチを報酬に直結する仕組み（taro_core本能版）の検証。",
+  "defs": [
+   "check_threshold_logic",
+   "check_bonus_addition",
+   "check_default_unchanged",
+   "check_body_change_survives"
+  ],
+  "lines": 268,
+  "goal": "",
+  "last_commit": "2026-08-11"
+ },
+ {
+  "path": "run/tools/check_entry.py",
+  "doc": "入口以外から実験していないかを機械的に調べる。",
+  "defs": [
+   "_exempt_dir",
+   "scan",
+   "main"
+  ],
+  "lines": 126,
+  "goal": "",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "run/tools/check_f2_1_babble.py",
+  "doc": "F2-1「喃語で口の内部モデルを作る」：短時間走行での配線・自己検証。",
+  "defs": [
+   "_BabbleLengthCollector"
+  ],
+  "lines": 105,
+  "goal": "",
+  "last_commit": "2026-08-27"
+ },
+ {
+  "path": "run/tools/check_f2_1_babble_equivalence.py",
+  "doc": "F2-1「喃語で口の内部モデルを作る」：既定OFFの原則の実測確認。",
+  "defs": [],
+  "lines": 156,
+  "goal": "",
+  "last_commit": "2026-08-27"
+ },
+ {
+  "path": "run/tools/check_f2_2_short_run.py",
+  "doc": "F2-2「見た物の名前を言う」：短時間走行での配線・自己検証。",
+  "defs": [],
+  "lines": 118,
+  "goal": "",
+  "last_commit": "2026-08-27"
+ },
+ {
+  "path": "run/tools/check_f2_produce_report.py",
+  "doc": "F2「見た物の名前を言う」本走行の結果を図にする（検証専用・実装本体には含めない）。",
+  "defs": [
+   "load_rows",
+   "rolling_mean",
+   "fig1_time_trend",
+   "fig2_word_by_toy",
+   "main"
+  ],
+  "lines": 131,
+  "goal": "",
+  "last_commit": "2026-08-27"
+ },
+ {
+  "path": "run/tools/check_fence.py",
+  "doc": "環境の物（柵）と太郎の体の大きさが合っているかを測る。",
+  "defs": [],
+  "lines": 79,
+  "goal": "",
+  "last_commit": "2026-08-11"
+ },
+ {
+  "path": "run/tools/check_figure.py",
+  "doc": "図の「機械的に確かめられること」を検査する。見た目の主観は人が見る。",
+  "defs": [
+   "_text_w",
+   "_seg_rect",
+   "main"
+  ],
+  "lines": 142,
+  "goal": "",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "run/tools/check_jitter.py",
+  "doc": "指標の「暴れ」を既存CSVだけで数える。学習は回さない（タダ）。",
+  "defs": [
+   "load",
+   "sd",
+   "corr"
+  ],
+  "lines": 147,
+  "goal": "",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "run/tools/check_joint_compliance.py",
+  "doc": "関節可動域の壁を滑らかにする機構（joint_compliance）の検証。",
+  "defs": [
+   "_hr",
+   "_reference_solimp",
+   "_reference_margin",
+   "_joint_id",
+   "verify0_solimp_from_params_math",
+   "verify0_solimp_monotonic_in_range",
+   "verify0_resolve_params_flat_vs_per_joint",
+   "verify_a_requires_groups_or_joints",
+   "verify_a_unknown_group_name",
+   "verify_a_unknown_joint_name",
+   "verify_a_unknown_param_key",
+   "verify_b_default_off_matches_mujoco_builtin",
+   "verify_b_old_style_call_identical",
+   "verify_c_shoulder_group_wiring",
+   "verify_c_all_group_targets_only_limited_hinge",
+   "verify_d_reapplied_across_ages",
+   "_ScenePatch",
+   "verify_e_drive_mode_independence",
+   "_shoulder_actuator_indices",
+   "verify_f0_muscle_max_command_probe",
+   "verify_f_wall_sticking_reduced",
+   "verify_f_margin_sweep",
+   "main"
+  ],
+  "lines": 887,
+  "goal": "",
+  "last_commit": "2026-08-17"
+ },
+ {
+  "path": "run/tools/check_js.py",
+  "doc": "HTMLの中の操作スクリプト（JavaScript）が本当に動くかを確かめる。",
+  "defs": [
+   "check",
+   "main"
+  ],
+  "lines": 124,
+  "goal": "",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "run/tools/check_movement_units.py",
+  "doc": "「動きの区切り（movement units）」の数え方が正しいか確かめる。",
+  "defs": [
+   "make"
+  ],
+  "lines": 195,
+  "goal": "",
+  "last_commit": "2026-08-11"
+ },
+ {
+  "path": "run/tools/check_physics.py",
+  "doc": "物理（MuJoCo）を「激しく動かしたとき」に決定的かを調べる。脳を通さない。",
+  "defs": [
+   "_h",
+   "main"
+  ],
+  "lines": 105,
+  "goal": "",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "run/tools/check_posture_reflex.py",
+  "doc": "姿勢制御反射（層1、postural_gate.py）の検証。",
+  "defs": [
+   "_hr",
+   "_joint_id",
+   "verify0_joint_structure",
+   "_hip_bend_actuator_index",
+   "verify_a_muscle_channel_sign",
+   "_front_back_wall_env",
+   "verify_b_touch_front_back_sign",
+   "verify_c_gate_behavior",
+   "verify_d_error_conditions",
+   "verify_e_default_off_wiring",
+   "verify_f_posture_height_reward",
+   "main"
+  ],
+  "lines": 540,
+  "goal": "",
+  "last_commit": "2026-08-17"
+ },
+ {
+  "path": "run/tools/check_produce_cerebellum_passthrough.py",
+  "doc": "作業A（2026-08-24）：帳面（発話小脳 produce_cerebellum）がフェーズをまたぐと",
+  "defs": [],
+  "lines": 212,
+  "goal": "",
+  "last_commit": "2026-08-27"
+ },
+ {
+  "path": "run/tools/check_profile_overhead.py",
+  "doc": "作業C（速度改善・処理内訳の記録）の既定OFFの原則の実測確認。",
+  "defs": [
+   "spec",
+   "read_csv",
+   "diverging_cols",
+   "main"
+  ],
+  "lines": 139,
+  "goal": "",
+  "last_commit": "2026-08-27"
+ },
+ {
+  "path": "run/tools/check_progress_surprise.py",
+  "doc": "progress報酬のsurpriseボーナス（機構1、`cfg.progress_surprise_bonus`）の検証。",
+  "defs": [
+   "_base_taro",
+   "check_validation",
+   "_Recorder",
+   "_run_short",
+   "_old_formula_trace",
+   "check_default_unchanged",
+   "_TraceRecorder",
+   "_recompute_trace",
+   "_find_hitting_seed",
+   "check_positive_bonus_behavior",
+   "check_resync_period",
+   "check_existing_callers",
+   "_run_all"
+  ],
+  "lines": 617,
+  "goal": "",
+  "last_commit": "2026-08-11"
+ },
+ {
+  "path": "run/tools/check_qt_theme_neutral.py",
+  "doc": "共有テーマファイルに、別システム側の言葉が混入していないかを調べる。",
+  "defs": [
+   "check_file",
+   "main"
+  ],
+  "lines": 88,
+  "goal": "",
+  "last_commit": "2026-08-17"
+ },
+ {
+  "path": "run/tools/check_reach_goal_default_unchanged.py",
+  "doc": "既定値（goal_babbling=False、または goal_space=prop_full）のとき、",
+  "defs": [
+   "_load_module_from_source",
+   "_build"
+  ],
+  "lines": 141,
+  "goal": "",
+  "last_commit": "2026-08-11"
+ },
+ {
+  "path": "run/tools/check_reach_goal_legacy_unchanged.py",
+  "doc": "goal_babbling=True・goal_space=prop_full（旧実装）のとき、学習が再現するか。",
+  "defs": [
+   "_run_worker"
+  ],
+  "lines": 122,
+  "goal": "",
+  "last_commit": "2026-08-11"
+ },
+ {
+  "path": "run/tools/check_reach_goal_short_train.py",
+  "doc": "手先位置の目標表現（案C）：短時間学習で配線・勾配を確認する（検証計画 Level 5）。",
+  "defs": [],
+  "lines": 83,
+  "goal": "",
+  "last_commit": "2026-08-11"
+ },
+ {
+  "path": "run/tools/check_reach_goal_wiring.py",
+  "doc": "手先位置の目標表現（案C）の配線チェック・成長頑健性・通ってはいけない条件。",
+  "defs": [
+   "_build"
+  ],
+  "lines": 233,
+  "goal": "",
+  "last_commit": "2026-08-11"
+ },
+ {
+  "path": "run/tools/check_reach_success.py",
+  "doc": "reach_success プラグイン（run/plugins/common/reach_success.py）の検証。",
+  "defs": [
+   "check_threshold_logic",
+   "check_guards",
+   "check_initial_pose_near_zero",
+   "check_body_change_survives"
+  ],
+  "lines": 315,
+  "goal": "",
+  "last_commit": "2026-08-11"
+ },
+ {
+  "path": "run/tools/check_repeat.py",
+  "doc": "同じプロセスの中で学習を2回して、結果が一致するかを調べる。",
+  "defs": [
+   "one",
+   "fmt",
+   "main"
+  ],
+  "lines": 94,
+  "goal": "",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "run/tools/check_reset.py",
+  "doc": "`env.reset()` を繰り返すと、毎回同じ状態になるかを調べる。",
+  "defs": [
+   "_h",
+   "main"
+  ],
+  "lines": 101,
+  "goal": "",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "run/tools/check_scene_reset_consistency.py",
+  "doc": "シーン保存時の姿勢と、実際に学習が始まるときの姿勢の整合性を確認する。",
+  "defs": [
+   "_snapshot_joints",
+   "check_scene",
+   "print_report",
+   "main"
+  ],
+  "lines": 197,
+  "goal": "",
+  "last_commit": "2026-08-11"
+ },
+ {
+  "path": "run/tools/check_self_touch_interest.py",
+  "doc": "自己接触の興味度ボーナス（`cfg.self_touch_interest_bonus`）の検証。",
+  "defs": [
+   "_base_taro",
+   "check_validation",
+   "_Recorder",
+   "_run_short",
+   "check_default_unchanged",
+   "check_positive_bonus_behavior",
+   "_check_body_progress_vs_bonus"
+  ],
+  "lines": 304,
+  "goal": "",
+  "last_commit": "2026-08-11"
+ },
+ {
+  "path": "run/tools/check_sensorimotor_delay.py",
+  "doc": "感覚運動の伝達遅延（候補5）の配線チェック。",
+  "defs": [
+   "make_env",
+   "run_fixed",
+   "run_fixed_capture_action"
+  ],
+  "lines": 241,
+  "goal": "",
+  "last_commit": "2026-08-11"
+ },
+ {
+  "path": "run/tools/check_speed.py",
+  "doc": "「学習済みの方が倍速感がある」を実測で確かめる。",
+  "defs": [
+   "make_env",
+   "measure",
+   "brain_action",
+   "blank_action"
+  ],
+  "lines": 165,
+  "goal": "",
+  "last_commit": "2026-08-11"
+ },
+ {
+  "path": "run/tools/check_touch_adaptation.py",
+  "doc": "触覚の順応（同じ場所を押され続けると感じ方が弱まる）の検証。",
+  "defs": [
+   "_hr",
+   "verify0_peripheral_decay_matches_analytic",
+   "verify0_cortical_decay_matches_analytic",
+   "verify0_recovery",
+   "verify0_fa_zero_when_no_change",
+   "verify0_clip_bounds",
+   "verify0_cortical_disabled_matches_peripheral_only",
+   "verify0_zero_forever_stays_zero",
+   "verify0_fusion_regression_synthetic",
+   "verify0_advance_multiplicity_differs",
+   "verify0_growth_rebuild_required",
+   "verify0_double_touch_files_unaffected",
+   "verify_a_requires_touch_somatosensory",
+   "verify_a_default_taro_unchanged",
+   "verify_a_fusion_touch_unaffected_when_off",
+   "verify_a_fusion_target_state_consistency",
+   "verify_a_sa_floor_and_fa_zero_end_to_end",
+   "_Recorder",
+   "verify_b_regression_short_run",
+   "_run_labeled",
+   "verify_c_same_seed_reproducibility",
+   "main"
+  ],
+  "lines": 656,
+  "goal": "",
+  "last_commit": "2026-08-13"
+ },
+ {
+  "path": "run/tools/check_touch_growth.py",
+  "doc": "触覚が「体を育てても同じ部位を読み続けるか」を確かめる。",
+  "defs": [
+   "_make",
+   "_probe"
+  ],
+  "lines": 234,
+  "goal": "",
+  "last_commit": "2026-08-11"
+ },
+ {
+  "path": "run/tools/check_wiring_viewer_contrast.py",
+  "doc": "TaroMap（配線可視化アプリ）のテーマ配色が、コントラスト比の基準を満たすかを検証する。",
+  "defs": [
+   "test_all_themes_exist",
+   "test_text_roles_meet_threshold",
+   "test_graphic_roles_meet_threshold",
+   "test_ink_on_card_readable",
+   "_run_all"
+  ],
+  "lines": 111,
+  "goal": "",
+  "last_commit": "2026-08-17"
+ },
+ {
+  "path": "run/tools/check_wiring_viewer_dimensions.py",
+  "doc": "TaroMap（配線可視化アプリ）の scan_dimensions.py（実測モジュール）が正しく",
+  "defs": [
+   "test_measure_dimensions_sense_params_match_known_table",
+   "test_measure_dimensions_return_shape",
+   "test_measure_dimensions_efference_copy_reflects_cfg",
+   "test_measure_dimensions_cache_roundtrip_and_speedup",
+   "test_measure_dimensions_fingerprint_changes_when_dependency_mtime_changes",
+   "test_measure_dimensions_fingerprint_changes_when_self_file_mtime_changes",
+   "test_measure_dimensions_fusion_params_match_sum_of_senses",
+   "_run_all"
+  ],
+  "lines": 233,
+  "goal": "",
+  "last_commit": "2026-08-17"
+ },
+ {
+  "path": "run/tools/check_wiring_viewer_extract.py",
+  "doc": "TaroMap（配線可視化アプリ）の各scan_*.pyの抽出が正確かを、Qt起動なしで検証する。",
+  "defs": [
+   "test_scan_config_count_matches_defaults",
+   "test_scan_docstrings_count",
+   "test_scan_taro_setup_self_attrs_count_matches_grep",
+   "test_scan_logs_csv_total_matches_os_walk",
+   "test_wiring_map_node_edge_counts",
+   "_run_all"
+  ],
+  "lines": 131,
+  "goal": "",
+  "last_commit": "2026-08-17"
+ },
+ {
+  "path": "run/tools/check_wiring_viewer_prediction_page.py",
+  "doc": "TaroMap ⑦「予測のしくみ（実測）」ページ（page_prediction.py）の検証。",
+  "defs": [
+   "_find_page_scroll_areas",
+   "test_page_has_at_most_one_scroll_area_and_no_overflow_at_1920x1080",
+   "test_page_has_no_overflow_at_1280x720",
+   "test_touch_off_dims_the_touch_row_and_touch_on_restores_it",
+   "test_generation_time_is_shown",
+   "test_efference_copy_off_dims_the_section",
+   "test_main_window_has_prediction_page_and_switches_to_it",
+   "_run_all"
+  ],
+  "lines": 172,
+  "goal": "",
+  "last_commit": "2026-08-17"
+ },
+ {
+  "path": "run/tools/check_wiring_viewer_research_map.py",
+  "doc": "TaroMap（研究マップページ）の scan_research_map.py（実測一覧モジュール）が",
+  "defs": [
+   "_count_experiment_jsons",
+   "_count_csv_exists",
+   "test_list_experiments_count_matches_actual_glob",
+   "test_csv_exists_count_matches_actual_filesystem_check",
+   "test_return_shape_and_no_column_name_hardcoding",
+   "test_date_source_labeled_correctly_when_note_has_no_date_prefix",
+   "test_interpretation_lookup_uses_研究マップ_解釈",
+   "test_empty_hinagata_files_do_not_raise",
+   "test_new_dummy_experiment_appears_after_glob_even_with_cache",
+   "test_cache_roundtrip_speedup",
+   "_run_all"
+  ],
+  "lines": 243,
+  "goal": "",
+  "last_commit": "2026-08-17"
+ },
+ {
+  "path": "run/tools/check_wiring_viewer_research_map_page.py",
+  "doc": "TaroMap ⑧「研究マップ」ページ（page_research_map.py）の検証（工程5）。",
+  "defs": [
+   "_find_page_scroll_areas",
+   "test_table_row_count_matches_list_experiments_count",
+   "test_csv_exists_rows_show_nonempty_result_numbers",
+   "test_nan_is_shown_as_readable_text_not_raw_number",
+   "test_search_filter_narrows_rows_to_matching_only",
+   "test_no_overflow_at_1920x1080_and_1280x720",
+   "test_main_window_has_research_map_page_and_switches_to_it",
+   "test_empty_michisuji_shows_guidance_without_error",
+   "_run_all"
+  ],
+  "lines": 185,
+  "goal": "",
+  "last_commit": "2026-08-17"
+ },
+ {
+  "path": "run/tools/compare_runs.py",
+  "doc": "2つの条件の学習ログ(CSV)を並べて比べる。",
+  "defs": [
+   "load",
+   "summarize"
+  ],
+  "lines": 116,
+  "goal": "",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "run/tools/dashboard.py",
+  "doc": "学習の進み具合と結果を1枚の絵にする（HTML）。走行中も見られる。",
+  "defs": [
+   "_read_csv",
+   "_read_log",
+   "collect",
+   "_cond_of",
+   "bar",
+   "line_chart",
+   "_fmt_eta",
+   "_detail_html",
+   "build_html",
+   "make",
+   "main"
+  ],
+  "lines": 684,
+  "goal": "",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "run/tools/excalidraw.py",
+  "doc": "Excalidraw(.excalidraw)ファイルを組み立てる最小ヘルパー（2026-08-22新設）。",
+  "defs": [
+   "_nid",
+   "box",
+   "text",
+   "arrow",
+   "save"
+  ],
+  "lines": 60,
+  "goal": "",
+  "last_commit": "2026-08-27"
+ },
+ {
+  "path": "run/tools/index_tools.py",
+  "doc": "太郎のコード全部の索引を自動で作り、コマンドラインから探せるようにする。",
+  "defs": [
+   "_iter_py",
+   "_first_line",
+   "_entry",
+   "_last_commits",
+   "build",
+   "write",
+   "_tokens",
+   "_score",
+   "load",
+   "find",
+   "main"
+  ],
+  "lines": 263,
+  "goal": "",
+  "last_commit": ""
+ },
+ {
+  "path": "run/tools/memory_guard.py",
+  "doc": "繰り返し環境を作り直す検証ツール向けの、メモリ上限を見張る道具。",
+  "defs": [
+   "MemoryExceeded",
+   "MemoryGuard"
+  ],
+  "lines": 175,
+  "goal": "",
+  "last_commit": "2026-08-17"
+ },
+ {
+  "path": "run/tools/preflight.py",
+  "doc": "起動前チェック：一連の実験を回す前に、止まる原因を先に潰す。",
+  "defs": [
+   "_p",
+   "check",
+   "chain_order",
+   "main"
+  ],
+  "lines": 134,
+  "goal": "",
+  "last_commit": "2026-08-27"
+ },
+ {
+  "path": "run/tools/queue_train.py",
+  "doc": "実験を、GPUの上限を超えないように機械的に順番へ並べて実行する。",
+  "defs": [
+   "main"
+  ],
+  "lines": 96,
+  "goal": "",
+  "last_commit": "2026-08-11"
+ },
+ {
+  "path": "run/tools/record_learned_posture_clip.py",
+  "doc": "本日学習した座位保持モデル（座位_6ヶ月・muscle・reward=posture_height）を、",
+  "defs": [
+   "main"
+  ],
+  "lines": 266,
+  "goal": "",
+  "last_commit": "2026-08-17"
+ },
+ {
+  "path": "run/tools/record_orienting_reflex_clip.py",
+  "doc": "視線誘導反射（Orienting Reflex）が発動した瞬間の、太郎の両目カメラ映像をmp4で保存する。",
+  "defs": [
+   "main"
+  ],
+  "lines": 195,
+  "goal": "",
+  "last_commit": "2026-08-11"
+ },
+ {
+  "path": "run/tools/record_posture_reset_clip.py",
+  "doc": "発表用デモ映像：座位（シーン「座位_床_柵なし」）で「座る→前へ倒れる→座位へ",
+  "defs": [
+   "main"
+  ],
+  "lines": 231,
+  "goal": "",
+  "last_commit": "2026-08-17"
+ },
+ {
+  "path": "run/tools/record_self_touch_clip.py",
+  "doc": "発表用デモ映像：学習済み太郎が自己接触（頭に手が触れる）する瞬間のmp4を作る。",
+  "defs": [
+   "main"
+  ],
+  "lines": 185,
+  "goal": "",
+  "last_commit": "2026-08-11"
+ },
+ {
+  "path": "run/tools/record_topdown_flat_clip.py",
+  "doc": "発表用デモ映像：自発運動（もがき運動）の区切りの細かさを、真上からの",
+  "defs": [
+   "main"
+  ],
+  "lines": 216,
+  "goal": "",
+  "last_commit": "2026-08-11"
+ },
+ {
+  "path": "run/tools/refactor_harness.py",
+  "doc": "設定配線の大改修（シーンJSON→環境構築、`run/scene_tools/e_scene.py` 363〜411行の",
+  "defs": [
+   "_list_scenes",
+   "_run_child",
+   "_child_env",
+   "_run_one",
+   "_baseline_path",
+   "cmd_baseline",
+   "_compare_result",
+   "cmd_compare",
+   "main"
+  ],
+  "lines": 337,
+  "goal": "",
+  "last_commit": "2026-08-17"
+ },
+ {
+  "path": "run/tools/test_themes_keys.py",
+  "doc": "e_viewer_qt_theme.THEMES の各テーマが、キーの集合が完全一致しているかを調べる。",
+  "defs": [
+   "main"
+  ],
+  "lines": 48,
+  "goal": "",
+  "last_commit": "2026-08-17"
+ },
+ {
+  "path": "run/tools/wiring.py",
+  "doc": "太郎の中身の配線図を描く（SVG）。実装したもの全部を出し、使っていないものは薄く。",
+  "defs": [
+   "_order_in_columns",
+   "layout",
+   "_edge_path",
+   "_fit",
+   "build_svg",
+   "legend_html",
+   "html_page",
+   "main"
+  ],
+  "lines": 467,
+  "goal": "",
+  "last_commit": "2026-08-17"
+ },
+ {
+  "path": "run/tools/機構の稼働状況.py",
+  "doc": "機構の稼働状況 ── 実装済みの機構が、実験で一度でも使われたかを一覧する。",
+  "defs": [
+   "targetable_nodes",
+   "load_experiments",
+   "ever_on_map",
+   "_label",
+   "_tier_label",
+   "print_report",
+   "main"
+  ],
+  "lines": 218,
+  "goal": "",
+  "last_commit": ""
+ },
+ {
+  "path": "run/viewer_tools/e_launch.py",
+  "doc": "Viewer のランチャー — シーンを選んで起動するだけの入口。",
+  "defs": [
+   "read_last",
+   "write_last",
+   "describe",
+   "print_scene_list",
+   "print_footer",
+   "show_detail",
+   "select_scene",
+   "main"
+  ],
+  "lines": 192,
+  "goal": "",
+  "last_commit": "2026-08-07"
+ },
+ {
+  "path": "run/viewer_tools/e_launch_qt.py",
+  "doc": "新版ビューア（PySide6・第1段階）のランチャー — シーンを選んで起動するだけの入口。",
+  "defs": [
+   "main"
+  ],
+  "lines": 70,
+  "goal": "",
+  "last_commit": "2026-08-13"
+ },
+ {
+  "path": "run/viewer_tools/e_viewer.py",
+  "doc": "太郎を見るための統一ビューア。おもちゃ・姿勢・反射・測定器・再生を1枚にまとめる。",
+  "defs": [
+   "Section",
+   "slider",
+   "main"
+  ],
+  "lines": 3260,
+  "goal": "",
+  "last_commit": "2026-08-27"
+ },
+ {
+  "path": "run/viewer_tools/e_viewer_qt.py",
+  "doc": "太郎を見るための新しいビューア（PySide6版）— 第2段階：体・環境タブの残り＋状態表示。",
+  "defs": [
+   "_collect_pose_joints",
+   "_root_quat_from_sliders",
+   "_sliders_from_root_quat",
+   "MainWindow",
+   "_describe_scene",
+   "_confirm_overwrite",
+   "main"
+  ],
+  "lines": 1900,
+  "goal": "",
+  "last_commit": "2026-08-17"
+ },
+ {
+  "path": "run/viewer_tools/e_viewer_qt_drive.py",
+  "doc": "「駆動」タブ（PySide6版ビューア）— 第5段階：もがき運動・反射+共通駆動の移植。",
+  "defs": [
+   "build_drive_tab",
+   "_current_mode",
+   "_ensure_state",
+   "_apply_limb_strength",
+   "_rc_restore_stiffness",
+   "_build_reflex_common",
+   "_ensure_reflex_common",
+   "_apply_reflex_common_params",
+   "_babble_noise",
+   "drive_tick_action",
+   "_ensure_brain_state",
+   "_load_brain_model",
+   "_brain_step",
+   "brain_or_env_step"
+  ],
+  "lines": 845,
+  "goal": "",
+  "last_commit": "2026-08-17"
+ },
+ {
+  "path": "run/viewer_tools/e_viewer_qt_measure.py",
+  "doc": "「測定器」タブ（PySide6版ビューア）— 第5段階：本移植。",
+  "defs": [
+   "build_measure_tab",
+   "_body_id_or_none",
+   "update_measure_tab"
+  ],
+  "lines": 252,
+  "goal": "",
+  "last_commit": "2026-08-13"
+ },
+ {
+  "path": "run/viewer_tools/e_viewer_qt_status.py",
+  "doc": "Viewer(PySide6版)の状態表示欄（ステータスバー）の計算ロジック。",
+  "defs": [
+   "compute_status",
+   "format_status_text"
+  ],
+  "lines": 157,
+  "goal": "",
+  "last_commit": "2026-08-13"
+ },
+ {
+  "path": "run/viewer_tools/e_viewer_qt_theme.py",
+  "doc": "Viewer(PySide6版)の見た目テーマを定義する。",
+  "defs": [
+   "theme_names",
+   "_theme_dict",
+   "build_palette",
+   "build_stylesheet",
+   "apply_theme",
+   "try_apply_mica"
+  ],
+  "lines": 394,
+  "goal": "",
+  "last_commit": "2026-08-13"
+ },
+ {
+  "path": "run/viewer_tools/e_viewer_qt_touch.py",
+  "doc": "Viewer(PySide6版)「感覚と報酬」タブの非GUIロジック（触覚の順応・口元の報酬）。",
+  "defs": [
+   "TouchMonitor",
+   "build_touch_monitor",
+   "_build_mouth_contributor",
+   "advance_touch_monitor",
+   "format_touch_status"
+  ],
+  "lines": 229,
+  "goal": "",
+  "last_commit": "2026-08-13"
+ },
+ {
+  "path": "run/viewer_tools/e_viewer_qt_widgets.py",
+  "doc": "Viewer(PySide6版)で使い回す小さなUI部品。",
+  "defs": [
+   "FloatSlider",
+   "CollapsibleSection"
+  ],
+  "lines": 165,
+  "goal": "",
+  "last_commit": "2026-08-13"
+ },
+ {
+  "path": "run/viewer_tools/test_pose_slider_roundtrip.py",
+  "doc": "体ぜんたいスライダー（絶対値化）の往復保証テスト。",
+  "defs": [
+   "_find_root_qadr",
+   "test_angle_roundtrip",
+   "test_scene_save_load_roundtrip"
+  ],
+  "lines": 189,
+  "goal": "",
+  "last_commit": "2026-08-17"
+ },
+ {
+  "path": "run/viewer_tools/wiring_viewer/app.py",
+  "doc": "TaroMap の起動口。",
+  "defs": [
+   "build_app",
+   "main"
+  ],
+  "lines": 50,
+  "goal": "",
+  "last_commit": "2026-08-17"
+ },
+ {
+  "path": "run/viewer_tools/wiring_viewer/body_regions.py",
+  "doc": "体の部位分類（「器官の説明」ページの小さな絞り込みフィルタ用）。",
+  "defs": [
+   "body_region_names",
+   "region_categories",
+   "region_of",
+   "files_related_to_category"
+  ],
+  "lines": 108,
+  "goal": "",
+  "last_commit": "2026-08-17"
+ },
+ {
+  "path": "run/viewer_tools/wiring_viewer/contrast_check.py",
+  "doc": "色のコントラスト比を測る（Qt非依存の純粋関数）。",
+  "defs": [
+   "relative_luminance",
+   "contrast_ratio",
+   "_hex_to_rgb",
+   "_self_test"
+  ],
+  "lines": 75,
+  "goal": "",
+  "last_commit": "2026-08-17"
+ },
+ {
+  "path": "run/viewer_tools/wiring_viewer/health_check.py",
+  "doc": "TaroMap（⑥健康診断ページ）用：2つの独立したヒューリスティック検査。",
+  "defs": [
+   "_fallback_scan_taro_setup",
+   "_scan_taro_setup",
+   "_find_taro_core_classes",
+   "find_unwired_classes",
+   "find_uncovered_bool_settings"
+  ],
+  "lines": 245,
+  "goal": "",
+  "last_commit": "2026-08-17"
+ },
+ {
+  "path": "run/viewer_tools/wiring_viewer/main_window.py",
+  "doc": "TaroMap のメインウィンドウ（工程C＝統合済み。6ページとも本物のページを配線）。",
+  "defs": [
+   "_build_pages",
+   "MainWindow"
+  ],
+  "lines": 159,
+  "goal": "",
+  "last_commit": "2026-08-17"
+ },
+ {
+  "path": "run/viewer_tools/wiring_viewer/page_classification.py",
+  "doc": "TaroMap ⑤区分一覧ページ。",
+  "defs": [
+   "PageClassification"
+  ],
+  "lines": 237,
+  "goal": "",
+  "last_commit": "2026-08-17"
+ },
+ {
+  "path": "run/viewer_tools/wiring_viewer/page_health.py",
+  "doc": "TaroMap ⑥健康診断ページ。",
+  "defs": [
+   "PageHealth"
+  ],
+  "lines": 126,
+  "goal": "",
+  "last_commit": "2026-08-17"
+ },
+ {
+  "path": "run/viewer_tools/wiring_viewer/page_logs.py",
+  "doc": "TaroMap ④実測ログページ。",
+  "defs": [
+   "PageLogs"
+  ],
+  "lines": 192,
+  "goal": "",
+  "last_commit": "2026-08-17"
+ },
+ {
+  "path": "run/viewer_tools/wiring_viewer/page_organs.py",
+  "doc": "TaroMap ②「器官の説明」ページ。",
+  "defs": [
+   "PageOrgans"
+  ],
+  "lines": 243,
+  "goal": "",
+  "last_commit": "2026-08-17"
+ },
+ {
+  "path": "run/viewer_tools/wiring_viewer/page_prediction.py",
+  "doc": "TaroMap ⑦「予測のしくみ（実測）」ページ。",
+  "defs": [
+   "_bar_width_px",
+   "_box",
+   "_arrow",
+   "_note",
+   "_section_title",
+   "PagePrediction"
+  ],
+  "lines": 493,
+  "goal": "",
+  "last_commit": "2026-08-17"
+ },
+ {
+  "path": "run/viewer_tools/wiring_viewer/page_research_map.py",
+  "doc": "TaroMap ⑧「研究マップ」ページ（工程5）。",
+  "defs": [
+   "_format_result_numbers",
+   "_note_preview",
+   "_sort_key_日付",
+   "_ExperimentTable",
+   "PageResearchMap",
+   "_section_title"
+  ],
+  "lines": 358,
+  "goal": "",
+  "last_commit": "2026-08-17"
+ },
+ {
+  "path": "run/viewer_tools/wiring_viewer/page_settings.py",
+  "doc": "TaroMap ③設定一覧ページ。",
+  "defs": [
+   "_value_to_text",
+   "_ConfigTable",
+   "PageSettings"
+  ],
+  "lines": 144,
+  "goal": "",
+  "last_commit": "2026-08-17"
+ },
+ {
+  "path": "run/viewer_tools/wiring_viewer/page_wiring.py",
+  "doc": "TaroMap ①配線図ページ。太郎の中身38機構・40本の依存関係を1枚の絵で見せる。",
+  "defs": [
+   "_layout",
+   "_edge_geom",
+   "_fit_font_px",
+   "NodeItem",
+   "_node_item_of",
+   "WiringView",
+   "WiringScene",
+   "PageWiring"
+  ],
+  "lines": 534,
+  "goal": "",
+  "last_commit": "2026-08-17"
+ },
+ {
+  "path": "run/viewer_tools/wiring_viewer/scan_config.py",
+  "doc": "TaroMap（③設定一覧ページ）用：run/config.py の設定項目を実行時に列挙する。",
+  "defs": [
+   "_rows_from",
+   "scan_config"
+  ],
+  "lines": 80,
+  "goal": "",
+  "last_commit": "2026-08-17"
+ },
+ {
+  "path": "run/viewer_tools/wiring_viewer/scan_dimensions.py",
+  "doc": "太郎の各層（感覚エンコーダ5個・融合層・脳）を実際にインスタンス化し、",
+  "defs": [
+   "_taro_root",
+   "_ensure_sys_path",
+   "_compute_fingerprint",
+   "_load_cache",
+   "_save_cache",
+   "_measure_module",
+   "_efference_copy_enabled",
+   "_build_and_measure",
+   "measure_dimensions"
+  ],
+  "lines": 316,
+  "goal": "",
+  "last_commit": "2026-08-17"
+ },
+ {
+  "path": "run/viewer_tools/wiring_viewer/scan_docstrings.py",
+  "doc": "taro_core/src 配下の全 .py ファイルから、モジュールdocstringを抽出する道具。",
+  "defs": [
+   "_taro_root",
+   "default_src_root",
+   "scan_docstrings"
+  ],
+  "lines": 120,
+  "goal": "",
+  "last_commit": "2026-08-17"
+ },
+ {
+  "path": "run/viewer_tools/wiring_viewer/scan_logs.py",
+  "doc": "TaroMap（④実測ログページ）用：E/logs 配下のCSVログを高速に一覧化する。",
+  "defs": [
+   "list_log_runs",
+   "read_csv_header",
+   "read_csv_data"
+  ],
+  "lines": 125,
+  "goal": "",
+  "last_commit": "2026-08-17"
+ },
+ {
+  "path": "run/viewer_tools/wiring_viewer/scan_research_map.py",
+  "doc": "TaroMap（⑦研究マップページ）用：E/experiments 配下の実験ファイルと、その結果CSVを",
+  "defs": [
+   "_to_rel",
+   "_load_cache",
+   "_save_cache",
+   "_load_interpretations",
+   "_stat",
+   "_parse_experiment_json",
+   "_read_csv_summary",
+   "list_experiments"
+  ],
+  "lines": 299,
+  "goal": "",
+  "last_commit": "2026-08-17"
+ },
+ {
+  "path": "run/viewer_tools/wiring_viewer/scan_taro_setup.py",
+  "doc": "taro_setup.py を静的解析して「実際に組み立てられているクラス」を洗い出す。",
+  "defs": [
+   "_find_class_taro",
+   "_find_init",
+   "_class_name_of_call",
+   "scan_taro_setup"
+  ],
+  "lines": 133,
+  "goal": "",
+  "last_commit": "2026-08-17"
+ },
+ {
+  "path": "run/viewer_tools/wiring_viewer/search_deviation_list.py",
+  "doc": "TaroMap（⑤区分一覧ページ）用：`doc/人間模倣からの逸脱リスト.md` の全文検索。",
+  "defs": [
+   "search_deviations"
+  ],
+  "lines": 96,
+  "goal": "",
+  "last_commit": "2026-08-17"
+ },
+ {
+  "path": "run/viewer_tools/wiring_viewer/theme.py",
+  "doc": "TaroMap（配線・設定の一覧アプリ）専用のテーマ定義。",
+  "defs": [
+   "get_theme",
+   "detect_system_theme"
+  ],
+  "lines": 97,
+  "goal": "",
+  "last_commit": "2026-08-17"
+ },
+ {
+  "path": "taro_core/src/body/adenosine.py",
+  "doc": "アデノシン — 眠さの原因物質",
+  "defs": [
+   "Adenosine"
+  ],
+  "lines": 44,
+  "goal": "",
+  "last_commit": "2026-07-17"
+ },
+ {
+  "path": "taro_core/src/body/blood_vessel.py",
+  "doc": "血管（血中栄養素） — 胃と空腹感の間にあるバッファ",
+  "defs": [
+   "BloodVessel"
+  ],
+  "lines": 57,
+  "goal": "",
+  "last_commit": "2026-07-17"
+ },
+ {
+  "path": "taro_core/src/body/development.py",
+  "doc": "月齢(age_months) → 発達パラメータ の対応表を一本化する（2026-08-23新設）。",
+  "defs": [
+   "vision_acuity_cpd",
+   "vision_required_px",
+   "vocal_tract_stage_for_age",
+   "develop"
+  ],
+  "lines": 148,
+  "goal": "",
+  "last_commit": "2026-08-27"
+ },
+ {
+  "path": "taro_core/src/body/homeostasis.py",
+  "doc": "恒常性（Homeostasis） — 体の状態を快適値に保とうとする本能",
+  "defs": [
+   "Homeostasis"
+  ],
+  "lines": 74,
+  "goal": "",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "taro_core/src/body/infant_body.py",
+  "doc": "新生児の体型（プロポーション）— 太郎の身体そのものの定義。",
+  "defs": [
+   "taper_weight",
+   "elongate_head",
+   "_restore_growth_schema",
+   "body_scale_custom",
+   "build_body_kwargs",
+   "apply_head_mass",
+   "apply_distal_mass",
+   "actuator_strength",
+   "scale_actuator_strength",
+   "apply_physiological_flexion",
+   "apply_runtime_corrections",
+   "center_eyes",
+   "apply_eye_centering_spring",
+   "apply_eye_muscle_scale",
+   "apply_neck_tone"
+  ],
+  "lines": 1184,
+  "goal": "",
+  "last_commit": "2026-08-17"
+ },
+ {
+  "path": "taro_core/src/body/infant_limbs.py",
+  "doc": "四肢の「発達の向きの逆転」を解消する補正。注意恣意性は小さいが逸脱リスト対象。",
+  "defs": [
+   "_descendants",
+   "actuator_ratios",
+   "measure_reference_ratios",
+   "_reference_ratios",
+   "apply_limb_inversion_fix",
+   "_expand_groups",
+   "limb_tone_joints",
+   "limb_tone_joints_by_group",
+   "gravity_moment",
+   "tone_from_gravity",
+   "disable_limb_tone_spring",
+   "apply_limb_tone"
+  ],
+  "lines": 704,
+  "goal": "",
+  "last_commit": "2026-08-12"
+ },
+ {
+  "path": "taro_core/src/body/infant_neck.py",
+  "doc": "新生児の「首がすわっていない」を再現する補正。注意**恣意的な逸脱**（下記ラベリング参照）。",
+  "defs": [
+   "_head_bodies",
+   "head_gravity_torque",
+   "lift_ratio",
+   "target_ratio_for_age",
+   "apply_newborn_neck"
+  ],
+  "lines": 266,
+  "goal": "",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "taro_core/src/body/internal_state.py",
+  "doc": "内受容感覚 — 身体の信号を統合して脳に渡す",
+  "defs": [
+   "InternalState"
+  ],
+  "lines": 194,
+  "goal": "",
+  "last_commit": "2026-07-17"
+ },
+ {
+  "path": "taro_core/src/body/joint_compliance.py",
+  "doc": "関節可動域の限界へ近づく抵抗を滑らかにする — MuJoCoのjnt_solimpを実行時に書き換える。",
+  "defs": [
+   "_solimp_from_params",
+   "_margin_from_params",
+   "_is_flat_params",
+   "_validate_param_keys",
+   "_resolve_params",
+   "_resolve_target_joints",
+   "apply_joint_compliance",
+   "_rad2deg"
+  ],
+  "lines": 461,
+  "goal": "",
+  "last_commit": "2026-08-17"
+ },
+ {
+  "path": "taro_core/src/body/smooth_actuation.py",
+  "doc": "筋活性化ダイナミクス（一次遅れ）を既存のトルクモータに足す実行層（taro-C5 実験①）。",
+  "defs": [
+   "SmoothTorqueModel"
+  ],
+  "lines": 82,
+  "goal": "",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "taro_core/src/body/stomach.py",
+  "doc": "胃 — 食べ物を受け取り、消化で空になる容器",
+  "defs": [
+   "Stomach"
+  ],
+  "lines": 107,
+  "goal": "",
+  "last_commit": "2026-07-17"
+ },
+ {
+  "path": "taro_core/src/body/vocal_tract.py",
+  "doc": "声道シミュレータ — 太郎の「口」",
+  "defs": [
+   "VocalTract"
+  ],
+  "lines": 304,
+  "goal": "",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "taro_core/src/brain/basal_ganglia.py",
+  "doc": "【転送のみ】このファイルの中身は basal_ganglia/basal_ganglia.py へ移した（2026-08-30の整理）。",
+  "defs": [],
+  "lines": 12,
+  "goal": "",
+  "last_commit": "2026-08-30"
+ },
+ {
+  "path": "taro_core/src/brain/brainstem/atnr.py",
+  "doc": "非対称性緊張性頸反射（ATNR, asymmetric tonic neck reflex）＝脳幹反射弓。",
+  "defs": [
+   "ATNR"
+  ],
+  "lines": 88,
+  "goal": "",
+  "last_commit": "2026-07-24"
+ },
+ {
+  "path": "taro_core/src/brain/brainstem/locus_coeruleus.py",
+  "doc": "青斑核（Locus Coeruleus） — 脳全体の探索レベルを調整する中枢",
+  "defs": [
+   "LocusCoeruleus"
+  ],
+  "lines": 194,
+  "goal": "",
+  "last_commit": "2026-09-08"
+ },
+ {
+  "path": "taro_core/src/brain/brainstem/vergence.py",
+  "doc": "輻輳反射：左右の周辺カメラ画像のズレ（両眼視差）から、目をどれだけ寄せるかを決める。",
+  "defs": [
+   "_grayscale",
+   "_corr_at",
+   "_measure_shift_coarse_to_fine",
+   "_measure_shift_px",
+   "_measure_shift_px_slow",
+   "VergenceReflex"
+  ],
+  "lines": 422,
+  "goal": "",
+  "last_commit": "2026-09-10"
+ },
+ {
+  "path": "taro_core/src/brain/brainstem/vor.py",
+  "doc": "VOR（前庭動眼反射）：眼球を方策から切り離し、頭の動きを打ち消して視線を安定させる。",
+  "defs": [
+   "VOR"
+  ],
+  "lines": 287,
+  "goal": "",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "taro_core/src/brain/cerebellum.py",
+  "doc": "【転送のみ】このファイルの中身は cerebellum/speech.py へ移した（2026-08-30の整理）。",
+  "defs": [],
+  "lines": 12,
+  "goal": "",
+  "last_commit": "2026-08-30"
+ },
+ {
+  "path": "taro_core/src/brain/cerebellum_lobe/motor.py",
+  "doc": "運動小脳（連続版, MotorCerebellum） — 運動の自動化（結晶化）",
+  "defs": [
+   "MotorCerebellum"
+  ],
+  "lines": 61,
+  "goal": "",
+  "last_commit": "2026-08-30"
+ },
+ {
+  "path": "taro_core/src/brain/cerebellum_lobe/speech.py",
+  "doc": "発話小脳（Cerebellum） — 口の動きと音の対応を体験から学ぶ帳面（順モデル＋逆モデル）",
+  "defs": [
+   "Cerebellum"
+  ],
+  "lines": 121,
+  "goal": "",
+  "last_commit": "2026-08-30"
+ },
+ {
+  "path": "taro_core/src/brain/cerebellum_motor.py",
+  "doc": "【転送のみ】このファイルの中身は cerebellum/motor.py へ移した（2026-08-30の整理）。",
+  "defs": [],
+  "lines": 12,
+  "goal": "",
+  "last_commit": "2026-08-30"
+ },
+ {
+  "path": "taro_core/src/brain/cerebral_cortex/chunk_vocab.py",
+  "doc": "塊の名簿（ChunkVocab） — 塊（モーラID列）に番号を振る器。",
+  "defs": [
+   "ChunkVocab"
+  ],
+  "lines": 88,
+  "goal": "",
+  "last_commit": "2026-09-07"
+ },
+ {
+  "path": "taro_core/src/brain/cerebral_cortex/frontal_lobe/corticospinal.py",
+  "doc": "皮質脊髄路（corticospinal tract）相当の薄い配線層。",
+  "defs": [
+   "project"
+  ],
+  "lines": 19,
+  "goal": "",
+  "last_commit": "2026-08-30"
+ },
+ {
+  "path": "taro_core/src/brain/cerebral_cortex/frontal_lobe/motor_cortex.py",
+  "doc": "運動野（motor cortex）相当のモジュール。",
+  "defs": [
+   "MotorCortex"
+  ],
+  "lines": 28,
+  "goal": "",
+  "last_commit": "2026-08-30"
+ },
+ {
+  "path": "taro_core/src/brain/cerebral_cortex/message_layer.py",
+  "doc": "言いたいことの層（MessageLayer） — 物の塊と述語の塊を別々に選んで並べる。",
+  "defs": [
+   "MessageLayer",
+   "_cosine"
+  ],
+  "lines": 311,
+  "goal": "",
+  "last_commit": "2026-09-07"
+ },
+ {
+  "path": "taro_core/src/brain/cerebral_cortex/parietal_lobe/intraparietal_sulcus.py",
+  "doc": "物体ファイル ── 「これ」を物として保つ最小の仕組み。",
+  "defs": [
+   "ObjectFile",
+   "ObjectFileSystem"
+  ],
+  "lines": 711,
+  "goal": "",
+  "last_commit": "2026-09-10"
+ },
+ {
+  "path": "taro_core/src/brain/cerebral_cortex/parietal_lobe/priority_map.py",
+  "doc": "段6 注意の優先度地図 ── 「下からの目立ち」と「上からの目的」を1枚の地図で競わせる。",
+  "defs": [
+   "PriorityMap"
+  ],
+  "lines": 187,
+  "goal": "",
+  "last_commit": "2026-09-09"
+ },
+ {
+  "path": "taro_core/src/brain/cerebral_cortex/parietal_lobe/spatial_priority_map.py",
+  "doc": "場所の優先度地図 ── 「次にどこへ注意を向けるか」を、視野の升目ごとの値で持つ。",
+  "defs": [
+   "SpatialPriorityMap"
+  ],
+  "lines": 166,
+  "goal": "",
+  "last_commit": "2026-09-10"
+ },
+ {
+  "path": "taro_core/src/brain/cerebral_cortex/recurrent_core.py",
+  "doc": "大脳皮質（Cortex） — 予測する単一の再帰ネットワーク",
+  "defs": [
+   "Vocabulary",
+   "TaroBrain"
+  ],
+  "lines": 594,
+  "goal": "",
+  "last_commit": "2026-09-07"
+ },
+ {
+  "path": "taro_core/src/brain/cerebral_cortex/recurrent_core_motor.py",
+  "doc": "本物のTaroBrain（taro_brain.py）に、運動性喃語（身体の感覚運動予測ループ）専用の",
+  "defs": [
+   "TaroBrainWithMotor"
+  ],
+  "lines": 461,
+  "goal": "",
+  "last_commit": "2026-08-30"
+ },
+ {
+  "path": "taro_core/src/brain/cerebral_cortex/sensorimotor_brain.py",
+  "doc": "感覚運動の脳（試作） — Phase 6・運動出力＋感覚運動予測ループ",
+  "defs": [
+   "SensorimotorBrain"
+  ],
+  "lines": 85,
+  "goal": "",
+  "last_commit": "2026-08-30"
+ },
+ {
+  "path": "taro_core/src/brain/cerebral_cortex/temporal_lobe/lexicon.py",
+  "doc": "原-辞書（Proto-Lexicon） — 聞いた発話から「単語の型」を切り出して蓄える",
+  "defs": [
+   "_cosine",
+   "_unit",
+   "_as_channels",
+   "Lexicon"
+  ],
+  "lines": 592,
+  "goal": "",
+  "last_commit": "2026-09-07"
+ },
+ {
+  "path": "taro_core/src/brain/cerebral_cortex/visual_projection.py",
+  "doc": "視覚投射（VisualProjection） — 視覚野から連合野への「軸索の束」。",
+  "defs": [
+   "VisualProjection"
+  ],
+  "lines": 31,
+  "goal": "",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "taro_core/src/brain/cerebral_cortex/world_predictor.py",
+  "doc": "連合野の世界予測器（M7a・測るだけ／M7b-1・物ごとに動かす）。",
+  "defs": [
+   "_ObjState",
+   "WorldPredictor",
+   "_PortSpec",
+   "_PortMem",
+   "PortWorldPredictor"
+  ],
+  "lines": 1448,
+  "goal": "",
+  "last_commit": "2026-09-09"
+ },
+ {
+  "path": "taro_core/src/brain/corticospinal.py",
+  "doc": "【転送のみ】このファイルの中身は cerebral_cortex/frontal_lobe/corticospinal.py へ移した（2026-08-30の整理）。",
+  "defs": [],
+  "lines": 12,
+  "goal": "",
+  "last_commit": "2026-08-30"
+ },
+ {
+  "path": "taro_core/src/brain/developmental_clock.py",
+  "doc": "【転送のみ】このファイルの中身は development/developmental_clock.py へ移した（2026-08-30の整理）。",
+  "defs": [],
+  "lines": 12,
+  "goal": "",
+  "last_commit": "2026-08-30"
+ },
+ {
+  "path": "taro_core/src/brain/developmental_schedule.py",
+  "doc": "【転送のみ】このファイルの中身は development/developmental_schedule.py へ移した（2026-08-30の整理）。",
+  "defs": [],
+  "lines": 12,
+  "goal": "",
+  "last_commit": "2026-08-30"
+ },
+ {
+  "path": "taro_core/src/brain/dopamine.py",
+  "doc": "【転送のみ】このファイルの中身は neuromodulator/dopamine.py へ移した（2026-08-30の整理）。",
+  "defs": [],
+  "lines": 12,
+  "goal": "",
+  "last_commit": "2026-08-30"
+ },
+ {
+  "path": "taro_core/src/brain/double_touch.py",
+  "doc": "【転送のみ】このファイルの中身は drives/double_touch.py へ移した（2026-08-30の整理）。",
+  "defs": [],
+  "lines": 12,
+  "goal": "",
+  "last_commit": "2026-08-30"
+ },
+ {
+  "path": "taro_core/src/brain/drives/double_touch.py",
+  "doc": "ダブルタッチ（頭への自己接触）検出器 ── 報酬に繋ぐための本能版。",
+  "defs": [
+   "mouth_point_mask",
+   "DoubleTouchDetector"
+  ],
+  "lines": 338,
+  "goal": "",
+  "last_commit": "2026-08-30"
+ },
+ {
+  "path": "taro_core/src/brain/drives/imitation_reward.py",
+  "doc": "模倣衝動 — 親の発話に似るほど心地よい",
+  "defs": [
+   "_sub_cost",
+   "_edit_distance",
+   "_weighted_edit_distance",
+   "compute_alignment_credit",
+   "compute_imitation_reward"
+  ],
+  "lines": 136,
+  "goal": "",
+  "last_commit": "2026-08-30"
+ },
+ {
+  "path": "taro_core/src/brain/drives/learning_progress.py",
+  "doc": "内発的動機 — 太郎が「何を嬉しいと感じるか」。",
+  "defs": [
+   "LearningProgress",
+   "smoothness_cost",
+   "effort_cost"
+  ],
+  "lines": 280,
+  "goal": "",
+  "last_commit": "2026-08-30"
+ },
+ {
+  "path": "taro_core/src/brain/goal_babbling/reach_goal_head.py",
+  "doc": "目標専用の順モデル（ReachGoalHead）— 手先位置の目標表現（案C）用。",
+  "defs": [
+   "ReachGoalHead"
+  ],
+  "lines": 47,
+  "goal": "",
+  "last_commit": "2026-08-11"
+ },
+ {
+  "path": "taro_core/src/brain/goal_babbling/trajectory.py",
+  "doc": "区分線形の軌道（GoalTrajectory）— Goal Babbling 段階1。",
+  "defs": [
+   "GoalTrajectory"
+  ],
+  "lines": 63,
+  "goal": "",
+  "last_commit": "2026-08-11"
+ },
+ {
+  "path": "taro_core/src/brain/hippocampus.py",
+  "doc": "【転送のみ】このファイルの中身は limbic/hippocampus.py へ移した（2026-08-30の整理）。",
+  "defs": [],
+  "lines": 12,
+  "goal": "",
+  "last_commit": "2026-08-30"
+ },
+ {
+  "path": "taro_core/src/brain/homeostatic_scaling.py",
+  "doc": "【転送のみ】このファイルの中身は principles/homeostatic_scaling.py へ移した（2026-08-30の整理）。",
+  "defs": [],
+  "lines": 12,
+  "goal": "",
+  "last_commit": "2026-08-30"
+ },
+ {
+  "path": "taro_core/src/brain/imitation_reward.py",
+  "doc": "【転送のみ】このファイルの中身は drives/imitation_reward.py へ移した（2026-08-30の整理）。",
+  "defs": [],
+  "lines": 12,
+  "goal": "",
+  "last_commit": "2026-08-30"
+ },
+ {
+  "path": "taro_core/src/brain/language_hippocampus/language_hippocampus.py",
+  "doc": "言語海馬（LanguageHippocampus） — 聞いた発話の鎖状連想メモリ＋睡眠リプレイ。",
+  "defs": [
+   "LanguageHippocampus"
+  ],
+  "lines": 197,
+  "goal": "",
+  "last_commit": "2026-09-07"
+ },
+ {
+  "path": "taro_core/src/brain/learning_progress.py",
+  "doc": "【転送のみ】このファイルの中身は drives/learning_progress.py へ移した（2026-08-30の整理）。",
+  "defs": [],
+  "lines": 12,
+  "goal": "",
+  "last_commit": "2026-08-30"
+ },
+ {
+  "path": "taro_core/src/brain/left_frontal_lobe/brocas_area.py",
+  "doc": "ブローカ野（Broca's Area） — 左前頭葉にある発話計画の中枢",
+  "defs": [
+   "BrocasArea"
+  ],
+  "lines": 100,
+  "goal": "",
+  "last_commit": "2026-08-27"
+ },
+ {
+  "path": "taro_core/src/brain/lexicon.py",
+  "doc": "【転送のみ】このファイルの中身は cerebral_cortex/temporal_lobe/lexicon.py へ移した（2026-08-30の整理）。",
+  "defs": [],
+  "lines": 12,
+  "goal": "",
+  "last_commit": "2026-08-30"
+ },
+ {
+  "path": "taro_core/src/brain/limbic/hippocampus.py",
+  "doc": "海馬（Hippocampus） — 運動性自己モデル用の短期経験バッファ＆睡眠リプレイ",
+  "defs": [
+   "MotorHippocampus"
+  ],
+  "lines": 58,
+  "goal": "",
+  "last_commit": "2026-08-30"
+ },
+ {
+  "path": "taro_core/src/brain/locus_coeruleus.py",
+  "doc": "【転送のみ】このファイルの中身は brainstem/locus_coeruleus.py へ移した（2026-08-30の整理）。",
+  "defs": [],
+  "lines": 12,
+  "goal": "",
+  "last_commit": "2026-08-30"
+ },
+ {
+  "path": "taro_core/src/brain/maturation/developmental_clock.py",
+  "doc": "発達の時計（DevelopmentalClock） — ③発達年齢を「累積学習回数」で刻む",
+  "defs": [
+   "DevelopmentalClock"
+  ],
+  "lines": 35,
+  "goal": "",
+  "last_commit": "2026-08-30"
+ },
+ {
+  "path": "taro_core/src/brain/maturation/developmental_schedule.py",
+  "doc": "writhing→fidgety移行のスケジュール（2026-07-23設計）。",
+  "defs": [
+   "_ramp",
+   "schedule_w_mean",
+   "schedule_syn_w"
+  ],
+  "lines": 48,
+  "goal": "",
+  "last_commit": "2026-08-30"
+ },
+ {
+  "path": "taro_core/src/brain/midbrain/efference_copy.py",
+  "doc": "段0 座標の安定化（遠心性コピー）── 目を動かす命令の写しを、感覚側へ先回りで送る。",
+  "defs": [
+   "EfferenceCopy"
+  ],
+  "lines": 119,
+  "goal": "",
+  "last_commit": "2026-09-10"
+ },
+ {
+  "path": "taro_core/src/brain/midbrain/orienting.py",
+  "doc": "視線誘導反射（新版）＝設計図（`E/docs/視線誘導反射_設計図.md`）に基づく実装。",
+  "defs": [
+   "_dofadr_of",
+   "_qposadr_of",
+   "OrientingReflexV2"
+  ],
+  "lines": 1656,
+  "goal": "",
+  "last_commit": "2026-09-11"
+ },
+ {
+  "path": "taro_core/src/brain/midbrain/preattentive_map.py",
+  "doc": "段1 前注意の地図 ── 目を向ける前に「どこで何が起きているか」を並列に作る。",
+  "defs": [
+   "PreattentiveMap"
+  ],
+  "lines": 159,
+  "goal": "",
+  "last_commit": "2026-09-10"
+ },
+ {
+  "path": "taro_core/src/brain/midbrain/salience_map.py",
+  "doc": "目立ちの地図 ── 視野ぜんたいの各場所に「どれくらい注意を向けるべきか」の値を1つ持つ。",
+  "defs": [
+   "_pyramid",
+   "_resize_to",
+   "_normalize",
+   "_dog_competition",
+   "SalienceMap"
+  ],
+  "lines": 242,
+  "goal": "",
+  "last_commit": "2026-09-10"
+ },
+ {
+  "path": "taro_core/src/brain/midbrain/superior_colliculus.py",
+  "doc": "上丘（superior colliculus）— 視野の地図と、そこからサッケードを決める仕組み。",
+  "defs": [
+   "visual_to_collicular",
+   "collicular_to_visual",
+   "magnification",
+   "CollicularMap"
+  ],
+  "lines": 358,
+  "goal": "",
+  "last_commit": "2026-08-30"
+ },
+ {
+  "path": "taro_core/src/brain/motor_cortex.py",
+  "doc": "【転送のみ】このファイルの中身は cerebral_cortex/frontal_lobe/motor_cortex.py へ移した（2026-08-30の整理）。",
+  "defs": [],
+  "lines": 12,
+  "goal": "",
+  "last_commit": "2026-08-30"
+ },
+ {
+  "path": "taro_core/src/brain/neuromodulator/dopamine.py",
+  "doc": "ドーパミン（報酬予測誤差） — 学習を駆動するごほうび信号",
+  "defs": [
+   "Dopamine"
+  ],
+  "lines": 27,
+  "goal": "",
+  "last_commit": "2026-08-30"
+ },
+ {
+  "path": "taro_core/src/brain/object_files.py",
+  "doc": "【転送のみ】このファイルの中身は cerebral_cortex/parietal_lobe/intraparietal_sulcus.py へ移した（2026-09-04）。",
+  "defs": [],
+  "lines": 14,
+  "goal": "",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "taro_core/src/brain/precision_perception.py",
+  "doc": "【転送のみ】このファイルの中身は principles/precision_perception.py へ移した（2026-08-30の整理）。",
+  "defs": [],
+  "lines": 12,
+  "goal": "",
+  "last_commit": "2026-08-30"
+ },
+ {
+  "path": "taro_core/src/brain/predictive_coding_latent.py",
+  "doc": "【転送のみ】このファイルの中身は principles/predictive_coding_latent.py へ移した（2026-08-30の整理）。",
+  "defs": [],
+  "lines": 12,
+  "goal": "",
+  "last_commit": "2026-08-30"
+ },
+ {
+  "path": "taro_core/src/brain/principles/homeostatic_scaling.py",
+  "doc": "恒常的シナプススケーリング（Homeostatic Synaptic Scaling） —",
+  "defs": [
+   "HomeostaticScaling"
+  ],
+  "lines": 57,
+  "goal": "",
+  "last_commit": "2026-08-30"
+ },
+ {
+  "path": "taro_core/src/brain/principles/precision_perception.py",
+  "doc": "精度重み付き知覚（Precision-Weighted Perception） — 感覚と期待を精度で混ぜる",
+  "defs": [
+   "PrecisionWeightedPerception"
+  ],
+  "lines": 52,
+  "goal": "",
+  "last_commit": "2026-08-30"
+ },
+ {
+  "path": "taro_core/src/brain/principles/predictive_coding_latent.py",
+  "doc": "確率的な潜在変数＋推論時のその場調整（PV-RNNに着想）",
+  "defs": [
+   "PredictiveCodingLatent"
+  ],
+  "lines": 129,
+  "goal": "",
+  "last_commit": "2026-08-30"
+ },
+ {
+  "path": "taro_core/src/brain/sensorimotor_brain.py",
+  "doc": "【転送のみ】このファイルの中身は cerebral_cortex/sensorimotor_brain.py へ移した（2026-08-30の整理）。",
+  "defs": [],
+  "lines": 12,
+  "goal": "",
+  "last_commit": "2026-08-30"
+ },
+ {
+  "path": "taro_core/src/brain/spinal_cord/common_drive.py",
+  "doc": "脊髄・脳幹相当の上位層：周期・振幅が揺らぐ振動子による共通駆動。",
+  "defs": [
+   "WanderingOscillator",
+   "RhythmicCommonDriveGroup",
+   "joint_signal_to_L0_offset"
+  ],
+  "lines": 152,
+  "goal": "",
+  "last_commit": "2026-08-11"
+ },
+ {
+  "path": "taro_core/src/brain/spinal_cord/cpg.py",
+  "doc": "脊髄・中枢パターン発生器（CPG）相当のモジュール。",
+  "defs": [
+   "ColoredNoiseGenerator",
+   "CPG",
+   "antagonist_map",
+   "is_antagonist_action",
+   "write_joint_command",
+   "read_joint_command"
+  ],
+  "lines": 369,
+  "goal": "",
+  "last_commit": "2026-08-11"
+ },
+ {
+  "path": "taro_core/src/brain/spinal_cord/grasp_reflex.py",
+  "doc": "把握反射（palmar grasp reflex）＝脊髄反射弓。",
+  "defs": [
+   "GraspReflex"
+  ],
+  "lines": 79,
+  "goal": "",
+  "last_commit": "2026-07-23"
+ },
+ {
+  "path": "taro_core/src/brain/spinal_cord/postural_gate.py",
+  "doc": "姿勢制御反射（層1）＝座位で体幹が前後に傾いたとき、傾きと逆側の筋だけを通す",
+  "defs": [
+   "PosturalGate"
+  ],
+  "lines": 334,
+  "goal": "",
+  "last_commit": "2026-08-17"
+ },
+ {
+  "path": "taro_core/src/brain/spinal_cord/righting_damper.py",
+  "doc": "立ち直り反射・層2＝角速度ダンパー（VCR風の連続的バイアス）。",
+  "defs": [
+   "support_fraction_from_pinned_groups",
+   "RightingDamper",
+   "_demo_sensitivity_sweep"
+  ],
+  "lines": 215,
+  "goal": "",
+  "last_commit": "2026-08-17"
+ },
+ {
+  "path": "taro_core/src/brain/spinal_cord/stretch_reflex.py",
+  "doc": "伸張反射（脊髄反射弓）。新しい駆動モジュール（伸張反射＋揺らぐ振動子の共通駆動）の下位層。",
+  "defs": [
+   "StretchReflex"
+  ],
+  "lines": 114,
+  "goal": "",
+  "last_commit": "2026-08-11"
+ },
+ {
+  "path": "taro_core/src/brain/subcortical_nuclei/basal_ganglia.py",
+  "doc": "大脳基底核（Basal Ganglia） — 行動選択と強化学習",
+  "defs": [
+   "TaroLearner"
+  ],
+  "lines": 137,
+  "goal": "",
+  "last_commit": "2026-08-30"
+ },
+ {
+  "path": "taro_core/src/brain/subcortical_nuclei/speech_gate.py",
+  "doc": "発話の門（SpeechGate） — 「言うかどうか」を反応の随伴で学ぶ大脳基底核の門。",
+  "defs": [
+   "SpeechGate"
+  ],
+  "lines": 116,
+  "goal": "",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "taro_core/src/brain/superior_colliculus.py",
+  "doc": "【転送のみ】このファイルの中身は midbrain/superior_colliculus.py へ移した（2026-08-30の整理）。",
+  "defs": [],
+  "lines": 12,
+  "goal": "",
+  "last_commit": "2026-08-30"
+ },
+ {
+  "path": "taro_core/src/brain/taro_brain.py",
+  "doc": "【転送のみ】このファイルの中身は cerebral_cortex/recurrent_core.py へ移した（2026-08-30の整理）。",
+  "defs": [],
+  "lines": 12,
+  "goal": "",
+  "last_commit": "2026-08-30"
+ },
+ {
+  "path": "taro_core/src/brain/taro_brain_motor.py",
+  "doc": "【転送のみ】このファイルの中身は cerebral_cortex/recurrent_core_motor.py へ移した（2026-08-30の整理）。",
+  "defs": [],
+  "lines": 12,
+  "goal": "",
+  "last_commit": "2026-08-30"
+ },
+ {
+  "path": "taro_core/src/brain/vocal_tract.py",
+  "doc": "【転送のみ】中身は body/vocal_tract.py へ移した（2026-08-30の整理）。",
+  "defs": [],
+  "lines": 17,
+  "goal": "",
+  "last_commit": "2026-09-05"
+ },
+ {
+  "path": "taro_core/src/senses/fusion.py",
+  "doc": "感覚融合（fusion）— 各感覚エンコーダの出力を1本のベクトルに統合する、太郎の\"本物の融合層\"。",
+  "defs": [
+   "to_tensor",
+   "MinimalFusion"
+  ],
+  "lines": 103,
+  "goal": "",
+  "last_commit": "2026-08-13"
+ },
+ {
+  "path": "taro_core/src/senses/hearing.py",
+  "doc": "耳（Hearing） — 親の発話文字列を、脳が扱えるトークン列に変える薄い入口。",
+  "defs": [
+   "expand_long_vowel",
+   "to_hiragana",
+   "normalize_kana",
+   "Vocabulary",
+   "Hearing"
+  ],
+  "lines": 130,
+  "goal": "",
+  "last_commit": "2026-09-06"
+ },
+ {
+  "path": "taro_core/src/senses/insula.py",
+  "doc": "島皮質（Insula） — 体の感覚を大脳皮質に伝える経路",
+  "defs": [
+   "Insula"
+  ],
+  "lines": 44,
+  "goal": "",
+  "last_commit": "2026-07-17"
+ },
+ {
+  "path": "taro_core/src/senses/object_detector.py",
+  "doc": "物の切り出し ── 「ここに何かがある」だけを返す。種類は出さない。",
+  "defs": [
+   "patch_features",
+   "figure_mask",
+   "detect",
+   "load_mobilesam",
+   "make_point_predictor",
+   "_mask_touches_edge",
+   "_cohesion_groups",
+   "_mask_appearance",
+   "_dedup_masks",
+   "segment_at_points",
+   "_detect_mobilesam"
+  ],
+  "lines": 552,
+  "goal": "",
+  "last_commit": "2026-09-10"
+ },
+ {
+  "path": "taro_core/src/senses/otolith_organs.py",
+  "doc": "耳石器（前庭迷路の一部）— 卵形嚢・球形嚢。直線加速度と、重力に対する頭の傾きを感知する。",
+  "defs": [
+   "read",
+   "OtolithOrgans"
+  ],
+  "lines": 144,
+  "goal": "",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "taro_core/src/senses/proprioceptive_map.py",
+  "doc": "固有感覚（腕の関節角度）の中から、狙った関節だけを取り出す索引表を作る。",
+  "defs": [
+   "_opposite_side",
+   "ArmProprioMap",
+   "build_arm_proprio_map_from_env"
+  ],
+  "lines": 133,
+  "goal": "",
+  "last_commit": "2026-08-11"
+ },
+ {
+  "path": "taro_core/src/senses/retina.py",
+  "doc": "網膜 — 「自分が動いたせいで流れる背景」と「対象そのものの動き」を分ける。",
+  "defs": [
+   "object_motion"
+  ],
+  "lines": 92,
+  "goal": "",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "taro_core/src/senses/semicircular_canals.py",
+  "doc": "三半規管（前庭迷路の一部）— 頭の回転（角速度）を感知する。",
+  "defs": [
+   "time_constant",
+   "read",
+   "SemicircularCanals"
+  ],
+  "lines": 124,
+  "goal": "",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "taro_core/src/senses/sensory_encoders.py",
+  "doc": "感覚の通訳層（Phase 5・接続層） — MIMoの各感覚を、太郎の脳が読める形に変換する。",
+  "defs": [
+   "ProprioceptionEncoder",
+   "VestibularEncoder",
+   "TouchEncoder"
+  ],
+  "lines": 68,
+  "goal": "",
+  "last_commit": "2026-07-17"
+ },
+ {
+  "path": "taro_core/src/senses/somatosensory_cortex.py",
+  "doc": "体性感覚系(触覚)の脳内経路：視床VPL核（部位別集約） → 一次体性感覚野S1（部位間統合）。",
+  "defs": [
+   "body_names_of_group",
+   "TouchMap",
+   "build_touch_map",
+   "build_touch_map_from_env",
+   "_initial_part_weights",
+   "SomatosensoryCortex",
+   "build_sensor_layout"
+  ],
+  "lines": 469,
+  "goal": "",
+  "last_commit": "2026-08-11"
+ },
+ {
+  "path": "taro_core/src/senses/touch_adaptation.py",
+  "doc": "触覚の順応（同じ場所を押され続けると感じ方が弱まる、人間の受容器が持つ性質）。",
+  "defs": [
+   "TouchAdaptation"
+  ],
+  "lines": 182,
+  "goal": "",
+  "last_commit": "2026-08-13"
+ },
+ {
+  "path": "taro_core/src/senses/vision_backends.py",
+  "doc": "視覚バックエンドの差し替え機構（F1-3b）— 語彙学習(Lexicon)が使う「見ていたもの」の",
+  "defs": [
+   "fovea_crop",
+   "register",
+   "get_backend",
+   "CustomVisionBackend",
+   "_pick_device",
+   "DINOv2VisionBackend",
+   "UntrainedViTVisionBackend"
+  ],
+  "lines": 297,
+  "goal": "",
+  "last_commit": "2026-08-30"
+ },
+ {
+  "path": "taro_core/src/senses/vision_encoder.py",
+  "doc": "視覚の通訳層（Phase 5・接続層） — MIMoの画像を、太郎の脳が読める形に変換する。",
+  "defs": [
+   "VisionEncoder"
+  ],
+  "lines": 68,
+  "goal": "",
+  "last_commit": "2026-07-31"
+ },
+ {
+  "path": "taro_core/src/wrapper/hybrid_env.py",
+  "doc": "HybridEnv — MIMo（外側の身体）と太郎の内臓（内側の身体）を束ねるラッパー層。",
+  "defs": [
+   "HybridEnv"
+  ],
+  "lines": 181,
+  "goal": "",
+  "last_commit": "2026-07-31"
+ }
+]

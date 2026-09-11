@@ -31,6 +31,32 @@ benchmarkv2_scene.xml には既に freejoint の箱(test_object1)と球(test_obj
     env = ToySupineEnv(age=0, toy=True)
 """
 import os
+
+# 【2026-09-11】サッケード中に VOR の利得を下げる（人間の能動的抑制の模倣）。
+#
+# 【実測で既定ONにした】F2-124pre（基準 F2-122pre と同設定・種91・600歩）：
+#   | 命令の大きさ | 基準 | VOR抑制 |
+#   |---|---|---|
+#   | 1度未満   |   0% |   0%（変わらず） |
+#   | 1〜2度    |  78% |  75% |
+#   | 2〜4度    |  86% | **98%**（+12点） |
+#   | 4〜8度    | 100% | 100% |
+#   | 8度以上   |  97% | 100% |
+#   | **全体**  | **86%** | **90%**（+4点） |
+#   着地時の速度 111.3 → 104.6 度/秒（−6%）
+#   物の追跡：照合できた 214→214（同じ）／見失った 38→36／よみがえった 9→13
+#   見えていた率 46.2→43.9% は**分母（照合できなかった検出）が249→274に増えた**ため。
+#   照合できた回数と検出コマ数は同じなので、見落としが増えたのではない。
+#   親の発話 22→22。
+#
+#   予測は「1度未満が0%から大きく上がる」だったので**半分外れている**
+#   （効いたのは2〜4度）。1度未満が0%のままな理由は未解明（10発しかなく統計も弱い）。
+#
+# E_VOR_SUPPRESS=0 で従来（抑制なし）に戻せる。
+# 抑制の強さ E_VOR_SUPPRESS_GAIN は [Tier3・ARBITRARY]：人間の抑制の
+#   定量値（何%まで下がるか・何ms か）は文献で未確認。0.0＝完全に止める、で測った。
+_VOR_SUPPRESS = os.environ.get("E_VOR_SUPPRESS", "1") == "1"
+_VOR_SUPPRESS_GAIN = float(os.environ.get("E_VOR_SUPPRESS_GAIN", "0.0"))
 import sys
 
 import numpy as np
@@ -2246,7 +2272,25 @@ class ToySupineEnv(SupineMimoEnv):
         self._update_glow()
         if self._vor is not None:
             # 方策の眼球出力を捨て、VORの指令に差し替える（皮質は反射弓に介入しない）
-            action = self._vor.override(action, self.model, self.data, self.dt)
+            #
+            # 【2026-09-11】サッケードの最中は VOR の利得を下げる。
+            #   人間では VOR はサッケード開始時に利得が下がり終了前に戻る
+            #   （能動的な抑制。Daye, Roberts, Zee & Optican 2015【原文確認】）。
+            #   太郎にはこれが無く、実測で**1度未満の命令の90%でVORの指令の方が
+            #   サッケードの指令より大きかった**（0.77 対 0.24・F2-122pre 190発）。
+            #   向きの一致率と完全に対応する＝小さいサッケードがVORに埋もれていた。
+            #   E_VOR_SUPPRESS=1 でON（既定OFF＝従来どおり1ビット不変）。
+            #   抑制の強さ E_VOR_SUPPRESS_GAIN は [Tier3・ARBITRARY]：
+            #   人間の抑制の定量値（何%まで下がるか）は文献で未確認。
+            _sup = 1.0
+            if _VOR_SUPPRESS and self._orienting is not None:
+                try:
+                    if self._orienting.is_saccading():
+                        _sup = _VOR_SUPPRESS_GAIN
+                except Exception:
+                    _sup = 1.0
+            action = self._vor.override(action, self.model, self.data, self.dt,
+                                        suppress=_sup)
         if self._orienting is not None:
             # 前回描画された画像から計算済みの方向を、首・（VOR後の）目に加算する
             action = self._orienting.apply(action)
