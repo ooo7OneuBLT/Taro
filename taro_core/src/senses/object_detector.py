@@ -354,6 +354,11 @@ def segment_at_points(predictor, img224, points, patch_feats, n, img_size=224,
 
     n_points_expect = 0
     n_reject_scale = 0
+    # 【2026-09-11・計測】数えていない足切りが3つあった。どれで落ちているか
+    #   分からないと直せない（F2-126 で「点は出したが検出0」が 228 コマ）。
+    n_reject_edge = 0      # 3枚の候補が全部「画像の端に接している」で落ちた点の数
+    n_reject_area = 0      # 当てが無い側で、面積が min/max の外だった点の数
+    n_reject_dedup = 0     # 重複除けで消えた数
 
     predictor.set_image(img224)
     raw = []
@@ -382,6 +387,7 @@ def segment_at_points(predictor, img224, points, patch_feats, n, img_size=224,
             area_i = float(mask_i.sum()) / total_px
             candidates.append({"mask": mask_i, "bbox": bbox_i, "area": area_i})
         if not candidates:
+            n_reject_edge += 1
             continue
 
         if expect_area is not None:
@@ -409,6 +415,7 @@ def segment_at_points(predictor, img224, points, patch_feats, n, img_size=224,
                 if best_area is None or c["area"] > best_area:
                     best_area, best = c["area"], c
             if best is None:
+                n_reject_area += 1
                 continue
 
         # 【2026-09-10・見る側3段目】この点から新しい記録を作ってよいか。
@@ -418,12 +425,16 @@ def segment_at_points(predictor, img224, points, patch_feats, n, img_size=224,
                     "can_create": bool(p.get("can_create", True))})
     predictor.reset_image()
 
-    stats = {"n_points_expect": n_points_expect, "n_reject_scale": n_reject_scale}
+    stats = {"n_points_expect": n_points_expect, "n_reject_scale": n_reject_scale,
+             "n_reject_edge": n_reject_edge, "n_reject_area": n_reject_area,
+             "n_reject_dedup": 0}
 
     if not raw:
         return [], stats
 
+    _n_before_dedup = len(raw)
     raw = _dedup_masks(raw)
+    stats["n_reject_dedup"] = _n_before_dedup - len(raw)
     if not raw:
         return [], stats
 

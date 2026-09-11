@@ -129,6 +129,7 @@ class ObjectFiles(Plugin):
         # 【2026-09-09・追記1「直し」3】当て付きの点の数／当てに合う大きさが
         #   無くて捨てた点の数。
         "n_points_expect", "n_reject_scale",
+        "n_reject_edge", "n_reject_area", "n_reject_dedup",
         # 【2026-09-10・消え方で持ち時間を決める】
         "explained", "budget",
     ]
@@ -633,6 +634,9 @@ class ObjectFiles(Plugin):
                 #   大きさが無くて捨てた点の数。
                 "n_points_expect": onset_extra.get("n_points_expect", ""),
                 "n_reject_scale": onset_extra.get("n_reject_scale", ""),
+                "n_reject_edge": onset_extra.get("n_reject_edge", ""),
+                "n_reject_area": onset_extra.get("n_reject_area", ""),
+                "n_reject_dedup": onset_extra.get("n_reject_dedup", ""),
             })
 
     def _detect_frame(self, ctx, img224, t, protect_id):
@@ -665,7 +669,9 @@ class ObjectFiles(Plugin):
                         "ec_res_shift": "", "ec_res_noshift": "", "ec_moving": "",
                         # 【2026-09-09・追記1「直し」3】最初のコマ("first")は
                         #   segment_at_pointsを通らないので空文字のまま（既定不変）。
-                        "n_points_expect": "", "n_reject_scale": ""}
+                        "n_points_expect": "", "n_reject_scale": "",
+                        "n_reject_edge": "", "n_reject_area": "",
+                        "n_reject_dedup": ""}
 
         # ---- 0. 遠心性コピー（無効ならshift=(0,0)・moving=False） --------------
         eff = getattr(ctx, "efference", None) or {}
@@ -845,6 +851,8 @@ class ObjectFiles(Plugin):
                                                         blobs=pre_res["blobs"])
             n_points_expect = seg_stats.get("n_points_expect", 0)
             n_reject_scale = seg_stats.get("n_reject_scale", 0)
+            for _k in ("n_reject_edge", "n_reject_area", "n_reject_dedup"):
+                onset_extra[_k] = seg_stats.get(_k, 0)
             if self.empty_cache_after_detect:
                 import torch
                 if torch.cuda.is_available():
