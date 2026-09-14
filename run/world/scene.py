@@ -28,7 +28,7 @@ for _p in (os.path.join(_ROOT, "run", "scene_tools"),
         sys.path.insert(0, _p)
 
 
-def resolve(scene_name, taro=None):
+def resolve(scene_name, taro=None, world=None):
     """シーンを読んで、実験ファイルの `taro` 欄による上書きまで済ませた辞書を返す。
 
     【なぜ切り出したか、2026-09-14】走行の記録（`run.meta.json`）に
@@ -36,10 +36,20 @@ def resolve(scene_name, taro=None):
     作られていなかった。同じ処理を記録側でもう一度書くと**二重の真実**になるので、
     ここを唯一の場所にして `build()` と記録の両方から呼ぶ。
     物理は組み立てない（JSONを読むだけ）ので軽い。
+
+    Args:
+        world: 実験ファイルの `world` 欄。場面の `world` に**重ねる**（後が勝つ）。
+            【なぜ要るか、2026-09-14・ステップ3】設定の層が「①コードの既定値→
+            ②場面」の2段しかなく、「③その回だけ違う」を書く場所が無かった。
+            そのため壁を足す・おもちゃを1個増やすたびに213項目の場面を丸ごと複製し、
+            340本まで増えた（実測で94%が複製）。ここが3層目。
+            書かなければ（None）1ビットも変わらない。
     """
     import scene_io
     taro = taro or {}
     sc = scene_io.load(scene_name)
+    if world:
+        sc["world"] = scene_io._merge(sc["world"], world)
 
     # 月齢は実験ファイルで上書きできる（体を育てる実験のため）。
     #   注意：上書きしたらシーンの指紋とは一致しないので照合を外す。
@@ -49,7 +59,8 @@ def resolve(scene_name, taro=None):
     return sc
 
 
-def build(scene_name, *, taro=None, seed=0, verbose=False, hybrid=False):
+def build(scene_name, *, taro=None, seed=0, verbose=False, hybrid=False,
+          world=None):
     """シーンの名前から環境を作る。
 
     Args:
@@ -67,7 +78,7 @@ def build(scene_name, *, taro=None, seed=0, verbose=False, hybrid=False):
     """
     import scene_io
     taro = taro or {}
-    sc = resolve(scene_name, taro)
+    sc = resolve(scene_name, taro, world)
 
     # 駆動モデル。既定（None）＝ scene_io の既定＝筋肉モード。
     act = None

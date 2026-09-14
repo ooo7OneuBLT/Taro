@@ -114,7 +114,7 @@ def load_spec(path):
         spec = json.load(fp)
     # 【2026-09-11】expect＝「この走行は何を出すはずか」の宣言。走行そのものには
     #   使わない（run/tools/smoke.py が試し走行の結果と突き合わせる）。
-    known = {"name", "note", "scene", "taro", "run", "plugins", "expect"}
+    known = {"name", "note", "scene", "world", "taro", "run", "plugins", "expect"}
     unknown = set(spec) - known
     if unknown:
         raise ValueError(f"実験ファイルに知らない欄がある: {sorted(unknown)}\n"
@@ -211,7 +211,8 @@ def _write_run_meta(spec, out_dir):
     import subprocess
     from run.world import scene as scene_mod
 
-    sc = scene_mod.resolve(spec["scene"], spec.get("taro") or {})
+    sc = scene_mod.resolve(spec["scene"], spec.get("taro") or {},
+                           spec.get("world"))
 
     rev = None
     try:
@@ -225,6 +226,7 @@ def _write_run_meta(spec, out_dir):
         # ---- 既存の欄（読み手がいるので変えない）--------------------------
         "name": spec.get("name"),
         "scene": spec.get("scene"),
+        "world_override": spec.get("world"),   # 実験ファイルが上書きした分（ステップ3）
         "taro": spec.get("taro"),
         "run": spec.get("run"),
         "tools": sorted(k for k, v in (spec.get("plugins") or {}).items() if v),
@@ -369,7 +371,8 @@ def run(spec, *, steps_override=None, verbose=False):
     # --- measure：太郎の脳を通さず、環境をそのまま進めて測る ---
     import numpy as np
     env, sc, _hands = scene_mod.build(spec["scene"], taro=spec["taro"],
-                                      seed=seed, verbose=verbose)
+                                      seed=seed, verbose=verbose,
+                                      world=spec.get("world"))
     u = env.unwrapped
     K = int(r.get("K", 10))
     dt = float(u.model.opt.timestep) * int(u.frame_skip) * K

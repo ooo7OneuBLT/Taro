@@ -204,7 +204,18 @@ def default_scene(name="無題"):
             #   {"enabled": true, "dist": 1.2, "height": 2.0, "repeat": [6,5],
             #    "rgb1": [...], "rgb2": [...]} で太郎のまわりに模様の壁を4枚立てる。
             #   実体は e_toy_env.ToySupineEnv._add_backdrop。
-            "backdrop": None,
+            # 【2026-09-14・ステップ3】既定は「標準の壁・ただし消してある」。
+            #   値まで持たせる理由：実験ファイルから
+            #   `"world": {"backdrop": {"enabled": true}}` の1行で**標準の壁**が
+            #   出るようにするため。None のままだと、上書きしても中身が
+            #   {"enabled": True} だけになり、toy_env._add_backdrop 側の既定
+            #   （repeat 6×5・rgb1 0.52…）という**別の壁**が立つ。
+            #   標準の値は 2026-09-10 に決めたもの（ユーザー「壁は今後も常に使い続けて」）。
+            #   enabled=False なので、書かない場面の見た目は1ビットも変わらない
+            #   （toy_env.py:1550 が enabled を見てから立てる）。
+            "backdrop": {"enabled": False, "dist": 1.2, "height": 2.0,
+                         "repeat": [4, 4], "rgb1": [0.56, 0.58, 0.64],
+                         "rgb2": [0.49, 0.52, 0.6]},
             # 【2026-08-21新設・F1-4h】影スイッチ。既定False＝従来どおり
             #   全光源の影が有効（1ビットも変わらない）。Trueで全光源の
             #   castshadowを切る。根拠：素材md（scratchpad/テスト場面素材.md）

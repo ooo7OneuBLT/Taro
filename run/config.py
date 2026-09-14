@@ -466,7 +466,7 @@ class Config:
       ログのどこから条件が違うのかが追えなくなる。
     """
 
-    def __init__(self, taro=None, run=None, *, scene=None, name=None):
+    def __init__(self, taro=None, run=None, *, scene=None, name=None, world=None):
         # 実験の名前。設定ではないが、絵の見出しや記録に使うので持ち回る
         #   （2026-07-31：ダッシュボードの見出しがフォルダ名になっていたので追加）
         self.name = name
@@ -484,6 +484,9 @@ class Config:
         for key, (dflt, _doc, _envname) in RUN_DEFAULTS.items():
             setattr(self, key, self._run.get(key, dflt))
         self.scene = scene
+        # 【2026-09-14・ステップ3】実験ファイルの `world` 欄。場面の world に重ねる分。
+        #   ここでは中身を検査しない（場面側の既定値の表＝scene_io.default_scene が正典）。
+        self.world = dict(world) if world else None
         self._check()
 
     # ------------------------------------------------------------------ 作る
@@ -494,7 +497,7 @@ class Config:
         if steps_override is not None:
             run["steps"] = int(steps_override)
         return cls(spec.get("taro"), run, scene=spec.get("scene"),
-                   name=spec.get("name"))
+                   name=spec.get("name"), world=spec.get("world"))
 
     @classmethod
     def from_env(cls):

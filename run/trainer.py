@@ -170,7 +170,8 @@ class Trainer:
             taro_spec["age_months"] = float(self._cur_age)
         self._taro_spec = taro_spec
         self.env, self.scene, self.hands = scene_mod.build(
-            cfg.scene, taro=taro_spec, seed=cfg.seed, verbose=self.verbose, hybrid=True)
+            cfg.scene, taro=taro_spec, seed=cfg.seed, verbose=self.verbose, hybrid=True,
+            world=getattr(cfg, "world", None))
         if self._cur_age is None:
             # シーンが決めた月齢を控える（体を育てない実験ではこのまま）
             self._cur_age = float(self.scene["body"]["age_months"])
@@ -402,7 +403,8 @@ class Trainer:
         spec = dict(self._taro_spec)
         spec["age_months"] = float(new_age)
         self.env, self.scene, self.hands = scene_mod.build(
-            cfg.scene, taro=spec, seed=cfg.seed, verbose=False, hybrid=True)
+            cfg.scene, taro=spec, seed=cfg.seed, verbose=False, hybrid=True,
+            world=getattr(cfg, "world", None))
         new = (int(self.env.observation_space["observation"].shape[0]),
                int(self.env.action_space.shape[0]))
         if old != new:
