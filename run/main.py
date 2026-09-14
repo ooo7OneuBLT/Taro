@@ -184,6 +184,77 @@ def _csv_logger(path, spec):
     return log_row
 
 
+def _write_run_meta(spec, out_dir):
+    """この走行が**実際に何で動いたか**を1本のJSONに残す（2026-09-14・ステップ1）。
+
+    【なぜ本体で書くか】以前これを書いていたのは dashboard プラグイン
+    （`run/plugins/common/dashboard.py`）で、①道具なので外せる ②`run.csv` が
+    無いと書かない ③`except Exception` で黙って失敗する、の3点から
+    **270フォルダ中123本にしかなかった**（2026-09-14 実測）。本番 F2-126 にも無い。
+
+    【なぜ全部要るか】場面ファイルを直したり消したりすると、その場面で走った
+    過去の走行が何だったか分からなくなる。ログ側に写しがあれば触れる。
+    また 771/805 本の実験が過去のモデルを出発点にしているので、
+    「そのモデルがどの環境で育ったか」はここからしか引けない
+    （F2-129 が背景の壁なしで育っていた件は、これがあれば自動で分かる）。
+
+    【環境変数】`E_` で始まる設定が 110 個あり、どこにも記録されていなかったため
+    `F2-117pre_積み上げ0.2/0.5/1.0` の3本は**設定が完全に同一で再現できない**。
+    ここで丸ごと控える。注意：控えるのは「環境に設定されていた値」であって、
+    設定されていなければ現れない（そのときはコード側の既定値が効く）。
+
+    【欄の増やし方】`name` は `run/tools/preflight.py` が「他人のフォルダでないか」の
+    判定に読む。ほかにも `run/tools/dashboard.py`・`check_jitter.py` が読むので、
+    **既存の欄は名前も意味も変えず、足すだけ**にする。
+    """
+    import datetime
+    import subprocess
+    from run.world import scene as scene_mod
+
+    sc = scene_mod.resolve(spec["scene"], spec.get("taro") or {})
+
+    rev = None
+    try:
+        rev = subprocess.run(["git", "rev-parse", "--short", "HEAD"],
+                             cwd=_ROOT, capture_output=True, text=True,
+                             timeout=5).stdout.strip() or None
+    except Exception:       # noqa: BLE001  git が無くても走行は続ける
+        rev = None
+
+    meta = {
+        # ---- 既存の欄（読み手がいるので変えない）--------------------------
+        "name": spec.get("name"),
+        "scene": spec.get("scene"),
+        "taro": spec.get("taro"),
+        "run": spec.get("run"),
+        "tools": sorted(k for k, v in (spec.get("plugins") or {}).items() if v),
+        "scene_note": sc.get("note"),
+        "world": sc.get("world"),
+        "body": sc.get("body"),
+        # ---- ここから 2026-09-14 に足した欄 --------------------------------
+        "meta_schema": 2,
+        "note": spec.get("note"),
+        "plugins": spec.get("plugins"),
+        "expect": spec.get("expect"),
+        "setup": sc.get("setup"),
+        "state": sc.get("state"),
+        "noise_mode": sc.get("noise_mode"),
+        "fingerprint": sc.get("fingerprint"),
+        "scene_created": sc.get("created"),
+        "env": {k: v for k, v in sorted(os.environ.items()) if k.startswith("E_")},
+        "started_at": datetime.datetime.now().isoformat(timespec="seconds"),
+        "git": rev,
+    }
+    d = out_dir if os.path.isabs(out_dir) else os.path.join(_ROOT, out_dir)
+    os.makedirs(d, exist_ok=True)
+    path = os.path.join(d, "run.meta.json")
+    # 注意：ここで失敗したら**止める**。以前は握りつぶしていたので、
+    #   「記録が無い」ことに気づけなかった。
+    with open(path, "w", encoding="utf-8") as fp:
+        json.dump(meta, fp, ensure_ascii=False, indent=2)
+    return path
+
+
 def run(spec, *, steps_override=None, verbose=False):
     from run.context import Ctx
     from run.plugins.common import scene as scene_mod
@@ -200,6 +271,11 @@ def run(spec, *, steps_override=None, verbose=False):
     print(f"  太郎     {spec['taro'] or '(既定)'}")
     print(f"  動かし方 {kind} / {n_steps}ステップ / seed={seed}")
     print(f"  道具     {sorted(k for k, v in spec['plugins'].items() if v)}")
+
+    # 【2026-09-14・ステップ1】走行の記録を最初に置く。道具を1つも付けない
+    #   走行でも必ず残る（以前は dashboard プラグイン頼みで46%しか無かった）。
+    _meta_path = _write_run_meta(spec, _out_dir_of(spec))
+    print(f"  記録     {os.path.relpath(_meta_path, _ROOT)}")
 
     plugins = build_plugins(spec)
 
@@ -493,6 +569,32 @@ def _check_toy_distance(spec):
     print("")
 
 
+def _out_dir_of(spec):
+    """この走行のログ置き場を実験ファイルから決める（2026-09-12）。
+
+    実験ファイルは出力先を `run.csv` / `taro.save` / 各道具の `*_out` に
+    バラバラに書くので、そのどれかの**フォルダ**を借りる（ほぼ常に
+    `F/logs/<実験名>/` になっている）。1つも無ければ名前から作る。
+    """
+    cands = []
+    r = spec.get("run") or {}
+    t = spec.get("taro") or {}
+    cands += [r.get("csv"), t.get("save")]
+    for cfg in (spec.get("plugins") or {}).values():
+        if isinstance(cfg, dict):
+            for k, v in cfg.items():
+                if isinstance(v, str) and (k.endswith("_out") or k.endswith("_dir")):
+                    cands.append(v)
+    for c in cands:
+        if isinstance(c, str) and c.strip():
+            d = os.path.dirname(c)
+            if d:
+                return d
+    name = str(spec.get("name") or "無名").replace("/", "_").replace("\\", "_")
+    goal = "F" if name.startswith("F") else "E"
+    return os.path.join(goal, "logs", name)
+
+
 def main():
     ap = argparse.ArgumentParser(description="シミュレーションシステムの入口")
     ap.add_argument("spec", help="実験ファイル（JSON）のパス")
@@ -504,13 +606,33 @@ def main():
     _check_texture_resolution()
     _register()
     spec = load_spec(a.spec)
+    # 【2026-09-12・ユーザー指示】「エラーログは一つにまとめてファイル化」
+    #   「実行中はエラーログを絶対読むようにしよう」。
+    #   この走行のフォルダに エラー.log／走行.log／未実装.log を作る。
+    #   画面の一番下にエラー.logの中身を出す（最後に呼ぶ log_tail）ので、
+    #   読み忘れが注意力ではなく**位置**で防がれる。詳細は run/log_setup.py
+    from run.log_setup import setup_logging, log_tail
+    log_paths = setup_logging(_out_dir_of(spec))
     _check_toy_distance(spec)
     # 【2026-09-11・ユーザー指示】構造のミスは走る前に止める。走行後に発覚して
     #   1本（9〜15分）を捨てるのを避ける。詳細は run/tools/preflight.py
     from run.tools.preflight import run_check
     if not run_check(spec, a.spec, skip=a.skip_preflight):
+        log_tail(log_paths)
         return 1
-    run(spec, steps_override=a.steps, verbose=a.verbose)
+    try:
+        run(spec, steps_override=a.steps, verbose=a.verbose)
+    except KeyboardInterrupt:
+        raise
+    except BaseException as _e:
+        # 先に記録してから finally へ。excepthook は finally の**後**に発火するので、
+        # ここで書かないと log_tail が「エラー.log：空」と嘘を言う（2026-09-12に実測）
+        from run.log_setup import log_crash
+        log_crash(_e)
+        raise
+    finally:
+        # 落ちても必ずエラー.logを画面の最後に出す
+        log_tail(log_paths)
     return 0
 
 

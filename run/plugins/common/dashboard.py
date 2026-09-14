@@ -63,7 +63,10 @@ class Dashboard(Plugin):
             print("注意[dashboard] 出力先が決まらないので絵を作りません"
                   "（run.csv か plugins.dashboard.dir を指定してください）", flush=True)
             return
-        self._write_meta(ctx)
+        # 【2026-09-14・ステップ1】run.meta.json は本体（run/main.py の
+        #   _write_run_meta）が書くようになった。ここで書くと、姿勢・setup・
+        #   環境変数を含まない古い形で**上書きしてしまう**ので呼ばない。
+        #   _write_meta 自体は下に残す（古いログを読む道具の参照先のため）。
         # 学習の開始時に1枚作ってブラウザで開く（あとは30秒ごとに自動で読み直される）
         self._make()
         self._open_once()
