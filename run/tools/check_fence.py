@@ -24,7 +24,7 @@ for p in ("run/scene_tools", "D/scripts", "taro_core/src/body", "taro_core/src/b
 os.chdir(_R)
 
 import numpy as np, mujoco
-import e_scene
+import scene_io
 
 HX, HY, H, T = 0.31, 0.16, 0.225, 0.024
 IN_X, IN_Y = (HX - T / 2) * 2, (HY - T / 2) * 2
@@ -45,10 +45,10 @@ print(f"{'月齢':>5}{'C条件の回数':>11}{'体(頭足)':>10}{'体(左右)':>
 print("-" * 100)
 
 for age in ages:
-    sc = e_scene.load(scene)
+    sc = scene_io.load(scene)
     sc["body"]["age_months"] = age
     sc["fingerprint"] = None
-    env, _sc = e_scene.build(sc, seed=0, verbose=False)
+    env, _sc = scene_io.build(sc, seed=0, verbose=False)
     u = env.unwrapped
     m, d = u.model, u.data
     mujoco.mj_forward(m, d)

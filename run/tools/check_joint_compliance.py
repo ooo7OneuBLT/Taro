@@ -46,7 +46,7 @@ for _p in ("run/scene_tools", "D/scripts", "taro_core/src/body",
 import numpy as np                                          # noqa: E402
 import mujoco                                                # noqa: E402
 
-import e_scene                                                # noqa: E402
+import scene_io                                                # noqa: E402
 from joint_compliance import (                                # noqa: E402
     apply_joint_compliance, _solimp_from_params, _margin_from_params, _resolve_params,
     DEFAULT_JOINT_COMPLIANCE, JOINT_COMPLIANCE_OVERRIDES,
@@ -96,9 +96,9 @@ def _hr(title):
 def _reference_solimp(scene_name):
     """joint_complianceを一切適用していない、その場でビルドしたenvのjnt_solimpを
     そのまま「実測ベースライン」として返す（ハードコードした定数と比較しない）。"""
-    sc = e_scene.load(scene_name)
+    sc = scene_io.load(scene_name)
     assert sc["body"]["joint_compliance"] is False
-    env, _sc = e_scene.build(sc, seed=0, verbose=False, vision=False)
+    env, _sc = scene_io.build(sc, seed=0, verbose=False, vision=False)
     ref = np.asarray(env.unwrapped.model.jnt_solimp).copy()
     env.close()
     return ref
@@ -112,9 +112,9 @@ def _reference_margin(scene_name):
     0.0だったが、raw定数(0.0)をハードコードして比較せず、_reference_solimpと
     同じく毎回独立にビルドした参照値と比較する（設計時の前提が実測と食い違って
     いた教訓を踏まえる）。"""
-    sc = e_scene.load(scene_name)
+    sc = scene_io.load(scene_name)
     assert sc["body"]["joint_compliance"] is False
-    env, _sc = e_scene.build(sc, seed=0, verbose=False, vision=False)
+    env, _sc = scene_io.build(sc, seed=0, verbose=False, vision=False)
     ref = np.asarray(env.unwrapped.model.jnt_margin).copy()
     env.close()
     return ref
@@ -203,8 +203,8 @@ def verify0_resolve_params_flat_vs_per_joint():
 def verify_a_requires_groups_or_joints():
     """groups・jointsのどちらも未指定なら明示的にValueErrorで止まるか。"""
     _hr("検証A-1: groups/jointsのどちらも未指定だとValueErrorで止まるか")
-    sc = e_scene.load("新生児_仰向け_柵なし")
-    env, _sc = e_scene.build(sc, seed=0, verbose=False, vision=False)
+    sc = scene_io.load("新生児_仰向け_柵なし")
+    env, _sc = scene_io.build(sc, seed=0, verbose=False, vision=False)
     try:
         apply_joint_compliance(env.unwrapped.model, groups=None, joints=None)
         print("  [NG] 例外が発生しなかった（黙って何もしていない可能性）")
@@ -219,8 +219,8 @@ def verify_a_requires_groups_or_joints():
 def verify_a_unknown_group_name():
     """未知のgroup名（打ち間違い）を渡すとValueErrorで止まるか。"""
     _hr("検証A-2: 未知のgroup名（'shoulderr'）でValueErrorになるか")
-    sc = e_scene.load("新生児_仰向け_柵なし")
-    env, _sc = e_scene.build(sc, seed=0, verbose=False, vision=False)
+    sc = scene_io.load("新生児_仰向け_柵なし")
+    env, _sc = scene_io.build(sc, seed=0, verbose=False, vision=False)
     try:
         apply_joint_compliance(env.unwrapped.model, groups=["shoulderr"])
         print("  [NG] 例外が発生しなかった")
@@ -235,8 +235,8 @@ def verify_a_unknown_group_name():
 def verify_a_unknown_joint_name():
     """存在しない関節名を渡すとValueErrorで止まるか。"""
     _hr("検証A-3: 存在しない関節名でValueErrorになるか")
-    sc = e_scene.load("新生児_仰向け_柵なし")
-    env, _sc = e_scene.build(sc, seed=0, verbose=False, vision=False)
+    sc = scene_io.load("新生児_仰向け_柵なし")
+    env, _sc = scene_io.build(sc, seed=0, verbose=False, vision=False)
     try:
         apply_joint_compliance(env.unwrapped.model, joints=["right_no_such_joint"])
         print("  [NG] 例外が発生しなかった")
@@ -251,8 +251,8 @@ def verify_a_unknown_joint_name():
 def verify_a_unknown_param_key():
     """paramsに未知のキー（打ち間違い、正しくはd0）を渡すとValueErrorになるか。"""
     _hr("検証A-4: paramsの未知キー（'d_min'）でValueErrorになるか")
-    sc = e_scene.load("新生児_仰向け_柵なし")
-    env, _sc = e_scene.build(sc, seed=0, verbose=False, vision=False)
+    sc = scene_io.load("新生児_仰向け_柵なし")
+    env, _sc = scene_io.build(sc, seed=0, verbose=False, vision=False)
     try:
         apply_joint_compliance(env.unwrapped.model, groups=["shoulder"],
                                params={"d_min": 0.5})
@@ -293,8 +293,8 @@ def verify_b_default_off_matches_mujoco_builtin():
     for name in _SCENES_FOR_REGRESSION:
         ref = _reference_solimp(name)
         ref_margin = _reference_margin(name)
-        sc = e_scene.load(name)
-        env, _sc = e_scene.build(sc, seed=0, verbose=False, vision=False)
+        sc = scene_io.load(name)
+        env, _sc = scene_io.build(sc, seed=0, verbose=False, vision=False)
         m = env.unwrapped.model
         solimp = np.asarray(m.jnt_solimp)
         margin = np.asarray(m.jnt_margin)
@@ -324,15 +324,15 @@ def verify_b_old_style_call_identical():
     （回帰確認の裏取り）。"""
     _hr("検証B-2: 4引数を渡さない呼び出し（旧仕様相当）と明示False指定で完全一致するか")
     from infant_body import apply_runtime_corrections
-    sc = e_scene.load("新生児_仰向け_柵なし")
-    env_a, _ = e_scene.build(sc, seed=0, verbose=False, vision=False)
+    sc = scene_io.load("新生児_仰向け_柵なし")
+    env_a, _ = scene_io.build(sc, seed=0, verbose=False, vision=False)
     ua = env_a.unwrapped
     apply_runtime_corrections(ua.model, ua.data, 0.0)   # 旧仕様相当（新引数を渡さない）
     solimp_a = np.asarray(ua.model.jnt_solimp).copy()
     margin_a = np.asarray(ua.model.jnt_margin).copy()
     env_a.close()
 
-    env_b, _ = e_scene.build(sc, seed=0, verbose=False, vision=False)
+    env_b, _ = scene_io.build(sc, seed=0, verbose=False, vision=False)
     ub = env_b.unwrapped
     apply_runtime_corrections(ub.model, ub.data, 0.0, joint_compliance=False,
                               joint_compliance_groups=None, joint_compliance_joints=None,
@@ -358,10 +358,10 @@ def verify_c_shoulder_group_wiring():
     scene_name = "新生児_仰向け_柵なし"
     ref = _reference_solimp(scene_name)
     ref_margin = _reference_margin(scene_name)
-    sc = e_scene.load(scene_name)
+    sc = scene_io.load(scene_name)
     sc["body"]["joint_compliance"] = True
     sc["body"]["joint_compliance_groups"] = ["shoulder"]
-    env, _sc = e_scene.build(sc, seed=0, verbose=False, vision=False)
+    env, _sc = scene_io.build(sc, seed=0, verbose=False, vision=False)
     m = env.unwrapped.model
 
     ok_all = True
@@ -403,8 +403,8 @@ def verify_c_all_group_targets_only_limited_hinge():
     limitedでない関節・非hinge関節は対象にしないことを確認する
     （jnt_solimp・jnt_marginの両方の変化を見る）。"""
     _hr("検証C-2: groups=['all']が jnt_limited==1 のhinge関節だけを対象にするか")
-    sc = e_scene.load("新生児_仰向け_柵なし")
-    env, _sc = e_scene.build(sc, seed=0, verbose=False, vision=False)
+    sc = scene_io.load("新生児_仰向け_柵なし")
+    env, _sc = scene_io.build(sc, seed=0, verbose=False, vision=False)
     m = env.unwrapped.model
     before = np.asarray(m.jnt_solimp).copy()
     before_margin = np.asarray(m.jnt_margin).copy()
@@ -447,12 +447,12 @@ def verify_d_reapplied_across_ages():
     _hr("検証D: 月齢を変えて作り直しても対象関節に再適用されるか（regrow相当、solimp/margin）")
     ok_all = True
     for age in (0.0, 2.0, 4.0):
-        sc = e_scene.load("新生児_仰向け_柵なし")
+        sc = scene_io.load("新生児_仰向け_柵なし")
         sc["body"]["age_months"] = age
         sc["body"]["joint_compliance"] = True
         sc["body"]["joint_compliance_groups"] = ["shoulder"]
         sc["fingerprint"] = None
-        env, _sc = e_scene.build(sc, seed=0, verbose=False, vision=False)
+        env, _sc = scene_io.build(sc, seed=0, verbose=False, vision=False)
         m = env.unwrapped.model
         jid = _joint_id(m, "right_shoulder_ad_ab")
         lo = float(m.jnt_range[jid, 0]); hi = float(m.jnt_range[jid, 1])
@@ -475,7 +475,7 @@ def verify_d_reapplied_across_ages():
 
 # ================================================================== 検証E
 class _ScenePatch:
-    """e_scene.load を一時的に差し替え、joint_complianceを常にONにして返す
+    """scene_io.load を一時的に差し替え、joint_complianceを常にONにして返す
     （run/plugins/common/scene.build 経由でシーン名からしか環境を作れない
     Trainer側の検証のために、ディスク上のシーンJSONは一切書き換えずに行う）。"""
 
@@ -484,7 +484,7 @@ class _ScenePatch:
         self._orig = None
 
     def __enter__(self):
-        self._orig = e_scene.load
+        self._orig = scene_io.load
         orig = self._orig
         groups = self._groups
 
@@ -494,11 +494,11 @@ class _ScenePatch:
             sc["body"]["joint_compliance_groups"] = list(groups)
             sc["fingerprint"] = None
             return sc
-        e_scene.load = patched
+        scene_io.load = patched
         return self
 
     def __exit__(self, *exc):
-        e_scene.load = self._orig
+        scene_io.load = self._orig
 
 
 def verify_e_drive_mode_independence():
@@ -562,8 +562,8 @@ def verify_f0_muscle_max_command_probe(n_steps=3000, seed=0):
     _hr("検証F-0: 筋肉アクチュエータの最大指令だけで限界(183度)近くまで届くか（事前確認）")
     scene_name = "新生児_仰向け_柵なし"
     joint = "right_shoulder_ad_ab"
-    sc = e_scene.load(scene_name)
-    env, _sc = e_scene.build(sc, seed=seed, verbose=False, vision=False)
+    sc = scene_io.load(scene_name)
+    env, _sc = scene_io.build(sc, seed=seed, verbose=False, vision=False)
     u = env.unwrapped
     m, d = u.model, u.data
     am = u.actuation_model
@@ -612,11 +612,11 @@ def verify_f_wall_sticking_reduced(n_steps=400, near_deg=1.0, torque=2.0, seed=0
     joint = "right_shoulder_ad_ab"
 
     def run_once(joint_compliance):
-        sc = e_scene.load(scene_name)
+        sc = scene_io.load(scene_name)
         sc["body"]["joint_compliance"] = bool(joint_compliance)
         if joint_compliance:
             sc["body"]["joint_compliance_groups"] = ["shoulder"]
-        env, _sc = e_scene.build(sc, seed=seed, verbose=False, vision=False)
+        env, _sc = scene_io.build(sc, seed=seed, verbose=False, vision=False)
         u = env.unwrapped
         m, d = u.model, u.data
         jid = _joint_id(m, joint)
@@ -723,8 +723,8 @@ def verify_f_margin_sweep(n_steps=400, near_deg=1.0, torque=2.0, seed=0):
     joint = "right_shoulder_ad_ab"
 
     # 右肩の可動域を実測する（ハードコードしない）
-    sc0 = e_scene.load(scene_name)
-    env0, _sc0 = e_scene.build(sc0, seed=seed, verbose=False, vision=False)
+    sc0 = scene_io.load(scene_name)
+    env0, _sc0 = scene_io.build(sc0, seed=seed, verbose=False, vision=False)
     m0 = env0.unwrapped.model
     jid0 = _joint_id(m0, joint)
     lo0 = float(m0.jnt_range[jid0, 0]); hi0 = float(m0.jnt_range[jid0, 1])
@@ -748,11 +748,11 @@ def verify_f_margin_sweep(n_steps=400, near_deg=1.0, torque=2.0, seed=0):
     rows = {}
     for label, margin_deg in candidates:
         margin_frac = (margin_deg / range_span_deg) if range_span_deg > 0 else 0.0
-        sc = e_scene.load(scene_name)
+        sc = scene_io.load(scene_name)
         sc["body"]["joint_compliance"] = True
         sc["body"]["joint_compliance_groups"] = ["shoulder"]
         sc["body"]["joint_compliance_params"] = {"margin_frac": float(margin_frac)}
-        env, _sc = e_scene.build(sc, seed=seed, verbose=False, vision=False)
+        env, _sc = scene_io.build(sc, seed=seed, verbose=False, vision=False)
         u = env.unwrapped
         m, d = u.model, u.data
         jid = _joint_id(m, joint)

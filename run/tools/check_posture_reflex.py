@@ -41,7 +41,7 @@ for _p in ("run/scene_tools", "D/scripts", "taro_core", "taro_core/src/body",
 import numpy as np                                          # noqa: E402
 import mujoco                                                # noqa: E402
 
-import e_scene                                                # noqa: E402
+import scene_io                                                # noqa: E402
 from postural_gate import PosturalGate                        # noqa: E402
 
 SCENE = "新生児_仰向け_柵なし"
@@ -62,8 +62,8 @@ def verify0_joint_structure():
     """0コスト：hip_bend1/hip_bend2/chest_leanの軸・可動域・アクチュエータ数を
     実測する（postural_gate.pyのdocstring【関節構造の実測】の裏取り）。"""
     _hr("検証0: 関節構造の実測（軸・可動域・アクチュエータ）")
-    sc = e_scene.load(SCENE)
-    env, _sc = e_scene.build(sc, seed=0, verbose=False, vision=False)
+    sc = scene_io.load(SCENE)
+    env, _sc = scene_io.build(sc, seed=0, verbose=False, vision=False)
     m = env.unwrapped.model
 
     ok = True
@@ -101,8 +101,8 @@ def verify_a_muscle_channel_sign(n_steps=800, seed=0):
     """act:hip_bendのneg/posチャンネルを個別に最大活性化し、qposがどちらへ動くかを
     実測する（動力学つき、静的運動学スイープだけで確定しない＝項107対応）。"""
     _hr("検証A: act:hip_bendのneg/posチャンネルとqpos方向の対応（動力学つき）")
-    sc = e_scene.load(SCENE)
-    env, _sc = e_scene.build(sc, seed=seed, verbose=False, vision=False)
+    sc = scene_io.load(SCENE)
+    env, _sc = scene_io.build(sc, seed=seed, verbose=False, vision=False)
     u = env.unwrapped
     m, d = u.model, u.data
     n_act = int(u.model.nu)
@@ -110,7 +110,7 @@ def verify_a_muscle_channel_sign(n_steps=800, seed=0):
     qadr1 = int(m.jnt_qposadr[_joint_id(m, "hip_bend1")])
 
     def run(channel):
-        env2, _sc2 = e_scene.build(e_scene.load(SCENE), seed=seed, verbose=False, vision=False)
+        env2, _sc2 = scene_io.build(scene_io.load(SCENE), seed=seed, verbose=False, vision=False)
         u2 = env2.unwrapped
         a = np.zeros(u2.action_space.shape[0], dtype=np.float32)
         idx = i_hip if channel == "neg" else i_hip + n_act
@@ -308,8 +308,8 @@ def verify_c_gate_behavior():
     """PosturalGateが実際に「傾きと逆側の筋だけを通す」ことを、複数の傾き条件で
     確認する（action=全筋0.5一定を与え、ゲート適用後にどちらの筋が0になるか）。"""
     _hr("検証C: ゲートの動作（前傾・後傾・不感帯内の3条件）")
-    sc = e_scene.load(SCENE)
-    env, _sc = e_scene.build(sc, seed=0, verbose=False, vision=False)
+    sc = scene_io.load(SCENE)
+    env, _sc = scene_io.build(sc, seed=0, verbose=False, vision=False)
     u = env.unwrapped
     m, d = u.model, u.data
     gate = PosturalGate(m)
@@ -376,8 +376,8 @@ def verify_d_error_conditions():
     """通ってはいけない条件：一致しないactuator_patterns、存在しない関節名で
     ValueErrorになるかを確認する。"""
     _hr("検証D: 通ってはいけない条件")
-    sc = e_scene.load(SCENE)
-    env, _sc = e_scene.build(sc, seed=0, verbose=False, vision=False)
+    sc = scene_io.load(SCENE)
+    env, _sc = scene_io.build(sc, seed=0, verbose=False, vision=False)
     m = env.unwrapped.model
 
     ok_all = True

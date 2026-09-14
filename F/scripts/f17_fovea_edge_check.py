@@ -39,8 +39,8 @@ TARO_BASE = dict(actuation="muscle", age_months=6.0, lr=0.0)
 
 def _make_scene_variant(fovea_camera):
     import copy, json
-    import run.scene_tools.e_scene as e_scene
-    scene = copy.deepcopy(e_scene.load(BASE_SCENE_NAME))
+    import run.scene_tools.scene_io as scene_io
+    scene = copy.deepcopy(scene_io.load(BASE_SCENE_NAME))
     scene.pop("_path", None)
     scene["body"]["fovea_camera"] = bool(fovea_camera)
     out_path = os.path.join(_SCRATCHPAD_DIR, f"f17_edge_{'on' if fovea_camera else 'off'}.json")

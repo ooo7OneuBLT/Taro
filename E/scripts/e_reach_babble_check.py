@@ -41,7 +41,7 @@ for _p in [os.path.join(_ROOT, "taro_core", "src", "brain"),
 
 import numpy as np      # noqa: E402
 import mujoco           # noqa: E402
-import e_scene          # noqa: E402
+import scene_io          # noqa: E402
 
 SCENE = os.environ.get("E_SCENE", "リーチング_リクライニング60度")
 SECONDS = float(os.environ.get("E_SECONDS", "30.0"))
@@ -61,10 +61,10 @@ ARM_JOINTS = ("shoulder_horizontal", "shoulder_ad_ab", "shoulder_rotation", "elb
 
 def run(label, limb_scale, amp):
     from spinal_cord.cpg import ColoredNoiseGenerator
-    sc = e_scene.load(SCENE)
+    sc = scene_io.load(SCENE)
     sc["body"]["limb_scale"] = float(limb_scale)
     sc["fingerprint"] = None          # 条件を変えたので照合しない
-    env, hands = e_scene.build(sc, orient=True, vor=True, seed=0)
+    env, hands = scene_io.build(sc, orient=True, vor=True, seed=0)
     u = env.unwrapped
     m, d = u.model, u.data
     dt = float(m.opt.timestep) * int(u.frame_skip)

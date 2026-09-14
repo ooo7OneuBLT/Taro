@@ -24,10 +24,10 @@
 
 【使い方】
 
-    import e_scene
-    scene = e_scene.load("リーチング_リクライニング60度")
-    env, hands = e_scene.build(scene, orient=True)     # 反射のON/OFFは実験の条件
-    e_scene.verify(scene, env)                          # 指紋が合わなければ止まる
+    import scene_io
+    scene = scene_io.load("リーチング_リクライニング60度")
+    env, hands = scene_io.build(scene, orient=True)     # 反射のON/OFFは実験の条件
+    scene_io.verify(scene, env)                          # 指紋が合わなければ止まる
 
 【シーンに入れないもの】
 反射のON/OFF・前庭動眼反射・乱数の種・測定時間は入れない。
@@ -823,7 +823,7 @@ def build(scene, orient=None, vor=True, seed=0, verbose=False, actuation_model=N
     # 【2026-08-15・座位保持の学習】立ち直り反射（層2、righting_damper.py）の
     #   support_fraction（体幹がどれだけ外部で支えられているか）は、
     #   pinned_groupsから作る（righting_damper.pyのdocstring【support_fractionの
-    #   取得方法】参照）。taro_coreはrun配下に依存しない設計なので、e_scene.pyが
+    #   取得方法】参照）。taro_coreはrun配下に依存しない設計なので、scene_io.pyが
     #   計算済みの値をenv属性として渡す（taro_core側からe_scene.pyをimportしない、
     #   実装ノウハウ2026-08-15項の必須要件）。
     env.unwrapped._pinned_groups = summary["pinned_groups"]
@@ -1721,7 +1721,7 @@ def open_scene(name=None, orient=None, vor=True, seed=0, strict=True, verbose=Fa
 
     測定スクリプトはこれ1行で始められる::
 
-        env, hands, scene = e_scene.open_scene(orient=True)
+        env, hands, scene = scene_io.open_scene(orient=True)
     """
     scene = load(name) if name else from_env_var()
     env, hands = build(scene, orient=orient, vor=vor, seed=seed, verbose=verbose)

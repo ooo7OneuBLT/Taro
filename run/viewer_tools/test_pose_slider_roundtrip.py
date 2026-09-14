@@ -34,7 +34,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.abspath(os.path.join(_HERE, os.pardir, os.pardir))
 # 【なぜ、2026-08-17】e_viewer_qt.py（33〜60行目）と同じパス設定。
-#   e_scene.py が内部で e_toy_env・infant_body 等をimportするため必要。
+#   scene_io.py が内部で e_toy_env・infant_body 等をimportするため必要。
 for _p in [os.path.join(_ROOT, "D", "scripts"), os.path.join(_ROOT, "MIMo"),
            os.path.join(_ROOT, "taro_core"),
            os.path.join(_ROOT, "taro_core", "src", "body"),
@@ -50,7 +50,7 @@ for _p in [os.path.join(_ROOT, "D", "scripts"), os.path.join(_ROOT, "MIMo"),
 import numpy as np
 import mujoco
 
-import e_scene
+import scene_io
 import e_toy_env as TE
 from e_viewer_qt import _root_quat_from_sliders, _sliders_from_root_quat
 
@@ -104,7 +104,7 @@ def test_angle_roundtrip(tol_deg=0.01):
 def test_scene_save_load_roundtrip(tol_deg=0.05, tol_cm=0.05):
     """(b) シーンに絶対値を設定して保存→読み込み直し、同じ値が読めるか確認する。
 
-    e_scene.SCENE_DIR を一時フォルダへ差し替えて保存する（run/scenes/ 配下は
+    scene_io.SCENE_DIR を一時フォルダへ差し替えて保存する（run/scenes/ 配下は
     一切変更しない）。save() は末尾で catalog.write_catalog() を自動で呼び、
     これは出力先 E/docs/シーン一覧.md をハードコードしている（catalog.py 34行目・
     OUT_PATH）ため、SCENE_DIRの差し替えだけでは防げない。テスト中だけ
@@ -116,16 +116,16 @@ def test_scene_save_load_roundtrip(tol_deg=0.05, tol_cm=0.05):
     print("=" * 70)
 
     tmp_dir = tempfile.mkdtemp(prefix="pose_slider_roundtrip_")
-    orig_scene_dir = e_scene.SCENE_DIR
+    orig_scene_dir = scene_io.SCENE_DIR
     import catalog
     orig_write_catalog = catalog.write_catalog
     catalog.write_catalog = lambda *a, **k: None
     try:
-        e_scene.SCENE_DIR = tmp_dir
+        scene_io.SCENE_DIR = tmp_dir
 
-        base = e_scene.load(os.path.join(
+        base = scene_io.load(os.path.join(
             _ROOT, "run", "scenes", "座位_6ヶ月_土台_2026-08-17_fix.json"))
-        env, hands = e_scene.build(base, orient=True, vor=True, seed=0, verbose=False)
+        env, hands = scene_io.build(base, orient=True, vor=True, seed=0, verbose=False)
         u = env.unwrapped
         m, d = u.model, u.data
         root_qadr = _find_root_qadr(m)
@@ -139,12 +139,12 @@ def test_scene_save_load_roundtrip(tol_deg=0.05, tol_cm=0.05):
             [set_dx, set_dy, set_dz]) / 100.0
         mujoco.mj_forward(m, d)
 
-        e_scene.save(base, name="_test_pose_slider_roundtrip", env=env, hands=hands,
+        scene_io.save(base, name="_test_pose_slider_roundtrip", env=env, hands=hands,
                      settle_seconds=0, image=False, verbose=False)
 
-        reloaded = e_scene.load(
+        reloaded = scene_io.load(
             os.path.join(tmp_dir, "_test_pose_slider_roundtrip.json"))
-        env2, hands2 = e_scene.build(reloaded, orient=True, vor=True, seed=0,
+        env2, hands2 = scene_io.build(reloaded, orient=True, vor=True, seed=0,
                                      verbose=False)
         u2 = env2.unwrapped
         m2, d2 = u2.model, u2.data
@@ -172,7 +172,7 @@ def test_scene_save_load_roundtrip(tol_deg=0.05, tol_cm=0.05):
         print(f"\n[{'PASS' if ok else 'FAIL'}] 許容: 角度<{tol_deg}度・位置<{tol_cm}cm")
         return ok, errs
     finally:
-        e_scene.SCENE_DIR = orig_scene_dir
+        scene_io.SCENE_DIR = orig_scene_dir
         catalog.write_catalog = orig_write_catalog
         shutil.rmtree(tmp_dir, ignore_errors=True)
 

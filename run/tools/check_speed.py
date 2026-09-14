@@ -21,7 +21,7 @@ for p in ("run/scene_tools", "D/scripts", "taro_core/src/body", "taro_core/src/b
 os.chdir(_R)
 
 import numpy as np, torch, mujoco
-import e_scene
+import scene_io
 
 STEPS = 3000          # 物理ステップ（K=10 なので判断は300回）
 # 測るモデル。コマンドラインの第1引数で差し替えられる。
@@ -31,10 +31,10 @@ MODEL = (sys.argv[1] if len(sys.argv) > 1
 
 
 def make_env(hybrid):
-    sc = e_scene.load("新生児_仰向け_柵なし")
+    sc = scene_io.load("新生児_仰向け_柵なし")
     sc["body"]["age_months"] = 4.0
     sc["fingerprint"] = None
-    env, _ = e_scene.build(sc, seed=0, verbose=False)
+    env, _ = scene_io.build(sc, seed=0, verbose=False)
     if hybrid:
         from hybrid_env import HybridEnv
         env = HybridEnv(env)

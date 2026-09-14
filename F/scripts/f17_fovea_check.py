@@ -51,8 +51,8 @@ TARO_BASE = dict(actuation="muscle", age_months=6.0, lr=0.0)
 
 def _make_scene_variant(fovea_camera):
     """既存シーンJSONを読み、body.fovea_camera だけ差し替えた一時シーンを書き出す。"""
-    import run.scene_tools.e_scene as e_scene
-    scene = e_scene.load(BASE_SCENE_NAME)
+    import run.scene_tools.scene_io as scene_io
+    scene = scene_io.load(BASE_SCENE_NAME)
     scene = copy.deepcopy(scene)
     scene.pop("_path", None)
     scene["body"]["fovea_camera"] = bool(fovea_camera)

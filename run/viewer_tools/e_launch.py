@@ -24,9 +24,9 @@ _SCENE_TOOLS = os.path.join(_ROOT, "run", "scene_tools")
 if _SCENE_TOOLS not in sys.path:
     sys.path.insert(0, _SCENE_TOOLS)
 
-import e_scene  # noqa: E402
+import scene_io  # noqa: E402
 
-LAST = os.path.join(e_scene.SCENE_DIR, "_前回開いたシーン.txt")
+LAST = os.path.join(scene_io.SCENE_DIR, "_前回開いたシーン.txt")
 
 
 def read_last():
@@ -39,7 +39,7 @@ def read_last():
 
 def write_last(name):
     try:
-        os.makedirs(e_scene.SCENE_DIR, exist_ok=True)
+        os.makedirs(scene_io.SCENE_DIR, exist_ok=True)
         with open(LAST, "w", encoding="utf-8") as fp:
             fp.write(name)
     except Exception:
@@ -84,7 +84,7 @@ def print_scene_list(names, last):
     for i, n in enumerate(names, 1):
         mark = "←前回" if n == last else ""
         try:
-            info = describe(e_scene.load(n))
+            info = describe(scene_io.load(n))
         except Exception as e:
             info = f"（読めない: {e}）"
         print(f"  {i}. {n}  {mark}")
@@ -104,7 +104,7 @@ def show_detail(names, idx):
         return
     n = names[idx - 1]
     try:
-        note = e_scene.load(n).get("note")
+        note = scene_io.load(n).get("note")
     except Exception as e:
         print(f"  {idx}. {n}  （読めない: {e}）")
         return
@@ -156,7 +156,7 @@ def select_scene(names, last):
 
 
 def main():
-    names = e_scene.list_scenes()
+    names = scene_io.list_scenes()
     if not names:
         print("シーンが1つもありません。")
         print("  .venv/Scripts/python.exe run/scene_tools/e_scene_make.py  で作れます")

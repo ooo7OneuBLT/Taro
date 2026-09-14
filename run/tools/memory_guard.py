@@ -3,7 +3,7 @@
 
 仕様：作業記録（非公開）
 
-【なぜ要るか、2026-08-13】`run/tools/check_joint_compliance.py`が`e_scene.build()`を
+【なぜ要るか、2026-08-13】`run/tools/check_joint_compliance.py`が`scene_io.build()`を
 16回呼ぶ際、`vision=False`を渡し忘れていた。1回あたり顔・服のテクスチャ（約977MB、
 `vision=True`のとき既定でLeanMimoEnv.strip_texturesが発動しない）を持つ環境が
 積み上がり、実プロセスが13.6GBまで膨らんで強制停止された（項82「体を作り直す実験は
@@ -20,7 +20,7 @@
     from memory_guard import MemoryGuard
     guard = MemoryGuard(warn_mb=2000, stop_mb=5000)
     for i in range(16):
-        env, _ = e_scene.build(scene, vision=False)
+        env, _ = scene_io.build(scene, vision=False)
         ...
         env.close()
         guard.check(f"build#{i}")   # 閾値を超えたら print で警告、stop_mb 超で例外

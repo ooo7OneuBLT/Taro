@@ -822,11 +822,11 @@ def apply_runtime_corrections(model, data, age, neck=True, limbs=True, head_mass
     注意（2026-08-10・二重の入口）：`flexion=True` かつ `tone=True`（既定True）のとき、
     下の本体で `apply_limb_tone(model, data, age, profile="newborn_flexor",
     stiffness=tone_stiffness)` を呼び、四肢の筋緊張（バネ）を起動する。これは
-    `run/scene_tools/e_scene.py` の `_apply_limb_tone()`（`scene["setup"]["limb_tone"]`を読む、
+    `run/scene_tools/scene_io.py` の `_apply_limb_tone()`（`scene["setup"]["limb_tone"]`を読む、
     ViewerのGUIチェックボックスもここだけを見ている）とは**完全に別の入口**。
     GUIとの整合は `setup.limb_tone` 側でのみ保証されており、この関数の `flexion` 引数だけで
     バネを起動するシーンでは、GUI表示と物理が食い違いうる。この食い違いの検出（警告）は
-    `run/scene_tools/e_scene.py` の `build()` 側で行っている（`setup.limb_tone` が
+    `run/scene_tools/scene_io.py` の `build()` 側で行っている（`setup.limb_tone` が
     未設定のまま `flexion=True` のときに警告を出す）。詳細は監査
     作業記録（非公開）「中1」。
 

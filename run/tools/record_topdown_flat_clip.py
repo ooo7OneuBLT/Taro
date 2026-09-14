@@ -29,7 +29,7 @@
 
 【なぜこのシーンを使うか】
 上記4本の学習に使われたシーン `新生児_仰向け_柵なし`
-（`run/scene_tools/e_scene.py` の `load()` が読む名前）が、
+（`run/scene_tools/scene_io.py` の `load()` が読む名前）が、
 world.fence=false / world.toy.enabled=false / world.plain=true と、
 既に「おもちゃなし・柵なし・平坦な床・仰向け」の要件を満たしている。
 新しいシーンを作る必要はない。
@@ -80,7 +80,7 @@ import mujoco                                            # noqa: E402
 import numpy as np                                       # noqa: E402
 import torch                                              # noqa: E402
 
-import e_scene                                            # noqa: E402
+import scene_io                                            # noqa: E402
 from hybrid_env import HybridEnv                          # noqa: E402
 from run.config import Config, touch_setting_of           # noqa: E402
 from run.taro_setup import Taro, rescale_action            # noqa: E402
@@ -108,10 +108,10 @@ def main():
     print("=" * 78)
 
     # ---- ① シーン・環境（check_movement_units.py 119〜124行目と同じ） --------
-    sc = e_scene.load("新生児_仰向け_柵なし")
+    sc = scene_io.load("新生児_仰向け_柵なし")
     sc["body"]["age_months"] = 4.0     # 成長しきった状態（4ヶ月）＝実測と同じ
     sc["fingerprint"] = None
-    env0, _ = e_scene.build(sc, seed=SEED, verbose=False)
+    env0, _ = scene_io.build(sc, seed=SEED, verbose=False)
     env = HybridEnv(env0)
     env.reset(seed=SEED)
 

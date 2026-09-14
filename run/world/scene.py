@@ -9,7 +9,7 @@
 実測で動きが人間の新生児の約3.3倍速かった。
 ⇒ 組み立てるのは1箇所。他は呼ぶだけ。
 
-注意：駆動モデルは**渡さない**。`e_scene.build` の既定（筋肉モード）に従う。
+注意：駆動モデルは**渡さない**。`scene_io.build` の既定（筋肉モード）に従う。
   関節モードは逸脱リストの「逸脱5」に登録された逸脱なので、
   使うときは実験ファイルに明示的に書かせる（`taro.actuation: "joint"`）。
 """
@@ -37,9 +37,9 @@ def resolve(scene_name, taro=None):
     ここを唯一の場所にして `build()` と記録の両方から呼ぶ。
     物理は組み立てない（JSONを読むだけ）ので軽い。
     """
-    import e_scene
+    import scene_io
     taro = taro or {}
-    sc = e_scene.load(scene_name)
+    sc = scene_io.load(scene_name)
 
     # 月齢は実験ファイルで上書きできる（体を育てる実験のため）。
     #   注意：上書きしたらシーンの指紋とは一致しないので照合を外す。
@@ -65,11 +65,11 @@ def build(scene_name, *, taro=None, seed=0, verbose=False, hybrid=False):
     Returns:
         (env, scene, hands)
     """
-    import e_scene
+    import scene_io
     taro = taro or {}
     sc = resolve(scene_name, taro)
 
-    # 駆動モデル。既定（None）＝ e_scene の既定＝筋肉モード。
+    # 駆動モデル。既定（None）＝ scene_io の既定＝筋肉モード。
     act = None
     mode = str(taro.get("actuation", "muscle")).lower()
     if mode in ("joint", "spring", "springdamper", "torque"):
@@ -84,9 +84,9 @@ def build(scene_name, *, taro=None, seed=0, verbose=False, hybrid=False):
     vision_on = bool(taro.get("vision", True))
     # 【2026-09-13新設・設計_視覚を脳へ戻す 第2段】視覚と注意（VisualAttention）を
     #   環境（太郎の側）に持たせる設定。`taro.orienting_reflex` と同じ道を通す：
-    #   ここで実験ファイルの `taro` 欄から読み、e_scene.build() → ToySupineEnv へ渡す。
+    #   ここで実験ファイルの `taro` 欄から読み、scene_io.build() → ToySupineEnv へ渡す。
     #   値は辞書（run/plugins/common/object_files.py の `plugins.object_files` に
-    #   書いていた設定と同じ形）。未設定（None）なら e_scene.build() 側で何も作らない
+    #   書いていた設定と同じ形）。未設定（None）なら scene_io.build() 側で何も作らない
     #   ＝この設定を書かない既存の実験は1ビットも変わらない。
     visual_attention = taro.get("visual_attention")
     if visual_attention is not None and not vision_on:
@@ -99,7 +99,7 @@ def build(scene_name, *, taro=None, seed=0, verbose=False, hybrid=False):
     # ---- 視覚（2026-08-13、目標EでLeanMimoEnv.strip_texturesを発動させる修正）------
     #   【なぜ】taro.vision=False でも、これまでは環境が常にフルテクスチャ(約977MB)を
     #   持ったままだった。既存の仕組み(strip_textures)を発動させるため、
-    #   taro.vision をそのまま e_scene.build() の vision= へ渡す。
+    #   taro.vision をそのまま scene_io.build() の vision= へ渡す。
     #
     #   【注意・視線誘導反射との相性】OrientingReflex（視線誘導反射）は環境側の
     #   カメラ描画(get_vision_obs)で毎ステップ更新される。vision=False では
@@ -123,17 +123,17 @@ def build(scene_name, *, taro=None, seed=0, verbose=False, hybrid=False):
     # 【段A・2026-09-13】visual_attention は**環境へ渡さない**。持ち主は太郎
     #   （run/taro_setup.py: build_visual_attention）。ここでは上の妥当性検査
     #   （vision=True が要る）だけを行う。
-    env, hands = e_scene.build(sc, orient=orient,
+    env, hands = scene_io.build(sc, orient=orient,
                                vor=bool(taro.get("vor", True)),
                                seed=seed, verbose=verbose, actuation_model=act,
                                vision=vision_on)
 
     # ---- 感覚運動の伝達遅延（候補5、2026-08-02）----------------------------
     #   【なぜここで配線するか】TE.ToySupineEnv(...) を実際に呼んでいるのは
-    #   run/scene_tools/e_scene.py の build()（このファイルは「組み立てるのはここだけ」と
-    #   自分の docstring に書いているが、それは「e_scene.build() を呼ぶ場所を1つに
+    #   run/scene_tools/scene_io.py の build()（このファイルは「組み立てるのはここだけ」と
+    #   自分の docstring に書いているが、それは「scene_io.build() を呼ぶ場所を1つに
     #   絞る」という意味で、TE.ToySupineEnv(...) 自体の呼び出し箇所ではない）。
-    #   e_scene.py は今回の実装範囲外（触ってよいファイルの一覧に無い）なので、
+    #   scene_io.py は今回の実装範囲外（触ってよいファイルの一覧に無い）なので、
     #   コンストラクタに直接 sensory_delay=/motor_delay= を渡すのではなく、
     #   組み立て終わった env に対して同じ属性を書き換える形で配線する。
     #
@@ -170,7 +170,7 @@ def build(scene_name, *, taro=None, seed=0, verbose=False, hybrid=False):
     #   （MIMo/mimoActuation/muscle.py 53行目）は self.tau = 0.01 とハードコード
     #   されており、実測較正されたものではないと既に注記されている。
     #   MuscleModel.__init__ はコンストラクタ引数で tau を受け取らないため、
-    #   e_scene.py（触ってよいファイルの一覧に無い）を変更せずに済むよう、
+    #   scene_io.py（触ってよいファイルの一覧に無い）を変更せずに済むよう、
     #   組み立て終わった env の actuation_model に対して属性を直接書き換える形で配線する。
     #
     #   _update_activity（muscle.py 291行）は env.step() が呼ばれるたびに

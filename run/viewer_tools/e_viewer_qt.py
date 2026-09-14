@@ -46,7 +46,7 @@ warnings.filterwarnings("ignore")
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.abspath(os.path.join(_HERE, os.pardir, os.pardir))
 # 【なぜ、2026-08-13】run/viewer_tools/e_viewer.py（33〜60行目）と同じパス設定を
-#   そのまま使う。e_scene.py が内部で e_toy_env・infant_body 等
+#   そのまま使う。scene_io.py が内部で e_toy_env・infant_body 等
 #   （E/scripts、taro_core/src/body）をimportするため、この一覧が要る。
 for p in [os.path.join(_ROOT, "D", "scripts"), os.path.join(_ROOT, "MIMo"),
           os.path.join(_ROOT, "taro_core"),
@@ -76,7 +76,7 @@ import mujoco.viewer
 from scipy.spatial.transform import Rotation as _Rotation
 from PySide6 import QtCore, QtWidgets
 
-import e_scene
+import scene_io
 import e_toy_env as TE
 from e_head_hold import CaregiverHands
 from infant_limbs import apply_limb_tone, limb_tone_joints
@@ -347,7 +347,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # 【なぜ、2026-08-16】新版にはシーン保存が無く、ユーザーが手で作った
         #   座位の姿勢を保存できずに困っていた（依頼書①・最優先）。
         #   保存する中身・ファイル形式・保存先は旧版と完全に同じにする
-        #   （e_scene.save() をそのまま呼ぶので保証される。移植元は
+        #   （scene_io.save() をそのまま呼ぶので保証される。移植元は
         #   _current_scene()／save_scene()、main()側で配線する）。
         save_row = QtWidgets.QHBoxLayout()
         save_row.addWidget(QtWidgets.QLabel("シーン名"))
@@ -780,7 +780,7 @@ def _confirm_overwrite(parent, name):
 
 
 def main():
-    scene_names = e_scene.list_scenes()
+    scene_names = scene_io.list_scenes()
     if not scene_names:
         print("[e_viewer_qt] シーンが1つもありません。"
               "run/scene_tools/e_scene_make.py で作ってください。", flush=True)
@@ -792,7 +792,7 @@ def main():
               f"「{scene_names[0]}」を使います。", flush=True)
         scene_name = scene_names[0]
 
-    scene = e_scene.load(scene_name)
+    scene = scene_io.load(scene_name)
     # ---- 月齢の上書き（移植元：e_viewer.py 236〜249行目）------------------
     #   月齢UIの「最初からやり直す」がプロセスを作り直すときに使う。
     #   E_AGE を直接触るのはユーザーではなく、下のrestartハンドラだけ
@@ -809,14 +809,14 @@ def main():
     if scene.get("note"):
         print(f"        {scene['note']}", flush=True)
 
-    # actuation_model は指定しない＝e_scene.build() の既定（MuscleModel）を使う。
+    # actuation_model は指定しない＝scene_io.build() の既定（MuscleModel）を使う。
     #   駆動モード（E_ACTUATION）の切替UIは今回のスコープに入っていない。
     _ACTUATION_MODE = "muscle"
 
     # ====================================================================
     # 【必須・申し送り事項の移植（仕様2-2節）】limb_toneの初回構築時ガード。
     #
-    # 【なぜ】e_scene.build() は scene.setup.limb_tone を無条件に物理へ適用する
+    # 【なぜ】scene_io.build() は scene.setup.limb_tone を無条件に物理へ適用する
     #   ため、Viewer のチェックボックス（st_tone_limb、姿勢区画）がOFFでも
     #   常にONになる混線バグがあった（監査報告 2026-08-07）。初回構築時は
     #   limb_tone を意図的に外し、「四肢の筋緊張を物理へ適用する経路」を
@@ -828,7 +828,7 @@ def main():
         _scene_for_build = copy.deepcopy(scene)
         _scene_for_build["setup"]["limb_tone"] = None
 
-    env, hands = e_scene.build(_scene_for_build, orient=True, vor=True, seed=0,
+    env, hands = scene_io.build(_scene_for_build, orient=True, vor=True, seed=0,
                                verbose=True)
     u = env.unwrapped
     m, d = u.model, u.data
@@ -1000,7 +1000,7 @@ def main():
 
     def on_scene_pick(name):
         try:
-            sc = e_scene.load(name)
+            sc = scene_io.load(name)
         except Exception:
             win.scene_note.setText("")
             return
@@ -1289,7 +1289,7 @@ def main():
     # 【2026-08-13・移植元 e_viewer.py 276〜283行目】limb_toneの初回適用が
     #   終わった後にverify()する（偽陽性の食い違い警告を避けるため）。
     try:
-        e_scene.verify(scene, env, strict=False, verbose=True)
+        scene_io.verify(scene, env, strict=False, verbose=True)
     except Exception as e:
         print(f"[scene] 注意verify()に失敗しました（続行します）: {e}", flush=True)
 
@@ -1414,7 +1414,7 @@ def main():
 
     # ========================================================================
     # シーンとして保存する（移植元：e_viewer.py 1727〜1804行目 _current_scene/
-    # save_scene。保存する中身・ファイル形式・保存先・e_scene.save()呼び出し
+    # save_scene。保存する中身・ファイル形式・保存先・scene_io.save()呼び出し
     # そのものは一切変えていない。読み取り専用の参考として写した。
     # ========================================================================
     def _current_drive_mode():
@@ -1486,7 +1486,7 @@ def main():
         try:
             sc = _current_scene()
             sc["note"] = (win.scene_save_note_edit.text() or "").strip()
-            saved, drift = e_scene.save(
+            saved, drift = scene_io.save(
                 sc, name=name, env=env,
                 hands=(hands if win.chk_head_hold.isChecked() else None),
                 settle_seconds=3.0, verbose=True)
@@ -1498,7 +1498,7 @@ def main():
             win.msg_label.setText(f"保存に失敗: {e}（詳細はコンソールとダイアログ参照）")
             QtWidgets.QMessageBox.critical(win, "シーンの保存に失敗しました", err_text)
             return
-        # 【なぜ、保存後にファイルの実在を確かめるか】e_scene.save()が例外を
+        # 【なぜ、保存後にファイルの実在を確かめるか】scene_io.save()が例外を
         #   投げずに戻ってきても、パスの解決が想定とずれていれば「戻り値は
         #   あるのにファイルは無い」事態がありうる（想定外の事実の再発防止）。
         _saved_path = os.path.join(_ROOT, "run", "scenes", f"{name}.json")
@@ -1520,7 +1520,7 @@ def main():
             QtWidgets.QMessageBox.critical(win, "シーンの保存（ファイル未確認）", text)
         # 保存し直したときにシーン一覧を最新にする（移植元 _refresh_scene_menu 相当）。
         try:
-            names = e_scene.list_scenes()
+            names = scene_io.list_scenes()
             cur = win.scene_combo.currentText()
             win.scene_combo.blockSignals(True)
             win.scene_combo.clear()
@@ -1597,7 +1597,7 @@ def main():
                     win.close()
                     return 0
 
-                e_scene.reset_to_scene(
+                scene_io.reset_to_scene(
                     env, scene,
                     hands=(hands if win.chk_head_hold.isChecked() else None),
                     seed=0)

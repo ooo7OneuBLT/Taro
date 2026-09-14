@@ -13,18 +13,18 @@
 
 呼び出され方は2通り：
     ① 単体実行   python run/scene_tools/catalog.py
-    ② e_scene.save() の末尾から自動で呼ばれる（保存のたびに一覧を作り直す）
+    ② scene_io.save() の末尾から自動で呼ばれる（保存のたびに一覧を作り直す）
 
 出力先は通常どおり `E/docs/シーン一覧.md`。
 
 【2026-08-17・ステージB4】以前は出力先を `_ROOT`（このファイルの位置から
-計算した固定パス）から直接組み立てていたため、`e_scene.SCENE_DIR` を
+計算した固定パス）から直接組み立てていたため、`scene_io.SCENE_DIR` を
 一時フォルダへ差し替えて `save()` をテストすると、シーンJSON自体は
 一時フォルダに書かれるのに、`save()` の末尾が呼ぶ `write_catalog()` だけは
 **本物の `E/docs/シーン一覧.md` を上書きしてしまう**事故があった
 （run/viewer_tools/test_pose_slider_roundtrip.py がこれを踏んで、
 `catalog.write_catalog` そのものを丸ごと無効化する対症療法で回避していた）。
-出力先を呼び出し時点の `e_scene.SCENE_DIR` から導出するように直し、
+出力先を呼び出し時点の `scene_io.SCENE_DIR` から導出するように直し、
 標準の `<プロジェクト根>/run/scenes` という構造のときだけ実物の
 `E/docs/シーン一覧.md` を書く（`_out_path_for_scene_dir()` 参照）。
 """
@@ -40,7 +40,7 @@ _ROOT = os.path.abspath(os.path.join(_HERE, os.pardir, os.pardir))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
-import e_scene  # noqa: E402
+import scene_io  # noqa: E402
 
 # 実験ファイルは目標フォルダごとに置かれる（E/experiments、F/experiments …）。
 # 2026-08-23：目標Fの実験を E/experiments から F/experiments へ移したため、
@@ -49,10 +49,10 @@ EXPERIMENTS_GLOB = os.path.join(_ROOT, "*", "experiments", "*.json")
 
 
 def _out_path_for_scene_dir(scene_dir):
-    """`scene_dir`（＝呼び出し時点の `e_scene.SCENE_DIR`）から出力先を導く。
+    """`scene_dir`（＝呼び出し時点の `scene_io.SCENE_DIR`）から出力先を導く。
 
     標準の `<root>/run/scenes` という構造のときだけ `<root>/E/docs/シーン一覧.md`
-    を返す。それ以外（テストで `e_scene.SCENE_DIR` を一時フォルダへ差し替えた
+    を返す。それ以外（テストで `scene_io.SCENE_DIR` を一時フォルダへ差し替えた
     場合など）は None を返し、呼び出し側で書き込み自体をスキップさせる
     （＝本物のプロジェクトファイルには一切触れない）。
     """
@@ -106,15 +106,15 @@ def build_rows():
     """シーン名ごとの表の1行分を、辞書のリストとして組み立てる。"""
     exp_map = _experiments_by_scene()
     rows = []
-    for name in e_scene.list_scenes():
+    for name in scene_io.list_scenes():
         try:
-            scene = e_scene.load(name)
+            scene = scene_io.load(name)
         except Exception as e:
             rows.append({
                 "name": name, "error": str(e),
             })
             continue
-        summary = e_scene.constraint_summary(scene)
+        summary = scene_io.constraint_summary(scene)
         exps = exp_map.get(name) or []
         rows.append({
             "name": name,
@@ -139,7 +139,7 @@ def render_markdown(rows):
     lines.append("## 表の見方（用語のかみ砕き）")
     lines.append("")
     lines.append("- 月齢：シミュレーション上の赤ちゃんの月齢（0ヶ月＝新生児、4ヶ月）")
-    lines.append("- 主な設定：`e_scene.constraint_summary()` が計算した「固定/自由」")
+    lines.append("- 主な設定：`scene_io.constraint_summary()` が計算した「固定/自由」")
     lines.append("  「おもちゃの有無」「flexion（生理的屈曲）の有無」をそのまま並べたもの")
     lines.append("- 注記：シーンJSONの `note` フィールドをそのまま転記したもの"
                   "（自動生成のため要約はしていない）")
@@ -174,14 +174,14 @@ def render_markdown(rows):
 def write_catalog():
     """`E/docs/シーン一覧.md` を実際に作り直す。呼び出し側から見た唯一の入口。
 
-    出力先は呼び出し時点の `e_scene.SCENE_DIR` から導出する（モジュール読み込み時に
-    固定しない）。`e_scene.SCENE_DIR` が標準の `<root>/run/scenes` でなければ
+    出力先は呼び出し時点の `scene_io.SCENE_DIR` から導出する（モジュール読み込み時に
+    固定しない）。`scene_io.SCENE_DIR` が標準の `<root>/run/scenes` でなければ
     （テストでの一時フォルダ差し替えなど）、本物のファイルを守るため何も書かず None を返す。
     """
-    out_path = _out_path_for_scene_dir(e_scene.SCENE_DIR)
+    out_path = _out_path_for_scene_dir(scene_io.SCENE_DIR)
     if out_path is None:
-        print(f"[catalog] 注意 e_scene.SCENE_DIR が標準の run/scenes 構造ではないため、"
-              f"シーン一覧の書き込みをスキップしました（SCENE_DIR={e_scene.SCENE_DIR}）。")
+        print(f"[catalog] 注意 scene_io.SCENE_DIR が標準の run/scenes 構造ではないため、"
+              f"シーン一覧の書き込みをスキップしました（SCENE_DIR={scene_io.SCENE_DIR}）。")
         return None
     rows = build_rows()
     text = render_markdown(rows)

@@ -63,7 +63,7 @@ import mujoco                                            # noqa: E402
 import numpy as np                                       # noqa: E402
 import torch                                              # noqa: E402
 
-import e_scene                                            # noqa: E402
+import scene_io                                            # noqa: E402
 from hybrid_env import HybridEnv                          # noqa: E402
 from run.config import Config, touch_setting_of           # noqa: E402
 from run.taro_setup import Taro, rescale_action            # noqa: E402
@@ -104,10 +104,10 @@ def record_condition(tag, extra_spec):
     print(f" 条件 {tag}  追加設定={extra_spec}")
     print("=" * 78)
 
-    sc = e_scene.load(SCENE_NAME)
+    sc = scene_io.load(SCENE_NAME)
     sc["body"]["age_months"] = AGE_MONTHS
     sc["fingerprint"] = None
-    env0, _ = e_scene.build(sc, seed=SEED, verbose=False)
+    env0, _ = scene_io.build(sc, seed=SEED, verbose=False)
     env = HybridEnv(env0)
     env.reset(seed=SEED)
 

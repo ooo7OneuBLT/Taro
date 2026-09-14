@@ -54,7 +54,7 @@ for _p in ("E/scripts", "D/scripts", "taro_core/src/body",
 import numpy as np      # noqa: E402
 import mujoco           # noqa: E402
 import mimoEnv          # noqa: E402,F401
-import e_scene          # noqa: E402
+import scene_io          # noqa: E402
 from infant_limbs import actuator_ratios   # noqa: E402
 from mimoActuation.actuation import SpringDamperModel   # noqa: E402
 
@@ -80,9 +80,9 @@ def _body_pos(m, d, name):
 
 def main():
     os.makedirs(OUT, exist_ok=True)
-    sc = e_scene.load(SCENE)
+    sc = scene_io.load(SCENE)
     sc["fingerprint"] = None
-    env, _ = e_scene.build(sc, orient=False, vor=True, seed=0, verbose=False,
+    env, _ = scene_io.build(sc, orient=False, vor=True, seed=0, verbose=False,
                            actuation_model=SpringDamperModel)
     u = env.unwrapped
     m, d = u.model, u.data

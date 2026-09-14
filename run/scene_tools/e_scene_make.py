@@ -31,15 +31,15 @@ if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
 import numpy as np      # noqa: E402
-import e_scene          # noqa: E402
+import scene_io          # noqa: E402
 
 
 def _scene(name, note, body=None, world=None, setup=None):
-    sc = e_scene.default_scene(name)
+    sc = scene_io.default_scene(name)
     sc["note"] = note
     for key, over in (("body", body), ("world", world), ("setup", setup)):
         if over:
-            sc[key] = e_scene._merge(sc[key], over)
+            sc[key] = scene_io._merge(sc[key], over)
     return sc
 
 
@@ -304,7 +304,7 @@ def main():
         print(f" {sc['name']}")
         print("=" * 74)
         print(f"  {sc['note']}")
-        env, hands = e_scene.build(sc, orient=False, vor=True, seed=0, verbose=False)
+        env, hands = scene_io.build(sc, orient=False, vor=True, seed=0, verbose=False)
         # 物理を少し進めて落ち着かせてから保存する
         #   ＝作った直後は力が釣り合っておらず、そのまま保存すると
         #     測定を始めた瞬間に動いてしまう
@@ -329,10 +329,10 @@ def main():
         #     視線が真後ろを向いた状態のまま保存された）。
         if u._toy and hasattr(u, "_set_anchor"):
             u._set_anchor()
-            e_scene.place_toy(env, u._rest_pos)
+            scene_io.place_toy(env, u._rest_pos)
             for _ in range(int(0.3 / dt)):
                 env.step(a)
-        saved, drift = e_scene.save(sc, env=env, hands=hands,
+        saved, drift = scene_io.save(sc, env=env, hands=hands,
                                     settle_seconds=3.0, verbose=True)
         fp = saved["fingerprint"]
         print(f"  首 {fp['head_angles_deg']}")

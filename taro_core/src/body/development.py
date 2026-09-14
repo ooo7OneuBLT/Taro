@@ -37,7 +37,7 @@ import math
 #   今回、taro_core（目標横断で共有する場所）とE（目標固有）の2箇所に同じ表が
 #   存在する二重実装を解消するため、**canonicalな置き場所をここに移し**、
 #   e_toy_env.py 側は本モジュールをimportして使う形に変更した
-#   （依存の向き：E → taro_core。逆方向にしない。ノウハウ「e_scene.pyの値を
+#   （依存の向き：E → taro_core。逆方向にしない。ノウハウ「scene_io.pyの値を
 #   taro_core側のクラスへ渡す」と同じ理由＝taro_coreは目標フォルダの存在を
 #   知らない状態を保つ）。
 _ACUITY_AGES_MONTHS = [

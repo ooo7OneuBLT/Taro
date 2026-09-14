@@ -65,7 +65,7 @@ import mujoco
 from d_supine_env import SupineMimoEnv
 
 # 【なぜ、2026-08-23】development.py（taro_core側・月齢→発達パラメータの一本化）を
-#   import するための sys.path 追加。呼び出し元（e_scene.py等）は既に
+#   import するための sys.path 追加。呼び出し元（scene_io.py等）は既に
 #   taro_core/src/body を sys.path へ足しているが、e_toy_env.py が直接単体で
 #   import されるスクリプトも多い（require_px 等を直接呼ぶ14ファイル）ため、
 #   呼び出し側に依存せずこのファイル自身でも通す。
@@ -647,7 +647,7 @@ class ToySupineEnv(SupineMimoEnv):
                  vor=None, orient=None, recline_deg=None,
                  # 【2026-08-17・配線改修ステージA】以前はここに引数が無く、
                  #   モジュール定数（SEAT_FRICTION等）をimport後に直接上書きするしか
-                 #   設定を伝える方法が無かった（run/scene_tools/e_scene.py 参照）。
+                 #   設定を伝える方法が無かった（run/scene_tools/scene_io.py 参照）。
                  #   None なら従来どおりモジュール定数（＝環境変数の既定値）にフォールバック
                  #   するので、これらを渡さない既存の呼び出し元は1ビットも挙動が変わらない。
                  seat_friction=None, floor_dim=None, floor_emission=None,
@@ -745,7 +745,7 @@ class ToySupineEnv(SupineMimoEnv):
         #   確認する専用スクリプト）が `toy=True` を明示していたのに、旧ロジックでは
         #   環境変数がそれを踏みつぶし、**おもちゃ無しで「おもちゃの検査」を空振り
         #   していた**（実際に確認した。toyがFAR_AWAYへ退避され、接触・随伴性の
-        #   チェックが常に「対象なし」で終わる）。他の入口（run/scene_tools/e_scene.py
+        #   チェックが常に「対象なし」で終わる）。他の入口（run/scene_tools/scene_io.py
         #   のbuild()など）と同じ「Noneのときだけ環境変数を見る」形に統一する。
         #   toy/fence を明示しない既存の呼び出し元は、既定値がTrueからNoneに変わっても
         #   最終的に同じ式（環境変数が"1"ならON）に帰着するため1ビットも変わらない。
@@ -787,7 +787,7 @@ class ToySupineEnv(SupineMimoEnv):
         # リクライニングの角度[度]。0なら従来どおり仰向け（背もたれも作らない）
         self._recline_deg = float(RECLINE_DEG if recline_deg is None else recline_deg)
         # 【2026-08-17・配線改修ステージA】以前はモジュール定数（SEAT_FRICTION等）を
-        #   メソッド内で直接参照していた（run/scene_tools/e_scene.py がimport後に
+        #   メソッド内で直接参照していた（run/scene_tools/scene_io.py がimport後に
         #   TE.SEAT_FRICTION=... と直接上書きする以外に伝える手段が無かった）。
         #   ここでインスタンス属性へ写し、以降のメソッドは self._xxx を見る形にする。
         #   None ならモジュール定数（＝環境変数の既定値）にフォールバックするので、
@@ -886,7 +886,7 @@ class ToySupineEnv(SupineMimoEnv):
         #   super().__init__()後（モデル構築後）でないと分からないため、ここでは
         #   設定値の記録だけ行う（存在チェックは下のtest_object2ブロック直後）。
         #
-        # 【2026-08-25改修】以前は run/scene_tools/e_scene.py の build() が
+        # 【2026-08-25改修】以前は run/scene_tools/scene_io.py の build() が
         #   「共通ファイル扱いのため変更不可」としてtoy2までしかシーンJSONから
         #   読まず、環境変数(F_TOY3_*/F_TOY4_*)を新設して迂回していた。今回の
         #   指示でe_scene.pyの変更が許可されたため、toy2と同じ「シーンJSON→
@@ -947,7 +947,7 @@ class ToySupineEnv(SupineMimoEnv):
         #   kwargsに明示的にmodel_pathが渡されなければ何もしない＝MIMoV2DummyEnv
         #   既定のbenchmarkv2_scene.xmlのまま（1ビットも変わらない）。
         #   【2026-08-25改修】以前はここでE_SCENE_XML環境変数を読んでいた
-        #   （run/scene_tools/e_scene.pyのbuild()がmodel_pathを渡す手段を
+        #   （run/scene_tools/scene_io.pyのbuild()がmodel_pathを渡す手段を
         #   持たなかったため）。今回e_scene.pyの変更が許可され、シーンJSON
         #   （world.xml）からmodel_pathをkwargs直渡しできるようになったので、
         #   環境変数の読み取りは廃止した（他に使用箇所が無いことを確認済み）。
@@ -1040,7 +1040,7 @@ class ToySupineEnv(SupineMimoEnv):
             #   寸法は8cm角・厚さ1cm（half 0.04,0.005,0.04）＝絵本のページに相当。
             #   薄い軸はy（法線y）＝アンカーの視線正面配置で絵が太郎を向く。
             #   材質名の埋め込み形式にしたのは、既存の toy_shape 1本の配線
-            #   （シーンJSON→e_scene→ここ）を変えずに済ませるため。
+            #   （シーンJSON→scene_io→ここ）を変えずに済ませるため。
             import mujoco as _mj
             mat = self._toy_shape.split(":", 1)[1]
             half = (self._toy_radius, 0.005, self._toy_radius)
@@ -2230,11 +2230,11 @@ class ToySupineEnv(SupineMimoEnv):
         #
         # 【2026-08-16 復帰先の修正】ここ（reset_model内）で記録した値は、まだ
         #   「仰向け＋jitter＋settle」の既定姿勢でしかない。シーンの本当の姿勢は
-        #   run/scene_tools/e_scene.py の reset_to_scene()/build() が
+        #   run/scene_tools/scene_io.py の reset_to_scene()/build() が
         #   **env.reset()の呼び出しのあとに** apply_state() で qpos を書き込む
         #   ため、ここで記録した値は座位ではなく仰向けになる（2026-08-16に実際に
         #   再現・実測済み。別の実装担当が録画作成時に発見し実行時の属性上書きで
-        #   回避した。触ってよいファイルに e_scene.py が含まれないためここでは
+        #   回避した。触ってよいファイルに scene_io.py が含まれないためここでは
         #   直接直せない）。
         #   → ここでは**暫定値**として記録しつつ、_posture_baseline_pending を立てる。
         #   step() の先頭（このstepでまだ何も物理を進めていない時点）で、
@@ -2351,7 +2351,7 @@ class ToySupineEnv(SupineMimoEnv):
 
     # -------------------------------------------------- 座位保持の学習（2026-08-15）
     def _posture_trunk_tilt_deg(self):
-        """体幹の傾き[度]。run/scene_tools/e_scene.py の fingerprint() と
+        """体幹の傾き[度]。run/scene_tools/scene_io.py の fingerprint() と
         まったく同じ式（骨盤→胸のベクトルが水平から何度上がっているか）。
         """
         axis = (np.array(self.data.body("upper_body").xpos, dtype=float)
@@ -2368,7 +2368,7 @@ class ToySupineEnv(SupineMimoEnv):
         （taro_core/src/brain/spinal_cord/righting_damper.py の
         【前庭覚由来の頭角速度の取得方法】docstring参照。三半規管を通さないと
         「ゆっくりした傾きに反応する」というその10の問題を再現してしまう）。
-        support_fraction は run/scene_tools/e_scene.py の build() が
+        support_fraction は run/scene_tools/scene_io.py の build() が
         env.unwrapped._pinned_groups として配線した pinned_groups から作る。
         """
         if getattr(self, "_righting_canals", None) is None:

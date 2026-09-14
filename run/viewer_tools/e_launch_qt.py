@@ -28,14 +28,14 @@ _SCENE_TOOLS = os.path.join(_ROOT, "run", "scene_tools")
 if _SCENE_TOOLS not in sys.path:
     sys.path.insert(0, _SCENE_TOOLS)
 
-import e_scene  # noqa: E402
+import scene_io  # noqa: E402
 # 一覧表示・選択のロジックは旧版のランチャー（e_launch.py）と全く同じものを使う
 #   （複製を避けるため、そちらの関数をそのままimportして使い回す）。
 from e_launch import (read_last, write_last, select_scene)  # noqa: E402
 
 
 def main():
-    names = e_scene.list_scenes()
+    names = scene_io.list_scenes()
     if not names:
         print("シーンが1つもありません。")
         print("  .venv/Scripts/python.exe run/scene_tools/e_scene_make.py  で作れます")

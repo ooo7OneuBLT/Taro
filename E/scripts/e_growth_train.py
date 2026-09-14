@@ -133,11 +133,11 @@ if _SCENE_NAME:
     _scene_tools_dir = os.path.join(_BRIDGE, os.pardir, "run", "scene_tools")
     if _scene_tools_dir not in sys.path:
         sys.path.insert(0, _scene_tools_dir)
-    import e_scene
-    _sp = e_scene.scene_path(_SCENE_NAME)
+    import scene_io
+    _sp = scene_io.scene_path(_SCENE_NAME)
     if not os.path.exists(_sp):
         raise FileNotFoundError(f"シーンが見つからない: {_sp}\n"
-                                f"  使えるシーン: {'、'.join(e_scene.list_scenes())}")
+                                f"  使えるシーン: {'、'.join(scene_io.list_scenes())}")
     import json as _json
     _scene_age = float(_json.load(open(_sp, encoding="utf-8"))["body"]["age_months"])
     if not _AGE:
@@ -191,7 +191,7 @@ _SMOOTH = os.environ.get("E_SMOOTH", "0") == "1"
 # 前提なので自動でOFFにする。
 # 【2026-07-30 既定を反転】0（関節モード）→ 1（筋肉モード）。
 #   【なぜ】測定スクリプトは80本以上が `actuation_model=MuscleModel` を直書きし、
-#     シーン（e_scene.build）も筋肉モードが既定だったのに、**学習ループだけが
+#     シーン（scene_io.build）も筋肉モードが既定だったのに、**学習ループだけが
 #     既定で関節モード**だった。＝学習した太郎と、測定・Viewerで見ていた太郎が
 #     別の体だった（2026-07-30 にユーザーの目視「視線誘導反射の実験の時とは
 #     動きが全然違う／等速でも倍速みたい」で発覚。実測で動きが約3.3倍速い）。
@@ -525,7 +525,7 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
     # 注意：【2026-07-30 撤回】ここで SpringDamperModel を既定として渡していた。
     #   「学習ループの既定に合わせる」という判断だったが、それは
     #   **学習ループの既定そのものが逸脱していた**ので、分裂を固定するだけだった。
-    #   → 駆動モデルを渡さない（None）ときは e_scene.build の既定＝筋肉モードに従う。
+    #   → 駆動モデルを渡さない（None）ときは scene_io.build の既定＝筋肉モードに従う。
     _act_kw = {}
     if _MUSCLE:   # 【筋肉モデル】拮抗筋2本/関節・活性化ダイナミクス・引くだけ
         from mimoActuation.muscle import MuscleModel
@@ -555,11 +555,11 @@ def run(seed, n_train=3600, K=100, ckpt=600, n_eval=80):
     #     ＝シーンは「月齢以外の環境」を担い、月齢は成長スケジュールが担う。
     def _make_env(age_kw):
         if _SCENE_NAME:
-            import e_scene
-            sc = e_scene.load(_SCENE_NAME)
+            import scene_io
+            sc = scene_io.load(_SCENE_NAME)
             sc["body"]["age_months"] = float(age_kw.get("age", sc["body"]["age_months"]))
             sc["fingerprint"] = None      # 月齢を差し替えたので保存時の指紋とは一致しない
-            env0, _hands = e_scene.build(
+            env0, _hands = scene_io.build(
                 sc, orient=False, vor=True, seed=seed, verbose=False,
                 actuation_model=_act_kw.get("actuation_model"))
             return HybridEnv(env0)

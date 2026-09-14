@@ -90,7 +90,7 @@ def scene_coverage():
       （呼び出し側が上書きできないようにするため）。
       これを見落とすと「入れ忘れ」を7件も誤検出する（2026-07-29 に実際にやった）。
     """
-    _e_scene_path = os.path.join(_ROOT, "run", "scene_tools", "e_scene.py")
+    _e_scene_path = os.path.join(_ROOT, "run", "scene_tools", "scene_io.py")
     src = open(_e_scene_path, encoding="utf-8").read()
     by_env = set(re.findall(r'os\.environ\["(E_[A-Z0-9_]+)"\]', src))
     # 引数で直接渡しているもの＝シーンの項目名 → 対応する環境変数
@@ -144,7 +144,7 @@ def main():
         print("=" * 78)
         for v, f in missing:
             print(f"  {v:<22} {f}")
-        print("\n  ⇒ `e_scene.default_scene()` に項目を足し、`build()` で値を渡すこと。")
+        print("\n  ⇒ `scene_io.default_scene()` に項目を足し、`build()` で値を渡すこと。")
         print("     実験の条件なら INTENTIONAL に理由つきで登録すること。")
         return 1
 

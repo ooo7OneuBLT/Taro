@@ -24,7 +24,7 @@
     （229行目付近のdocstring「TrimeshTouch … キーはbody_id」）。
 
 【関節構造の実測、2026-08-15】`MIMo/mimoEnv/assets/benchmarkv2_scene_temp_*.xml`
-（`e_scene.build`が実行時に生成する成長済みXMLと同じテンプレート）を実際に読んで
+（`scene_io.build`が実行時に生成する成長済みXMLと同じテンプレート）を実際に読んで
 確認した。
 
     robot:hip_bend1  hip(骨盤)と lower_body(腰)の間。axis="0 1 0"（Y軸）。可動域[-17, 30.5]度

@@ -125,8 +125,8 @@ def main():
           f"posture_fall_deg={cfg.posture_fall_deg}", flush=True)
 
     # ---- シーンの姿勢（座位）へ戻す ------------------------------------------
-    import e_scene
-    e_scene.reset_to_scene(env, sc, hands=hands, seed=cfg.seed)
+    import scene_io
+    scene_io.reset_to_scene(env, sc, hands=hands, seed=cfg.seed)
 
     # ---- 想定外の手当て：座り直しの復帰先を「座位」に上書きする ---------------
     #   （docstring【_posture_seated_qpos の想定外】参照）

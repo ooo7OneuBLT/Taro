@@ -22,7 +22,7 @@ Taroが使う姿勢が別物**であることが判明した。
 【追記・2026-08-03 同日】上の方針のあと、真因を遡って調べたところ、
 `self.init_position`（`D/scripts/d_supine_env.py`）が「シーンの姿勢を流し込む
 より前」に記録されていることが分かった。これは`run/taro_setup.py`ではなく
-**目標E固有の`E/scripts/e_scene.py`の`build()`側の問題**だったため、
+**目標E固有の`E/scripts/scene_io.py`の`build()`側の問題**だったため、
 `build()`の最後で`init_position`を更新する1行を追加して**根本修正した**
 （`run/taro_setup.py`・`run/trainer.py`は変更していない）。
 詳細は`doc/検証の落とし穴チェックリスト.md`項95、`E/docs/研究日誌.md`同日の記録。
@@ -67,7 +67,7 @@ from run.plugins.common import scene as scene_mod   # noqa: E402
 from run.taro_setup import Taro                     # noqa: E402
 
 # scene_mod の import で E/scripts が sys.path に入るので、ここで初めて読める
-import e_scene                                      # noqa: E402
+import scene_io                                      # noqa: E402
 from e_head_hold import joint_group                 # noqa: E402
 
 # 仕様2節「最低限『肘・肩・首・体幹』を含む」に対応する部位
@@ -81,11 +81,11 @@ THRESHOLD_DEG = 5.0
 def _snapshot_joints(env):
     """joint名（"robot:"・左右接頭辞は残す）→角度(度) の辞書。
 
-    注意：e_scene.snapshot_state() が既に持っているロジック
+    注意：scene_io.snapshot_state() が既に持っているロジック
       （ヒンジ/スライド関節だけ・"robot:"接頭辞を外す・眼球を除く）をそのまま使う。
       同じ式をここで書き直すと、片方だけ直し忘れて食い違う（落とし穴チェックリスト 項30）。
     """
-    return dict(e_scene.snapshot_state(env)["joints_readable"])
+    return dict(scene_io.snapshot_state(env)["joints_readable"])
 
 
 def check_scene(scene_name, seed=0, taro_kwargs=None, verbose=False):

@@ -533,7 +533,7 @@ def disable_limb_tone_spring(model, groups=("arm", "leg")):
     【想定外・実装判断の記録】設計は「spinal_drive_modeをapply_limb_toneへどう
     渡すか（引数追加／呼び出し側で条件分岐して関数自体を呼ばない）は実装担当の判断」
     としていたが、実際に apply_limb_tone を呼んでいるのは
-    `run/scene_tools/e_scene.py` の `_apply_limb_tone()` であり、この仕様の
+    `run/scene_tools/scene_io.py` の `_apply_limb_tone()` であり、この仕様の
     「触ってよいファイル」の一覧に無い（触れない）。そのため、どちらの選択肢も
     そのままでは実現できない。かわりに、環境が組み立てられた**あと**
     （`run/taro_setup.py`、in-scope）でこの関数を呼び、四肢の関節の

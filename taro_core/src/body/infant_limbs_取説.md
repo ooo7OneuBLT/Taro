@@ -50,7 +50,7 @@ MuJoCoの`model`/`data`を受け取り、gear・剛性(jnt_stiffness)・初期�
 - `infant_body`モジュールへの参照は循環import回避のため、関数の**呼び出し時に
   遅延import**する設計（175行・255行・611行・626行）。モジュール先頭に
   `from infant_body import ...`を書かないこと。
-- `apply_limb_tone`を実際に呼んでいるのは`run/scene_tools/e_scene.py`の
+- `apply_limb_tone`を実際に呼んでいるのは`run/scene_tools/scene_io.py`の
   `_apply_limb_tone()`（本ファイルの外）。呼び出し側の引数の渡し方を変える必要が
   あるときはそちらを触る必要があるが、本取説の対象外（536-541行の「想定外」記録も参照）。
 - hold_deg=20.0（newborn_flexorプロファイルの既定、507行）はFarmania 2017の肘反跳実測

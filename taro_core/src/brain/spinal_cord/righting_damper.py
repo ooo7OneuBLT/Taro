@@ -53,13 +53,13 @@ VORクラスも同じ経路を使っている）。本クラスの `compute()` �
 避けられる。
 
 【support_fractionの取得方法】
-`run/scene_tools/e_scene.py` の `constraint_summary(scene)`（副作用なし）は
+`run/scene_tools/scene_io.py` の `constraint_summary(scene)`（副作用なし）は
     {"root_pinned": bool, "pinned_groups": [...], "free_groups": [...], ...}
 を返す。`pinned_groups` は「椅子・実験者の手などで固定されている体の部位」
 （`_repin()` のコメント「首は実験者の手が担当」「体幹・脚も完全固定する」を
 参照）に対応するため、支持の割合として妥当な代理指標になる。
 taro_core は run 配下に依存しない設計（呼び出し方向を run→taro_core に保つ）
-なので、本ファイルは `e_scene.py` を import しない。代わりに
+なので、本ファイルは `scene_io.py` を import しない。代わりに
 `support_fraction_from_pinned_groups()` という純粋関数を用意し、呼び出し側が
 `constraint_summary(scene)["pinned_groups"]` をそのまま渡せるようにする。
 
@@ -89,7 +89,7 @@ ALL_SUPPORT_GROUPS = ("arm", "finger", "leg", "trunk", "head")
 def support_fraction_from_pinned_groups(pinned_groups, all_groups=ALL_SUPPORT_GROUPS):
     """constraint_summary(scene)["pinned_groups"] から support_fraction[0,1] を作る。
 
-    副作用なし。e_scene.py を import しない（taro_core は run 配下に依存しない）。
+    副作用なし。scene_io.py を import しない（taro_core は run 配下に依存しない）。
     体の部位（arm/finger/leg/trunk/head の5グループ）のうち、外部で固定されて
     いる（＝椅子・実験者の手で支えられている）割合をそのまま support_fraction
     とする。全く固定が無ければ0.0（反射が最大限効く）、全部固定なら1.0

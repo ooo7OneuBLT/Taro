@@ -19,7 +19,7 @@
 `run/tools/record_posture_reset_clip.py`（本日別件で作られたもの）と同じ問題を
 踏む：`Taro.__init__` は内部で `env.reset()` を呼ぶため、シーンJSONの座位姿勢
 （scene_mod.build 時点で一度適用したもの）が既定の仰向け姿勢へ戻ってしまう。
-そこで Taro を構築した「あと」に `e_scene.reset_to_scene()` を呼び直し、
+そこで Taro を構築した「あと」に `scene_io.reset_to_scene()` を呼び直し、
 座位へ戻してから録画を始める。
 
 【_posture_seated_qpos の想定外は既に解消済み（確認した）】
@@ -125,8 +125,8 @@ def main():
           f"posture_fall_delay_sec={cfg.posture_fall_delay_sec}", flush=True)
 
     # ---- シーンの姿勢（座位）へ戻す ------------------------------------------
-    import e_scene
-    e_scene.reset_to_scene(env, sc, hands=hands, seed=cfg.seed)
+    import scene_io
+    scene_io.reset_to_scene(env, sc, hands=hands, seed=cfg.seed)
     tilt_after_reset = u._posture_trunk_tilt_deg()
     head_z_after_reset = float(u.data.body("head").xpos[2])
     print(f"[診断] reset_to_scene直後の体幹傾き={tilt_after_reset:.1f}度 "

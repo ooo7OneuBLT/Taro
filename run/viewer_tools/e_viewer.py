@@ -43,7 +43,7 @@ _ROOT = os.path.abspath(os.path.join(_HERE, os.pardir, os.pardir))
 #   （いずれも関数内での遅延import）は E/scripts 直下に残る（目標Eの本能実装群。
 #   今回の移設のスコープ外）。以前は _HERE が E/scripts を指していたため
 #   sys.path に _HERE を足すだけで暗黙に読めていたが、_HERE が run/viewer_tools に
-#   変わった今はこれが効かない。run/scene_tools/e_scene.py が2026-08-05に
+#   変わった今はこれが効かない。run/scene_tools/scene_io.py が2026-08-05に
 #   実際に踏んだのと同じ罠（設計：作業記録（非公開）
 #   2026-08-07_runSystem移設_統合版.md 2.3節）。
 for p in [os.path.join(_ROOT, "D", "scripts"), os.path.join(_ROOT, "MIMo"),
@@ -198,7 +198,7 @@ def main():
     #     視力も4ヶ月  … 体と揃える（1ヶ月の4.3倍）
     #     頭を抑える    … 人間の乳児実験と同じ条件（Hunter & Richards 2003）
     from e_head_hold import CaregiverHands
-    import e_scene
+    import scene_io
 
     # ---- 駆動モード（筋肉／関節）2026-08-10 新設 --------------------------
     #   【なぜ】run.type=edit（このファイル）は taro.actuation を一切見ておらず、
@@ -226,13 +226,13 @@ def main():
     # ------------------------------------------------------------------------
     # 【なぜ】環境の条件が4か所（コードの定数／環境変数／プリセット／保存ファイル）に
     # 散らばっており、Viewer で見ている太郎と測定している太郎が食い違っていた。
-    # シーンを使うと**環境を組み立てるのは `e_scene.build` だけ**になるので、
+    # シーンを使うと**環境を組み立てるのは `scene_io.build` だけ**になるので、
     # Viewer と測定が構造的に同じ環境になる。設計は `E/docs/シーン方式_設計.md`。
     # ========================================================================
     _scene = None
     _scene_name = os.environ.get("E_SCENE")
     if _scene_name:
-        _scene = e_scene.load(_scene_name)
+        _scene = scene_io.load(_scene_name)
         # 月齢だけは E_AGE で上書きできる（2026-07-31）。
         #   【なぜ要るか】シーンは「新生児（0ヶ月）」で作ってあるが、
         #   体を育てる実験の学習済みモデルは**終わりの月齢（4ヶ月）の体**で学んでいる。
@@ -263,7 +263,7 @@ def main():
             import copy as _copy_lt
             _scene_for_build = _copy_lt.deepcopy(_scene)
             _scene_for_build["setup"]["limb_tone"] = None
-            # 【なぜ、2026-08-07・重大バグ修正】e_scene.build() は scene.setup.limb_tone を
+            # 【なぜ、2026-08-07・重大バグ修正】scene_io.build() は scene.setup.limb_tone を
             #   無条件に物理へ適用するため、Viewer のチェックボックス（st_tone_limb、下記）が
             #   OFF でも常にONになる混線バグがあった（監査報告
             #   作業記録（非公開） 2-1）。
@@ -272,8 +272,8 @@ def main():
             #   と連動する経路）だけに一本化する。build() は apply_state の後に
             #   mj_forward するだけで物理ステップは進めないため、limb_tone を外しても
             #   返ってきた直後の姿勢（qpos）はシーンの state と完全に一致する
-            #   （run/scene_tools/e_scene.py の build()・_apply_limb_tone() で確認済み）。
-        env, hands = e_scene.build(_scene_for_build, orient=True, vor=True, seed=0,
+            #   （run/scene_tools/scene_io.py の build()・_apply_limb_tone() で確認済み）。
+        env, hands = scene_io.build(_scene_for_build, orient=True, vor=True, seed=0,
                                    verbose=True, actuation_model=_ACT_MODEL)
         u = env.unwrapped
         m, d = u.model, u.data
@@ -679,7 +679,7 @@ def main():
     #   プリセットは Viewer の中にしか無く、測定スクリプトからは使えなかった。
     #   シーンはファイルなので、Viewer で作ったものをそのまま測定が読める。
     # ------------------------------------------------------------------
-    scene_names = e_scene.list_scenes()
+    scene_names = scene_io.list_scenes()
     _init_scene = (_scene["name"] if _scene else
                    (scene_names[0] if scene_names else ""))
     scene_var = tk.StringVar(value=_init_scene)
@@ -700,7 +700,7 @@ def main():
              fg="#a30", font=("", 8), justify="left").pack(anchor="w", padx=14)
 
     def _refresh_scene_menu():
-        names = e_scene.list_scenes()
+        names = scene_io.list_scenes()
         mnu = _scene_menu["menu"]
         mnu.delete(0, "end")
         for n in names:
@@ -714,7 +714,7 @@ def main():
           保存時に記録した指紋と安定確認の結果をここに出す。
         """
         try:
-            sc = e_scene.load(scene_var.get())
+            sc = scene_io.load(scene_var.get())
         except Exception:
             scene_note.config(text="", fg="#666")
             return
@@ -795,7 +795,7 @@ def main():
     #     「最初からやり直す」でプロセスごと作り直す。
     def on_scene_switches(*_a):
         try:
-            sc = e_scene.load(scene_var.get())
+            sc = scene_io.load(scene_var.get())
         except Exception:
             return
         st_fence.set(bool(sc["world"]["fence"]))
@@ -1726,7 +1726,7 @@ def main():
     #   外したので、ここで一度だけ on_limb_tone() を呼び、チェックボックスの
     #   初期値（=シーンの元の設定）どおりに物理へ反映する。これにより
     #   _limb_saved[0] が「本当に脱力した状態（剛性0）」を正しく記憶できる
-    #   （修正前は e_scene 側が既に適用済みの状態を誤って「元の状態」として
+    #   （修正前は scene_io 側が既に適用済みの状態を誤って「元の状態」として
     #   記憶してしまい、チェックを外しても何も起きないバグの直接の原因だった）。
     # 注意：この呼び出しは `on_limb_tone()` の定義直後には置けない。
     #   `limb_tone_apply()`/`limb_tone_release()` は末尾で `msg.config(...)` を呼ぶが、
@@ -1739,9 +1739,9 @@ def main():
     if _scene is not None:
         # 保存した状態と本当に同じ環境になったかを確かめる（止めはしない＝
         # Viewer は直すための道具なので、ずれていても開けた方が直せる）。
-        # 【なぜここに移したか】上の e_scene.build() 直後ではなく、on_limb_tone()
+        # 【なぜここに移したか】上の scene_io.build() 直後ではなく、on_limb_tone()
         #   のあとで照合する（詳細はビルド直後のコメント参照）。
-        e_scene.verify(_scene, env, strict=False, verbose=True)
+        scene_io.verify(_scene, env, strict=False, verbose=True)
 
     # ---- シーンとして保存する欄（2026-07-29 新設）------------------------
     #   ここで名前を付けて保存すると、測定スクリプトが E_SCENE=名前 で
@@ -1769,7 +1769,7 @@ def main():
         """いまの Viewer の状態からシーンを組み立てる。"""
         import copy as _copy
         sc = (_copy.deepcopy(_scene) if _scene is not None
-              else e_scene.default_scene("新しいシーン"))
+              else scene_io.default_scene("新しいシーン"))
         sc.pop("_path", None)
         sc["body"]["age_months"] = float(_AGE)
         sc["body"]["eye_rest_vertical_deg"] = float(_EYE_REST_V)
@@ -1799,7 +1799,7 @@ def main():
         #   （default_scene() のコメント「setup に無い項目は build() で使われない」の
         #   前提を壊さないため）。記録専用の追加キーとしてトップレベルに置く。
         #   load() 側の _merge() は base に無いキーもそのまま引き継ぐので、
-        #   run/scene_tools/e_scene.py 側は一切変更しなくてよい。
+        #   run/scene_tools/scene_io.py 側は一切変更しなくてよい。
         sc["noise_mode"] = str(noise_mode[0])
         return sc
 
@@ -1811,7 +1811,7 @@ def main():
         try:
             sc = _current_scene()
             sc["note"] = (note_var.get() or "").strip()
-            saved, drift = e_scene.save(
+            saved, drift = scene_io.save(
                 sc, name=name, env=env,
                 hands=(hands if st_hold_head.get() else None),
                 settle_seconds=3.0, verbose=True)
@@ -2528,13 +2528,13 @@ def main():
                 #   シーンで立ち上げても最初のフレームで既定状態に戻っていた
                 #   （ユーザーの報告「おもちゃの位置がまた元に戻ってる」2026-07-29）。
                 if _scene is not None:
-                    e_scene.reset_to_scene(env, _scene,
+                    scene_io.reset_to_scene(env, _scene,
                                            hands=(hands if st_hold_head.get() else None),
                                            seed=0)
                     if not st_hold_head.get():
                         hands.release()
                     # 【なぜ、2026-08-07・重大バグ修正】reset_to_scene() は内部で
-                    #   e_scene._apply_limb_tone() を無条件に呼び直す（「姿勢を戻した
+                    #   scene_io._apply_limb_tone() を無条件に呼び直す（「姿勢を戻した
                     #   ので目標角も取り直す」という設計自体は正しい）。ただし
                     #   チェックボックスの状態を見ないため、OFFにしていても
                     #   毎回ONに戻ってしまっていた。on_limb_tone() を呼び直し、

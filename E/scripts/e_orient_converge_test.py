@@ -115,11 +115,11 @@ os.environ.setdefault("E_ORIENT_SEED", str(SEED))
 def run(orient_on, off, env, u, m, d, dt, toy_gadr, right, toy_bid, n_steps,
         hands=None, scene=None):
     """1条件を走らせ、時系列（時刻・ずれ・眼球角度・サッケード数）を返す。"""
-    import e_scene
+    import scene_io
     # 【2026-07-29】`env.reset()` ではなくシーンへ戻す。
     #   reset だけだと**シーンの姿勢が失われ**、2条件目からは既定の姿勢で
     #   走ってしまう（Viewer と測定の食い違いと同じ型）。
-    e_scene.reset_to_scene(env, scene, hands=(hands if HEAD_HOLD else None),
+    scene_io.reset_to_scene(env, scene, hands=(hands if HEAD_HOLD else None),
                            seed=SEED)
     reflex = u._orienting
     if reflex is not None:
@@ -135,7 +135,7 @@ def run(orient_on, off, env, u, m, d, dt, toy_gadr, right, toy_bid, n_steps,
     #     シーンでは位置が最初から決まっているので運搬を待つ必要がない。
     #     `place_toy` は固定位置（`_rest_pos`）ごと動かすので、次の step で
     #     元の場所へ引き戻されることもない。
-    e_scene.place_toy(env, right * off, relative=True)
+    scene_io.place_toy(env, right * off, relative=True)
     for _ in range(int(0.2 / dt)):
         env.step(a)                       # 落ち着かせる
 
@@ -202,23 +202,23 @@ def main():
     #   ⇒ Viewer で見た状態と、この測定が走る状態が構造的に同じになる。
     #   注意：移行前は `fence` を指定しておらず既定（柵あり）で走っていたが、
     #     Viewer 側は柵なしで見ていた＝**実際に食い違っていた**。
-    import e_scene
+    import scene_io
     global AGE, HEAD_HOLD
-    scene = e_scene.from_env_var(default=DEFAULT_SCENE)
+    scene = scene_io.from_env_var(default=DEFAULT_SCENE)
     AGE = float(scene["body"]["age_months"])
     HEAD_HOLD = bool(scene["setup"].get("head_hold"))
     print(f"[scene] 「{scene['name']}」で測ります")
     if scene.get("note"):
         print(f"        {scene['note']}")
     for orient_on in (True, False):
-        env, hands = e_scene.build(scene, orient=orient_on, vor=True,
+        env, hands = scene_io.build(scene, orient=orient_on, vor=True,
                                    seed=SEED, verbose=False)
         u = env.unwrapped
         m, d = u.model, u.data
         # 保存した状態と本当に同じ環境かを確かめる。違ったらここで止まる
         #   ＝「見ていたのとは別の実験」を黙って走らせない
-        e_scene.verify(scene, env, strict=True, verbose=orient_on)
-        e_scene.reset_to_scene(env, scene, hands=hands, seed=SEED)
+        scene_io.verify(scene, env, strict=True, verbose=orient_on)
+        scene_io.reset_to_scene(env, scene, hands=hands, seed=SEED)
         dt = float(m.opt.timestep) * int(u.frame_skip)
         n_steps = int(SECONDS / dt)
         toy_bid = int(m.body("test_object1").id)

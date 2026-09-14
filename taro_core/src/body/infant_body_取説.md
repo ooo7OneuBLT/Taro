@@ -42,7 +42,7 @@ Tierラベルと根拠実験を読むこと）
 
 ## 触るときの注意
 - **coreに目標プレフィックス（E_/目標E固有の名前）を書かない方針**（7-8, 45-47行目）。
-  環境変数の読み取りは目標フォルダ側（`run/scene_tools/e_scene.py`等）の責務で、
+  環境変数の読み取りは目標フォルダ側（`run/scene_tools/scene_io.py`等）の責務で、
   このファイルは係数の既定値と変換ロジックだけを持つ。
 - `_restore_growth_schema`（232-257行目）は必須の防御。これを外すと同一プロセス内で
   環境を作り直すたびに体が縮み続けるバグ（MIMo側のグローバル辞書破壊）が再発する。
@@ -60,7 +60,7 @@ Tierラベルと根拠実験を読むこと）
   四肢筋力→生理的屈曲→筋緊張→首の緊張→関節可動域の滑らかさ）。804-839行目のdocstringに
   理由が書かれているので、順序を変える前に必読。
 - `flexion=True` 経由での筋緊張起動（`apply_runtime_corrections`内、866-869行目）と、
-  `run/scene_tools/e_scene.py`の`_apply_limb_tone`（`setup.limb_tone`を読む）は
+  `run/scene_tools/scene_io.py`の`_apply_limb_tone`（`setup.limb_tone`を読む）は
   **完全に別の入口**。GUIとの整合は後者側でのみ保証されている（822-831行目）。
 - 数値のほとんどに Tier1/2/3 の根拠ラベルが付いている。値を変更する場合は
   ラベルと出典コメントを一緒に更新すること（このファイルの慣例）。
@@ -79,4 +79,4 @@ Tierラベルと根拠実験を読むこと）
 - 首のバネの強さ・目標角を変えたいなら `NECK_TONE_STIFFNESS`／`NECK_TONE_TARGET`
   （654-673行目）、適用は `apply_neck_tone`（956行目）。
 - モデル構築後の補正を丸ごと呼ぶ入口を変えたいなら `apply_runtime_corrections`
-  （804行目）。呼び出し元は主に `run/scene_tools/e_scene.py` の `build()`。
+  （804行目）。呼び出し元は主に `run/scene_tools/scene_io.py` の `build()`。

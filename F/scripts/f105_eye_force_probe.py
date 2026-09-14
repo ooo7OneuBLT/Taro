@@ -32,12 +32,12 @@ MEASURE_S = 0.08     # 加速度を測る区間
 
 def build():
     """太郎の身体だけを持つ最小の環境を作る（シーンの物や親は要らない）。"""
-    from run.scene_tools import e_scene
+    from run.scene_tools import scene_io
     spec = {"world": {"toys": [], "backdrop": None, "eye_centering": False,
                        "orienting_hold": False},
             "taro": {"actuation": "muscle", "age_months": 12.0,
                      "orienting_reflex": False, "hearing": False}}
-    return e_scene.build(spec)
+    return scene_io.build(spec)
 
 
 def main():

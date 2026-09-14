@@ -128,7 +128,7 @@
 - **メインループの駆動方式（脳/もがき運動/反射+共通駆動/停止）の分岐を変えたいなら**：2606-2691行目
   の`if freeze: ... elif st_brain.get(): ... elif st_babble.get()...: ... else: env.step(zero)`。
 - **シーンの読み込み・保存の形を変えたいなら**：`_current_scene()`（1637行目）・`save_scene()`
-  （1675行目）。ただしシーンの実体（`e_scene.build`/`e_scene.save`）は`run/scene_tools/e_scene.py`
+  （1675行目）。ただしシーンの実体（`scene_io.build`/`scene_io.save`）は`run/scene_tools/scene_io.py`
   側にあり、このファイルからは触れない。
 - **駆動モード（white/colored/colored+synergy/reflex_common）を増減したいなら**：1306行目
   `NOISE_MODES`リストと、`_set_noise_mode()`（2227行目）・`_set_brain_noise_mode()`（2187行目）・

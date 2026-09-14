@@ -40,7 +40,7 @@ if _SCENE_TOOLS not in sys.path:
 
 import numpy as np      # noqa: E402
 import mujoco           # noqa: E402
-import e_scene          # noqa: E402
+import scene_io          # noqa: E402
 
 SCENE = os.environ.get("E_SCENE", "リーチング_リクライニング60度")
 OUT_DIR = os.path.join(_ROOT, "E", "logs", "rom")
@@ -66,9 +66,9 @@ def shot(model, data, renderer, cam):
 def main():
     os.makedirs(OUT_DIR, exist_ok=True)
     from PIL import Image, ImageDraw
-    scene = e_scene.load(SCENE)
+    scene = scene_io.load(SCENE)
     scene["fingerprint"] = None
-    env, _ = e_scene.build(scene, orient=False, vor=False, seed=0, verbose=False)
+    env, _ = scene_io.build(scene, orient=False, vor=False, seed=0, verbose=False)
     u = env.unwrapped
     m, d = u.model, u.data
     m.vis.global_.offwidth = max(int(m.vis.global_.offwidth), SIZE)

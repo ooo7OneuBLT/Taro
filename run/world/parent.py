@@ -888,7 +888,7 @@ class WordSchedule:
                 #   語彙テストでこれが起きると「試行は回ったが一語も学習器に
                 #   届いていない」という気づきにくい空振りになる（設計
                 #   技術付録3節「注意：hearing有効が前提」の指定）。
-                #   ビルド時点（e_scene.build()）ではtaro（run/taro_setup.py側）が
+                #   ビルド時点（scene_io.build()）ではtaro（run/taro_setup.py側）が
                 #   まだ存在せずhearing設定を見られないため、taroが配線済みに
                 #   なる最初の使用時（＝ここ）で止める。
                 # 【2026-08-21修正】env.taro は posture_reflex/righting_reflex の

@@ -236,7 +236,7 @@ def _setup_reflex_common(taro, cfg, env, *, verbose=True):
         groups=groups, rho=float(cfg.common_drive_rho), osc_params=osc_params,
         amp=amp, seed=taro.seed)
     taro.brain.set_reflex_common_baseline(am.muscle_lengths)
-    # apply_limb_tone（run/scene_tools/e_scene.py、触ってよいファイルの一覧に無い）が
+    # apply_limb_tone（run/scene_tools/scene_io.py、触ってよいファイルの一覧に無い）が
     #   四肢に効かせた「継続的なバネ」役割を事後的に無効化する（infant_limbs.py参照）。
     from infant_limbs import disable_limb_tone_spring
     n_disabled = disable_limb_tone_spring(env.unwrapped.model, groups=("arm", "leg"))
@@ -931,7 +931,7 @@ class Taro(TaroBrainTick):
 
         # ---- 視覚の解像度（fusion に渡す）------------------------------------
         # 注意：2026-08-13より、taro.vision は「脳が視覚を使うか」（ここでのvres）と、
-        #   「環境が視覚センサ自体を持つか」（e_scene.build()へ渡るvision_params。
+        #   「環境が視覚センサ自体を持つか」（scene_io.build()へ渡るvision_params。
         #   run/plugins/common/scene.py参照）の**両方**を連動して切り替える。
         #   vision=False は環境の視覚センサごと無効化するアブレーションになり、
         #   LeanMimoEnv.strip_texturesによりメモリも節約される。

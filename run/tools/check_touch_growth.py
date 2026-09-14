@@ -36,7 +36,7 @@ os.chdir(_R)
 
 import numpy as np              # noqa: E402
 import torch                    # noqa: E402
-import e_scene                  # noqa: E402
+import scene_io                  # noqa: E402
 from somatosensory_cortex import (       # noqa: E402
     SomatosensoryCortex, build_touch_map_from_env)
 
@@ -48,10 +48,10 @@ print("=" * 78)
 
 
 def _make(age):
-    sc = e_scene.load("新生児_仰向け_柵なし")
+    sc = scene_io.load("新生児_仰向け_柵なし")
     sc["body"]["age_months"] = age
     sc["fingerprint"] = None
-    env, _ = e_scene.build(sc, seed=0, verbose=False)
+    env, _ = scene_io.build(sc, seed=0, verbose=False)
     return env
 
 

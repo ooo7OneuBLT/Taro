@@ -30,7 +30,7 @@ if _SCENE_TOOLS not in sys.path:
     sys.path.insert(0, _SCENE_TOOLS)
 
 import numpy as np                                          # noqa: E402
-import e_scene                                               # noqa: E402
+import scene_io                                               # noqa: E402
 
 SCENE_NAME = "座位_15ヶ月_2おもちゃ_F2-2_1個提示_fovea_2026-08-23"
 OUT_DIR = os.path.join(_R, "F", "logs", "15ヶ月シーン準備_2026-08-23")
@@ -40,15 +40,15 @@ N_STEPS = 60  # 「数十ステップ」
 def main():
     os.makedirs(OUT_DIR, exist_ok=True)
 
-    scene = e_scene.load(SCENE_NAME)
+    scene = scene_io.load(SCENE_NAME)
     print(f"[scene] {scene['name']}  age_months={scene['body']['age_months']}"
           f"  fovea_camera={scene['body'].get('fovea_camera')}"
           f"  develop_from_age={scene['body'].get('develop_from_age')}")
 
-    env, hands = e_scene.build(scene, orient=False, vor=False, seed=0, verbose=False)
-    e_scene.verify(scene, env, strict=False, verbose=True)  # 指紋なし→素通り想定
+    env, hands = scene_io.build(scene, orient=False, vor=False, seed=0, verbose=False)
+    scene_io.verify(scene, env, strict=False, verbose=True)  # 指紋なし→素通り想定
 
-    e_scene.reset_to_scene(env, scene, hands=hands, seed=0)
+    scene_io.reset_to_scene(env, scene, hands=hands, seed=0)
 
     u = env.unwrapped
     m, d = u.model, u.data
@@ -69,13 +69,13 @@ def main():
             return False
 
     p0 = hip_pos()
-    e_scene.capture_eye(env, os.path.join(OUT_DIR, "step000_body.png"), cam="body")
+    scene_io.capture_eye(env, os.path.join(OUT_DIR, "step000_body.png"), cam="body")
 
     positions = [p0]
     for i in range(1, N_STEPS + 1):
         env.step(np.zeros(env.action_space.shape, dtype=np.float32))
         if i in (10, 20, 30, 45, 60):
-            e_scene.capture_eye(
+            scene_io.capture_eye(
                 env, os.path.join(OUT_DIR, f"step{i:03d}_body.png"), cam="body")
         positions.append(hip_pos())
 

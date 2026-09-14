@@ -41,7 +41,7 @@ if _SCENE_TOOLS not in sys.path:
     sys.path.insert(0, _SCENE_TOOLS)
 
 import numpy as np      # noqa: E402
-import e_scene          # noqa: E402
+import scene_io          # noqa: E402
 
 DEFAULT = "視線誘導反射_仰向け_頭を支える"
 _results = []
@@ -55,7 +55,7 @@ def check(label, ok, detail=""):
 
 def main():
     name = sys.argv[1] if len(sys.argv) > 1 else DEFAULT
-    scene = e_scene.load(name)
+    scene = scene_io.load(name)
     print("=" * 78)
     print(f" シーン方式の自己テスト — 「{name}」")
     print("=" * 78)
@@ -64,8 +64,8 @@ def main():
     # ---- 1. 同じシーンを作り直したら一致するか ----------------------------
     print("\n1. 同じシーンをもう一度作ったら、同じ環境になるか")
     print("-" * 78)
-    env, hands = e_scene.build(scene, orient=False, seed=0)
-    diffs = e_scene.verify(scene, env, strict=False, verbose=False)
+    env, hands = scene_io.build(scene, orient=False, seed=0)
+    diffs = scene_io.verify(scene, env, strict=False, verbose=False)
     check("保存した指紋と一致する", not diffs,
           "" if not diffs else f"{len(diffs)}件ずれた")
     for t in diffs:
@@ -79,7 +79,7 @@ def main():
     err = float(np.max(np.abs(q_saved - q_now)))
     check("qpos が一致する", err < 1e-9, f"最大の差 {err:.2e}")
 
-    fp = e_scene.fingerprint(env)
+    fp = scene_io.fingerprint(env)
     rec = scene["fingerprint"]
     print(f"     首 記録={rec['head_angles_deg']}")
     print(f"        今  ={fp['head_angles_deg']}")
@@ -116,13 +116,13 @@ def main():
         bad = copy.deepcopy(scene)
         mutate(bad)
         try:
-            env2, _ = e_scene.build(bad, orient=False, seed=0)
+            env2, _ = scene_io.build(bad, orient=False, seed=0)
         except Exception as e:
             # 姿勢の長さが変わる（柵の有無など）ならここで落ちる＝それも「止まった」
             check(label, True, f"環境を作る時点で止まった: {str(e)[:60]}")
             continue
         try:
-            d2 = e_scene.verify(scene, env2, strict=False, verbose=False)
+            d2 = scene_io.verify(scene, env2, strict=False, verbose=False)
             check(label, bool(d2), f"{len(d2)}件のずれを検知"
                   if d2 else "見逃した（照合をすり抜けた）")
             for t in d2[:3]:

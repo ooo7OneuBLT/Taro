@@ -1,4 +1,4 @@
-"""設定配線の大改修（シーンJSON→環境構築、`run/scene_tools/e_scene.py` 363〜411行の
+"""設定配線の大改修（シーンJSON→環境構築、`run/scene_tools/scene_io.py` 363〜411行の
 環境変数24個＋モジュール定数上書き15個を「設定オブジェクト1個」へ束ねる改修）に先立つ
 bit-identical検証ハーネス。
 

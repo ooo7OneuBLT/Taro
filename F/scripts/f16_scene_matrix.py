@@ -9,11 +9,11 @@
 実測してから水準を決める。水準を適当に等間隔で刻まない（仕様書の指示）。
 
 【罠1: state キー】シーンJSONに `state`（qpos）があると `dist`/`angle_deg`/`elev_deg`
-の変更が `run/scene_tools/e_scene.py:634 build()` の `apply_state`（`scene.get("state")`
+の変更が `run/scene_tools/scene_io.py:634 build()` の `apply_state`（`scene.get("state")`
 が真のときだけ呼ばれる）で上書きされて効かない。→ 生成するJSONからは
 **`state` キーを削除する**（`_strip_state` 参照）。stateが無ければ姿勢は
 setup（neck_tone/limb_tone/body_support）から毎回作り直される
-（`e_scene.py:634` `if scene.get("state"):` を確認済み＝キー自体が無ければ
+（`scene_io.py:634` `if scene.get("state"):` を確認済み＝キー自体が無ければ
 このブロックは実行されない）。
 【罠2: enabled キー】`toy2.enabled=false` で消すと、残した側の角度計算まで
 無効化されて中央寄せに戻る（`e_toy_env.py`）。→ 使わない。片方を消すときは
@@ -103,7 +103,7 @@ _SCRATCH_SCENE_DIR = os.path.join(_ROOT, "F", "logs", "_scratch", "f16_tmp_scene
 
 
 def _write_tmp_scene(sc, tag="tmp"):
-    """scene.py の build() は e_scene.load() 経由でファイルパスしか受け付けない
+    """scene.py の build() は scene_io.load() 経由でファイルパスしか受け付けない
     （辞書を直接渡すと "シーンが見つからない" で落ちる＝実測で確認済み）ので、
     一時ファイルへ書き出してパスを渡す。"""
     os.makedirs(_SCRATCH_SCENE_DIR, exist_ok=True)
