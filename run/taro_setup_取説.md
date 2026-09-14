@@ -1,6 +1,6 @@
 # taro_setup.py 取扱説明書（AI用）
 
-本体: C:\claude\AI\Taro\run\taro_setup.py（959行）
+本体: run\taro_setup.py（959行）
 最終同期: 2026-08-14 / 本体の行数: 959
 
 ## このファイルは何をするか

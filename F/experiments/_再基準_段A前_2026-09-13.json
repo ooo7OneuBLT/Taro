@@ -1,0 +1,162 @@
+{
+ "name": "再基準_段A前_2026-09-13",
+ "note": "【検証用】段Aに入る前に、今のコードで基準と同じ数字が出るかを確かめるだけの走行。設定は _基準_視覚移設前_2026-09-13.json と完全に同一で、出力先だけ変えた。",
+ "scene": "座位_12ヶ月_コップを覚えて20度ずらす_壁あり_2026-09-11",
+ "taro": {
+  "actuation": "muscle",
+  "age_months": 12.0,
+  "orienting_reflex": true,
+  "hearing": true,
+  "lexicon_vision": {
+   "backend": "dinov2_vits14",
+   "fovea_px": 32,
+   "eye": "left",
+   "source": "wide"
+  },
+  "lexicon_mode": "contrast",
+  "lexicon_eta_pull": 0.05,
+  "lexicon_eta_push": 0.0,
+  "model": "F/models/F2-84_r2_seed98_2026-09-07.pt",
+  "save": "F/logs/_再基準_段A前_2026-09-13/model.pt",
+  "produce": {
+   "mode": "word",
+   "threshold": 0.5,
+   "cooldown_sec": 2.0,
+   "max_length": 8,
+   "develop_from_age": true,
+   "vocal_tract_decoupled": true,
+   "context": true,
+   "listen_learn": true,
+   "context_lambda": 0.0,
+   "vision_context": true,
+   "listen_lr": 0.001,
+   "hippocampus": {
+    "capacity": 512,
+    "decay": 0.5,
+    "replay_passes": 10,
+    "recent_ratio": 0.7,
+    "sleep_lr": 0.005
+   },
+   "word_choice": "gru_hippo",
+   "hippo_gain": 1.0,
+   "listen_self": false,
+   "listen_eos": true,
+   "segment_mode": "end_prob",
+   "vanish_input": true,
+   "here_input": true,
+   "chunk_level": true,
+   "message_level": true
+  },
+  "world_predictor": {
+   "ports": true,
+   "h_port": 64,
+   "h_slow": 32,
+   "summary_dim": 32,
+   "tau_fast": 5,
+   "tau_slow": 40,
+   "lr": 0.001,
+   "max_files": 4,
+   "min_hits": 2,
+   "appearance_freeze": true,
+   "block_norm": true,
+   "ne_surprise_rate": 0.0,
+   "slow_window": 40,
+   "grad_check_step": 300,
+   "leaky_fast": false,
+   "vec_proj_dim": 32,
+   "loss_balance": true,
+   "baseline_init": "shared",
+   "switch_refractory_s": 0.4
+  }
+ },
+ "run": {
+  "type": "train",
+  "steps": 200,
+  "seed": 91,
+  "K": 10,
+  "checkpoint": 100,
+  "csv": "F/logs/_再基準_段A前_2026-09-13/run.csv"
+ },
+ "plugins": {
+  "word_production": {
+   "events_out": "F/logs/_再基準_段A前_2026-09-13/太郎の発話.csv"
+  },
+  "word_learning": {
+   "events_out": "F/logs/_再基準_段A前_2026-09-13/発話イベント.csv"
+  },
+  "object_files": {
+   "events_out": "F/logs/_再基準_段A前_2026-09-13/物体ファイル.csv",
+   "points_per_side": 16,
+   "points_per_batch": 16,
+   "empty_cache_after_detect": true,
+   "frames_out": "F/logs/_再基準_段A前_2026-09-13/検出フレーム",
+   "interval_s": 0.2,
+   "attend": true,
+   "attend_out": "F/logs/_再基準_段A前_2026-09-13/注意.csv",
+   "vanish_misses": 5,
+   "attend_surprise_gain": 0.0,
+   "cohesion_gap_px": 4,
+   "revive_window_s": 30,
+   "revive_cos": 0.5,
+   "revive_dist_px": 40,
+   "max_files": 4,
+   "max_missed": 50,
+   "coast_max_s": 1.0,
+   "uncertainty_penalty": 1.0,
+   "exclusive_dist_px": 20,
+   "exclusive_cos": 0.4,
+   "exclusive_scale_by_size": true,
+   "coast_min_speed_px_s": 30,
+   "pos_gate": "size",
+   "appearance_gate_cos": 0.4,
+   "efference_copy": {
+    "sign_h": 1,
+    "sign_v": 1,
+    "moving_extra_ticks": 1
+   },
+   "preattentive": {
+    "diff_thresh": 20,
+    "min_blob_area_px": 30,
+    "max_blobs": 8
+   },
+   "vanish_budget": {
+    "abrupt_frames": 5,
+    "occluded_frames": 50,
+    "look_back": 4
+   },
+   "attention": {
+    "cell": 28,
+    "ior_tau_s": 0.7,
+    "ior_gain": 1.0,
+    "acc_tau_s": 0.11,
+    "dog_iters": 10
+   },
+   "gaze_from_attention": true,
+   "goal": {
+    "g": 1.0,
+    "sigma": 1.5,
+    "hold_s": 3.0
+   }
+  },
+  "world_predictor_log": {
+   "events_out": "F/logs/_再基準_段A前_2026-09-13/世界の予測器.csv"
+  }
+ },
+ "expect": {
+  "サッケード1発ごと.json": [
+   "t",
+   "h0",
+   "h1",
+   "tgt_h",
+   "t_end"
+  ],
+  "眼球の角度_毎ステップ.json": [],
+  "注意.csv": [
+   "attended_id"
+  ],
+  "物体ファイル.csv": [
+   "file_id",
+   "event"
+  ]
+ }
+}

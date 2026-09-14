@@ -44,6 +44,15 @@ from cerebellum_motor import MotorCerebellum                    # noqa: E402
 #   （taro_core/src/brain/cerebellum.py冒頭コメント参照）。既定OFF（cfg.produce=None）
 #   では_setup_produce内で一度もCerebellum()を作らない＝乱数消費なし。
 from cerebellum import Cerebellum as SpeechCerebellum           # noqa: E402
+
+# 【段B-2c3・2026-09-13】太郎の脳の1周期（親の声を聞く・見た物の名前を言う・
+#   世界を予測する・寝ている間に復習する）。元は run/trainer.py の中にあった。
+#   `taro_core/src` を通してから import する（このファイルの先頭が sys.path へ
+#   足しているのは src/<各サブフォルダ> だけで、`brain.xxx` 形には src が要る）。
+_CORE_SRC = os.path.join(_CORE, "src")
+if _CORE_SRC not in sys.path:
+    sys.path.insert(0, _CORE_SRC)
+from brain.brain_tick import TaroBrainTick                        # noqa: E402
 from learning_progress import LearningProgress                  # noqa: E402
 from homeostatic_scaling import HomeostaticScaling              # noqa: E402
 from test_phase8_motor_learning import CombinedParams, rescale_action, to_tensor  # noqa: E402
@@ -894,7 +903,7 @@ class _MouthTouchBonusContributor:
         return self.bonus if rising else 0.0
 
 
-class Taro:
+class Taro(TaroBrainTick):
     """太郎そのもの。脳・学習器・神経調節・小脳・海馬を持つ。
 
     注意：ここは「太郎の中身」だけ。環境（env）は組み立てに必要なので受け取るが、
@@ -1269,6 +1278,94 @@ class Taro:
                       f"（2026-08-05・全身一般化。既定headのみでは既存実験の挙動は不変）"
                       f"{mouth_info}",
                       flush=True)
+
+        # ------------------------------------------------- ⑩視覚と注意（段A）
+        # 【段A・2026-09-13・設計_太郎をCoreで完結させる.md】
+        #   「見る → 注意を決める → 眼球へ命令」は**太郎の能力**であって、
+        #   測る道具の仕事ではない。これまで持ち主が
+        #     ・run/plugins/common/object_files.py（道具）… 本番
+        #     ・E/scripts/e_toy_env.py（環境）… 2026-09-13に作ったが誤り
+        #   の2通りしかなかったので、3つ目の**太郎が持つ**を作る。
+        #
+        # 【呼ぶのは誰か】run/trainer.py。**呼ぶ位置は動かさない**
+        #   （プラグインが呼んでいたのと同じ位置＝plugins.on_step の直前）。
+        #   毎tickの中で「何に注意しているか」を読む処理が2つあり、
+        #   片方は前tickの値・もう片方は今tickの値を読んでいるため、
+        #   位置を動かすと振る舞いが変わる（設計の実測表）。
+        #
+        # 既定 None＝この分岐は1行も通らない。既存の実験は1ビットも変わらない。
+        #
+        # 【★組み立てる場所をここにしてはいけない（2026-09-13・実測して分かった）】
+        #   `VisualAttention()` は MobileSAM と DINOv2 を読む。この**組み立て自体が
+        #   torch の乱数を消費する**（同じ種で組み立て前後に randn を引くと値が変わる
+        #   ことを確認）。元は object_files プラグインの setup が組み立てていたので、
+        #   ここ（Taro の組み立ての最後）で作ると乱数の消費位置が前へずれ、
+        #   方策の探索ノイズ→行動→目の向き→目に映る絵 が全部変わる。
+        #   実際に1度そうして、基準と注意.csv が step 1 から食い違った
+        #   （dist_center 18.567 → 20.306）。
+        #   ⇒ 組み立ては `build_visual_attention()` に分け、run/trainer.py の build() が
+        #      **元と同じ位置**（プラグインの setup ループの直前）で呼ぶ。
+        _core_src = os.path.join(_CORE, "src")
+        if _core_src not in sys.path:
+            sys.path.insert(0, _core_src)
+        # 【段B-2a・2026-09-13】脳の作業台。太郎が1周期の中で自分に渡す値の置き場。
+        #   元は測る道具の掲示板(ctx)に置いていた（道具を外すと太郎が値を失っていた）。
+        from brain.brain_tick import BrainTickState, BrainClock
+        self.tick = BrainTickState()
+        # 【段B-2c・2026-09-13】太郎の時計。走らせる側が毎tick進める。
+        #   元は測る道具の掲示板（ctx.sim_sec / ctx.step）から読んでいた。
+        self.now = BrainClock()
+        # 【段B-2c3・2026-09-13】太郎の身体が置かれている世界。
+        #   受け取っていたのに控えていなかったので、脳の処理は
+        #   測る道具の掲示板（ctx.env）から世界を取りにいっていた。
+        self.env = env
+        # 【段B-2b・2026-09-13】元は run/trainer.py の Trainer.__init__ が
+        #   持っていた脳の状態。太郎の状態なので太郎が持つ。
+        #   （親が今言ったこと／世界の予測器の前回値・驚き／連合中の見え方）
+        self.tick._active_assoc = None
+        self.tick._last_parent_events = []
+        self.tick._wp_last_parent_speak_sec = None
+        self.tick._wp_parent_chunks = None
+        self.tick._wp_prev_action = None
+        self.tick._wp_surprise_trace = {}
+        self.tick._wp_z_max = None
+        self.visual_attention = None
+        self._visual_attention_cfg = getattr(cfg, "visual_attention", None)
+        self._verbose = verbose
+
+    # -------------------------------------------------- 視覚と注意（段A）
+    def build_visual_attention(self):
+        """太郎の視覚と注意（見る→注意を決める→眼球へ命令）を組み立てる。
+
+        【段A・2026-09-13・設計_太郎をCoreで完結させる.md】
+        これは**太郎の能力**であって測る道具の仕事ではない。持ち主を
+        `run/plugins/common/object_files.py`（道具）から太郎へ移した。
+
+        【なぜ __init__ の中で呼ばないのか】組み立てが torch の乱数を消費するため
+        （実測済み）。元は object_files の setup が組み立てていたので、同じ位置で
+        呼ばないと乱数の消費順がずれ、方策の探索ノイズ以降が全部変わる。
+        呼ぶのは `run/trainer.py` の `build()`（プラグインの setup ループの直前）。
+
+        既定（`taro.visual_attention` 未設定）では何も作らない＝既存実験は不変。
+        """
+        cfgv = self._visual_attention_cfg
+        if not cfgv:
+            return None
+        # 【import の道】このファイルの先頭は `taro_core/src/<各サブフォルダ>` を
+        #   sys.path に足しているが、`taro_core/src` そのものは足していないので
+        #   `brain.xxx` 形の import ができない。元の持ち主（object_files.py）と
+        #   同じように、ここで足してから import する。
+        _core_src = os.path.join(_CORE, "src")
+        if _core_src not in sys.path:
+            sys.path.insert(0, _core_src)
+        from brain.cerebral_cortex.parietal_lobe.visual_attention import VisualAttention
+        self.visual_attention = VisualAttention(config=dict(cfgv))
+        if self._verbose:
+            print(f"[visual_attention] 太郎が持つ: interval_s={self.visual_attention.interval_s}"
+                  f" attend={self.visual_attention.attend}"
+                  f" gaze_from_attention={self.visual_attention.gaze_from_attention}",
+                  flush=True)
+        return self.visual_attention
 
     # ------------------------------------------------------------ 読み込み
     def _load(self, path, *, verbose=True):

@@ -46,6 +46,28 @@ class Ctx:
         self.stop_requested = False
         self.stop_reason = None
 
+
+    # 【段B-2a・2026-09-13】太郎が自分の作業台（taro.tick）へ書いた値を、
+    #   道具からは今までどおり `ctx.<名前>` で読めるようにする。
+    #   **写さない＝参照する。** 写すと、写した瞬間と道具が読む瞬間がずれて
+    #   1周期古い値を読むことになる（道具は tick の途中で読むため）。
+    #   自分（Ctx）に直接置かれた値があればそちらが勝つ＝
+    #   `taro.visual_attention` を使わない古い実験（道具が自分で作って
+    #   ctx へ置く経路）もそのまま動く。
+    _BRAIN_KEYS = frozenset(['attended_object', 'attention_point', 'attention_switch_t', 'efference', 'goal_point', 'last_babble', 'last_produce', 'last_vision_vec', 'last_world_pred', 'object_files', 'priority_map_result', 'priority_map_result_t', 'salience_map', 'surprise_trace', 'vanish_misses', 'world_pred_by_file', 'world_pred_inputs', 'world_predictor_grad_report'])
+
+    def __getattr__(self, name):
+        # 通常の属性探索が失敗したときだけ呼ばれる
+        if name in Ctx._BRAIN_KEYS:
+            taro = self.__dict__.get("taro")          # 再帰を避けるため辞書から直接
+            tick = getattr(taro, "tick", None) if taro is not None else None
+            if tick is not None:
+                try:
+                    return getattr(tick, name)
+                except AttributeError:
+                    pass
+        raise AttributeError(name)
+
     def log(self, row):
         self._log(row)
 

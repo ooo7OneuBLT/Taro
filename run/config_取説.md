@@ -1,6 +1,6 @@
 # config.py 取扱説明書（AI用）
 
-本体: `C:\claude\AI\Taro\run\config.py`（749行）
+本体: `run\config.py`（749行）
 最終同期: 2026-08-14 / 本体の行数: 749
 
 ## このファイルは何をするか
@@ -35,7 +35,7 @@
   `_load_brain()`（`E/scripts/e_viewer.py`）のように辞書を直接組み立てて構築する
   経路では、`taro_spec`にキーが無ければ`TARO_DEFAULTS`の既定値がそのまま使われる
   （359行の`self._taro.get(key, dflt)`）。既定値と同じ値を明示的に追加しても
-  挙動はbit-identical（出典: 実装ノウハウ2026-08-07）。
+  挙動はbit-identical（出典: 2026-08-07の実測）。
 - 新しい設定項目を追加するときは、`TARO_DEFAULTS`/`RUN_DEFAULTS`辞書に追記するだけで
   自動的に属性になる（353行の`unknown`チェックで、辞書に無いキーを実験ファイルに
   書くと即座に例外で止まる＝書き間違いを黙って無視しない設計）。

@@ -158,9 +158,11 @@ _F_DIR_DEFAULT = os.path.join(_ROOT, "F", "logs", "F1-4_直接読み出し_2026-
 _VIEWS_DIR_DEFAULT = os.path.join(_F_DIR_DEFAULT, "views")
 _E_DIR_DEFAULT = os.path.join(_ROOT, "E", "logs", "F1-4_直接読み出し")
 _FIG_PATH_DEFAULT = os.path.join(_F_DIR_DEFAULT, "埋め込み地図.png")
-_SCRATCHPAD_DIR = os.path.join(
-    "C:\\", "Users", "syun5", "AppData", "Local", "Temp", "claude", "C--claude-AI",
-    "5ec2eba7-a91a-4b6c-9265-5649ba84ca5f", "scratchpad")
+# 【2026-09-14】以前はここに開発機の絶対パス（Claude Codeのscratchpad）を直書きしていたが、
+#   ユーザー名がリポジトリに残るうえ、そのセッションフォルダ自体が既に消えていた。
+#   _ROOT基準の F/logs/_scratch に変更（F/logs/ は .gitignore 済み＝出力は公開されない）。
+_SCRATCHPAD_DIR = os.path.join(_ROOT, "F", "logs", "_scratch")
+os.makedirs(_SCRATCHPAD_DIR, exist_ok=True)
 _REPORT_PATH_DEFAULT = os.path.join(_SCRATCHPAD_DIR, "直接読み出しレポート.md")
 
 

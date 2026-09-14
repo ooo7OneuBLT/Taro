@@ -225,11 +225,22 @@ class PosturalGate:
         from somatosensory_cortex import body_names_of_group
         hip_body_names = body_names_of_group("hip")
         self.hip_body_ids = []
+        _missing = []
         for nm in hip_body_names:
             try:
                 self.hip_body_ids.append(int(model.body(nm).id))
             except Exception:
-                pass
+                # 【2026-09-12】全滅なら下で raise するが、**一部だけ見つからない**
+                #   場合はここを黙って通り、骨盤触覚が半分しか効かない状態で走れる。
+                #   それを警告として残す（エラー.logに出る）。詳細は run/log_setup.py
+                _missing.append(nm)
+        if _missing and self.hip_body_ids:
+            # 太郎の脳は単体でも import されるので `run.log_setup` に依存しない
+            # （doc/ログの使い方.md の決まり）。標準の logging だけ使う
+            import logging
+            logging.getLogger(__name__).warning(
+                "骨盤触覚のbody %s がmodelに無く、%s だけで骨盤を見ています",
+                _missing, [nm for nm in hip_body_names if nm not in _missing])
         if not self.hip_body_ids:
             raise ValueError(
                 f"PosturalGate: body_names_of_group('hip')={hip_body_names} の"

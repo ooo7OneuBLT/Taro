@@ -1,6 +1,6 @@
 # trainer.py 取扱説明書（AI用）
 
-本体: C:\claude\AI\Taro\run\trainer.py（1,005行）
+本体: run\trainer.py（1,005行）
 最終同期: 2026-08-14 / 本体の行数: 1005
 
 ## このファイルは何をするか

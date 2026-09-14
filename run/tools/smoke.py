@@ -74,6 +74,29 @@ def _check_expect(expect, scratch):
             lines.append("  [出ていない] %s ができていない" % fname)
             ok = False
             continue
+        # 【2026-09-12】JSONも見る。F2-135pre で「肝心の出力がJSONなので
+        #   smokeが確かめられない」と分かった（CSVしか見ていなかった）。
+        #   宣言の書き方：{"サッケード1発ごと.json": ["tgt_h", "h1"]}
+        #   ＝中身が空でない配列で、最初の要素にその鍵があること。
+        #   鍵を省いて {"...json": []} と書けば「空でないこと」だけ見る。
+        if fname.lower().endswith(".json"):
+            with open(path, encoding="utf-8") as f:
+                obj = json.load(f)
+            if not obj:
+                lines.append("  [出ていない] %s が空" % fname)
+                ok = False
+                continue
+            head = obj[0] if isinstance(obj, list) else obj
+            for c in (cols if isinstance(cols, (list, tuple)) else [cols]):
+                if not isinstance(head, dict) or c not in head:
+                    lines.append("  [鍵が無い] %s に %s が無い" % (fname, c))
+                    ok = False
+                else:
+                    lines.append("  [ある] %s の %s（%d 件）"
+                                 % (fname, c, len(obj) if isinstance(obj, list) else 1))
+            if not cols:
+                lines.append("  [ある] %s：%d 件" % (fname, len(obj) if isinstance(obj, list) else 1))
+            continue
         with open(path, encoding="utf-8") as f:
             rows = list(csv.DictReader(f))
         if not rows:
@@ -144,6 +167,11 @@ def main():
         print("（終了コード %d。短い走行では親がまだ名前を教えていないため。"
               "出力はできているので中身を見る）" % p.returncode)
 
+    # 【2026-09-12・ユーザー指示「実行中はエラーログを絶対読むようにしよう」】
+    #   試し走行が作った エラー.log を、本番を回す前にここで読む。
+    #   落ちなくても警告が出ていれば本番でも同じ警告が出るので、先に知る。
+    err_n = _show_error_log(scratch)
+
     ok, lines = _check_expect(expect, scratch)
     print("\n宣言（expect）との突き合わせ")
     for ln in lines:
@@ -153,7 +181,40 @@ def main():
         return 0
     print("\n" + ("試し走行：合格。本番を回してよい" if ok
                   else "試し走行：**不合格**。本番を回す前に直す（1分で分かった＝本番なら9〜15分）"))
+    if ok and err_n:
+        print("  ただし警告が %d 行ある（上のエラー.log）。本番でも同じものが出る" % err_n)
     return 0 if ok else 1
+
+
+def _show_error_log(scratch):
+    """試し走行の エラー.log を探して中身を出す。戻り値は行数（0なら異常なし）。
+
+    【2026-09-12】走行ごとの出力フォルダは実験ファイルの書き方によって変わるので、
+      scratch の下を探しに行く（run/main.py の _out_dir_of がどこに作っても拾える）。
+    """
+    hits = []
+    for root, _dirs, files in os.walk(scratch):
+        if "エラー.log" in files:
+            hits.append(os.path.join(root, "エラー.log"))
+    if not hits:
+        print("\nエラー.log：見つからない（古い作りの走行か、ログ初期化前に落ちた）")
+        return 0
+    total = 0
+    for pth in hits:
+        try:
+            lines = [l for l in open(pth, encoding="utf-8").read().splitlines() if l.strip()]
+        except Exception:
+            continue
+        total += len(lines)
+        if lines:
+            print("\nエラー.log：%d 行 ← 本番を回す前に読む" % len(lines))
+            for l in lines[:25]:
+                print("  | " + l)
+            if len(lines) > 25:
+                print("  | （他 %d 行。%s）" % (len(lines) - 25, pth))
+    if total == 0:
+        print("\nエラー.log：空（警告もエラーも無し）")
+    return total
 
 
 if __name__ == "__main__":

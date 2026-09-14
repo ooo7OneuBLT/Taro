@@ -11,6 +11,23 @@
   ・太郎を変える設定は実験ファイルの `taro` 欄が担う
   ・4つのうち必要なものだけ書けばよい（書かないものは何もしない）
 
+【2026-09-13・道具は2種類ある（段A・設計_太郎をCoreで完結させる.md）】
+  規約を「読むだけ」1本にしていたら、`object_files.py` が眼球へ命令を出していた
+  のに4か月気づかなかった。**書く道具を禁止するのではなく、名乗らせる**。
+
+    測る道具（既定）… 読むだけ。`intervenes = None`
+    介入する道具    … わざと太郎か環境か走行を変える。`intervenes` に理由を書く
+
+  `intervenes` を名乗った道具は `run/tools/check_plugins.py` が違反として数えない
+  代わりに、**一覧に出して「この実験は介入つき」と分かるようにする**。
+  名乗らずに書いたものだけが違反。名乗るときは必ず
+  `doc/人間模倣からの逸脱リスト.md` の項番号を添える。
+
+  例：
+      class ParentNoticeBridge(Plugin):
+          name = "parent_notice"
+          intervenes = "台帳その45（親が太郎の内部を覗く・既定OFF）"
+
 使い方（プラグインを書く側）:
     from run.plugins.base import Plugin
 
@@ -28,6 +45,11 @@ class Plugin:
 
     #: ログや報告に出る名前。実験ファイルのキーと同じにする
     name = "plugin"
+
+    #: None＝測る道具（読むだけ）。太郎か環境か走行を**わざと**変える道具は、
+    #:  ここに理由と `doc/人間模倣からの逸脱リスト.md` の項番号を書く。
+    #:  書かずに変えていると `run/tools/check_plugins.py` が違反として止める。
+    intervenes = None
 
     def __init__(self, config=None):
         """config: 実験ファイルでこのプラグインに与えた値。

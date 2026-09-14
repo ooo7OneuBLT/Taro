@@ -96,9 +96,10 @@ def build_variant(base, *, elev=BASE_ELEV, dist_scale=BASE_DIST_SCALE,
     return sc
 
 
-_SCRATCH_SCENE_DIR = os.path.join(
-    "C:\\", "Users", "syun5", "AppData", "Local", "Temp", "claude", "C--claude-AI",
-    "5ec2eba7-a91a-4b6c-9265-5649ba84ca5f", "scratchpad", "f16_tmp_scenes")
+# 【2026-09-14】以前はここに開発機の絶対パス（Claude Codeのscratchpad）を直書きしていたが、
+#   ユーザー名がリポジトリに残るうえ、そのセッションフォルダ自体が既に消えていた。
+#   _ROOT基準の F/logs/_scratch に変更（F/logs/ は .gitignore 済み＝出力は公開されない）。
+_SCRATCH_SCENE_DIR = os.path.join(_ROOT, "F", "logs", "_scratch", "f16_tmp_scenes")
 
 
 def _write_tmp_scene(sc, tag="tmp"):

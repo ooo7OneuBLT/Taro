@@ -1,6 +1,6 @@
 # infant_limbs.py 取扱説明書（AI用）
 
-本体: `C:\claude\AI\Taro\taro_core\src\body\infant_limbs.py`（703行）
+本体: `taro_core\src\body\infant_limbs.py`（703行）
 最終同期: 2026-08-14 / 本体の行数: 703
 
 ## このファイルは何をするか

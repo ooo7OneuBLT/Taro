@@ -28,9 +28,11 @@ from f14_direct_readout import eye_addrs, set_eye_deg, solve_gaze, get_vision  #
 
 FIG_DIR = os.path.join(_ROOT, "F", "logs", "F1-7_中心窩_2026-08-22")
 os.makedirs(FIG_DIR, exist_ok=True)
-_SCRATCHPAD_DIR = os.path.join(
-    "C:\\", "Users", "syun5", "AppData", "Local", "Temp", "claude", "C--claude-AI",
-    "5ec2eba7-a91a-4b6c-9265-5649ba84ca5f", "scratchpad")
+# 【2026-09-14】以前はここに開発機の絶対パス（Claude Codeのscratchpad）を直書きしていたが、
+#   ユーザー名がリポジトリに残るうえ、そのセッションフォルダ自体が既に消えていた。
+#   _ROOT基準の F/logs/_scratch に変更（F/logs/ は .gitignore 済み＝出力は公開されない）。
+_SCRATCHPAD_DIR = os.path.join(_ROOT, "F", "logs", "_scratch")
+os.makedirs(_SCRATCHPAD_DIR, exist_ok=True)
 BASE_SCENE_NAME = "座位_6ヶ月_2おもちゃ_F1-4h_テスト12試行A_2026-08-21"
 TARO_BASE = dict(actuation="muscle", age_months=6.0, lr=0.0)
 

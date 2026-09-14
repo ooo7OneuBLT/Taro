@@ -1,6 +1,6 @@
 # infant_body.py 取扱説明書（AI用）
 
-本体: C:\claude\AI\Taro\taro_core\src\body\infant_body.py（1,030行）
+本体: taro_core\src\body\infant_body.py（1,030行）
 最終同期: 2026-08-14 / 本体の行数: 1030
 
 ## このファイルは何をするか

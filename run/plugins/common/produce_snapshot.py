@@ -44,6 +44,11 @@ def _abs_path(p):
 
 
 class ProduceSnapshot(Plugin):
+    # 【2026-09-13・名乗り】太郎の視覚（vision_backend.fovea_px）を一時的に
+    #   書き換えて「中心窩の切り出しをやめた絵」を撮り、直後に元へ戻す
+    #   （153行・159行）。同じtick内で復元するので学習の数値は変わらないが、
+    #   **太郎の部品に書いている**ことに変わりはないので名乗る。
+    intervenes = "撮影のため vision_backend.fovea_px を一時変更し同tick内で復元する"
     name = "produce_snapshot"
 
     def setup(self, ctx):

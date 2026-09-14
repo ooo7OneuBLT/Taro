@@ -127,6 +127,18 @@ TARO_DEFAULTS = {
     #   orienting_reflex=true のときだけ意味を持つ（taro_setup.py起動時に確認、
     #   無ければValueErrorで止める）。
     #   設計：F/docs/設計_F2_初語（見た物の名前を言う）.md
+    # 【未決・2026-09-13】`produce.social` を書くと発話の門（SpeechGate＝言うか黙るかを
+    #   学ぶ部品）が作られる。その学習率 `gate_lr` の既定が **core と run で食い違って
+    #   いる**：
+    #     core（taro_core/.../speech_gate.py:33）  lr=0.1  … 人間側の根拠つき
+    #        「0.1なら約10回の経験で新しい実入りに追いつく。静止顔実験で乳児の行動が
+    #          数分＝十数回の発話機会で変わるのに対応」（同41-42行）
+    #     run （run/taro_setup.py:782）            0.5     … 根拠の記載なし
+    #   実際に走ってきたのは **0.5**。影響を受けたのは `produce.social` を書いた
+    #   3本だけ（F2-22_静止顔_*_2026-08-31）。現行の実験では作られない＝休眠中。
+    #   **どちらが正しいかは研究上の判断なので未決のまま**（2026-09-13・ユーザー判断で保留）。
+    #   発話の動機を再開するときに必ず決めること。台帳：
+    #   doc/_調査_2026-09-13_分離/台帳_どこに何があるか.md「乙の実態」
     "produce": (None, "見た物の名前を言う（初語）。None=OFF（既定）。有効化するときは"
                "{'threshold': 0.80, 'cooldown_sec': 2.0, 'max_length': 8, "
                "'vocal_tract_stage': 2, 'vocal_tract_decoupled': true, 'lr': 0.005} の"
@@ -138,6 +150,17 @@ TARO_DEFAULTS = {
     "world_predictor": (None, "世界の予測器（M7a、測るだけ）。None=OFF（既定）。有効化する"
                "ときは{'h_fast':64,'h_slow':32,'tau_fast':5,'tau_slow':40,"
                "'lr':0.001,'tbptt':10}の形（辞書、すべて省略可）", None),
+    # 【段A・2026-09-13・設計_太郎をCoreで完結させる】視覚と注意（見る→注意を決める
+    #   →眼球へ命令）。**太郎の持ち物**。None=OFF（既定）＝既存実験は1ビットも
+    #   変わらない（今までどおり plugins.object_files が自分で作って呼ぶ）。
+    #   ここに書くと太郎が持ち、run/trainer.py が毎tick呼ぶ＝
+    #   **plugins.object_files を消しても太郎は見える**（道具は記録するだけになる）。
+    #   中身のキーは plugins.object_files に書いていたものと同じ（interval_s・attend・
+    #   vanish_misses・attention・goal・efference_copy ほか）。出力先（events_out・
+    #   attend_out・frames_out）だけは道具の仕事なので plugins.object_files に残す。
+    "visual_attention": (None, "視覚と注意（太郎の持ち物）。None=OFF（既定）。有効化する"
+               "ときは{'interval_s':0.2,'attend':true,'vanish_misses':5,...}の形"
+               "（辞書。plugins.object_files と同じキー。出力先は除く）", None),
     # 座位保持の学習（2026-08-15）。層1＝姿勢制御反射（ゲート方式）、
     # 層2＝立ち直り反射（角速度ダンパー、Tier3）。
     # 設計：作業記録（非公開）

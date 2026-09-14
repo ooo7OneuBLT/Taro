@@ -29,9 +29,26 @@ from scipy.ndimage import gaussian_filter
 # 関節への指令を、身体の駆動方式（筋肉2本／モーター1つ）に合った形で書き込む共通の写像。
 # 反射がこれを飛ばして直接書くと、筋肉モデルでは負の指令が消えて片方向にしか動けなくなる。
 import os as _os, sys as _sys
+
+
+def _log():
+    """ログ口。太郎の脳は単体でも import されるので、遅延取得にして依存を増やさない。
+
+    【2026-09-12】`print` ではなく logging にすると、警告が エラー.log に集まり、
+      走行の最後に画面の一番下へ自動で出る（run/log_setup.py）。
+      注意：このモジュールは2つの名前で import されるため（`midbrain.orienting` と
+      `taro_core.src.brain.midbrain.orienting`）、ログの [名前] 欄が走行によって
+      変わって見えることがある。どちらも root へ伝わるので出力は出る。
+    """
+    import logging
+    return logging.getLogger(__name__)
+# 【2026-09-13・直し】ここは既に taro_core/src/brain/midbrain なので、
+#   1つ上がれば brain。以前は「2つ上がって taro_core/src/brain を足す」と
+#   書いてあり、**存在しないパス**（taro_core/src/taro_core/src/brain）を
+#   足していた。呼び出し側（run/taro_setup.py）が正しい道を先に通していたので
+#   気づかれなかった。単体で import されると落ちる。
 _CORE_BRAIN = _os.path.abspath(_os.path.join(
-    _os.path.dirname(_os.path.abspath(__file__)), _os.pardir, _os.pardir,
-    "taro_core", "src", "brain"))
+    _os.path.dirname(_os.path.abspath(__file__)), _os.pardir))
 if _CORE_BRAIN not in _sys.path:
     _sys.path.insert(0, _CORE_BRAIN)
 from spinal_cord.cpg import write_joint_command as _write_joint_command
@@ -284,11 +301,84 @@ SACCADE_MIN_DIR = float(_os.environ.get("E_SACC_MIN_DIR", "0.083"))
 #   ＝位置の内部フィードバック（Robinson DA 1975 の local feedback model。
 #     以後のサッケード生成モデルの標準形）。
 #
-# 【新生児らしさ】1発では届かない（低振幅＝hypometric）。届かなければ次の
-#   サッケードで詰める＝階段状になる（Aslin & Salapatek 1975）。
-SACCADE_FRAC = 0.30         # 1発でずれの何割を詰めるか 注意[Tier3・ARBITRARY]
-                            #   文献は「著しく低振幅」としか言わない
-EYE_FB_GAIN = 0.25          # 位置の誤差[度] → 筋の活性化。4度で飽和 注意[ARBITRARY]
+# 【2026-09-12・0.30 → 1.0 に変更（ユーザー承認）。E_SACC_FRAC=0.30 で戻せる】
+#
+#   【何を変えたか】「1発でずれの3割だけ狙う」のをやめ、**命令の全部を狙う**。
+#   届かない分（アンダーシュート）は命令せず、体から出るに任せる。
+#
+#   【なぜ 0.30 を捨てたか】0.30 を支える根拠が、人間側にもロボット側にも無い：
+#     ・10〜41か月児：成人の約90%（Alahyane et al. 2016・Tier1・PMC本文確認）
+#     ・成人：目標の約90%（10%届かない。Kapoula & Robinson 1986・Tier2）
+#     ・iCub：100%（部分到達という概念自体が無い。Tier1・論文＋ソース確認）
+#     ・0.30 の出所は**生後1〜2か月**の記述（Aslin & Salapatek 1975）。太郎は12か月。
+#   調査でも「1発で目標の何割か」の人間の実測値は見つからなかった
+#   （F/docs/二語文/文献調査/2026-09-11_サッケードのメインシーケンス_人間と乳児.md）。
+#
+#   【機構として何が正しいか】人間の上丘は**目標までの全部**を命令する。届かなさは
+#   命令ではなく体から結果として出て、小脳が長期的に較正する。0.30 は
+#   「結果を命令に焼き込む」形で、因果の向きが逆だった。
+#
+#   【実測（2026-09-12・命令を80回ずつ注入・F/scripts/f_saccade_command_probe.py）】
+#   利得0.75・打ち切り0.30秒で、可動域内の命令に対する到達率：
+#     6度 87% ／ 12度 98% ／ 18度 100% ／ 24度 99% ／ 30度 99%
+#     （0.30 のときは一律 28〜31%）。残り誤差は中央 **0.31度**。
+#   注意：目標角が眼球の可動域（水平±45度）を超える命令は届かない（実測で80件中11件）。
+#   これは制御ではなく体の限界で、人間は頭を動かして解決する（太郎の首は今の場面で固定）。
+SACCADE_FRAC = float(_os.environ.get("E_SACC_FRAC", "1.0"))
+#   注意[Tier2]：値そのものは人間の実測（10〜41か月＝成人の約90%、成人＝目標の約90%）
+#   と iCub（100%）に挟まれる範囲。1.0 は「命令では小分けしない」という**機構の選択**で
+#   あって、アンダーシュートの大きさを決める値ではない（それは体から出る）。
+# 【2026-09-12・変更B】0.25 → 0.75。E_EYE_FB_GAIN=0.25 で従来に戻せる。
+#   【なぜ】眼球には中央復帰バネがある。この比例制御は誤差が小さいほど力も弱く
+#   なるので、「筋の力＝バネの力」で**釣り合った所で止まる**＝誤差がゼロになる前に
+#   終わる。実測（F2-134pre・193発・本番と同じ体）：
+#     ・残り誤差 = 0.0794 × 偏心（決定係数 0.766）。振幅では説明できない（0.028）
+#     ・時間切れで終わった107発でも、終了時の速度は最高速度の 4〜7%＝もう止まっている
+#     ・193発すべて map 発火（own は0発）
+#   釣り合いに要る指令はバネの力だけで決まり利得によらない（実測の最大 0.80 ＜ 上限1.0）。
+#   よって利得を3倍にすれば釣り合う場所は 1/3 になるはず。
+#   【走行前に固定した予測】外れたらバネ説は誤りなので測り直す：
+#     ① 残り誤差 = 0.0265 × 偏心（偏心30度で 0.79度前後）
+#     ② 0.30秒の時間切れで終わる発が 55% → 20〜30%
+#     ③ 行き過ぎ（目標を越える）が出ていない
+#   注意：指令の飽和は誤差 4度 → 1.33度 で起きるようになるが、これは**経路が速くなる
+#   だけ**で、止まる場所（釣り合い）は変えない。
+EYE_FB_GAIN = float(_os.environ.get("E_EYE_FB_GAIN", "0.75"))   # 注意[ARBITRARY]
+
+# ---- 小脳にあたる層：サッケード適応（2026-09-12・ユーザー承認）-----------------
+# 【既定OFF】E_SACC_ADAPT=1 のときだけ働く。OFFなら1ビットも挙動が変わらない。
+#
+# 【人間ではどうか】小脳（虫部・室頂核）が**着地の誤差**からサッケードの利得を
+#   較正し続ける。正常なサルで利得0.96（Robinson, Straube & Fuchs 1993）。
+#   壊すと利得が79%/65%に落ち、適応が永久に失われる（Barash et al. 1999）。
+#   適応にかかる試行：ずらし15%/30%/50% で 163/368/827回（Straube et al. 1997・二次情報）。
+#   **10〜41か月児でも成人と同等の速さで適応する**（Alahyane et al. 2016・Tier1）。
+#
+# 【なぜ誤差で、報酬でないか】報酬は「何が良いか」を設計者が書く必要がある。
+#   誤差は「狙い」と「着地」の引き算なので**誰も書かない**。
+#   さらに「動かない」が最良にならない（動かなければ誤差は大きいまま）＝
+#   太郎の記録にある報酬ハッキング（view_video.py 冒頭「指標は行動の退化を高評価しがち」）を
+#   構造的に塞ぐ。
+#
+# 【何を直すか】**狙いをどこに置くか**（＝人間の小脳と同じ）。筋の強さは直さない
+#   （人間も筋力はその場で変えられない。弱ければその分だけ遠くを狙って埋める）。
+#
+# 【正直な注意】収束**先**は物理が決める（着地が狙いと一致する所）が、
+#   **速さ**を決める SACC_ADAPT_RATE は手置きの定数。逃げ切れてはいない。
+#   ただし「どこへ行くか」は決めていない。
+USE_SACC_ADAPT = _os.environ.get("E_SACC_ADAPT", "0") == "1"
+SACC_ADAPT_RATE = float(_os.environ.get("E_SACC_ADAPT_RATE", "0.01"))
+#   1発あたりの直し幅。0.01 で30%のずれが数百発で埋まる見当（人間の163〜827回に合わせた）
+SACC_ADAPT_INIT = float(_os.environ.get("E_SACC_ADAPT_INIT", "1.0"))   # 倍率の初期値
+SACC_ADAPT_MIN = float(_os.environ.get("E_SACC_ADAPT_MIN", "0.3"))
+SACC_ADAPT_MAX = float(_os.environ.get("E_SACC_ADAPT_MAX", "3.0"))
+SACC_ADAPT_MIN_DEG = float(_os.environ.get("E_SACC_ADAPT_MIN_DEG", "1.0"))
+#   これ未満の小さい発は学習に使わない（測定のばらつきが相対的に大きいため）
+SACC_ADAPT_EDGE_DEG = float(_os.environ.get("E_SACC_ADAPT_EDGE", "0.5"))
+#   【2026-09-12・最初の試作の不合格を受けて追加】狙った目標角が可動域の端から
+#   これ以内（または外）だった発は**学習に使わない**。眼球は±45度で機械的に止まり、
+#   必ず「届かなかった」と報告するため、そのまま学ぶと倍率が際限なく上がる
+#   （実測：0.70→1.11 と正しい行き先1.0を通り過ぎた。議事録 1-8）。
 SACCADE_DONE_DEG = 0.5      # 目標にこれだけ近づいたら1発を終える[度] 注意[ARBITRARY]
 # 撃ってから、終了判定を始めるまでの最小時間[秒]。筋の反応の遅れ（MIMoの
 #   muscle.py tau=0.01、実測でも20ms）より短いと、**目が動く前に「もう着いた」と
@@ -783,6 +873,17 @@ class OrientingReflexV2:
         self._field = None
         # 撃った瞬間に決める目標角度[度]（位置フィードバックの目標）
         self._tgt = {"eye_h": 0.0, "eye_v": 0.0, "neck_h": 0.0, "neck_v": 0.0}
+        # 小脳にあたる層（サッケード適応）。USE_SACC_ADAPT=False なら参照されない。
+        self._adapt_gain = SACC_ADAPT_INIT   # 狙いに掛ける倍率（学習される唯一の量）
+        self._adapt_want_h = 0.0             # この1発で本来動かしたかった量[度]（倍率を掛ける前）
+        self._adapt_h0 = 0.0                 # 撃つ前の水平角[度]
+        self.adapt_log = []                  # [(t, 倍率, 狙い, 実際)]
+        self.adapt_skipped = 0               # 可動域の端で学習に使わなかった発の数
+        # 【2026-09-12】狙った目標角が眼球の可動域の外に出た回数。
+        #   本番の走行では0%（F2-134pre 0/193・F2-135pre 0/194）だが、
+        #   そういう場面が出たときに**走行中に気づける**ようにする（文書でなく機械で）。
+        self.blocked_target_n = 0
+        self._blocked_warned = False
         self.n_saccades = 0          # 撃った回数（テスト・観察用）
         self.time_scales = tuple(time_scales)
         self._max_scale = max(self.time_scales)
@@ -839,6 +940,21 @@ class OrientingReflexV2:
         self.eye_dadr = {k: [a for a in (_dofadr_of(model, i) for i in v)
                              if a is not None]
                          for k, v in self.eye_idx.items()}
+        # 【2026-09-12】眼球（水平）の可動域[度]を控える。適応層が
+        #   **機械的に止められた動きから学ばない**ようにするため。
+        #   壁に阻まれた手の伸ばしから腕の較正をしないのと同じで、そこに情報が無い。
+        #   （この見落としで最初の試作が不合格になった＝議事録 1-8）
+        self._eye_h_limit_deg = None
+        try:
+            _lims = []
+            for _i in self.eye_idx.get("h", []):
+                _j = int(model.actuator_trnid[_i, 0])
+                if _j >= 0 and bool(model.jnt_limited[_j]):
+                    _lims.append(float(np.degrees(model.jnt_range[_j]).max()))
+            if _lims:
+                self._eye_h_limit_deg = float(min(_lims))
+        except Exception:
+            self._eye_h_limit_deg = None
         self.neck_qadr = {k: a for k, a in
                           ((k, _qposadr_of(model, i)) for k, i in self.neck_idx.items())
                           if a is not None}
@@ -899,6 +1015,10 @@ class OrientingReflexV2:
         self._chain_count = 0
         self._chain_wait = 0.0
         self._hold_last_seen_t = -1e9
+        # 適応：**学習した倍率 `_adapt_gain` は消さない**（人間は reset で忘れない）。
+        #   途中まで進んだ1発の控えだけ捨てる。
+        self._adapt_want_h = 0.0
+        self._adapt_h0 = 0.0
         self._hold_i_h = 0.0
         self._hold_i_v = 0.0
         self.n_saccades = 0
@@ -1233,12 +1353,37 @@ class OrientingReflexV2:
             #   goal_h/half（連射目標由来）になるため、ここは self._sacc_h/_v を
             #   使う（通常発火では self._sacc_h == self.h_dir なので既存挙動と同じ）。
             half = VISION_FOVY_DEG / 2.0
-            dh = EYE_SIGN_H * SACCADE_FRAC * self._sacc_h * half
-            dv = EYE_SIGN_V * SACCADE_FRAC * self._sacc_v * half
+            # 小脳にあたる層：狙いに学習した倍率を掛ける（OFFなら 1.0 ＝従来と同じ）
+            _ag = self._adapt_gain if USE_SACC_ADAPT else 1.0
+            dh = EYE_SIGN_H * SACCADE_FRAC * self._sacc_h * half * _ag
+            dv = EYE_SIGN_V * SACCADE_FRAC * self._sacc_v * half * _ag
             _h0 = self._version_h_deg()
+            # 学習用に「本来動かしたかった量」（倍率を掛ける**前**）を控える。
+            #   誤差はこれに対して測る＝ずらした狙いに対してではない。
+            self._adapt_want_h = EYE_SHARE * EYE_SIGN_H * SACCADE_FRAC * self._sacc_h * half
+            self._adapt_h0 = _h0
             _v0 = self._angle_deg(self.eye_qadr["v"])
             self._tgt["eye_h"] = _h0 + EYE_SHARE * dh
             self._tgt["eye_v"] = _v0 + EYE_SHARE * dv
+            # 【2026-09-12】狙いが眼球の可動域の外に出たら、最初の1回だけ知らせる。
+            #   こうなると眼球は機械的に止まるので、**どう制御しても届かない**。
+            #   人間は頭を動かして解決する（eye-head coordination）が、太郎は
+            #   NECK_SHARE=0.0 かつ場面が neck_fix=true なので首が使えない。
+            #   本番の走行では一度も起きていないので、起きたら場面が変わった合図。
+            _lim_h = self._eye_h_limit_deg
+            if _lim_h is not None and abs(self._tgt["eye_h"]) > _lim_h:
+                self.blocked_target_n += 1
+                if not self._blocked_warned:
+                    self._blocked_warned = True
+                    # 【2026-09-12】print から logging へ。これで エラー.log に残り、
+                    #   走行の最後に画面の一番下へ自動で出る（run/log_setup.py）。
+                    _log().warning(
+                        "狙った目標角 %.1f度 が眼球の可動域（±%.0f度）の外です。"
+                        "眼球は機械的に止まるので、どう制御しても届きません。"
+                        "人間は頭を動かして解決しますが、太郎は首に配分していません"
+                        "（NECK_SHARE=%.2f）。この場面を続けるなら目と首の分担を決める"
+                        "必要があります（F/docs/研究日誌_2026-09.md の 2026-09-12 の節）。",
+                        self._tgt["eye_h"], _lim_h, NECK_SHARE)
             self._hold_i_h = 0.0
             self._hold_i_v = 0.0
             if len(self.sacc_log) < 400:
@@ -1312,6 +1457,26 @@ class OrientingReflexV2:
                 self._sacc_remaining = 0.0
             if self._sacc_remaining <= 0.0:
                 self._sacc_end_t = self._t      # 終わった時刻を記録
+                # 小脳にあたる層：着地の誤差から倍率を直す。
+                #   誤差 = 1 - 実際に動いた量 / 本来動かしたかった量（符号つきで割るので
+                #   左右どちらでも「足りない→倍率を上げる」になる）。
+                _lim = self._eye_h_limit_deg
+                _blocked = (_lim is not None
+                            and abs(self._tgt.get("eye_h", 0.0)) > _lim - SACC_ADAPT_EDGE_DEG)
+                if _blocked:
+                    self.adapt_skipped += 1
+                if USE_SACC_ADAPT and not _blocked and abs(self._adapt_want_h) >= SACC_ADAPT_MIN_DEG:
+                    _act = self._version_h_deg() - self._adapt_h0
+                    _err = float(np.clip(1.0 - _act / self._adapt_want_h, -1.0, 1.0))
+                    self._adapt_gain = float(np.clip(
+                        self._adapt_gain + SACC_ADAPT_RATE * _err,
+                        SACC_ADAPT_MIN, SACC_ADAPT_MAX))
+                    if len(self.adapt_log) < 20000:
+                        self.adapt_log.append((round(float(self._t), 3),
+                                               round(float(self._adapt_gain), 5),
+                                               round(float(self._adapt_want_h), 3),
+                                               round(float(_act), 3)))
+                    self._adapt_want_h = 0.0
                 if self._sacc_rec is not None:
                     self._sacc_rec["t_end"] = float(self._t)
                     self._sacc_rec["h1"] = float(self._version_h_deg())
