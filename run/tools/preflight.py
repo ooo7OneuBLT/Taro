@@ -74,6 +74,28 @@ def _log_dir_of(path):
     return s[:i + len("/logs/")] + rest.split("/", 1)[0]
 
 
+def _場面の兄弟(name):
+    """その場面の名前で始まる別の場面（＝あとから作られた派生）を返す。
+
+    【なぜ名前で探すか、2026-09-14】場面は「親の名前＋しっぽ」の形で複製されてきた
+    （実測26対）。ファイルの中には親子の関係が書かれていないので、名前が唯一の手がかり。
+    **新しい＝良いとは限らない**（`_保持を切る` `_バネを切る` はわざと機能を切った版）ので、
+    止めずに並べて見せるだけにする。選ぶのは人。
+    """
+    out = []
+    for d in ("run/scenes", "run/scenes/_旧"):
+        dd = _abs(d)
+        if not os.path.isdir(dd):
+            continue
+        for f in os.listdir(dd):
+            if not f.endswith(".json"):
+                continue
+            stem = f[:-5]
+            if stem != name and stem.startswith(name + "_"):
+                out.append(stem + ("" if d == "run/scenes" else "（_旧）"))
+    return sorted(out)
+
+
 def check(spec, spec_path=""):
     """(errors, warns) を返す。どちらも文字列のリスト。"""
     errors, warns = [], []
@@ -120,9 +142,29 @@ def check(spec, spec_path=""):
     if model and not os.path.exists(_abs(str(model))):
         errors.append("出発モデルが無い: %s" % model)
     scene = spec.get("scene")
-    if scene and not os.path.exists(_abs(os.path.join("run/scenes", str(scene) + ".json"))):
-        warns.append("run/scenes に %s.json が見当たらない（別の探し方をしているなら無視してよい）"
-                     % scene)
+    if scene:
+        cur = _abs(os.path.join("run/scenes", str(scene) + ".json"))
+        old_p = _abs(os.path.join("run/scenes/_旧", str(scene) + ".json"))
+        if not os.path.exists(cur) and not os.path.exists(old_p):
+            warns.append("run/scenes に %s.json が見当たらない（別の探し方をしているなら無視してよい）"
+                         % scene)
+        else:
+            # 【2026-09-14・ステップ2a】`_旧/` ＝ 使い終わった場面の置き場。
+            #   読めるので止めないが、選び直したのかは分からないので知らせる。
+            if not os.path.exists(cur):
+                m = "場面 %s は run/scenes/_旧/ にある（使い終わった置き場）" % scene
+                if not str(spec.get("note") or "").strip():
+                    m += "。note が空＝わざと選んだ理由が残らない"
+                warns.append(m)
+            # 【なぜ現役の場面でも知らせるか】F2-129（本番）は、改善後の
+            #   `_背景あり_2026-09-10` があるのに元の版で走った。元の版は
+            #   直近で使われていて `_旧/` には無い＝上の判定では鳴らない。
+            #   **止めない**：`_保持を切る` `_バネを切る` のように、わざと機能を
+            #   切った派生もあるので、新しい＝良いとは限らない。並べて見せるだけ。
+            sibs = _場面の兄弟(str(scene))
+            if sibs:
+                warns.append("場面 %s には派生がある（選び直したか確かめる）：\n      %s"
+                             % (scene, "\n      ".join(sibs)))
 
     # --- 5. 既にあるものを上書きするか（同じ実験名なら意図的なことが多い）------
     #   1件1行にすると再走行のたびに10行出てうるさいので、まとめて1行にする。
@@ -135,6 +177,26 @@ def check(spec, spec_path=""):
     return errors, warns
 
 
+def _索引の遅れを知らせる():
+    """落とし穴チェックリストの索引が本体に追いついていなければ1行だけ知らせる。
+
+    【2026-09-12・ユーザー指示「索引も随時更新するようにして」】
+      索引は1か月（32件）放置されていた。「次からは更新する」では守られないので
+      機械にする。ただし**実験は止めない**（文書の遅れで走行を止めるのは本末転倒）。
+      中身は run/tools/check_index.py。
+    """
+    try:
+        from run.tools import check_index as ci
+        漏れ = [h for h in ci._見出し(ci.本体)
+                if not any(k and k in h[1] for k in ci._索引の検索文字列(ci.索引))]
+        if 漏れ:
+            print("  [注意] 落とし穴チェックリストの索引に %d 件の漏れがあります"
+                  "（索引を読んでも当たらない）。"
+                  "`python -m run.tools.check_index` で一覧" % len(漏れ))
+    except Exception:
+        pass      # 点検の付け足しで走行を止めない
+
+
 def run_check(spec, spec_path="", skip=False):
     """点検して表示する。ERROR があれば False を返す（走らせない）。"""
     if skip:
@@ -143,6 +205,7 @@ def run_check(spec, spec_path="", skip=False):
     errors, warns = check(spec, spec_path)
     for w in warns:
         print("  [注意] %s" % w)
+    _索引の遅れを知らせる()
     if not errors:
         print("走行前点検：問題なし（%d 件の注意）" % len(warns))
         return True

@@ -352,24 +352,65 @@ def _merge(base, over):
 # ============================================================================
 # 読み書き
 # ============================================================================
+# 【2026-09-14・ステップ2a】使い終わった場面の置き場。
+#   【なぜ分けたか】場面は 340 本あり、実測で **94%が複製**（設定の差3項目以下かつ姿勢も同一）、
+#   さらに **95%は Viewer ではなく Claude が JSON を複製して作ったもの**だった。
+#   そのため「壁あり版」と「壁なし版」が同じ資格で並び、Compact のあと Claude が
+#   古い方を選ぶ事故が実際に起きた（F2-129＝本番が壁なしの場面で走った。2026-09-11）。
+#   文書やメモリでは防げない（多数派が目に入るため）ので、**見えるものを変える**。
+#   古い場面は消さずにここへ移し、名前で呼ばれたら今までどおり読めるようにする。
+OLD_DIR = os.path.join(SCENE_DIR, "_旧")
+
+
 def scene_path(name, ext=".json"):
-    return os.path.join(SCENE_DIR, f"{name}{ext}")
+    """場面のファイルの場所。現役に無ければ `_旧/` も探す（古い実験をそのまま動かすため）。"""
+    p = os.path.join(SCENE_DIR, f"{name}{ext}")
+    if os.path.exists(p):
+        return p
+    old = os.path.join(OLD_DIR, f"{name}{ext}")
+    if os.path.exists(old):
+        return old
+    return p          # 無ければ現役側の道を返す（呼び手が「無い」と言えるように）
 
 
-def list_scenes():
-    """使えるシーンの名前を返す。"""
-    if not os.path.isdir(SCENE_DIR):
-        return []
-    return sorted(f[:-5] for f in os.listdir(SCENE_DIR) if f.endswith(".json"))
+def is_old_scene(name):
+    """その場面が `_旧/` にしか無いか。走行前点検が知らせるために使う。"""
+    return (not os.path.exists(os.path.join(SCENE_DIR, f"{name}.json"))
+            and os.path.exists(os.path.join(OLD_DIR, f"{name}.json")))
+
+
+def list_scenes(include_old=True):
+    """使えるシーンの名前を返す。
+
+    Args:
+        include_old: `_旧/` も含めるか。**名前を探すとき（読み込みの失敗時の候補出し・
+            道具の一覧）は含める**。「いま使うものを選ぶ」場面では False にする。
+    """
+    out = []
+    for d in (SCENE_DIR, OLD_DIR) if include_old else (SCENE_DIR,):
+        if os.path.isdir(d):
+            out += [f[:-5] for f in os.listdir(d) if f.endswith(".json")]
+    return sorted(set(out))
 
 
 def load(name):
     """シーンを読む。名前でもファイルパスでもよい。"""
     path = name if os.path.isfile(str(name)) else scene_path(name)
     if not os.path.isfile(path):
-        avail = "、".join(list_scenes()) or "（1つも無い）"
+        # 【2026-09-12】以前はここで使えるシーン全部（400個以上・40KB）を並べていた。
+        #   そのため例外メッセージ1件でログも画面も埋まり、何が起きたか読めなかった。
+        #   ⇒ **名前が似ているものだけ**を出す。全一覧が要るときは一覧の出し方を案内する。
+        import difflib
+        all_names = list_scenes()
+        near = difflib.get_close_matches(str(name), all_names, n=5, cutoff=0.4)
+        if not near:
+            key = str(name)[:6]
+            near = [s for s in all_names if key and key in s][:5]
+        hint = ("\n  名前が近いもの: " + "、".join(near)) if near else ""
         raise FileNotFoundError(
-            f"シーンが見つからない: {path}\n  使えるシーン: {avail}")
+            f"シーンが見つからない: {path}{hint}\n"
+            f"  シーンは全部で {len(all_names)} 個あります。"
+            f"一覧は run/scenes/ を見てください")
     with open(path, encoding="utf-8") as fp:
         raw = json.load(fp)
     scene = _merge(default_scene(), raw)
@@ -482,6 +523,9 @@ def build(scene, orient=None, vor=True, seed=0, verbose=False, actuation_model=N
         vision: 環境に視覚センサを持たせるか。False なら vision_params に
             None を渡し、LeanMimoEnv.strip_textures（D/scripts/mimo_lean.py）を
             発動させてテクスチャ（顔・服 約977MB）を単色化する（2026-08-13）。
+        （2026-09-13にあった visual_attention 引数は段Aで撤去した。視覚と注意の
+            持ち主は環境ではなく太郎＝run/taro_setup.py の build_visual_attention。
+            設計：doc/設計_太郎をCoreで完結させる_2026-09-13.md）
         actuation_model: 筋の駆動モデル。None なら MuscleModel（従来どおり）。
             【なぜ渡せるようにしたか、2026-07-30】学習ループ
             （`e_growth_train.py`）は既定で SpringDamperModel を使うのに、
