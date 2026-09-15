@@ -170,6 +170,41 @@ def check(spec, spec_path=""):
                 warns.append("場面 %s には派生がある（選び直したか確かめる）：\n      %s"
                              % (scene, "\n      ".join(sibs)))
 
+    # --- 6. 壁（背景）の無い場面で走らせようとしていないか ---------------------
+    #   【なぜ止めるか・2026-09-15】ユーザー決定「壁は今後も常に使い続けて」
+    #   （2026-09-11。F/docs/研究日誌_2026-09.md の該当節）。
+    #   にもかかわらず**2回続けて壁なしの場面で走らせた**：
+    #     F2-129（K1）… F2-126 の場面をそのまま引き継いだ＝場面を選んでいなかった。
+    #       日誌に「この47%を後の走行と並べてはいけない」と書かれている
+    #     F2-131（2026-09-15）… 同じ理由で同じ場面を選び、走行前点検の
+    #       「派生がある（選び直したか確かめる）」という注意を読んで無視した
+    #   **知らせるだけの注意は2回とも無視された。**
+    #   CLAUDE.md「同じミスが2回起きたら文書ではなく機械で防ぐ」に従い、止める。
+    #   わざと壁なしにするとき（昔の走行と条件を揃える等）は --skip-preflight。
+    if scene:
+        sc = {}
+        for _d in ("run/scenes", "run/scenes/_旧"):
+            _p = _abs(os.path.join(_d, str(scene) + ".json"))
+            if os.path.exists(_p):
+                try:
+                    with open(_p, encoding="utf-8") as f:
+                        sc = json.load(f)
+                except Exception:
+                    sc = {}
+                break
+        bd = ((sc.get("world") or {}).get("backdrop") or {})
+        if sc and not bd.get("enabled"):
+            兄弟 = [x for x in _場面の兄弟(str(scene)) if "背景あり" in x]
+            m = ["場面 %s に**壁（背景）がありません**。" % scene,
+                 "      2026-09-11のユーザー決定「壁は今後も常に使い続けて」に反します。",
+                 "      場面ファイルに1行足すだけで直ります：",
+                 '        "world": { "backdrop": { "enabled": true, "dist": 1.2,'
+                 ' "height": 2.0, "repeat": [4, 4] } }']
+            if 兄弟:
+                m.append("      壁ありの派生が既にあります： " + " / ".join(兄弟))
+            m.append("      わざと壁なしで走らせるなら --skip-preflight")
+            errors.append("\n".join(m))
+
     # --- 5. 既にあるものを上書きするか（同じ実験名なら意図的なことが多い）------
     #   1件1行にすると再走行のたびに10行出てうるさいので、まとめて1行にする。
     exist = [p for _w, p in outs if os.path.exists(_abs(p))]
