@@ -17,10 +17,13 @@
   ここで sim時間の間隔（interval_s）に満たなければ打ち切り（`detected=False`）
   段1 前注意の地図（動いた塊）
   段2 目立ちの地図 → 段3 目的の地図（goal） → 段4 場所の優先度地図
+  **段8 注意が移った瞬間だけ眼球へ命令（`orienting.set_map_target`）**
+      注意：番号は役割の順で、**実行の順ではない**。眼球への命令は段4のすぐ後に
+      出している（_detect_frame の中。前のtickで決めた注意先をもとに出すため）。
+      下の段5〜7より**先**に走る。
   段5 点プロンプトで切り出す（MobileSAM）
   段6 物体ファイルの更新（カルマン＋ハンガリアン、ObjectFileSystem）
   段7 注意する物を決める・消失を判定する（`attend`設定時のみ）
-  段8 注意が移った瞬間だけ眼球へ命令（`orienting.set_map_target`）
 
 `step()` は ctx を受け取らない。呼び出し側（`run/plugins/common/object_files.py`）が
 ctx から必要な値を取り出して引数で渡し、戻り値をまた ctx へ書き戻す。

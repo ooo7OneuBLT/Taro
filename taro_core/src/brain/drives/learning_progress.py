@@ -185,8 +185,10 @@ class LearningProgress:
         期間が構造的に罰される恐れがある（調査報告2026-08-03 1-3節）。
         ここでは`pe_slow`を0にリセットしない。0にすると次の一歩で「急に良くなった」という
         誤った大きなプラスのprogressを一度だけ生んでしまう（pe_fastがまだ古い高い値のまま
-        pe_slowだけ0から動き出すと、差がプラス側に不自然に開く）。代わりに**その時点で
-        実際に持っている値**（pe_fast側）を両方にコピーし、差＝0からスタートさせる。
+        pe_slowだけ0から動き出すと、差がプラス側に不自然に開く）。代わりに
+        **pe_slow の値を pe_fast へコピー**して、差＝0からスタートさせる
+        （`self.pe_fast = self.pe_slow`。pe_slow のほうは変えない。
+        向きに注意：pe_fast → 両方 ではない）。
         これは根拠のある確定的な修正ではなく、成長イベントでの罰を自己接触と同様に
         避けたいという設計判断（人間模倣からの逸脱ではなく実装上の工学的判断）。
 
@@ -221,7 +223,8 @@ class LearningProgress:
 def smoothness_cost(action, prev_action):
     """行動の**急変**にかかるコスト（CAPS）＝「さっきと違うことを急にするのは損」。
 
-    `‖a_t − a_{t-1}‖²` を返す。呼び出し側で `報酬 − λ×smoothness_cost(...)` の形で引く。
+    `a_t − a_{t-1}` の各成分を二乗した**平均**を返す（合計ではない。理由は下）。
+    呼び出し側で `報酬 − λ×smoothness_cost(...)` の形で引く。
 
     【根拠】CAPS（Mysore et al. 2021, *Regularizing Action Policies for Smooth Control
     with Reinforcement Learning*, http://ai.bu.edu/caps/）[Tier1]。

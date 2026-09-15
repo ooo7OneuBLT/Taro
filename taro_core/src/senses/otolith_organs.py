@@ -91,7 +91,9 @@ class OtolithOrgans:
         self._warm = 0
         # 「直立（傾き0）」のときに重力がどちらを向いて見えるか。
         # 注意：仰向けの太郎では重力は体の背中方向から来るので、単純に -z とは限らない。
-        #   None なら最初の観測を基準にする（＝リセット直後の姿勢を傾き0とみなす）。
+        #   None なら最初の観測を基準にする（＝**一度も決まっていないとき**の
+        #   最初の姿勢を傾き0とみなす）。注意：reset() は upright を戻さないので、
+        #   一度決まったあとに reset() しても基準は変わらない。
         self.upright = None if upright is None else np.asarray(upright, dtype=float)
 
     def reset(self):

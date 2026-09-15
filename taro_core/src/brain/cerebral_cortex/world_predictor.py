@@ -993,9 +993,10 @@ class PortWorldPredictor(nn.Module):
         いない）だけは、shared_var=0.0のまま借りると分母（std+1e-6）がほぼ0になり
         z が数十万に跳ねる（実測：F2-99相当の机上確認でfile_id=0の2tick目に
         z_state=815071）。"first"モードなら初回はbaseline:=err_vで作るためこの
-        問題が起きない。そのためuse_sharedをこのメソッドの外（呼び出し側）で
+        問題が起きない。そのためuse_sharedを**このメソッドの冒頭で**
         `self.baseline_init=="shared" and self._shared_n>0`として決め、母集団側が
-        1件も無いときだけ"first"と同じ式にフォールバックする。
+        1件も無いときだけ"first"と同じ式にフォールバックする
+        （呼び出し元の observe_all は use_shared を渡していない）。
         """
         use_shared = self.baseline_init == "shared" and self._shared_n > 0
         if is_first:
@@ -1129,7 +1130,8 @@ class PortWorldPredictor(nn.Module):
         body_target: {"act": [act_dimの列] or None}
 
         戻り値：{"by_file": {file_id: {"err_state","err_vec","z_state",
-                "err_total","baseline","z"}}, "err_parent", "err_body"}
+                "err_total","baseline","z","z_vec"}},
+                "err_parent", "err_body", "z_hearing", "z_body"}
                 （まだ誰も予測していない物・聴覚・体は初回のみNone。
                 err_slowはこの中には無い＝predict_allが今tickぶんを返す）
         """

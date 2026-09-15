@@ -344,9 +344,11 @@ def segment_at_points(predictor, img224, points, patch_feats, n, img_size=224,
         emb`）。`emb`は常にNone（点プロンプトのMobileSAM埋め込みは計算しない
         ＝仕様に無かった判断。`ObjectFile.emb`は次の見回りで埋まる）。
         `cohesion_reason`は"motion"（同じblobでまとめられた）または""。
-        `n_points_expect`・`n_reject_scale`（呼び出し側のCSV記録用）は検出
-        リストにはぶら下げず、`(dets, stats)` のタプルの2つめとして返す
-        （`stats = {"n_points_expect": int, "n_reject_scale": int}`）。
+        足切りの数え（呼び出し側のCSV記録用）は検出リストにはぶら下げず、
+        `(dets, stats)` のタプルの2つめとして返す。stats は**5つ**：
+        `{"n_points_expect", "n_reject_scale", "n_reject_edge",
+          "n_reject_area", "n_reject_dedup"}`（すべて int）。
+        （はじめは前2つだけだった。数えていない足切りが3つあると2026-09-11に分かって足した）
     """
     img224 = np.asarray(img224)
     h, w = img224.shape[0], img224.shape[1]

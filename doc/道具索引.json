@@ -3833,6 +3833,7 @@
    "render_struct",
    "_func_table",
    "render_io",
+   "_string_names",
    "_all_names",
    "check_unknown",
    "_git",
@@ -3841,7 +3842,7 @@
    "_write",
    "main"
   ],
-  "lines": 609,
+  "lines": 652,
   "goal": "",
   "last_commit": "2026-09-15"
  },
@@ -4516,7 +4517,7 @@
    "apply_eye_muscle_scale",
    "apply_neck_tone"
   ],
-  "lines": 1184,
+  "lines": 1196,
   "goal": "",
   "last_commit": "2026-09-15"
  },
@@ -4563,7 +4564,7 @@
   ],
   "lines": 197,
   "goal": "",
-  "last_commit": "2026-07-17"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "taro_core/src/body/joint_compliance.py",
@@ -4578,7 +4579,7 @@
    "apply_joint_compliance",
    "_rad2deg"
   ],
-  "lines": 461,
+  "lines": 462,
   "goal": "",
   "last_commit": "2026-08-17"
  },
@@ -4598,7 +4599,7 @@
   "defs": [
    "Stomach"
   ],
-  "lines": 107,
+  "lines": 112,
   "goal": "",
   "last_commit": "2026-07-17"
  },
@@ -4608,13 +4609,13 @@
   "defs": [
    "VocalTract"
   ],
-  "lines": 305,
+  "lines": 308,
   "goal": "",
-  "last_commit": "2026-09-05"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "taro_core/src/brain/basal_ganglia.py",
-  "doc": "【転送のみ】このファイルの中身は basal_ganglia/basal_ganglia.py へ移した（2026-08-30の整理）。",
+  "doc": "【転送のみ】このファイルの中身は subcortical_nuclei/basal_ganglia.py へ移した（2026-08-30の整理）。",
   "defs": [],
   "lines": 12,
   "goal": "",
@@ -4664,7 +4665,7 @@
    "_measure_shift_px_slow",
    "VergenceReflex"
   ],
-  "lines": 422,
+  "lines": 425,
   "goal": "",
   "last_commit": "2026-09-10"
  },
@@ -4674,13 +4675,13 @@
   "defs": [
    "VOR"
   ],
-  "lines": 289,
+  "lines": 292,
   "goal": "",
   "last_commit": "2026-09-15"
  },
  {
   "path": "taro_core/src/brain/cerebellum.py",
-  "doc": "【転送のみ】このファイルの中身は cerebellum/speech.py へ移した（2026-08-30の整理）。",
+  "doc": "【転送のみ】このファイルの中身は cerebellum_lobe/speech.py へ移した（2026-08-30の整理）。",
   "defs": [],
   "lines": 12,
   "goal": "",
@@ -4708,7 +4709,7 @@
  },
  {
   "path": "taro_core/src/brain/cerebellum_motor.py",
-  "doc": "【転送のみ】このファイルの中身は cerebellum/motor.py へ移した（2026-08-30の整理）。",
+  "doc": "【転送のみ】このファイルの中身は cerebellum_lobe/motor.py へ移した（2026-08-30の整理）。",
   "defs": [],
   "lines": 12,
   "goal": "",
@@ -4722,7 +4723,7 @@
   ],
   "lines": 91,
   "goal": "",
-  "last_commit": "2026-09-07"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "taro_core/src/brain/cerebral_cortex/frontal_lobe/corticospinal.py",
@@ -4751,9 +4752,9 @@
    "MessageLayer",
    "_cosine"
   ],
-  "lines": 315,
+  "lines": 318,
   "goal": "",
-  "last_commit": "2026-09-07"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "taro_core/src/brain/cerebral_cortex/parietal_lobe/intraparietal_sulcus.py",
@@ -4764,7 +4765,7 @@
   ],
   "lines": 714,
   "goal": "",
-  "last_commit": "2026-09-10"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "taro_core/src/brain/cerebral_cortex/parietal_lobe/priority_map.py",
@@ -4774,7 +4775,7 @@
   ],
   "lines": 189,
   "goal": "",
-  "last_commit": "2026-09-09"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "taro_core/src/brain/cerebral_cortex/parietal_lobe/spatial_priority_map.py",
@@ -4793,7 +4794,7 @@
    "_abs_path",
    "VisualAttention"
   ],
-  "lines": 990,
+  "lines": 993,
   "goal": "",
   "last_commit": "2026-09-15"
  },
@@ -4804,9 +4805,9 @@
    "Vocabulary",
    "TaroBrain"
   ],
-  "lines": 603,
+  "lines": 604,
   "goal": "",
-  "last_commit": "2026-09-07"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "taro_core/src/brain/cerebral_cortex/recurrent_core_motor.py",
@@ -4816,7 +4817,7 @@
   ],
   "lines": 465,
   "goal": "",
-  "last_commit": "2026-08-30"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "taro_core/src/brain/cerebral_cortex/sensorimotor_brain.py",
@@ -4826,7 +4827,7 @@
   ],
   "lines": 86,
   "goal": "",
-  "last_commit": "2026-08-30"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "taro_core/src/brain/cerebral_cortex/temporal_lobe/segmentation.py",
@@ -4834,7 +4835,7 @@
   "defs": [
    "Segmenter"
   ],
-  "lines": 226,
+  "lines": 229,
   "goal": "",
   "last_commit": "2026-09-15"
  },
@@ -4858,7 +4859,7 @@
    "_PortMem",
    "PortWorldPredictor"
   ],
-  "lines": 1448,
+  "lines": 1450,
   "goal": "",
   "last_commit": "2026-09-15"
  },
@@ -4872,7 +4873,7 @@
  },
  {
   "path": "taro_core/src/brain/developmental_clock.py",
-  "doc": "【転送のみ】このファイルの中身は development/developmental_clock.py へ移した（2026-08-30の整理）。",
+  "doc": "【転送のみ】このファイルの中身は maturation/developmental_clock.py へ移した（2026-08-30の整理）。",
   "defs": [],
   "lines": 12,
   "goal": "",
@@ -4880,7 +4881,7 @@
  },
  {
   "path": "taro_core/src/brain/developmental_schedule.py",
-  "doc": "【転送のみ】このファイルの中身は development/developmental_schedule.py へ移した（2026-08-30の整理）。",
+  "doc": "【転送のみ】このファイルの中身は maturation/developmental_schedule.py へ移した（2026-08-30の整理）。",
   "defs": [],
   "lines": 12,
   "goal": "",
@@ -4923,7 +4924,7 @@
    "compute_alignment_credit",
    "compute_imitation_reward"
   ],
-  "lines": 136,
+  "lines": 138,
   "goal": "",
   "last_commit": "2026-08-30"
  },
@@ -4935,7 +4936,7 @@
    "smoothness_cost",
    "effort_cost"
   ],
-  "lines": 280,
+  "lines": 283,
   "goal": "",
   "last_commit": "2026-08-30"
  },
@@ -4989,9 +4990,9 @@
   "defs": [
    "LanguageHippocampus"
   ],
-  "lines": 199,
+  "lines": 201,
   "goal": "",
-  "last_commit": "2026-09-07"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "taro_core/src/brain/learning_progress.py",
@@ -5009,7 +5010,7 @@
   ],
   "lines": 105,
   "goal": "",
-  "last_commit": "2026-08-27"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "taro_core/src/brain/limbic/hippocampus.py",
@@ -5057,7 +5058,7 @@
   "defs": [
    "EfferenceCopy"
   ],
-  "lines": 121,
+  "lines": 123,
   "goal": "",
   "last_commit": "2026-09-15"
  },
@@ -5070,7 +5071,7 @@
    "_qposadr_of",
    "OrientingReflexV2"
   ],
-  "lines": 1870,
+  "lines": 1872,
   "goal": "",
   "last_commit": "2026-09-15"
  },
@@ -5082,7 +5083,7 @@
   ],
   "lines": 149,
   "goal": "",
-  "last_commit": "2026-09-14"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "taro_core/src/brain/midbrain/preattentive_map.py",
@@ -5104,7 +5105,7 @@
    "_dog_competition",
    "SalienceMap"
   ],
-  "lines": 242,
+  "lines": 246,
   "goal": "",
   "last_commit": "2026-09-15"
  },
@@ -5117,7 +5118,7 @@
    "magnification",
    "CollicularMap"
   ],
-  "lines": 358,
+  "lines": 363,
   "goal": "",
   "last_commit": "2026-08-30"
  },
@@ -5137,7 +5138,7 @@
   ],
   "lines": 28,
   "goal": "",
-  "last_commit": "2026-08-30"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "taro_core/src/brain/object_files.py",
@@ -5189,7 +5190,7 @@
   "defs": [
    "PredictiveCodingLatent"
   ],
-  "lines": 129,
+  "lines": 130,
   "goal": "",
   "last_commit": "2026-08-30"
  },
@@ -5224,7 +5225,7 @@
    "write_joint_command",
    "read_joint_command"
   ],
-  "lines": 373,
+  "lines": 374,
   "goal": "",
   "last_commit": "2026-09-15"
  },
@@ -5276,7 +5277,7 @@
   "defs": [
    "TaroLearner"
   ],
-  "lines": 137,
+  "lines": 139,
   "goal": "",
   "last_commit": "2026-08-30"
  },
@@ -5286,9 +5287,9 @@
   "defs": [
    "SpeechGate"
   ],
-  "lines": 121,
+  "lines": 126,
   "goal": "",
-  "last_commit": "2026-09-05"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "taro_core/src/brain/superior_colliculus.py",
@@ -5343,9 +5344,9 @@
    "Vocabulary",
    "Hearing"
   ],
-  "lines": 133,
+  "lines": 134,
   "goal": "",
-  "last_commit": "2026-09-06"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "taro_core/src/senses/insula.py",
@@ -5373,7 +5374,7 @@
    "segment_at_points",
    "_detect_mobilesam"
   ],
-  "lines": 565,
+  "lines": 567,
   "goal": "",
   "last_commit": "2026-09-15"
  },
@@ -5384,9 +5385,9 @@
    "read",
    "OtolithOrgans"
   ],
-  "lines": 145,
+  "lines": 147,
   "goal": "",
-  "last_commit": "2026-07-31"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "taro_core/src/senses/proprioceptive_map.py",
@@ -5420,7 +5421,7 @@
   ],
   "lines": 125,
   "goal": "",
-  "last_commit": "2026-07-31"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "taro_core/src/senses/sensory_encoders.py",
@@ -5432,7 +5433,7 @@
   ],
   "lines": 71,
   "goal": "",
-  "last_commit": "2026-07-17"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "taro_core/src/senses/somatosensory_cortex.py",
@@ -5448,7 +5449,7 @@
   ],
   "lines": 470,
   "goal": "",
-  "last_commit": "2026-08-11"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "taro_core/src/senses/touch_adaptation.py",
@@ -5458,11 +5459,11 @@
   ],
   "lines": 183,
   "goal": "",
-  "last_commit": "2026-08-13"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "taro_core/src/senses/vision_backends.py",
-  "doc": "視覚バックエンドの差し替え機構（F1-3b）— 語彙学習(Lexicon)が使う「見ていたもの」の",
+  "doc": "視覚バックエンドの差し替え機構（F1-3b）— 語の学習が使う「見ていたもの」の",
   "defs": [
    "fovea_crop",
    "register",
@@ -5474,7 +5475,7 @@
   ],
   "lines": 304,
   "goal": "",
-  "last_commit": "2026-08-30"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "taro_core/src/senses/vision_encoder.py",
@@ -5484,7 +5485,7 @@
   ],
   "lines": 70,
   "goal": "",
-  "last_commit": "2026-07-31"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "taro_core/src/wrapper/hybrid_env.py",
@@ -5494,6 +5495,6 @@
   ],
   "lines": 184,
   "goal": "",
-  "last_commit": "2026-07-31"
+  "last_commit": "2026-09-15"
  }
 ]

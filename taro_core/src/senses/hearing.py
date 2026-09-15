@@ -8,8 +8,9 @@
   - トークンはかな1文字単位の動的語彙（固定音素集合ではない）
   - hear(text) は Vocabulary.encode の薄いラッパーで、環境から受け取った
     親の発話文字列をトークンID列に変える「耳」の役割だけを持つ
-  - BOS/EOSの付与や連合（Lexicon）への橋渡しはこのファイルの責務ではない
-    （呼び出し側が taro_core/src/brain/lexicon.py と組み合わせて使う）
+  - BOS/EOSの付与や、分節・語の学習への橋渡しはこのファイルの責務ではない
+    （呼び出し側が Segmenter（brain/cerebral_cortex/temporal_lobe/segmentation.py）
+     などと組み合わせて使う。2026-09-15までは brain/lexicon.py だった）
 """
 
 
@@ -113,8 +114,8 @@ class Vocabulary:
 class Hearing:
     """耳。環境から親の発話文字列を受け、トークン列にして脳へ渡す入口。
 
-    Vocabulary をラップするだけで、分節（Lexicon.segment）や連合（Lexicon.observe）
-    には踏み込まない（F2仕様書の役割分担どおり：耳＝トークン化、連合器＝学習）。
+    Vocabulary をラップするだけで、分節（Segmenter.segment）や語の学習には
+    踏み込まない（F2仕様書の役割分担どおり：耳＝トークン化、その先＝学習）。
     """
 
     def __init__(self):

@@ -338,7 +338,38 @@ STRING_DIRS = ["taro_core", "run", "MIMo"]   # MuJoCoの関節名・設定のキ
 _WORD = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 # 「もう無い」と書いてあるのは腐りではなく履歴。知らせない。
-_HISTORY = re.compile(r"元(は|の)|以前|かつて|削除|廃止|だった|やめた|旧|→|変えた|移した|使い捨て")
+_HISTORY = re.compile(
+    r"元(は|の)|以前|かつて|削除|廃止|だった|やめた|旧|→|変えた|移した|使い捨て"
+    r"|一般化|置き換え|差し替え|改名|存在しない|もう無い|訂正")
+
+
+def _string_names(src):
+    """コードの中の文字列リテラルに出てくる語を集める。**説明文は数えない**。
+
+    【なぜ説明文を外すか・2026-09-15】外さないと検査Aが自分で自分を無効にする。
+    説明文も文字列リテラルなので、「説明文に書いてある」ことが
+    「コードに実在する」の証拠になってしまい、嘘を1件も検出できない。
+    実際、わざと存在しない名前を説明文に入れても素通りした。
+    （長い説明文だけは「200字未満」という別の条件でたまたま除外されていて、
+      短い説明文の嘘だけが見逃されるという分かりにくい形になっていた）
+    """
+    out = set()
+    try:
+        tree = ast.parse(src)
+    except Exception:
+        return out
+    docs = set()
+    for n in ast.walk(tree):
+        if isinstance(n, (ast.Module, ast.ClassDef, ast.FunctionDef,
+                          ast.AsyncFunctionDef)):
+            b = getattr(n, "body", None)
+            if b and isinstance(b[0], ast.Expr) and isinstance(b[0].value, ast.Constant):
+                docs.add(id(b[0].value))
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Constant) and isinstance(n.value, str) \
+                and id(n) not in docs and len(n.value) < 200:
+            out.update(_WORD.findall(n.value))
+    return out
 
 
 def _all_names():
@@ -376,10 +407,8 @@ def _all_names():
                         names.update(_WORD.findall(
                             io.open(p, encoding="utf-8", errors="replace").read()))
                     elif f.endswith(".py"):
-                        with io.open(p, encoding="utf-8", errors="replace") as fh:
-                            for t in tokenize.generate_tokens(fh.readline):
-                                if t.type == tokenize.STRING and len(t.string) < 200:
-                                    names.update(_WORD.findall(t.string))
+                        names.update(_string_names(
+                            io.open(p, encoding="utf-8", errors="replace").read()))
                 except Exception:
                     pass
     # 実在するファイル名（`e_body_measure.py` のような引用のため）。
@@ -407,8 +436,12 @@ def check_unknown(entries=None):
     names = _all_names()
     hits = []
     for e in entries:
-        for ln_no, ln in enumerate((e.get("fulldoc") or "").splitlines(), 1):
-            if _HISTORY.search(ln):
+        lines = (e.get("fulldoc") or "").splitlines()
+        for ln_no, ln in enumerate(lines, 1):
+            # 履歴の言い回しは行をまたぐ（「`touched_name` を」で改行して次の行に
+            # 「一般化した」が来る）ので、前後1行まで見る。2026-09-15に3件誤検知した。
+            near = "".join(lines[max(0, ln_no - 2):ln_no + 1])
+            if _HISTORY.search(near):
                 continue        # 「もう無い」と書いてある行は履歴。腐りではない
             for tokn in re.findall(r"`([^`]+)`", ln):
                 if " " in tokn or "=" in tokn:
@@ -465,6 +498,10 @@ def check_commit(min_lines=10):
             if b and isinstance(b[0], ast.Expr) and isinstance(b[0].value, ast.Constant) \
                     and isinstance(b[0].value.value, str):
                 doc_lines.update(range(b[0].lineno, b[0].end_lineno + 1))
+        # 【数え方・2026-09-15】「説明を一切書かずにコードだけ変えたか」を見たい。
+        #   だから **# のコメントも「説明を書いた」に数える**（説明文と同じ扱い）。
+        #   コメントだけを直したコミットで誤発火したため（3度目の調整）。
+        #   逆に、コメントでも説明文でもない行が増減したぶんだけを「コードの変更」と数える。
         diff = _git(["diff", "--cached", "-U0", "--", rel])
         changed = 0
         touched_doc = False
@@ -473,14 +510,20 @@ def check_commit(min_lines=10):
             m = re.match(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@", ln)
             if m:
                 cur = int(m.group(1))
-            elif ln.startswith("+") and not ln.startswith("+++"):
-                if cur in doc_lines:
-                    touched_doc = True
-                else:
-                    changed += 1
-                cur += 1
+                continue
+            if ln.startswith("+") and not ln.startswith("+++"):
+                body, advance = ln[1:], True
             elif ln.startswith("-") and not ln.startswith("---"):
-                changed += 1      # 消えた行は今のファイルに無いので位置を進めない
+                body, advance = ln[1:], False   # 消えた行は今のファイルに無い
+            else:
+                continue
+            is_doc = body.lstrip().startswith("#") or (advance and cur in doc_lines)
+            if is_doc:
+                touched_doc = True
+            elif body.strip():
+                changed += 1
+            if advance:
+                cur += 1
         if changed >= min_lines and not touched_doc:
             out.append((rel, changed, doc_end))
     return out

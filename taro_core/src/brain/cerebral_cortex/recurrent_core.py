@@ -226,7 +226,8 @@ class TaroBrain(nn.Module):
     def token_probs(self, token_ids, hidden=None):
         """列の各トークンを「直前までからどれだけ予測できたか」を返す（2026-08-31・二語文）。
 
-        lexicon の統計的分節（自信度の谷で切る）へ渡す本物の自信度。
+        分節（Segmenter・temporal_lobe/segmentation.py）の統計的分節
+        （自信度の谷で切る）へ渡す本物の自信度。
         BOS から始め、位置iの確率 = p(token_i | BOS, token_0..i-1, 文脈hidden)。
         読み出し専用（no_grad）。token_ids が空なら空リスト。
         """

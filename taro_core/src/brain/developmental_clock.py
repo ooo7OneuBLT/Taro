@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""【転送のみ】このファイルの中身は development/developmental_clock.py へ移した（2026-08-30の整理）。
+"""【転送のみ】このファイルの中身は maturation/developmental_clock.py へ移した（2026-08-30の整理）。
 
 既存の `from developmental_clock import ...` を壊さないために、ここに転送だけを残している。
 新しく書くコードは移動先を直接 import すること。

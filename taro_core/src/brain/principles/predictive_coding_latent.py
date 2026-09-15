@@ -54,9 +54,10 @@ class PredictiveCodingLatent(nn.Module):
         hidden_after : GRUが今回の感覚を処理した"後"の状態 (posterior用)
         current_sensory: 今回の融合ベクトル（zの再構成目標、detach済み想定）
 
-        戻り値: (z, kl_loss)
+        戻り値: (z, kl_loss, recon_loss)  ← **3つ**返す
           z: その場で調整した後の潜在変数（勾配は事後netの重みに繋がる）
           kl_loss: 事前・事後のズレ（訓練の損失に加える）
+          recon_loss: zから今回の融合ベクトルを復元したときのズレ
         """
         prior_mean, prior_logvar = self.prior_net(hidden_before).chunk(2, dim=-1)
         post_mean, post_logvar = self.posterior_net(hidden_after).chunk(2, dim=-1)

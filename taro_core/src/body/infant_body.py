@@ -45,6 +45,9 @@ mimoGrowth の age=0 は「大きさは新生児だが四肢の比率が成人�
 注意：環境変数（`E_LEG_SCALE` 等）の読み取りは**目標フォルダ側の責務**。core は係数の既定値と
 変換ロジックだけを持つ（[[feedback-core-target-neutral-naming]]＝core に目標プレフィックスを
 書かない）。
+**ただしこのファイル自身が2箇所で破っている**（2026-09-15に発覚）：
+  `E_EYE_REST_V`（EYE_REST_VERTICAL_DEG）と `E_EYE_CENTERING`（EYE_CENTERING）。
+  実験ファイルから渡す経路が無いので、今のところOS環境変数でしか変えられない。
 """
 
 # 部位グループ -> 既定の係数。1.0 は「触らない」。
@@ -95,7 +98,10 @@ HEAD_ELONGATION = 1.16
 #   やること：Sun & Jensen 1994 の本文を入手して新生児の頭部質量比を確認する
 #     （やることリストに登録）。それまでは感度分析の対象（型B）として扱う。
 HEAD_MASS_FRACTION = 0.25   # [Tier2〜3・一次文献の裏取り未了]
-# 何ヶ月まで頭の質量を補正するか。首の筋力補正（4ヶ月で解除）と揃えてある[Tier3]。
+# 何ヶ月まで頭の質量を補正するか[Tier3]。
+# 注意：もとは「首の筋力補正（当時4ヶ月で解除）と揃えた」という理由だった。
+#   2026-07-28に首だけ18ヶ月へ延ばした（infant_neck.MATURE_AGE=18.0）ので、
+#   **今は揃っていない**。この4ヶ月という値は今のところ根拠を失っている。
 HEAD_MASS_UNTIL_MO = 4.0
 
 # 【2026-07-28】新生児向けの補正を月齢で**薄める**ための重み。
@@ -366,7 +372,8 @@ def apply_head_mass(model, age=0.0, fraction=None, verbose=True):
     「18ヶ月児と比べて発達の向きが逆転していないか」を見るために**18ヶ月の基準モデルを
     別に構築する**ので、月齢で止めないと**基準モデルの頭まで25%に書き換えてしまい、
     基準そのものが歪む**（2026-07-25、実測ログで発覚：18ヶ月モデルの頭 1.846kg が
-    0.865kg に書き換えられていた）。首の補正が4ヶ月で解除されるのと同じ形にしてある。
+    0.865kg に書き換えられていた）。首の補正と同じ形にしてある（ただし首の期限は2026-07-28に18ヶ月へ延び、
+    こちらは4ヶ月のまま＝期限は揃っていない）。
     注意：人間の頭の質量比は新生児25%→成人8%と月齢で下がるが、その中間の文献値を
     持っていないので**新生児期だけ合わせて以降は触らない**[Tier3・簡略化]。
 
@@ -814,7 +821,9 @@ def apply_runtime_corrections(model, data, age, neck=True, limbs=True, head_mass
     - **首の筋力**（`infant_neck`）：MIMoは gear を geom の体積から計算するため、
       頭が大きい新生児ほど首も強くなり**発達の向きが逆転**する（age=0で持ち上げ能力比
       4.21倍 > age=18ヶ月の3.00倍）。首がすわっていない（head lag）を再現するため
-      月齢に応じて下げる。注意目標比1.0・4ヶ月で解除は恣意的[Tier3]。
+      月齢に応じて下げる。注意いまの首の設定は目標比0.5・18ヶ月で解除
+      （infant_neck.TARGET_RATIO_AT_BIRTH=0.5・MATURE_AGE=18.0。2026-07-28の改訂）。
+      以前の「目標比1.0・4ヶ月」ではない[Tier2]。
     - **四肢の筋力**（`infant_limbs`）：同じ理由で四肢も発達の向きが逆転しているのを解消。
 
     注意：MIMo本体は書き換えない（Git管理外で再現性が失われるため）＝実行時に上書きする。
@@ -1125,7 +1134,8 @@ def apply_neck_tone(model, age=0.0, stiffness=None, target=None, joints=None,
 
     Args:
         model: MuJoCo のモデル
-        age: 体の月齢。TONE_UNTIL_MO を超えたら何もしない
+        age: 体の月齢。NECK_TONE_UNTIL_MO（18ヶ月）を超えたら何もしない
+            注意：四肢の TONE_UNTIL_MO（3ヶ月）ではない。首だけ期限が別
         stiffness: バネの強さ [N·m/rad]。None なら NECK_TONE_STIFFNESS
         target: 目標角 [度]。None なら NECK_TONE_TARGET
             注意：重力を織り込んだ実効値で、解剖学的な角度ではない（定数のコメント参照）
@@ -1172,7 +1182,9 @@ def apply_neck_tone(model, age=0.0, stiffness=None, target=None, joints=None,
         # 減衰は元の値と臨界減衰の大きい方（元より弱くはしない）
         model.dof_damping[dof] = max(float(model.dof_damping[dof]), c_crit)
         if data is not None:
-            # 初期姿勢もバネの釣り合い近くから始める（リセット直後の大移動を避ける）
+            # **初速**をゼロにする（リセット直後にバネで一気に動き出すのを防ぐ）。
+            # 注意：姿勢そのもの（data.qpos）は触っていない。上で書き換えているのは
+            #   model.qpos_spring＝バネの釣り合い位置であって、今の姿勢ではない。
             data.qvel[dof] = 0.0
         n += 1
     if verbose and n:

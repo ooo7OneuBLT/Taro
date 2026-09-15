@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""【転送のみ】このファイルの中身は basal_ganglia/basal_ganglia.py へ移した（2026-08-30の整理）。
+"""【転送のみ】このファイルの中身は subcortical_nuclei/basal_ganglia.py へ移した（2026-08-30の整理）。
 
 既存の `from basal_ganglia import ...` を壊さないために、ここに転送だけを残している。
 新しく書くコードは移動先を直接 import すること。

@@ -98,7 +98,12 @@ class Stomach:
         return 1.0 - (self.contents / self.capacity)
 
     def get_last_absorption(self):
-        """直前の1秒で吸収された量。胃→眠さの接続に使う。"""
+        """直前の1秒で吸収された量（グルコース）を返す。引数は無い。
+
+        いまの使い道は血管（blood_vessel.receive_glucose）＝胃→血糖値→空腹感。
+        注意：「胃→眠さ」の接続は**まだ無い**（adenosine.py 側に「B-4以降で
+        接続予定」と書いてある）。
+        """
         return self._last_absorption
 
     def grow(self):

@@ -194,7 +194,7 @@ def target_ratio_for_age(age, birth_ratio=TARGET_RATIO_AT_BIRTH,
     【2026-07-28 全面改訂】旧実装は settle_age(4ヶ月)で補正を打ち切っていたため、
     そこで比が 24.4 → 47.5 と跳んでいた（実測）。3区間に分けて連続にする：
 
-        0 〜 4ヶ月    birth_ratio(1.0) → control_ratio(1.5)      首がすわるまで
+        0 〜 4ヶ月    birth_ratio(0.5) → control_ratio(1.5)      首がすわるまで
         4 〜 18ヶ月   control_ratio(1.5) → natural_ratio        素のMIMoへ戻る
         18ヶ月〜      None（補正しない）                          素のMIMoそのまま
 

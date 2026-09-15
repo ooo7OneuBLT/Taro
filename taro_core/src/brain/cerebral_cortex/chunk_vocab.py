@@ -4,8 +4,8 @@
 （taro_core/src/senses/hearing.py の Vocabulary）と同じ流儀＝聞いて新しい
 塊が立てば増える。人は整理しない（断片も1つの単位として登録される）。
 
-塊＝タプル(int, int, ...)（音のIDの並び。Lexicon.segment_all/segment_end_prob
-が切り出した1単位そのもの）。id空間は音の名簿（Vocabulary）とは別。
+塊＝タプル(int, int, ...)（音のIDの並び。Segmenter.segment_all/segment_end_prob
+（temporal_lobe/segmentation.py）が切り出した1単位そのもの）。id空間は音の名簿（Vocabulary）とは別。
 """
 
 

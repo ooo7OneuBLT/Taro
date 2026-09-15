@@ -135,7 +135,7 @@ class SpatialPriorityMap:
             dt: 前回からの経過［秒］。
             goal: 上からの目的の地図（cell×cell）。None なら 0。
         Returns:
-            {"priority","winner_cell","winner_px","ior","switched"}
+            {"priority","winner_cell","winner_px","ior","acc_max","switched"}
         """
         sal = np.asarray(salience, dtype=np.float32)
         self._remap(shift_px)

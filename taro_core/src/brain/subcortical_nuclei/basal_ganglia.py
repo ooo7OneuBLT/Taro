@@ -37,7 +37,8 @@ class TaroLearner:
 
         input_tokens: list of int（親の発話のトークン列）
         body_state: 内部状態テンソル（モデルB用。NoneならモデルA互換）
-        戻り値: prediction_loss (float), prediction_probs (list of tensors)
+        戻り値: prediction_loss (torch.Tensor。update() で backward するため勾配を持つ),
+                prediction_probs (list of tensors)
         """
         if len(input_tokens) < 2:
             return 0.0, [], None
@@ -99,7 +100,8 @@ class TaroLearner:
         delta: float（ドーパミン＝報酬予測誤差）
         credits: log_probsと同じ長さのlist（各文字の目標語との一致度、[-1,1]程度）。
             Noneなら従来通り全文字に同じδを適用する
-        戻り値: policy_loss (float)
+        戻り値: policy_loss。ふつうは torch.Tensor（勾配を持つ）。
+                log_probs が空のときだけ Python の float 0.0 を返す
         """
         if len(log_probs) == 0:
             return 0.0

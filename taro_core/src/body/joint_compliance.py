@@ -411,8 +411,9 @@ def apply_joint_compliance(model, groups=None, joints=None, params=None, verbose
         joints: 個別の関節名（":" より後ろ、例 "right_shoulder_ad_ab"）のリスト。
             groups と併用可（和集合として扱う）。
         params: パラメータの上書き。
-            フラットな辞書（キーが width_frac/d0/d_width/midpoint/power のいずれか
-              のみ）なら、対象関節すべてへの共通上書き。
+            フラットな辞書（キーが width_frac/d0/d_width/midpoint/power/margin_frac
+              のいずれかのみ）なら、対象関節すべてへの共通上書き。
+              （有効なキーは DEFAULT_JOINT_COMPLIANCE のキーと同じ＝_PARAM_KEYS）
             関節のbase名をキーにした辞書（例 {"shoulder_ad_ab": {"d0": 0.3}}）なら、
               その関節だけへの個別上書き。
             None なら DEFAULT_JOINT_COMPLIANCE（＋JOINT_COMPLIANCE_OVERRIDES）

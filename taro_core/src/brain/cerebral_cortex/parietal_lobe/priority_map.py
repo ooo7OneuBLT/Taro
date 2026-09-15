@@ -6,7 +6,7 @@ F/docs/二語文/仕様_見る側の設計_段構成_2026-09-09.md 後半A（段
 Bisley & Goldberg（LIP＝下からの目立ち＋上からの目的）、Kidd 2012（驚きは
 逆U字）、Itti-Koch（復帰抑制IOR）[Tier2]。
 
-【既定不変】全部の重みが0・switch_delay_s=0・hysteresis=0のときは
+【既定不変】w_size=1.0・**それ以外の重みが0**・switch_delay_s=0・hysteresis=0のときは
 「候補（misses==0）の中で area が最大のもの」を選ぶだけになる
 （`priority_i = w_size・area_i` のみが残るため）。中央56px内への絞りは
 呼び出し側（object_files.py の`_process_attention`、既存843-845行）が

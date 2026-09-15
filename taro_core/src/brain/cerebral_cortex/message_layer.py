@@ -40,8 +40,10 @@ import numpy as np
 class MessageLayer:
     STATES = ("here", "gone")   # 状態の箱の値。None（注意中の物なし）は数えない
 
-    # 【Tier3・2026-09-07・M6b】vis_consの移動平均の速さ。lexicon.py contrastの
-    #   eta_pull(0.05)より少し速いが桁は同じ（文献根拠なし・恣意的、仕様書指定値）。
+    # 【Tier3・2026-09-07・M6b】vis_consの移動平均の速さ。
+    #   当時あった lexicon.py contrast の eta_pull(0.05) より少し速いが桁は同じ、
+    #   という決め方をした（文献根拠なし・恣意的、仕様書指定値）。
+    #   注意：lexicon.py は2026-09-15に削除済み。この0.1という値の由来の記録としてだけ残す。
     VIS_ALPHA = 0.1
     # 【Tier3・2026-09-07・M6b追記】全塊共通の平均鍵(global_mean)の移動平均の
     #   速さ。VIS_ALPHA(0.1)より遅くした＝個々の塊のvis_consより緩やかに動く
@@ -137,7 +139,8 @@ class MessageLayer:
 
         初回観測は「現在のvis_mean」がまだ無い（コサインを取る相手が無い）ので
         vis_meanをkeyそのもので初期化し、vis_consは1.0（自分自身と完全一致）
-        にする（lexicon.py contrastモードのproto初期化と同じ考え方）。
+        にする（当時の lexicon.py contrastモードのproto初期化と同じ考え方。
+        その lexicon.py は2026-09-15に削除済みで、ここは考え方の出典としてだけ書いている）。
         """
         vm = self.vis_mean.get(cid)
         if vm is None:
