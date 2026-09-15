@@ -30,7 +30,7 @@ if _SCENE_TOOLS not in sys.path:
 import numpy as np                                          # noqa: E402
 import scene_io                                               # noqa: E402
 
-SCENE_NAME = "座位_12ヶ月_2おもちゃ_F1-3c_1個提示_fovea_2026-08-23"
+SCENE_NAME = "run/scenes/_旧/座位_12ヶ月_2おもちゃ_F1-3c_1個提示_fovea_2026-08-23.json"
 OUT_DIR = os.path.join(_R, "F", "logs", "12ヶ月シーン準備_2026-08-23")
 N_STEPS = 60  # 「数十ステップ」
 

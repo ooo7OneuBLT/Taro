@@ -405,23 +405,44 @@ def list_scenes(include_old=True):
 
 
 def load(name):
-    """シーンを読む。名前でもファイルパスでもよい。"""
-    path = name if os.path.isfile(str(name)) else scene_path(name)
+    """シーンを読む。名前でもファイルパスでもよい。
+
+    【2026-09-16・名前で引けるのは現役だけにした】
+    以前は `scene_path()` 経由で `_旧/`（書庫）にも自動で落ちていた。そのため
+    「使い終わった」と仕分けた場面が、名前を書くだけで**黙って走った**。
+    昔の実験ファイルをコピーすると、書庫の場面のまま走行が始まる。
+
+    ⇒ 名前で選べるのは `run/scenes/` 直下だけ。書庫のものを使うときは
+      パスで書く（`run/scenes/_旧/<名前>.json`）。パスなら実験ファイルにも
+      走行の記録にも `_旧/` の字が残るので、後から見て分かる。
+
+    見つからないときは**現役の全部**を並べる（選択肢を示すのはここの仕事）。
+    2026-09-12 に「400個以上を並べると画面が埋まる」という理由で候補5件に
+    絞ったが、現役を16本まで減らしたので全部出せるようになった。
+    """
+    path = str(name)
     if not os.path.isfile(path):
-        # 【2026-09-12】以前はここで使えるシーン全部（400個以上・40KB）を並べていた。
-        #   そのため例外メッセージ1件でログも画面も埋まり、何が起きたか読めなかった。
-        #   ⇒ **名前が似ているものだけ**を出す。全一覧が要るときは一覧の出し方を案内する。
+        cand = os.path.join(_ROOT, str(name))      # 根からの相対パスも受ける
+        path = cand if os.path.isfile(cand) else os.path.join(SCENE_DIR, f"{name}.json")
+    if not os.path.isfile(path):
+        現役 = list_scenes(include_old=False)
+        書庫 = os.path.join(OLD_DIR, f"{name}.json")
+        if os.path.isfile(書庫):
+            raise FileNotFoundError(
+                f"場面「{name}」は**書庫**にあります（使い終わった置き場）。\n"
+                f"  名前では選べません。使うなら実験ファイルにパスで書いてください：\n"
+                f'    "scene": "run/scenes/_旧/{name}.json"\n'
+                f"  普段の選択肢（{len(現役)}本）から選ぶなら下のどれかです：\n  "
+                + "\n  ".join("  " + s for s in 現役))
         import difflib
-        all_names = list_scenes()
-        near = difflib.get_close_matches(str(name), all_names, n=5, cutoff=0.4)
-        if not near:
-            key = str(name)[:6]
-            near = [s for s in all_names if key and key in s][:5]
-        hint = ("\n  名前が近いもの: " + "、".join(near)) if near else ""
+        near = difflib.get_close_matches(str(name), list_scenes(), n=3, cutoff=0.4)
+        hint = ("\n  書庫まで含めて名前が近いもの: " + "、".join(near)) if near else ""
         raise FileNotFoundError(
-            f"シーンが見つからない: {path}{hint}\n"
-            f"  シーンは全部で {len(all_names)} 個あります。"
-            f"一覧は run/scenes/ を見てください")
+            f"場面が見つからない: {name}{hint}\n"
+            f"  普段の選択肢は次の {len(現役)} 本です：\n  "
+            + "\n  ".join("  " + s for s in 現役)
+            + "\n  ここに無いものは書庫にあります。パスで書けば使えます："
+              '  "scene": "run/scenes/_旧/<名前>.json"')
     with open(path, encoding="utf-8") as fp:
         raw = json.load(fp)
     scene = _merge(default_scene(), raw)

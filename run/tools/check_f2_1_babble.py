@@ -50,7 +50,7 @@ print(" F2-1 喃語モード：短時間走行(300step=sim30秒)での配線・�
 print("=" * 78)
 
 cfg = Config.from_spec({
-    "scene": "座位_6ヶ月_2おもちゃ_F1-3c_1個提示_2026-08-19",
+    "scene": "run/scenes/_旧/座位_6ヶ月_2おもちゃ_F1-3c_1個提示_2026-08-19.json",
     "taro": {
         "actuation": "muscle", "age_months": 6.0,
         "orienting_reflex": True, "hearing": True,

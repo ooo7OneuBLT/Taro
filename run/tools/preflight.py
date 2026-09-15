@@ -146,20 +146,41 @@ def check(spec, spec_path=""):
     if model and not os.path.exists(_abs(str(model))):
         errors.append("出発モデルが無い: %s" % model)
     scene = spec.get("scene")
-    if scene:
+    # 【2026-09-16】場面は名前でもパスでも書ける（書庫のものはパスでしか選べない）。
+    #   パスで書いてあるなら「名前が現役にあるか」の検査は当てはまらないので飛ばす。
+    #   わざわざ `_旧/` と打った＝選んだ意思が実験ファイルに残っている、と見なす。
+    scene_は_パス = bool(scene) and (os.path.isfile(str(scene))
+                                     or os.path.isfile(_abs(str(scene))))
+    if scene and not scene_は_パス:
         cur = _abs(os.path.join("run/scenes", str(scene) + ".json"))
         old_p = _abs(os.path.join("run/scenes/_旧", str(scene) + ".json"))
         if not os.path.exists(cur) and not os.path.exists(old_p):
-            warns.append("run/scenes に %s.json が見当たらない（別の探し方をしているなら無視してよい）"
-                         % scene)
+            # 【2026-09-16・知らせるだけ→止めるに変えた】以前は「別の探し方をして
+            #   いるなら無視してよい」という注意だった。パスで書いた場合は上の
+            #   `scene_は_パス` で既に抜けているので、ここへ来るのは**現役にも書庫にも
+            #   無い名前**＝ただの間違い。走らせても load で落ちるので先に止める。
+            #   選択肢を並べるのはここの仕事（16本なら全部出せる）。
+            try:
+                import scene_io as _sio
+                現役 = _sio.list_scenes(include_old=False)
+            except Exception:       # noqa: BLE001
+                現役 = sorted(f[:-5] for f in os.listdir(_abs("run/scenes"))
+                             if f.endswith(".json"))
+            errors.append("場面 %s がありません。選べるのは次の %d 本です：\n      %s"
+                          % (scene, len(現役), "\n      ".join(現役)))
         else:
-            # 【2026-09-14・ステップ2a】`_旧/` ＝ 使い終わった場面の置き場。
-            #   読めるので止めないが、選び直したのかは分からないので知らせる。
+            # 【2026-09-16・止めるように変えた】`_旧/` ＝ 使い終わった場面の置き場。
+            #   以前は「読めるので止めない」＝知らせるだけだった。だが書庫は
+            #   **名前では選べない**ことにした（scene_io.load の説明を参照）ので、
+            #   名前で指した時点で走らせても load で落ちる。ここで先に止める。
+            #   書庫のものを使うこと自体は禁止しない。パスで書けば通る：
+            #     "scene": "run/scenes/_旧/<名前>.json"
+            #   パスなら実験ファイルにも走行の記録にも `_旧/` の字が残る。
             if not os.path.exists(cur):
-                m = "場面 %s は run/scenes/_旧/ にある（使い終わった置き場）" % scene
-                if not str(spec.get("note") or "").strip():
-                    m += "。note が空＝わざと選んだ理由が残らない"
-                warns.append(m)
+                errors.append(
+                    "場面 %s は**書庫**（run/scenes/_旧/）にあります。名前では選べません。\n"
+                    "      使うなら実験ファイルにパスで書いてください：\n"
+                    '        "scene": "run/scenes/_旧/%s.json"' % (scene, scene))
             # 【なぜ現役の場面でも知らせるか】F2-129（本番）は、改善後の
             #   `_背景あり_2026-09-10` があるのに元の版で走った。元の版は
             #   直近で使われていて `_旧/` には無い＝上の判定では鳴らない。
@@ -181,7 +202,17 @@ def check(spec, spec_path=""):
     #   **知らせるだけの注意は2回とも無視された。**
     #   CLAUDE.md「同じミスが2回起きたら文書ではなく機械で防ぐ」に従い、止める。
     #   わざと壁なしにするとき（昔の走行と条件を揃える等）は --skip-preflight。
-    if scene:
+    #
+    # 【2026-09-16・適用範囲を目標Fだけに絞った】入れた翌日に実測したところ、
+    #   現役16本のうち**15本で鳴った**。壁の決定は目標F（語）の視覚環境の話で、
+    #   目標E（リーチング・新生児・座位保持）の場面は元から壁が無い。
+    #   このままでは目標Eの実験が全部止まる＝誤発火で、`--skip-preflight` で
+    #   逃げる癖がつく（項17「エラーが出ずに動いたを信じない」の裏返しで、
+    #   **鳴りっぱなしの警報は読まれなくなる**）。
+    #   実験ファイルの置き場（F/experiments/…）で目標を判定する。
+    _目標F = str(spec_path).replace("\\", "/").startswith(("F/", "./F/")) or \
+             "/F/experiments/" in str(spec_path).replace("\\", "/")
+    if scene and _目標F:
         # 【2026-09-16に直した誤発火】以前はここで**場面ファイルの生JSONだけ**を
         #   読んでいた。そのため実験ファイルの `world.backdrop` で壁を足した走行
         #   （＝3層目という公認のやり方）でも「壁がありません」で止まった。
