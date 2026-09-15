@@ -64,7 +64,13 @@ import tokenize
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                     os.pardir, os.pardir))
-SCAN_DIRS = ["taro_core/src"]
+# 走査先＝**太郎の本体**。道具（測定器・ビューア・場面ツール）は入れない。
+# 【なぜ分けるか・2026-09-15】run/ は246本あるが、うち98本は道具
+# （run/tools 64・viewer_tools 32・scene_tools 3）で、太郎の構造ではなく調べる側。
+# それらは doc/道具索引.md（452本の浅い索引）が受け持つ。
+# ここに載せるのは「実験を回すと実際に通るもの」＝46本（run直下9・world 9・plugins 28）。
+SCAN_DIRS = ["taro_core/src", "run"]
+SCAN_EXCLUDE = ("run/tools", "run/viewer_tools", "run/scene_tools", "run/scenes")
 SKIP = ("__pycache__", ".venv", "MIMo", ".git", "node_modules")
 
 OUT_STRUCT = "doc/太郎の構造.md"
@@ -75,6 +81,8 @@ MARK_Z = "<!-- 手書きここまで -->"
 
 # 部位の日本語名と並び順（感覚 → 脳 → からだ の流れ）
 REGIONS = [
+    ("run",                                      "走らせる仕組み（入口・設定・学習ループ）"),
+    ("run/world",                                "世界（環境・親・おもちゃ）"),
     ("senses",                                   "感覚（目・耳・触覚）"),
     ("brain/cerebral_cortex",                    "大脳皮質"),
     ("brain/cerebral_cortex/parietal_lobe",      "大脳皮質 / 頭頂葉"),
@@ -96,6 +104,8 @@ REGIONS = [
     ("brain",                                    "脳の土台（1歩を回す）"),
     ("body",                                     "からだ"),
     ("wrapper",                                  "外枠"),
+    ("run/plugins",                              "測る道具（実験ファイルで付け外しする）"),
+    ("run/plugins/common",                       "測る道具 / 共通"),
 ]
 REGION_NAME = dict(REGIONS)
 REGION_ORDER = {k: i for i, (k, _) in enumerate(REGIONS)}
@@ -108,14 +118,21 @@ def _iter_py():
             continue
         for r, dirs, files in os.walk(base):
             dirs[:] = [x for x in dirs if x not in SKIP]
+            rel_dir = os.path.relpath(r, ROOT).replace("\\", "/")
+            if any(rel_dir == x or rel_dir.startswith(x + "/") for x in SCAN_EXCLUDE):
+                continue
             for f in sorted(files):
                 if f.endswith(".py") and f != "__init__.py":
                     yield os.path.relpath(os.path.join(r, f), ROOT).replace("\\", "/")
 
 
 def _region(rel):
-    d = os.path.dirname(rel[len("taro_core/src/"):])
-    return d if d else "(直下)"
+    """そのファイルがどの部位に属するかを返す（REGIONS のキー）。"""
+    if rel.startswith("taro_core/src/"):
+        d = os.path.dirname(rel[len("taro_core/src/"):])
+        return d if d else "(直下)"
+    d = os.path.dirname(rel)
+    return d if d else rel
 
 
 def _first(text):
