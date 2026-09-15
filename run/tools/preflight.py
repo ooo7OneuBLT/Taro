@@ -197,6 +197,164 @@ def _索引の遅れを知らせる():
         pass      # 点検の付け足しで走行を止めない
 
 
+def _置き場の乱れを知らせる():
+    """doc/ 直下に日付つきのファイルがあれば知らせる（2026-09-15・ユーザー合意）。
+
+    【なぜ、2026-09-15】doc/ 直下35本が「育て続ける参照」と「その時のスナップショット」の
+      混在になっていた。実測すると**名前の日付の有無で完全に分かれていた**
+      （日付なし20本＝逸脱リスト・落とし穴・道具一覧…／日付あり11本＝設計・議事録・
+      実装確認・状況整理）。例外は1本も無い。
+      同じ日 Claude は「呼称表」を 現在地.md（＝冒頭に「今の目標・直近の結果・次の一手だけ」と
+      書いてあるファイル）へ書き込む違反をした。**ファイル名と中身の不一致はその場では
+      気づけない**ので機械にする。規則の本文は 研究の原則.md §A。
+
+    【なぜ pre-commit ではなくここか】doc/ の .md は **35本すべて git 追跡外**
+      （公開リポジトリのため .gitignore で除外）。commit を見る検査は永久に発火しない。
+      走行前点検なら、実験を回すたびに必ず通る（索引の遅れを知らせるのと同じ流儀）。
+
+    実験は止めない（文書の置き場で走行を止めるのは本末転倒。上の索引と同じ）。
+    """
+    try:
+        import re as _re
+        d = _abs("doc")
+        if not os.path.isdir(d):
+            return
+        pat = _re.compile(r"_\d{4}-\d{2}-\d{2}\.md$")
+        乱れ = sorted(f for f in os.listdir(d)
+                      if pat.search(f) and os.path.isfile(os.path.join(d, f)))
+        if 乱れ:
+            print("  [注意] doc/ 直下に日付つきのファイルが %d 本あります"
+                  "（doc/ 直下は日付なしの『育て続ける参照』だけ。研究の原則.md §A）："
+                  % len(乱れ))
+            for f in 乱れ[:6]:
+                種類 = f.split("_")[0]
+                print("           %s → doc/%s/ へ" % (f, 種類))
+            if len(乱れ) > 6:
+                print("           ほか %d 本" % (len(乱れ) - 6))
+    except Exception:
+        pass      # 点検の付け足しで走行を止めない
+
+
+# 【2026-09-15・ルールの棚卸し】把握していなかったルール約20項目のうち、
+#   **判定式に翻訳できたもの**をここに置く。翻訳できなかったものは
+#   研究の原則.md §C・§D に文章のまま残る。
+#   置き場が preflight なのは、doc/ の .md が全て git 追跡外で
+#   pre-commit が永久に発火しないため（2026-09-15 に一度間違えた）。
+
+# 更新が止まったら知らせる記録（実測2026-09-15：問題解決の記録34日・
+#   発達依存関係マップ33日・注意すべき機能リスト30日が止まっていた）。
+_見張る記録 = {
+    "doc/問題解決の記録.md": "考え方が変わった／前提が崩れたときに書く",
+    "doc/注意すべき機能リスト.md": "効果が確認できない機能を残したときに書く",
+    "doc/発達依存関係マップ.md": "発達の前提条件が変わったときに書く",
+    "doc/道具一覧.md": "道具を作ったら1項目足す",
+    "doc/本能リスト.md": "本能・部品・反射を足したら書く",
+}
+_止まった日数 = 30
+
+
+def _記録の遅れを知らせる():
+    """1か月以上更新が止まっている記録を知らせる（2026-09-15・研究の原則.md §A）。
+
+    【なぜ】「何をしたら何を更新するか」の表（doc/記録の更新チェックリスト.md）はあるのに、
+      実測で3本が1か月放置されていた。「次から書く」では守られないので機械にする。
+      実験は止めない（文書の遅れで走行を止めるのは本末転倒）。
+    """
+    try:
+        import datetime
+        今日 = datetime.date.today()
+        遅れ = []
+        for f, 用途 in _見張る記録.items():
+            p = _abs(f)
+            if not os.path.exists(p):
+                continue
+            d = datetime.date.fromtimestamp(os.path.getmtime(p))
+            n = (今日 - d).days
+            if n >= _止まった日数:
+                遅れ.append((n, f, 用途))
+        for n, f, 用途 in sorted(遅れ, reverse=True)[:3]:
+            print("  [注意] %s が %d日 更新されていません（%s）" % (f, n, 用途))
+    except Exception:
+        pass
+
+
+def _コミットの溜まりを知らせる():
+    """未コミットが溜まっていたら知らせる（2026-09-15・研究の原則.md §E）。
+
+    【なぜ】「作業の区切りでコミットする（バグ修正1件・新規スクリプト1本・記録の更新ごと）」
+      というルールがあるが、2026-09-15 の実測で19件溜まっていた。
+      溜まると「どの変更がどの作業か」が後から分からなくなる。
+    """
+    try:
+        import subprocess
+        r = subprocess.run(["git", "status", "--short"], cwd=_abs(""),
+                           capture_output=True, text=True, encoding="utf-8", timeout=10)
+        n = len([l for l in (r.stdout or "").splitlines() if l.strip()])
+        if n >= 10:
+            print("  [注意] 未コミットが %d 件あります"
+                  "（作業の区切りでコミットする。研究の原則.md §E）" % n)
+    except Exception:
+        pass
+
+
+def _目視の欠けを知らせる(spec):
+    """学習の走行に view_video が無ければ知らせる（2026-09-15・研究の原則.md §C）。
+
+    【なぜ】「数字だけで判断せず必ず目視する」というルールがあり、ユーザーも
+      「学習前に必ず視界動画で環境を目視したい」と明言している。
+      実測（2026-09-15）では学習の実験803本中 view_video 付きは109本＝**14%**。
+      環境の取り違え（壁の有無・姿勢・物の配置）は動画を見れば1秒で分かる。
+    """
+    try:
+        if str((spec.get("run") or {}).get("type", "measure")).lower() != "train":
+            return
+        # 有効判定は本体（run/main.py:273）と同じ「値が真なら有効」に揃える。
+        #   {} は本体でも無効扱いなので、ここでも無効と見なす。
+        _pg = spec.get("plugins") or {}
+        if not _pg.get("view_video"):
+            print("  [注意] 学習の走行ですが view_video が付いていません"
+                  "（数字だけで判断せず目視する。研究の原則.md §C）")
+    except Exception:
+        pass
+
+
+def _引用の指す先が消えていないか():
+    """引用.md が名指しする実装ファイルが実在するかを調べる（2026-09-15）。
+
+    【なぜ】引用.md の基準は「**研究の中身が実装に入っているものだけ**」（引用.md 冒頭）。
+      実装が移動・削除されると、引用は「入っていないもの」を指したまま残る。
+      実測：2026-09-14 に場面を `_旧/` へ退避、2026-09-15 に `lexicon.py` を削除した結果、
+      引用.md の2箇所が存在しないパスを指していた。どちらも**その場では気づかなかった**。
+
+    ワイルドカード（*）を含む書き方と、リポジトリ外のパスは対象外。
+    実験は止めない。
+    """
+    try:
+        import re as _re
+        p = _abs("引用.md")
+        if not os.path.exists(p):
+            return
+        s = io.open(p, encoding="utf-8").read() if "io" in dir() else open(p, encoding="utf-8").read()
+        消えた = []
+        for m in _re.finditer(r"`([^`]+\.(?:py|json|xml))`", s):
+            q = m.group(1).replace(chr(92), "")
+            if "*" not in q and "/" in q and not os.path.exists(_abs(q)):
+                消えた.append(q)
+        消えた = sorted(set(消えた))
+        # 目標C（2026-07 で終了）の旧パスは既知の積み残しなので数だけ出す
+        現役 = [q for q in 消えた if not q.startswith("C/")]
+        if 現役:
+            print("  [注意] 引用.md が存在しないファイルを指しています"
+                  "（引用は『実装に入っているものだけ』。引用.md 冒頭）：")
+            for q in 現役[:4]:
+                print("           %s" % q)
+        旧 = len(消えた) - len(現役)
+        if 旧 and not 現役:
+            pass      # 目標Cの積み残しだけなら黙る（既知・2026-07で終了した目標）
+    except Exception:
+        pass
+
+
 def run_check(spec, spec_path="", skip=False):
     """点検して表示する。ERROR があれば False を返す（走らせない）。"""
     if skip:
@@ -206,6 +364,11 @@ def run_check(spec, spec_path="", skip=False):
     for w in warns:
         print("  [注意] %s" % w)
     _索引の遅れを知らせる()
+    _置き場の乱れを知らせる()
+    _記録の遅れを知らせる()
+    _コミットの溜まりを知らせる()
+    _目視の欠けを知らせる(spec)
+    _引用の指す先が消えていないか()
     if not errors:
         print("走行前点検：問題なし（%d 件の注意）" % len(warns))
         return True
