@@ -5,7 +5,7 @@
 `run/plugins/` に置かれていたのは置き場の誤り。
 
 新しく書くコードは `from run.world.scene import ...` を直接使うこと。
-設計：doc/設計_太郎をCoreで完結させる_2026-09-13.md（段D）
+設計：doc/設計/設計_太郎をCoreで完結させる_2026-09-13.md（段D）
 """
 import os as _os
 import sys as _sys

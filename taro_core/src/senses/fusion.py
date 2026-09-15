@@ -1,7 +1,7 @@
 """感覚融合（fusion）— 各感覚エンコーダの出力を1本のベクトルに統合する、太郎の"本物の融合層"。
 
 従来 `C/scripts/run_c_metrics_ac_lr.py` に `MinimalFusion` として埋まっていたものを taro_core へ
-抽出（移行記録：doc/移行記録_taro_core化_2026-07-17.md の残課題「MinimalFusion抽出」の解消）。
+抽出（移行記録：doc/移行記録/移行記録_taro_core化_2026-07-17.md の残課題「MinimalFusion抽出」の解消）。
 
 各感覚を64次元に通訳し（insula=内受容 / proprio=固有感覚 / vestibular=前庭覚 / touch=触覚 /
 vision=視覚）、連結して layer_norm する。触覚・視覚は**フラグで後付け**でき、両方OFFなら従来の

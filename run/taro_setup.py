@@ -492,7 +492,7 @@ def _setup_produce(taro, cfg, env, *, verbose=True):
             "  \"lexicon\"   … 語彙の表を逆引きして言う。"
             "2026-09-02より前の経路。昔の走行を再現したいときだけ\n"
             "実験ファイルの produce 欄に word_choice を足してください。"
-            "経緯は doc/状況整理_語彙の仕組みをどうするか_2026-09-14.md §11。")
+            "経緯は doc/状況整理/状況整理_語彙の仕組みをどうするか_2026-09-14.md §11。")
     if str(pd["word_choice"]) not in ("gru_hippo", "lexicon"):
         raise ValueError(
             "produce.word_choice は 'gru_hippo' か 'lexicon' のどちらかです"

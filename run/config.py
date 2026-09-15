@@ -481,7 +481,7 @@ class Config:
                     f"  使えるもの: {sorted(d)}")
         # 【2026-09-15】意味の表（lexicon.proto）の削除で意味を失った設定。
         #   黙って無視すると「設定したのに効かない」事故になるので名指しで止める。
-        #   経緯は doc/状況整理_語彙の仕組みをどうするか_2026-09-14.md §11。
+        #   経緯は doc/状況整理/状況整理_語彙の仕組みをどうするか_2026-09-14.md §11。
         _retired = {
             "lexicon_mode": "語ごとの見えの平均（意味の表）の学習則",
             "lexicon_eta_pull": "意味の表の引き寄せの学習率",
@@ -495,7 +495,7 @@ class Config:
             _lines += ["  %s … %s" % (k, _retired[k]) for k in _found]
             _lines += ["いずれも「意味の表」を育てるための設定で、表ごと削除しました。",
                        "これらの行を消してください（消しても走行の中身は変わりません）。",
-                       "経緯は doc/状況整理_語彙の仕組みをどうするか_2026-09-14.md §11。"]
+                       "経緯は doc/状況整理/状況整理_語彙の仕組みをどうするか_2026-09-14.md §11。"]
             raise ValueError(chr(10).join(_lines))
         for key, (dflt, _doc, _envname) in TARO_DEFAULTS.items():
             setattr(self, key, self._taro.get(key, dflt))

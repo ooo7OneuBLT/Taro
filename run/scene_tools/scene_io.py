@@ -536,7 +536,7 @@ def build(scene, orient=None, vor=True, seed=0, verbose=False, actuation_model=N
             発動させてテクスチャ（顔・服 約977MB）を単色化する（2026-08-13）。
         （2026-09-13にあった visual_attention 引数は段Aで撤去した。視覚と注意の
             持ち主は環境ではなく太郎＝run/taro_setup.py の build_visual_attention。
-            設計：doc/設計_太郎をCoreで完結させる_2026-09-13.md）
+            設計：doc/設計/設計_太郎をCoreで完結させる_2026-09-13.md）
         actuation_model: 筋の駆動モデル。None なら MuscleModel（従来どおり）。
             【なぜ渡せるようにしたか、2026-07-30】学習ループ
             （`e_growth_train.py`）は既定で SpringDamperModel を使うのに、

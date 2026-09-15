@@ -1219,7 +1219,7 @@ class ToySupineEnv(SupineMimoEnv):
         #     ＝語と物が結びつかない劣化版だった。
         #   正しい持ち主は**太郎**（`run/taro_setup.py: build_visual_attention`）で、
         #   呼ぶのは `run/trainer.py`（元と同じ位置＝プラグインが呼んでいた場所）。
-        #   設計：doc/設計_太郎をCoreで完結させる_2026-09-13.md
+        #   設計：doc/設計/設計_太郎をCoreで完結させる_2026-09-13.md
 
     # ------------------------------------------------------------------
     def _make_visually_plain(self, spec):
