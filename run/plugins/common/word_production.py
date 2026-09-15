@@ -33,6 +33,18 @@
   (target_word)・確信度(sim)・実際に出た音(generated_word)・一致度(reward)・
   計画長(plan_length)・帳面から引けたモーラ数(known_moras)・目標語と完全一致したか
   (exact_match、設計第3部④「言えた率」)。
+【2026-09-15追加・正解の列】太郎の発話に依存しない事実を3種類。
+  親の的      親がいま差し出している物（ParentLabeling._target。試行の頭で選ばれる）
+  親の状態    そのときの親の状態（_PICK/_SHAKE など。試行中かどうかの手がかり）
+  視線の先    その場面の全スロットのうち、視線のずれが最小の物＝太郎が向いている物
+  視線角_最小 そのずれ[度]（0が正面。大きいほど見ていない）
+  視線角_親の的 親が差し出している物への視線のずれ[度]
+  注意：スロットの数は場面で決まる（2択も8択もある）。親のスロット表から引いている
+  **既存の `toy` 欄とは別物**。`toy` は `word_to_target[target_word]` ＝太郎が選んだ
+  語からの逆引きで、太郎の発話に依存する（「正しい語を言えたか」には使えない）。
+  注意：「親の的」は親の意図、「視線の先」は太郎の向き。**同じではない**。
+  注意：視線角は角度だけの幾何判定で、遮蔽（体や柵で隠れる）は見ていない。
+
   実験ファイルでの書き方:
     "plugins": {"word_production": {"events_out": "E/logs/.../発話イベント.csv"}}
   events_out を省略した場合はCSVを書かない（メモリ上の集計だけ返す）。
@@ -65,12 +77,37 @@ class WordProduction(Plugin):
         if not ev:
             return
         toy = self.word_to_target.get(ev["target_word"])
+        # 【2026-09-15】**太郎の発話に依存しない正解**を3つ足す。
+        #   上の `toy` は word_to_target[target_word] ＝太郎が選んだ語からの逆引きなので、
+        #   「正しい語を言えたか」の検証には使えない（循環する）。
+        #   ここで読むのは環境の側の事実だけ。太郎も環境も変えない（読むだけの道具）。
+        _u = getattr(ctx.env, "unwrapped", ctx.env)
+        _pl = getattr(_u, "_parent_labeling", None)
+        親の的 = getattr(_pl, "_target", None) or ""
+        親の状態 = str(getattr(_pl, "_state", "") or "")
+        # スロットの数は場面で決まる（2択のことも8択のこともある）。決め打ちしない。
+        視線角 = {}
+        try:
+            for _slot, _info in (_pl._slots(_u) or {}).items():
+                _body = _info.get("body")
+                if _body:
+                    視線角[_slot] = round(float(_u._gaze_angle_to(_body)), 2)
+        except Exception:
+            視線角 = {}
+        _cand = sorted((v, k) for k, v in 視線角.items())
+        視線の先 = _cand[0][1] if _cand else ""
+        視線角_最小 = _cand[0][0] if _cand else ""
+        視線角_親の的 = 視線角.get(親の的, "")
         reward = ev.get("reward")
         plan_length = ev.get("plan_length")
         known_moras = ev.get("known_moras")
         self.rows.append({
             "step": ctx.step, "sim_sec": round(ctx.sim_sec, 3),
             "toy": toy if toy is not None else "",
+            # 【2026-09-15】太郎の発話に依存しない正解（上の toy は依存している）
+            "親の的": 親の的, "親の状態": 親の状態,
+            "視線の先": 視線の先, "視線角_最小": 視線角_最小,
+            "視線角_親の的": 視線角_親の的,
             "target_word": ev["target_word"], "sim": round(ev["sim"], 4),
             "generated_word": ev["generated_word"],
             # 【段階2・2026-09-02】語の選択の内訳（gru_hippo方式のときだけ入る）
@@ -135,7 +172,10 @@ class WordProduction(Plugin):
                            "known_moras", "exact_match",
                            "choice_gru", "choice_hippo", "chosen",
                            "gate", "gone", "attended_id", "here", "unit",
-                           "noun", "pred"])
+                           "noun", "pred",
+                           # 【2026-09-15】末尾に追加（既存の列順は変えない）
+                           "親の的", "親の状態", "視線の先", "視線角_最小",
+                           "視線角_親の的"])
                 for r in self.rows:
                     w.writerow([r["step"], r["sim_sec"], r["toy"], r["target_word"],
                                r["sim"], r["generated_word"], r["reward"],
@@ -143,7 +183,10 @@ class WordProduction(Plugin):
                                r.get("choice_gru"), r.get("choice_hippo"), r.get("chosen"),
                                r.get("gate", "ok"), r.get("gone", 0), r.get("attended_id", ""),
                                r.get("here", 0), r.get("unit", "mora"),
-                               r.get("noun", ""), r.get("pred", "")])
+                               r.get("noun", ""), r.get("pred", ""),
+                               r.get("親の的", ""), r.get("親の状態", ""),
+                               r.get("視線の先", ""), r.get("視線角_最小", ""),
+                               r.get("視線角_親の的", "")])
         exact = [r for r in self.rows if r["exact_match"]]
         return {
             "発話回数": len(self.rows),

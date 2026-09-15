@@ -12,6 +12,8 @@
 
 【出す指標】
   label_count_toy1 / label_count_toy2 : 親がその物に対して発話した累計回数
+  label_count_合計 / label_count_スロット : 全スロットぶん（8択の場面では
+    親が toy6〜toy11 を出すので、toy1/toy2 だけでは0に見える。2026-09-15追加）
   assoc_sep : 連合の分離度（2語平均）。
     cos(assoc(語), 正解物の特徴EMA) − cos(assoc(語), 不正解物の特徴EMA)
     正なら「その語を聞いたときに連合が思い浮かべる見え方」が正しい物へ寄っている。
@@ -136,4 +138,11 @@ class WordLearning(Plugin):
         return {"発話イベント数": len(self.rows),
                 "label_count_toy1": self.label_count["toy1"],
                 "label_count_toy2": self.label_count["toy2"],
+                # 【2026-09-15】toy3以降も数えていたのに報告していなかった。
+                #   8択の場面（実物8択など）では親が toy6〜toy11 を出すので、
+                #   toy1/toy2 だけ見ると「親が一度も喋っていない」に見える。
+                #   run/main.py の走行中止の判定がこれを見ているため、
+                #   8択の短い走行が誤って殺されていた（2026-09-15に実際に踏んだ）。
+                "label_count_合計": sum(self.label_count.values()),
+                "label_count_スロット": dict(self.label_count),
                 "assoc_sep": self._assoc_sep(ctx)}

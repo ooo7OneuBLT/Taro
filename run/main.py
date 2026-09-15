@@ -499,12 +499,22 @@ def _check_learning_happened(spec, out):
         return
     if float(pl.get("respond_prob", 1.0)) <= 0.0:
         return
+    # 【2026-09-15】toy1/toy2 だけを足していたため、8択の場面（親が toy6〜toy11 を
+    #   出す）で「親が一度も喋っていない」と誤判定し、走行を殺していた。
+    #   word_learning は全スロットを数えているので、その合計を見る。
+    #   古いログとの互換のため、合計が無ければ従来どおり toy1/toy2 を足す。
     n = 0
-    for k in ("label_count_toy1", "label_count_toy2"):
+    if rep.get("label_count_合計") is not None:
         try:
-            n += int(rep.get(k) or 0)
+            n = int(rep.get("label_count_合計") or 0)
         except (TypeError, ValueError):
-            pass
+            n = 0
+    else:
+        for k in ("label_count_toy1", "label_count_toy2"):
+            try:
+                n += int(rep.get(k) or 0)
+            except (TypeError, ValueError):
+                pass
     if n > 0:
         return
     lines = ["", "=" * 74,
