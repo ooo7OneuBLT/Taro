@@ -27,7 +27,10 @@
 
 【腐りを見つける検査（完全ではない。--unknown と --stale は別のものを見つける）】
     --unknown  説明文の中の名前が、コードに実在しないもの      （消えた名前を捕まえる）
-    --stale    説明文を書いた後にコードが変わったファイル      （中身のズレを捕まえる）
+    --stale    説明文を書いた後にコードが変わったファイル      （**手で叩くときだけ**）
+               2026-09-15に走行前点検から外した。厳しくすると直したばかりの
+               ファイルが鳴り、緩くするとコミットの98%が「説明を触った」判定で
+               永久に黙る。git の履歴に「説明が正しいか」は入っていない。
     --commit   **判断材料を並べて、コミットを止める**（pre-commit が呼ぶ）
     実測（2026-09-15）：Aが9本・Bが31本で、両方に出るのは4本だけ。
     そして読んで見つけた58件のうち、**機械が自力で名指しできたのは4件（7%）**。
@@ -599,8 +602,47 @@ def check_commit(min_lines=10):
     return out
 
 
+def _last_doc_commit(rel, limit=25):
+    """そのファイルの説明文かコメントを最後に触ったコミットの日付を返す。
+
+    【なぜモジュール冒頭だけでは駄目か・2026-09-15】はじめは冒頭の説明文の行だけを
+    git log -L で見ていた。すると**今日97ファイルを読み直して中身を直したのに、
+    冒頭を触らなかったファイルが「古い」と出続けた**（28本のうち約20本がそれ）。
+    知りたいのは「コードを直したあと、説明を一度でも直したか」なので、
+    どの階層の説明文でも、`#` のコメントでも「直した」と数える。
+    """
+    for h in _git(["log", "--format=%H", "-n", str(limit), "--", rel]).splitlines():
+        diff = _git(["show", h, "-U0", "--format=", "--", rel])
+        for ln in diff.splitlines():
+            if not (ln.startswith("+") or ln.startswith("-")) \
+                    or ln.startswith(("+++", "---")):
+                continue
+            body = ln[1:].lstrip()
+            if _looks_like_doc(body):
+                return _git(["log", "-1", "--format=%ad", "--date=short", h])
+    return ""
+
+
+_JA = re.compile(r"[ぁ-んァ-ヶ一-龠]")
+_CODEISH = re.compile(r"[=(){}\[\]]|^(def|class|return|import|from|if|for|while)\b")
+
+
+def _looks_like_doc(body):
+    """その行が「説明」か（コメント・説明文の一部）をおおまかに判定する。
+
+    【なぜ日本語を見るか・2026-09-15】`#` でも `\"\"\"` でもない、
+    **説明文の途中の行**を見落としていた（説明文を直したのに古いと出続けた）。
+    このコードの説明は日本語で書かれているので、
+    「日本語を含み、コードらしい記号を含まない行」を説明とみなす。
+    おおまかな判定であって厳密ではない。検査Bは目安なので、これで足りる。
+    """
+    if body.startswith("#") or '"""' in body or "'''" in body:
+        return True
+    return bool(_JA.search(body)) and not _CODEISH.search(body)
+
+
 def check_stale():
-    """検査B：説明文を最後に書いた後に、そのファイルのコードが変わったもの。"""
+    """検査B：説明文もコメントも直さないまま、コードだけが変わったファイル。"""
     rows = []
     for rel in _iter_py():
         p = os.path.join(ROOT, rel)
@@ -610,9 +652,7 @@ def check_stale():
             continue
         if not (tree.body and ast.get_docstring(tree)):
             continue
-        dd = _git(["log", "-1", "--format=%ad", "--date=short",
-                   "-L", "1,%d:%s" % (tree.body[0].end_lineno, rel)]).splitlines()
-        dd = dd[0] if dd else ""
+        dd = _last_doc_commit(rel)
         fd = _git(["log", "-1", "--format=%ad", "--date=short", "--", rel])
         if not dd or not fd or fd <= dd:
             continue

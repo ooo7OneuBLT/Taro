@@ -3839,11 +3839,13 @@
    "_git",
    "review_commit",
    "check_commit",
+   "_last_doc_commit",
+   "_looks_like_doc",
    "check_stale",
    "_write",
    "main"
   ],
-  "lines": 715,
+  "lines": 755,
   "goal": "",
   "last_commit": "2026-09-15"
  },
@@ -3899,7 +3901,7 @@
    "run_check",
    "main"
   ],
-  "lines": 496,
+  "lines": 501,
   "goal": "",
   "last_commit": "2026-09-15"
  },
