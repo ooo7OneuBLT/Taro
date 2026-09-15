@@ -28,13 +28,16 @@
 【腐りを見つける検査（完全ではない。--unknown と --stale は別のものを見つける）】
     --unknown  説明文の中の名前が、コードに実在しないもの      （消えた名前を捕まえる）
     --stale    説明文を書いた後にコードが変わったファイル      （中身のズレを捕まえる）
-    --commit   コードを変えたのに説明文を1行も書かなかったコミット（pre-commit が呼ぶ）
+    --commit   **判断材料を並べて、コミットを止める**（pre-commit が呼ぶ）
     実測（2026-09-15）：Aが9本・Bが31本で、両方に出るのは4本だけ。
+    そして読んで見つけた58件のうち、**機械が自力で名指しできたのは4件（7%）**。
     どちらでも見つからない第3類（最初から間違い・コードも不変）は、読むしかない。
-    --commit だけが**直せる瞬間に止める**。あとの2つは後追いで知らせるだけ。
-    数えるのはモジュール・クラス・関数のどの階層の説明文でもよい
-    （最初はモジュール冒頭だけを見ていて、関数の説明文を64個足しただけの
-      コミットで誤発火した。2026-09-15に直した）。
+
+    だから --commit は**数えるのをやめた**。`.py` を触ったら毎回、その説明文と
+    変更箇所（前後8行のコードつき）を並べて出し、コミットを止める。判定は読む人がする。
+    機械には「この日本語がこのコードと合っているか」は判定できない
+    （できるなら説明文を機械が書ける）。詳しくは review_commit() の説明。
+    A・Bは後追いで知らせるだけ。**直せる瞬間に止めるのは --commit だけ**。
 
 呼称は doc/脳の地図.md §0 が唯一の決まり。ここでもその名前を使う。
 
@@ -462,13 +465,80 @@ def _git(args):
         return ""
 
 
-def check_commit(min_lines=10):
-    """コミット直前の検査：本体を大きく変えたのに、冒頭の説明文を1行も触っていないもの。
+REVIEW_DIRS = ("taro_core/src", "run")
+REVIEW_CONTEXT = 8        # 変更箇所の前後に何行のコードを添えるか
 
-    【なぜこれが一番効くか・2026-09-15】検査A・検査Bは「あとから」腐りを見つける。
-    これは**直せる瞬間に**止める。コードを直している本人が、その場で説明文も直せる。
-    しかも .py は git が全部追跡しているので、.md と違って pre-commit がちゃんと効く
-    （.md は .gitignore の *.md 一括除外で新規が追跡外になり、フックが発火しなかった）。
+
+def review_commit():
+    """コミット直前に、**判断材料を並べて止める**。文字列を返す（空なら止めない）。
+
+    【なぜ「数える」のをやめたか・2026-09-15】
+    はじめは「コードを10行以上変えたのに説明文を1行も書いていないか」を数えていた。
+    これは形式しか見ていない。実際、`retina.py` の事故はこの数え方では捕まらない：
+      あのコミットが変えたのは**コメント3行だけ**（コード変更0行）で、
+      「truncate=2.0 にした」と書きながら、すぐ下のコード行には truncate が無かった。
+      問題の行は変わっていないので **diff にすら写らない**。
+
+    なので数えるのをやめて、**変更箇所の前後のコードごと並べて見せる**ことにした。
+    上の例なら、足したコメントのすぐ下に `gaussian_filter(a, sigma_px)` が並ぶので
+    一目で食い違いが分かる。判定は人（読む側）がする。機械には日本語とコードが
+    合っているかを判定できない。
+
+    【なぜ全ファイルを見せるか】ファイル数で絞ろうとしたが、実測すると
+    `.py` を触ったコミット181件のうち **62%が2本以下**、20本超えは6.1%しかない。
+    まれな大量変更のために設計を歪めない。長くなったら理由を書いて --no-verify で通す。
+
+    【止める理由】表示だけだとコミットが通って流れて消える。止めれば必ず目に入る。
+    `.py` は git が全部追跡しているので、.md と違ってここでの検査はちゃんと効く。
+    """
+    files = [f for f in _git(["diff", "--cached", "--name-only", "--diff-filter=ACM",
+                              "--"] + list(REVIEW_DIRS)).splitlines()
+             if f.endswith(".py")]
+    if not files:
+        return ""
+    L = ["", "=" * 70,
+         " 説明文が今のコードと合っているか見てください（%d ファイル）" % len(files),
+         "=" * 70]
+    for rel in files:
+        L.append("")
+        L.append("─" * 70)
+        L.append("  %s" % rel)
+        p = os.path.join(ROOT, rel)
+        doc = ""
+        if os.path.exists(p):
+            try:
+                doc = ast.get_docstring(ast.parse(
+                    io.open(p, encoding="utf-8", errors="replace").read())) or ""
+            except Exception:
+                doc = ""
+        if doc:
+            d = doc.splitlines()
+            L.append("  ── このファイルの説明 " + "─" * 44)
+            for ln in d[:12]:
+                L.append("    " + ln)
+            if len(d) > 12:
+                L.append("    …（あと %d 行。全文は "
+                         "python run/tools/index_core.py --full %s）"
+                         % (len(d) - 12, os.path.basename(rel)))
+        L.append("  ── 今回の変更（前後%d行つき） %s" % (REVIEW_CONTEXT, "─" * 36))
+        diff = _git(["diff", "--cached", "-U%d" % REVIEW_CONTEXT, "--", rel])
+        for ln in diff.splitlines():
+            if ln.startswith(("diff --git", "index ", "--- ", "+++ ")):
+                continue
+            L.append("    " + ln)
+    L += ["", "=" * 70,
+          "  合っていれば     git commit --no-verify（理由を1行考えてから）",
+          "  違っていれば     説明文を直してからコミットし直す",
+          "=" * 70, ""]
+    return "\n".join(L)
+
+
+def check_commit(min_lines=10):
+    """【旧】コードを大きく変えたのに説明文を1行も触っていないものを数える。
+
+    2026-09-15に review_commit() へ置き換えた。形式（行数）しか見ておらず、
+    retina.py の事故（コメントだけ足して嘘を書く）を原理的に捕まえられなかったため。
+    比較や過去の再現のために残してある。pre-commit はもう呼んでいない。
     """
     staged = _git(["diff", "--cached", "--name-only", "--diff-filter=M",
                    "--", "taro_core/src", "run"]).splitlines()
@@ -578,14 +648,10 @@ def main():
     a = ap.parse_args()
 
     if a.commit:
-        rows = check_commit()
-        if not rows:
+        text = review_commit()
+        if not text:
             return 0
-        print("  本体を変えたのに、冒頭の説明文を1行も触っていないファイルがあります：")
-        for rel, n, doc_end in rows:
-            print("    %s（%d行変更・説明文は1〜%d行目）" % (rel, n, doc_end))
-        print("  説明文が今のコードと合っているか見てください。")
-        print("  合っているなら、そのまま通して構いません（git commit --no-verify）。")
+        print(text)
         return 1
 
     if a.unknown:

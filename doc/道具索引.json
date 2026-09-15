@@ -3837,12 +3837,13 @@
    "_all_names",
    "check_unknown",
    "_git",
+   "review_commit",
    "check_commit",
    "check_stale",
    "_write",
    "main"
   ],
-  "lines": 652,
+  "lines": 715,
   "goal": "",
   "last_commit": "2026-09-15"
  },
@@ -4554,7 +4555,7 @@
   ],
   "lines": 266,
   "goal": "",
-  "last_commit": "2026-07-31"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "taro_core/src/body/internal_state.py",
@@ -4581,7 +4582,7 @@
   ],
   "lines": 462,
   "goal": "",
-  "last_commit": "2026-08-17"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "taro_core/src/body/smooth_actuation.py",
@@ -4601,7 +4602,7 @@
   ],
   "lines": 112,
   "goal": "",
-  "last_commit": "2026-07-17"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "taro_core/src/body/vocal_tract.py",
@@ -4619,7 +4620,7 @@
   "defs": [],
   "lines": 12,
   "goal": "",
-  "last_commit": "2026-08-30"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "taro_core/src/brain/brain_tick.py",
@@ -4667,7 +4668,7 @@
   ],
   "lines": 425,
   "goal": "",
-  "last_commit": "2026-09-10"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "taro_core/src/brain/brainstem/vor.py",
@@ -4685,7 +4686,7 @@
   "defs": [],
   "lines": 12,
   "goal": "",
-  "last_commit": "2026-08-30"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "taro_core/src/brain/cerebellum_lobe/motor.py",
@@ -4713,7 +4714,7 @@
   "defs": [],
   "lines": 12,
   "goal": "",
-  "last_commit": "2026-08-30"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "taro_core/src/brain/cerebral_cortex/chunk_vocab.py",
@@ -4877,7 +4878,7 @@
   "defs": [],
   "lines": 12,
   "goal": "",
-  "last_commit": "2026-08-30"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "taro_core/src/brain/developmental_schedule.py",
@@ -4885,7 +4886,7 @@
   "defs": [],
   "lines": 12,
   "goal": "",
-  "last_commit": "2026-08-30"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "taro_core/src/brain/dopamine.py",
@@ -4926,7 +4927,7 @@
   ],
   "lines": 138,
   "goal": "",
-  "last_commit": "2026-08-30"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "taro_core/src/brain/drives/learning_progress.py",
@@ -4938,7 +4939,7 @@
   ],
   "lines": 283,
   "goal": "",
-  "last_commit": "2026-08-30"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "taro_core/src/brain/goal_babbling/reach_goal_head.py",
@@ -5120,7 +5121,7 @@
   ],
   "lines": 363,
   "goal": "",
-  "last_commit": "2026-08-30"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "taro_core/src/brain/motor_cortex.py",
@@ -5192,7 +5193,7 @@
   ],
   "lines": 130,
   "goal": "",
-  "last_commit": "2026-08-30"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "taro_core/src/brain/sensorimotor_brain.py",
@@ -5279,7 +5280,7 @@
   ],
   "lines": 139,
   "goal": "",
-  "last_commit": "2026-08-30"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "taro_core/src/brain/subcortical_nuclei/speech_gate.py",

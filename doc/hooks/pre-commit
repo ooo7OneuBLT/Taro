@@ -128,8 +128,14 @@ if [ -n "$touched_py" ]; then
   "$pyx" run/tools/index_tools.py >/dev/null 2>&1
   "$pyx" run/tools/index_core.py  >/dev/null 2>&1
   git add doc/道具索引.md doc/道具索引.json           doc/太郎の構造.md doc/部位の入出力一覧.md >/dev/null 2>&1 || true
+  # 【2026-09-15】数える方式（説明文を1行も触っていないか）から、
+  #   **判断材料を並べて止める**方式に替えた。理由は index_core.review_commit の説明。
+  #   report() は head -5 で切ってしまうので、ここは直接 echo する。
   m=$("$pyx" run/tools/index_core.py --commit 2>/dev/null)
-  [ -n "$m" ] && report "本体を変えたのに説明文が置き去り" "$m"
+  if [ -n "$m" ]; then
+    echo "$m"
+    hit=1
+  fi
 fi
 
 if [ "$hit" = "1" ]; then
@@ -153,9 +159,11 @@ if [ "$hit" = "1" ]; then
   echo "     探す：python run/tools/index_tools.py --find <語> <語>"
   echo "     対処：既にあるなら、それを使う。無いなら下の --no-verify で通す"
   echo ""
-  echo "  【8】本体を変えたのに、冒頭の説明文を触っていない"
-  echo "     説明文はコードの隣にあっても腐ります（実測：本体143本中31本＝22%）。"
-  echo "     対処：説明文が今のコードと合っているか見る。合っていれば --no-verify で通す"
+  echo "  【8】説明文が今のコードと合っているかの確認（.py を触ると毎回出ます）"
+  echo "     上に「説明文」と「変更箇所＋前後のコード」を並べてあります。"
+  echo "     機械には日本語とコードが合っているかを判定できないので、見るのは人の仕事です。"
+  echo "     実測：読んで58件の食い違いが見つかったが、機械が名指しできたのは4件だけ。"
+  echo "     対処：合っていれば --no-verify で通す。違っていれば説明文を直す"
   echo ""
   echo "  どれも誤検知なら → git commit --no-verify で通す（理由を1行考えてから）"
   echo ""
