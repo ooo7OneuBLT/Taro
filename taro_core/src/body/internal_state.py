@@ -180,12 +180,15 @@ class InternalState:
         return not self.crying
 
     def is_sleeping(self):
+        """太郎が今、睡眠状態にあるかどうかを返す。引数は無く、返り値は sleeping の真偽値。"""
         return self.sleeping
 
     def is_drowsy(self):
+        """太郎が今、うとうとした状態（寝入りかけ）にあるかどうかを返す。引数は無く、返り値は drowsy の真偽値。"""
         return self.drowsy
 
     def is_crying(self):
+        """太郎が今、泣いている状態かどうかを返す。引数は無く、返り値は crying の真偽値。"""
         return self.crying
 
     def get_state_vector(self):

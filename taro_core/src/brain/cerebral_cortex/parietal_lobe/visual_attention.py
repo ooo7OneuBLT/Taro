@@ -408,6 +408,8 @@ class VisualAttention:
         acc = getattr(self._spri, "acc", None)
 
         def at(cx, cy, tag):
+            """_log_goal_terms の中だけで使われるローカル関数。升目座標(cx, cy)を0〜cell-1にクリップし、その升のgoal_map・salience・ior・（あれば）accの値を、tag付きのキー（g_at_タグ／sal_at_タグ／ior_at_タグ／acc_at_タグ）としてonset_extra辞書へ書き込む。accが無ければacc_at_タグは空文字にする。戻り値は無い。
+            """
             c = int(min(max(cx, 0), cell - 1))
             r = int(min(max(cy, 0), cell - 1))
             onset_extra["g_at_" + tag] = round(float(goal_map[r, c]), 4)

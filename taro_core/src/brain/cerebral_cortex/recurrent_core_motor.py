@@ -130,17 +130,21 @@ class TaroBrainWithMotor(TaroBrain):
     # チェックポイント側はload_matchingでの読み替えが別途必要）。
     @property
     def motor_gru(self):
+        """self.motor_cortex.motor_gru（運動用GRU本体）をそのまま返す転送用プロパティ。引数は無い。"""
         return self.motor_cortex.motor_gru
 
     @property
     def pc_latent(self):
+        """self.motor_cortex.pc_latent（潜在変数の推論モジュール）をそのまま返す転送用プロパティ。引数は無い。"""
         return self.motor_cortex.pc_latent
 
     @property
     def motor_head(self):
+        """self.motor_cortex.motor_head（潜在変数から関節指令を計算する層）をそのまま返す転送用プロパティ。引数は無い。"""
         return self.motor_cortex.motor_head
 
     def init_motor_hidden(self):
+        """運動用GRUの初期隠れ状態を、形状 (num_layers, 1, hidden_dim) のゼロテンソルとして作って返す。引数は無い（self のみ）。"""
         return torch.zeros(self.num_layers, 1, self.hidden_dim)
 
     def step_motor(self, sensory_vec, hidden, current_sensory_target=None,

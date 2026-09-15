@@ -24,6 +24,7 @@ class ChunkVocab:
 
     @property
     def size(self):
+        """現在登録されている塊・特殊トークンの総数（次に割り当てるid）を返す。引数は無い（self のみ）。"""
         return self._next_id
 
     def add_special(self, name):
@@ -72,6 +73,8 @@ class ChunkVocab:
         }
 
     def load_state_dict(self, d):
+        """state_dict形式の辞書 d を受け取り、chunk2idx・idx2chunk・specials・_next_id を復元する。返り値は無く、自身の状態を書き換える。
+        """
         self.chunk2idx = {}
         self.idx2chunk = {0: "<PAD>", 1: "<BOS>", 2: "<EOS>"}
         for k, v in d.get("chunk2idx", []):

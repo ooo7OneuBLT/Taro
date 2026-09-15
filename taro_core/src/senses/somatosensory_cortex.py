@@ -462,6 +462,7 @@ class SomatosensoryCortex(nn.Module):
 #     部位ごとに `nn.Linear(点数×3, dim)` を作る作りで、体を育てると
 #     **静かに別の部位を読む**（落とし穴 項86）。呼び出し側は build_touch_map へ。
 def build_sensor_layout(model, touch):
+    """呼び出されると常に NotImplementedError を送出する。model と touch を引数に取るが内部では使わない。返り値は無い。"""
     raise NotImplementedError(
         "build_sensor_layout は 2026-07-31 に廃止。build_touch_map(model, data, touch) を使う。\n"
         "  理由：部位ごとの層がセンサ点数に依存していて、体を育てると\n"

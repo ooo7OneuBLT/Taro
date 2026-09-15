@@ -29,6 +29,7 @@ class ProprioceptionEncoder(nn.Module):
         self.encoder = nn.Linear(input_dim, embedding_dim)
 
     def forward(self, observation):
+        """observation（固有感覚の生の数値ベクトル）を1層のLinearに通し、embedding_dim次元のベクトルを返す。"""
         return self.encoder(observation)
 
 
@@ -43,6 +44,7 @@ class VestibularEncoder(nn.Module):
         self.encoder = nn.Linear(input_dim, embedding_dim)
 
     def forward(self, vestibular):
+        """vestibular（前庭覚の生の数値ベクトル）を1層のLinearに通し、embedding_dim次元のベクトルを返す。"""
         return self.encoder(vestibular)
 
 
@@ -64,4 +66,5 @@ class TouchEncoder(nn.Module):
         )
 
     def forward(self, touch):
+        """touch（触覚の生の数値ベクトル）を Linear→ReLU→Linear の2層に通し、embedding_dim次元のベクトルを返す。"""
         return self.encoder(touch)

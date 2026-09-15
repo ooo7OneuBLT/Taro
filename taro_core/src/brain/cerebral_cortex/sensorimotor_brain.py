@@ -58,6 +58,7 @@ class SensorimotorBrain(nn.Module):
         self.motor_head = nn.Linear(hidden_dim, n_actuators)
 
     def init_hidden(self):
+        """隠れ状態の初期値として、形状 (hidden_dim,) のゼロテンソルを返す。引数は無い（self のみ）。"""
         return torch.zeros(self.hidden_dim)
 
     def step(self, sensory_vec, hidden):

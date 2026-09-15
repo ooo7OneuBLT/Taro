@@ -3841,9 +3841,9 @@
    "_write",
    "main"
   ],
-  "lines": 586,
+  "lines": 609,
   "goal": "",
-  "last_commit": ""
+  "last_commit": "2026-09-15"
  },
  {
   "path": "run/tools/index_tools.py",
@@ -3897,7 +3897,7 @@
    "run_check",
    "main"
   ],
-  "lines": 492,
+  "lines": 496,
   "goal": "",
   "last_commit": "2026-09-15"
  },
@@ -4561,7 +4561,7 @@
   "defs": [
    "InternalState"
   ],
-  "lines": 194,
+  "lines": 197,
   "goal": "",
   "last_commit": "2026-07-17"
  },
@@ -4608,7 +4608,7 @@
   "defs": [
    "VocalTract"
   ],
-  "lines": 304,
+  "lines": 305,
   "goal": "",
   "last_commit": "2026-09-05"
  },
@@ -4629,7 +4629,7 @@
    "BrainTickState",
    "TaroBrainTick"
   ],
-  "lines": 2015,
+  "lines": 2017,
   "goal": "",
   "last_commit": "2026-09-15"
  },
@@ -4649,7 +4649,7 @@
   "defs": [
    "LocusCoeruleus"
   ],
-  "lines": 194,
+  "lines": 195,
   "goal": "",
   "last_commit": "2026-09-15"
  },
@@ -4674,7 +4674,7 @@
   "defs": [
    "VOR"
   ],
-  "lines": 287,
+  "lines": 289,
   "goal": "",
   "last_commit": "2026-09-15"
  },
@@ -4720,7 +4720,7 @@
   "defs": [
    "ChunkVocab"
   ],
-  "lines": 88,
+  "lines": 91,
   "goal": "",
   "last_commit": "2026-09-07"
  },
@@ -4751,7 +4751,7 @@
    "MessageLayer",
    "_cosine"
   ],
-  "lines": 311,
+  "lines": 315,
   "goal": "",
   "last_commit": "2026-09-07"
  },
@@ -4762,7 +4762,7 @@
    "ObjectFile",
    "ObjectFileSystem"
   ],
-  "lines": 711,
+  "lines": 714,
   "goal": "",
   "last_commit": "2026-09-10"
  },
@@ -4772,7 +4772,7 @@
   "defs": [
    "PriorityMap"
   ],
-  "lines": 187,
+  "lines": 189,
   "goal": "",
   "last_commit": "2026-09-09"
  },
@@ -4793,7 +4793,7 @@
    "_abs_path",
    "VisualAttention"
   ],
-  "lines": 988,
+  "lines": 990,
   "goal": "",
   "last_commit": "2026-09-15"
  },
@@ -4804,7 +4804,7 @@
    "Vocabulary",
    "TaroBrain"
   ],
-  "lines": 594,
+  "lines": 603,
   "goal": "",
   "last_commit": "2026-09-07"
  },
@@ -4814,7 +4814,7 @@
   "defs": [
    "TaroBrainWithMotor"
   ],
-  "lines": 461,
+  "lines": 465,
   "goal": "",
   "last_commit": "2026-08-30"
  },
@@ -4824,7 +4824,7 @@
   "defs": [
    "SensorimotorBrain"
   ],
-  "lines": 85,
+  "lines": 86,
   "goal": "",
   "last_commit": "2026-08-30"
  },
@@ -4989,7 +4989,7 @@
   "defs": [
    "LanguageHippocampus"
   ],
-  "lines": 197,
+  "lines": 199,
   "goal": "",
   "last_commit": "2026-09-07"
  },
@@ -5007,7 +5007,7 @@
   "defs": [
    "BrocasArea"
   ],
-  "lines": 100,
+  "lines": 105,
   "goal": "",
   "last_commit": "2026-08-27"
  },
@@ -5057,7 +5057,7 @@
   "defs": [
    "EfferenceCopy"
   ],
-  "lines": 119,
+  "lines": 121,
   "goal": "",
   "last_commit": "2026-09-15"
  },
@@ -5070,7 +5070,7 @@
    "_qposadr_of",
    "OrientingReflexV2"
   ],
-  "lines": 1866,
+  "lines": 1870,
   "goal": "",
   "last_commit": "2026-09-15"
  },
@@ -5080,7 +5080,7 @@
   "defs": [
    "OrientingReflex"
   ],
-  "lines": 147,
+  "lines": 149,
   "goal": "",
   "last_commit": "2026-09-14"
  },
@@ -5135,7 +5135,7 @@
   "defs": [
    "Dopamine"
   ],
-  "lines": 27,
+  "lines": 28,
   "goal": "",
   "last_commit": "2026-08-30"
  },
@@ -5224,7 +5224,7 @@
    "write_joint_command",
    "read_joint_command"
   ],
-  "lines": 369,
+  "lines": 373,
   "goal": "",
   "last_commit": "2026-09-15"
  },
@@ -5286,7 +5286,7 @@
   "defs": [
    "SpeechGate"
   ],
-  "lines": 116,
+  "lines": 121,
   "goal": "",
   "last_commit": "2026-09-05"
  },
@@ -5329,7 +5329,7 @@
    "to_tensor",
    "MinimalFusion"
   ],
-  "lines": 103,
+  "lines": 107,
   "goal": "",
   "last_commit": "2026-09-15"
  },
@@ -5343,7 +5343,7 @@
    "Vocabulary",
    "Hearing"
   ],
-  "lines": 130,
+  "lines": 133,
   "goal": "",
   "last_commit": "2026-09-06"
  },
@@ -5373,7 +5373,7 @@
    "segment_at_points",
    "_detect_mobilesam"
   ],
-  "lines": 563,
+  "lines": 565,
   "goal": "",
   "last_commit": "2026-09-15"
  },
@@ -5384,7 +5384,7 @@
    "read",
    "OtolithOrgans"
   ],
-  "lines": 144,
+  "lines": 145,
   "goal": "",
   "last_commit": "2026-07-31"
  },
@@ -5418,7 +5418,7 @@
    "read",
    "SemicircularCanals"
   ],
-  "lines": 124,
+  "lines": 125,
   "goal": "",
   "last_commit": "2026-07-31"
  },
@@ -5430,7 +5430,7 @@
    "VestibularEncoder",
    "TouchEncoder"
   ],
-  "lines": 68,
+  "lines": 71,
   "goal": "",
   "last_commit": "2026-07-17"
  },
@@ -5446,7 +5446,7 @@
    "SomatosensoryCortex",
    "build_sensor_layout"
   ],
-  "lines": 469,
+  "lines": 470,
   "goal": "",
   "last_commit": "2026-08-11"
  },
@@ -5456,7 +5456,7 @@
   "defs": [
    "TouchAdaptation"
   ],
-  "lines": 182,
+  "lines": 183,
   "goal": "",
   "last_commit": "2026-08-13"
  },
@@ -5472,7 +5472,7 @@
    "DINOv2VisionBackend",
    "UntrainedViTVisionBackend"
   ],
-  "lines": 297,
+  "lines": 304,
   "goal": "",
   "last_commit": "2026-08-30"
  },
@@ -5482,7 +5482,7 @@
   "defs": [
    "VisionEncoder"
   ],
-  "lines": 68,
+  "lines": 70,
   "goal": "",
   "last_commit": "2026-07-31"
  },
@@ -5492,7 +5492,7 @@
   "defs": [
    "HybridEnv"
   ],
-  "lines": 181,
+  "lines": 184,
   "goal": "",
   "last_commit": "2026-07-31"
  }

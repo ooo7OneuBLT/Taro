@@ -80,6 +80,8 @@ class BrainClock:
         self.step = 0
 
     def set(self, *, step, dt):
+        """太郎の時計を進める。キーワード引数 step は現在のステップ番号、dt は1ステップあたりの秒数。self.step を step に、self.sim_sec を step×dt に置き換える。返り値は無い。
+        """
         self.step = step
         self.sim_sec = step * dt
 

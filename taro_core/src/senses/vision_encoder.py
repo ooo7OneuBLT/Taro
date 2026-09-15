@@ -61,6 +61,8 @@ class VisionEncoder(nn.Module):
         return self.per_eye_fc(x).squeeze(0)
 
     def forward(self, eye_left, eye_right):
+        """eye_left, eye_right をそれぞれ_encode_one_eyeでエンコードして連結し、fuse層に通してembedding_dim次元のベクトルを返す。
+        """
         left_vec = self._encode_one_eye(eye_left)
         right_vec = self._encode_one_eye(eye_right)
         combined = torch.cat([left_vec, right_vec], dim=-1)

@@ -108,6 +108,7 @@ class SemicircularCanals:
         self.sensed = np.zeros(self.n_axis, dtype=float)     # 最後の出力
 
     def reset(self):
+        """baseline と sensed を両方ゼロベクトルに戻す。引数・返り値ともに無い。"""
         self.baseline[:] = 0.0
         self.sensed[:] = 0.0
 

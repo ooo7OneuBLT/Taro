@@ -175,6 +175,8 @@ class LanguageHippocampus:
         }
 
     def load_state_dict(self, d):
+        """state_dict() が返した形の辞書 d を受け取り、capacity・decay・replay_passes・recent_ratio・sleep_lr・unit と episodes（key_visはndarrayに戻す）を自分の属性へ書き戻す。d にキーが無い項目は今の値のまま変えない。返り値は無い。
+        """
         self.capacity = int(d.get("capacity", self.capacity))
         self.decay_rate = float(d.get("decay", self.decay_rate))
         self.replay_passes = int(d.get("replay_passes", self.replay_passes))

@@ -81,9 +81,12 @@ class BrocasArea:
         self.structure = len(self.motor_buffer)
 
     def has_next(self):
+        """音韻バッファに未取り出しの項目が残っているかを返す。current_indexがstructure（計画の長さ）未満ならTrue。引数は無い。"""
         return self.current_index < self.structure
 
     def next_motor(self):
+        """音韻バッファの現在位置の項目（motor・known・targetを持つ辞書）を返し、current_indexを1つ進める。取り出す項目が無い（has_next()がFalse）場合はNoneを返す。引数は無い。
+        """
         if not self.has_next():
             return None
         item = self.motor_buffer[self.current_index]
@@ -91,9 +94,11 @@ class BrocasArea:
         return item
 
     def get_plan_length(self):
+        """現在の発話計画に入っている項目数（structure）を返す。引数は無い。"""
         return self.structure
 
     def reset(self):
+        """音韻バッファ・structure・current_indexをすべて空/0に戻す。引数・戻り値は無い。"""
         self.motor_buffer = []
         self.structure = 0
         self.current_index = 0

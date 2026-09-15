@@ -50,6 +50,8 @@ class PriorityMap:
 
     def update(self, files, t, motion_by_id, static_sal, surprise_trace, z_vec_by_id,
                goal_bonus, moving, dt):
+        """見えている（misses==0の）物体ファイルごとに、大きさ・中心近さ・動き・驚き・新奇性・目標ボーナス・IOR・慣れの重み付き和で優先度を計算し、ヒステリシスと切り替え遅延を経て次に注意する物（attended_id）を決める。探索地点（_compute_explore）とIOR値も計算する。files/t/motion_by_id/static_sal/surprise_trace/z_vec_by_id/goal_bonus/movingを使う（dtは受け取るが使わない）。戻り値はattended_id・switch_signal・switch_decided・priority・explore_point・iorを持つ辞書。
+        """
         candidates = [f for f in files if getattr(f, "misses", 0) == 0]
         CENTER_X, CENTER_Y = 112.0, 112.0
         surprise_trace = surprise_trace or {}

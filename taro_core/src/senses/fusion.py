@@ -29,6 +29,7 @@ import otolith_organs
 
 
 def to_tensor(x):
+    """x を numpy 配列に変換してから、torch.float32 のテンソルに変換して返す。"""
     return torch.as_tensor(np.asarray(x), dtype=torch.float32)
 
 
@@ -66,6 +67,8 @@ class MinimalFusion:
         self.vision = VisionEncoder(embedding_dim=64, image_size=vision_res) if vision_res else None
 
     def parameters(self):
+        """insula・proprio・vestibular・touch（設定されていれば）・vision（設定されていれば）の各パラメータを連結したイテレータを返す。引数は無い。
+        """
         ms = [self.insula.parameters(), self.proprio.parameters(), self.vestibular.parameters()]
         if self.touch is not None:
             ms.append(self.touch.parameters())
@@ -76,6 +79,7 @@ class MinimalFusion:
     def encode(self, obs):
         # 前庭覚を臓器レベルで分ける：耳石器(直線加速度)＋三半規管(角速度)。
         # MIMoの並び(加速度3+角速度3)を維持して連結＝数値は従来と1バイトも変わらない。
+        """観測辞書 obs を受け取り、内受容・固有感覚・前庭覚（と有効なら触覚・視覚）を各エンコーダに通して連結し、layer_norm をかけた融合ベクトルを返す。"""
         vestibular_raw = np.concatenate([
             otolith_organs.read(obs["vestibular"]),
             semicircular_canals.read(obs["vestibular"]),

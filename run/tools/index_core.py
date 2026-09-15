@@ -28,8 +28,13 @@
 【腐りを見つける検査（完全ではない。--unknown と --stale は別のものを見つける）】
     --unknown  説明文の中の名前が、コードに実在しないもの      （消えた名前を捕まえる）
     --stale    説明文を書いた後にコードが変わったファイル      （中身のズレを捕まえる）
+    --commit   コードを変えたのに説明文を1行も書かなかったコミット（pre-commit が呼ぶ）
     実測（2026-09-15）：Aが9本・Bが31本で、両方に出るのは4本だけ。
     どちらでも見つからない第3類（最初から間違い・コードも不変）は、読むしかない。
+    --commit だけが**直せる瞬間に止める**。あとの2つは後追いで知らせるだけ。
+    数えるのはモジュール・クラス・関数のどの階層の説明文でもよい
+    （最初はモジュール冒頭だけを見ていて、関数の説明文を64個足しただけの
+      コミットで誤発火した。2026-09-15に直した）。
 
 呼称は doc/脳の地図.md §0 が唯一の決まり。ここでもその名前を使う。
 
@@ -40,6 +45,7 @@
     python run/tools/index_core.py --full <名>  説明文の全文をその場で出す（mdには残さない）
     python run/tools/index_core.py --unknown    検査A
     python run/tools/index_core.py --stale      検査B
+    python run/tools/index_core.py --commit     コミット前の検査（pre-commit が呼ぶ）
 """
 import argparse
 import ast
@@ -444,20 +450,37 @@ def check_commit(min_lines=10):
             continue
         if not (tree.body and ast.get_docstring(tree)):
             continue
+        # 説明文の行の範囲を全部集める（モジュール・クラス・関数）。
+        # 【なぜ全部か・2026-09-15】最初はモジュール冒頭だけを見ていたが、
+        #   **関数の説明文を64個足しただけのコミットで誤発火した**。
+        #   知りたいのは「コードを変えたのに説明を一切書かなかったか」なので、
+        #   どの階層の説明文でも触っていれば触ったと数える。
+        doc_lines = set()
         doc_end = tree.body[0].end_lineno
+        for n in ast.walk(tree):
+            if not isinstance(n, (ast.Module, ast.ClassDef, ast.FunctionDef,
+                                  ast.AsyncFunctionDef)):
+                continue
+            b = getattr(n, "body", None)
+            if b and isinstance(b[0], ast.Expr) and isinstance(b[0].value, ast.Constant) \
+                    and isinstance(b[0].value.value, str):
+                doc_lines.update(range(b[0].lineno, b[0].end_lineno + 1))
         diff = _git(["diff", "--cached", "-U0", "--", rel])
         changed = 0
         touched_doc = False
+        cur = 0
         for ln in diff.splitlines():
-            m = re.match(r"^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", ln)
+            m = re.match(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@", ln)
             if m:
-                start = int(m.group(2))
-                n = int(m.group(3) or 1)
-                if start <= doc_end:
+                cur = int(m.group(1))
+            elif ln.startswith("+") and not ln.startswith("+++"):
+                if cur in doc_lines:
                     touched_doc = True
-            elif (ln.startswith("+") or ln.startswith("-")) \
-                    and not ln.startswith(("+++", "---")):
-                changed += 1
+                else:
+                    changed += 1
+                cur += 1
+            elif ln.startswith("-") and not ln.startswith("---"):
+                changed += 1      # 消えた行は今のファイルに無いので位置を進めない
         if changed >= min_lines and not touched_doc:
             out.append((rel, changed, doc_end))
     return out

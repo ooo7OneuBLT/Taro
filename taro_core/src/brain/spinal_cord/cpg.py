@@ -69,6 +69,8 @@ class ColoredNoiseGenerator:
         self._pos = 0
 
     def sample(self, beta):
+        """1/f^βノイズを1tickぶん取り出して返す。引数betaを受け取り、内部バッファが未生成か使い切っていれば、その時点のbetaで新しいブロックを作り直してからshape=(n_dim,)の1点を返す。
+        """
         if self._buf is None or self._pos >= self.block_len:
             self._make_block(beta)
         v = self._buf[self._pos]
@@ -193,6 +195,8 @@ class CPG:
                 gen_np[i] = (1 - syn_w) * gen_np[i] + syn_w * target_i
 
     def sample(self, beta, synergy=False, syn_w=0.6):
+        """引数betaで色付きノイズをshape=(n_act,)ぶん生成して返す。synergy=Trueの場合は、脚(左右逆位相)・右腕・左腕それぞれの共通シナジー信号を重みsyn_wで各関節の値へ混ぜてから返す。synergy=Falseなら混ぜずにそのまま返す。
+        """
         gen_np = self.gen.sample(beta)
         if not synergy:
             return gen_np

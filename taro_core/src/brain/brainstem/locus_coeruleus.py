@@ -168,6 +168,7 @@ class LocusCoeruleus:
         return self.ne_level
 
     def get_ne_level(self):
+        """現在のNEレベル(self.ne_level)をそのまま返す。引数は無く、内部状態を変更しない単純な取得用メソッドである。"""
         return self.ne_level
 
     def observe_surprise(self, z, rate=0.0, thresh=2.0):

@@ -110,6 +110,7 @@ class ObjectFile:
 
     @property
     def pos(self):
+        """現在位置を (x, y) のタプルで返す。カルマン状態ベクトル self.x の先頭2要素をfloatにしたもの。引数は無い（self以外）。"""
         return float(self.x[0]), float(self.x[1])
 
     def predict(self, t=None, coast_max_s=None, coast_min_speed_px_s=None, frame_dt_s=1.0,
@@ -216,6 +217,8 @@ class ObjectFile:
         return float(np.sqrt(y @ np.linalg.inv(S) @ y))
 
     def update(self, pos, appearance, area, appearance_lr=0.3, t=None, emb=None):
+        """新しい観測値でカルマンフィルタの状態を更新する。pos（観測位置）・appearance（観測した見た目、既存の見た目とappearance_lrの重みでEMA更新）・area（観測面積、そのまま置換）・t（省略可、last_seen_tを更新）・emb（省略可、そのまま置換）を受け取る。hitsを+1し、misses・since_seenを0に戻し、area_histにareaを追加し、budgetを1.0・explainedを0.0に戻す。戻り値は更新前の予測位置とposとの間のマハラノビス距離（float）。
+        """
         z = np.asarray(pos, dtype=np.float64)
         y = z - _H @ self.x
         S = _H @ self.P @ _H.T + self.R

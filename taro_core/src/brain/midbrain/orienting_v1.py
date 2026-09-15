@@ -82,6 +82,8 @@ class OrientingReflex:
                 self.eye_idx["v"].append(i)
 
     def reset(self):
+        """引数・返り値は無い。内部状態を初期化する。前回の目の画像キャッシュ(prev_eye)をNoneに戻し、水平・垂直の反射方向(h_dir, v_dir)を0.0にする。
+        """
         self.prev_eye = None
         self.h_dir = 0.0
         self.v_dir = 0.0

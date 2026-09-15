@@ -194,12 +194,14 @@ def _cohesion_groups(masks, gap, blobs=None):
     parent = list(range(m))
 
     def find(x):
+        """_cohesion_groups内部のUnion-Find用の関数。インデックス x が属する集合の代表（根）のインデックスを、経路を圧縮しながら返す。"""
         while parent[x] != x:
             parent[x] = parent[parent[x]]
             x = parent[x]
         return x
 
     def union(a, b):
+        """_cohesion_groups内部のUnion-Find用の関数。a と b が属する2つの集合を1つにまとめる。返り値は無い。"""
         ra, rb = find(a), find(b)
         if ra != rb:
             parent[ra] = rb

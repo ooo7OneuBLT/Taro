@@ -147,6 +147,7 @@ class HybridEnv(gymnasium.Wrapper):
     # gym インターフェース
     # ------------------------------------------------------------------
     def reset(self, **kwargs):
+        """ラップしているenvをresetし、口反射オブジェクトと内臓の状態を作り直してから、内受容感覚を足した観測とinfoを返す。"""
         obs, info = self.env.reset(**kwargs)
         self._build_oral()      # model は reset で確定するので作り直す
         self._init_body()
@@ -156,6 +157,8 @@ class HybridEnv(gymnasium.Wrapper):
         # --- 探索反射（rooting）：口が接触したら首を接触方向へ（E1・action override） ---
         # VOR（眼球）とは別アクチュエータ（首）なので競合しない。反射弓は皮質を経由しない、
         # という解剖学に沿って方策の首出力をここで差し替える。
+        """口反射オブジェクトがあればactionを書き換えてからenvを1ステップ進める。ステップ数がsteps_per_body_secondに達するたびに内臓を1秒分進めて恒常性報酬を加算し、内受容感覚を足した観測・合計報酬・terminated・truncated・infoを返す。
+        """
         if self.oral is not None:
             action = self.oral.rooting_override(action)
 

@@ -95,6 +95,7 @@ class OtolithOrgans:
         self.upright = None if upright is None else np.asarray(upright, dtype=float)
 
     def reset(self):
+        """推定中の重力方向 gravity_est をゼロベクトルに戻し、_warm を0に戻す。upright は変更しない。引数・返り値ともに無い。"""
         self.gravity_est[:] = 0.0
         self._warm = 0
 

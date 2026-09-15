@@ -23,4 +23,5 @@ class Dopamine:
         return delta
 
     def get_baseline(self):
+        """引数は無い。今のbaseline（予測される報酬の推定値、float）をそのまま返す。"""
         return self.baseline

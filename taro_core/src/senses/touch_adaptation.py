@@ -101,6 +101,7 @@ class TouchAdaptation:
 
     @property
     def total_dim(self):
+        """n_points に3を掛けた値（触覚flat配列の長さ）を返すプロパティ。引数は無い。"""
         return self.n_points * 3
 
     # ------------------------------------------------------------ リセット

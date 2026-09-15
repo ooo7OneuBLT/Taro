@@ -179,6 +179,8 @@ class VOR:
             ))
 
     def reset(self):
+        """半規管モジュール(self.canals)と耳石器モジュール(self.otolith)が設定されていれば、それぞれのreset()を呼んで内部状態を初期化する。引数・返り値は無い。
+        """
         if self.canals is not None:
             self.canals.reset()
         if self.otolith is not None:

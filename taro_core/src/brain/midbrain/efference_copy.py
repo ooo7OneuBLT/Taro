@@ -68,6 +68,8 @@ class EfferenceCopy:
         return out
 
     def update(self, orienting, t):
+        """毎tick呼ばれ、orienting（目の反射オブジェクト、または None）と時刻tを受け取る（tは本体では使わない）。orienting が None のときは内部状態を全てリセットし、shift_pred・shift_actual・shift_accum・moving・eye_h・eye_v・d_eye_h・d_eye_v を全て0/Falseにした辞書を返す。それ以外のときは今回と前回の目の水平・垂直角度から実際の画素ずれ(shift_actual)を計算して内部の累積(_accum)に足し込み、目標角度との差から予告ずれ(shift_pred)も計算し、サッケード中かどうかから moving フラグ（終了後も数tickだけ真を保つ）を決める。返り値はこれらをまとめた辞書。
+        """
         if orienting is None:
             self._prev_eye_h = None
             self._prev_eye_v = None

@@ -76,6 +76,7 @@ class Vocabulary:
         self.size = 3
 
     def encode(self, text):
+        """文字列 text を1文字ずつ走査し、未登録の文字があれば新しいIDを語彙に追加しながら、各文字をIDに変換したリストを返す。"""
         indices = []
         for ch in text:
             if ch not in self.char2idx:
@@ -99,6 +100,8 @@ class Vocabulary:
         return self.char2idx[token]
 
     def decode(self, indices):
+        """整数のリスト indices を受け取り、各要素を対応する文字に戻して連結した文字列を返す。<PAD>/<BOS>/<EOS>は出力に含めず、未登録のIDは"?"にする。
+        """
         chars = []
         for idx in indices:
             ch = self.idx2char.get(idx, "?")

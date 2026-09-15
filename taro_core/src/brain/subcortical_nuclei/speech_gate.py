@@ -53,6 +53,7 @@ class SpeechGate:
         self.history = []              # (sim_sec, prob, action, reward) 静止顔実験の記録用
 
     def prob(self):
+        """q_goとq_nogoの差をtemperatureで割ってシグモイド関数に通し、「言う」を選ぶ確率を計算して返す。引数は無い。"""
         return 1.0 / (1.0 + math.exp(-(self.q_go - self.q_nogo) / self.temperature))
 
     def decide(self, rng):
@@ -89,6 +90,8 @@ class SpeechGate:
 
     # ------------------------------------------------------------ 保存・復元
     def state(self):
+        """q_go・q_nogo・temperature・logit（(q_go-q_nogo)/temperature）・baseline（dopamineがあればその値、無ければ0.0）・n_decisions・n_speak・n_rewarded・historyのコピーを持つ辞書を返す。引数は無い。
+        """
         return {"q_go": self.q_go, "q_nogo": self.q_nogo,
                 "temperature": self.temperature,
                 "logit": (self.q_go - self.q_nogo) / self.temperature,   # 後方互換の読み出し用
@@ -101,6 +104,8 @@ class SpeechGate:
                 "history": list(self.history)}
 
     def load_state(self, st):
+        """辞書stからq_go・q_nogoを復元する（stに'q_go'があればそのまま使い、無く'logit'があれば logit*temperature をq_go・q_nogo=0として復元する）。dopamineがあれば'baseline'も復元し、n_decisions・n_speak・n_rewardedも復元する。historyは復元しない。戻り値は無い。
+        """
         if "q_go" in st:
             self.q_go = float(st["q_go"])
             self.q_nogo = float(st["q_nogo"])

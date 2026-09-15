@@ -267,6 +267,8 @@ class MessageLayer:
         return chunk_ids, conf, roles
 
     def state_dict(self):
+        """学習済みの内部状態（state_count・global_mean・vis_mean・vis_cons・pred_count・role_bigram・base・role_dev_thresh・min_count）をtorch.save可能な素のdictにして返す。引数は無い（self のみ）。
+        """
         return {
             "state_count": {int(k): dict(v) for k, v in self.state_count.items()},
             "global_mean": (np.asarray(self.global_mean, dtype=np.float64).tolist()
@@ -283,6 +285,8 @@ class MessageLayer:
         }
 
     def load_state_dict(self, d):
+        """state_dict形式の辞書 d を受け取り、内部状態（state_count・global_mean・vis_mean・vis_cons・pred_count・role_bigram・base・role_dev_thresh・min_count）を復元する。返り値は無い。
+        """
         self.state_count = {int(k): dict(v)
                              for k, v in d.get("state_count", {}).items()}
         _gm = d.get("global_mean")

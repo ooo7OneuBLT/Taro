@@ -27,6 +27,7 @@ class Vocabulary:
         self.size = 3
 
     def encode(self, text):
+        """文字列 text を1文字ずつidに変換したリストを返す。未知の文字には新しいidを割り当てて語彙に追加する（語彙は動的に増える）。"""
         indices = []
         for ch in text:
             if ch not in self.char2idx:
@@ -37,6 +38,7 @@ class Vocabulary:
         return indices
 
     def decode(self, indices):
+        """idのリスト indices を文字列に戻して返す。<PAD>/<BOS>/<EOS>は結果から除かれ、未知のidは"?"として扱われる。"""
         chars = []
         for idx in indices:
             ch = self.idx2char.get(idx, "?")
@@ -192,6 +194,8 @@ class TaroBrain(nn.Module):
         return out, hidden
 
     def forward_perception(self, x, hidden=None, body_state=None):
+        """トークン列 x と隠れ状態 hidden（任意で body_state）を forward_hidden に通し、その出力に perception_head を適用して語彙サイズ分の予測logitsを作る。戻り値は (logits, 更新後のhidden)。
+        """
         out, hidden = self.forward_hidden(x, hidden, body_state=body_state)
         logits = self.perception_head(out)
         return logits, hidden
@@ -265,6 +269,8 @@ class TaroBrain(nn.Module):
         return [float(v) for v in picked]
 
     def forward_articulation(self, gru_output):
+        """GRUの出力 gru_output を、口の部位(place)・調音法(manner)・声帯振動(voicing)・母音(vowel)それぞれのヘッドに通す。戻り値は4つのlogitsのタプル (place, manner, voicing, vowel)。
+        """
         return (
             self.head_place(gru_output),
             self.head_manner(gru_output),
@@ -561,6 +567,7 @@ class TaroBrain(nn.Module):
         return value
 
     def set_vocab_mapping(self, char2idx):
+        """文字から語彙idへの対応表 char2idx を self._vocab_char2idx として保持する。引数は char2idx の辞書1つ、返り値は無い。"""
         self._vocab_char2idx = char2idx
 
     def receive_ne(self, ne_level):
@@ -573,6 +580,8 @@ class TaroBrain(nn.Module):
         self.current_ne = ne_level
 
     def resize_embedding(self, new_vocab_size):
+        """embeddingとperception_headの語彙サイズを new_vocab_size に拡張する。既存の重みは先頭部分へそのままコピーし、増えた行は新規初期化する。new_vocab_size が現在の語彙数以下なら重みは変更せず vocab_size の値だけ更新する。返り値は無い。
+        """
         old_size = self.embedding.num_embeddings
         if new_vocab_size <= old_size:
             self.vocab_size = new_vocab_size

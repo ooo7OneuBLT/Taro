@@ -282,6 +282,7 @@ class VocalTract:
         self.coupled = False
 
     def is_coupled(self):
+        """調音点と調音法が連動した状態かどうかを返す。引数は無く、返り値は coupled の真偽値。"""
         return self.coupled
 
     def clamp_to_stage(self, place, manner, voicing, vowel):

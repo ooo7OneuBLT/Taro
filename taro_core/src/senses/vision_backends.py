@@ -62,7 +62,9 @@ BACKENDS = {}
 
 
 def register(name):
+    """登録名 name を受け取り、クラスを引数に取って BACKENDS に name→クラスとして登録してからそのクラスをそのまま返す関数(deco)を返す。"""
     def deco(cls):
+        """register(name)の内部で作られる関数。クラス cls を BACKENDS[name] に登録し、cls をそのまま返す。"""
         BACKENDS[name] = cls
         return cls
     return deco
@@ -111,9 +113,11 @@ class CustomVisionBackend:
     def dim(self):
         # VisionEncoder.fuse は (embedding_dim*2 -> embedding_dim) の最終層。
         # embedding_dim を決め打ちせず層の形から取る（手打ち数字の根絶）。
+        """self._enc（VisionEncoderインスタンス）が持つ fuse 層の出力次元数を整数で返すプロパティ。"""
         return int(self._enc.fuse.out_features)
 
     def encode(self, img_left, img_right):
+        """img_left, img_right を self._enc に渡してベクトルを得て、detach・CPU転送したうえでnumpy配列に変換して返す。"""
         vec = self._enc(img_left, img_right)
         return vec.detach().cpu().numpy()
 
@@ -206,6 +210,7 @@ class DINOv2VisionBackend:
 
     @property
     def dim(self):
+        """self._dim（384）を返すプロパティ。"""
         return self._dim
 
     def _encode_one_eye(self, img):
@@ -224,6 +229,8 @@ class DINOv2VisionBackend:
         return feat.squeeze(0)
 
     def encode(self, img_left, img_right):
+        """self.eye の設定（both/left/right）に応じて片目または両目の画像を_encode_one_eyeでエンコードし、bothの場合は左右の平均を取る。得られたベクトルをL2正規化してnumpy配列で返す。
+        """
         if self.eye == "left":
             avg = self._encode_one_eye(img_left)
         elif self.eye == "right":

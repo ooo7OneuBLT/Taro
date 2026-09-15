@@ -990,6 +990,8 @@ class OrientingReflexV2:
         return new
 
     def reset(self):
+        """引数・返り値は無い。内部状態を初期化する。フレームバッファ、動き・バイアス・競合・IOR・疲労などの各種の地図、方向・強さ(h_dir/v_dir/strength)、内部時計(_t)とサッケードの残り時間・連射・保持の積み上げ項、認識信号(_recognition)、固視の場所の追跡などをすべて初期値に戻す。学習された適応倍率(_adapt_gain)だけは変えずに保持する。
+        """
         self._frame_buffer = []
         self.motion_map = None
         self.raw_static_map = None
@@ -1206,6 +1208,8 @@ class OrientingReflexV2:
                                  co_activation=0.0, additive=True)
 
     def apply(self, action, dt=None):
+        """関節指令の配列action と、経過時間dt（Noneならself.dtを使う）を受け取り、階段状に発射するサッケード（目標角度への位置フィードバック）を足し込んだ配列を返す。まず連射の続き・外部から指定された地図の目標(set_map_targetで渡されたもの)・自前の方向信号(h_dir/v_dir/strength)のいずれかで今回発射するかを判定し、発射しないときは保持(hold)条件を満たす場合に限り_hold_command() の結果をそのまま返す。発射する場合は新しい目標角度(self._tgt)を定め、以後は目標との角度差に応じた指令を目に（NECK_SHAREが0でなければ首にも）additiveに書き込み続け、目標に十分近づいて一定時間経つとサッケードを終え、サッケード適応倍率・連射の続行判定・IOR記録（それぞれ有効時のみ）を更新する。
+        """
         if self.data is not None and len(self.angle_trace) < 60000:
             _hw = self._head_omega_deg()      # 1行で2回呼ばない（毎ステップ走る）
             self.angle_trace.append((
