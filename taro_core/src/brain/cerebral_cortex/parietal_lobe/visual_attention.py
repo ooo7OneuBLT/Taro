@@ -231,7 +231,6 @@ class VisualAttention:
         #   受け取れないので、step()の頭で一度だけ受け取って控える）。
         self._cur_vision_vec = None
         self._cur_surprise_trace = {}
-        self._cur_lexicon = None
         self._cur_vocab = None
         self._cur_step = None
         self.noticed_gone = False
@@ -281,7 +280,7 @@ class VisualAttention:
     # 1コマぶんの「見る」を最初から最後まで回す。
     # ------------------------------------------------------------------
     def step(self, *, obs, orienting, t, step=None, fovy=None, surprise_trace=None,
-             lexicon=None, vocab=None, vision_vec=None, parent_target=None):
+             vocab=None, vision_vec=None, parent_target=None):
         """呼び出し側（プラグイン）が毎tick呼ぶ。ctxは受け取らない。
 
         obs           : ctx.last["obs_out"] 相当（Noneも可）
@@ -294,7 +293,6 @@ class VisualAttention:
                         ＝ctxを持たない側の必然的な変更。値・タイミングは
                         元の_ensure_efference_copyと同じ）
         surprise_trace: ctx.surprise_trace 相当
-        lexicon       : ctx.taro.lexicon 相当
         vocab         : ctx.taro.hearing.vocab 相当
         vision_vec    : ctx.last_vision_vec 相当
         parent_target : ctx.last_parent_utterance 相当
@@ -303,7 +301,6 @@ class VisualAttention:
         """
         self._cur_vision_vec = vision_vec
         self._cur_surprise_trace = surprise_trace or {}
-        self._cur_lexicon = lexicon
         self._cur_vocab = vocab
         self._cur_step = step
 
@@ -807,42 +804,10 @@ class VisualAttention:
             return 0.0
         return float((a / na) @ (b / nb))
 
-    def _lexicon_proto(self):
-        """(proto, vocab) を返す。学習の最初期でlexiconが空ならNoneのペア。"""
-        lexicon = self._cur_lexicon
-        proto = getattr(lexicon, "proto", None) if lexicon is not None else None
-        vocab = self._cur_vocab
-        if not proto or vocab is None:
-            return None, None
-        return proto, vocab
-
-    def _nearest_lexicon_word(self, vec):
-        """vecに一番近い（コサイン最大）語彙プロトタイプの語と類似度を返す。
-        見つからなければ("", "")。"""
-        proto, vocab = self._lexicon_proto()
-        if proto is None:
-            return "", ""
-        best_word, best_cos = "", None
-        for chunk, v in proto.items():
-            s = vocab.decode(chunk)
-            if not s:
-                continue
-            c = self._cos(vec, v)
-            if best_cos is None or c > best_cos:
-                best_word, best_cos = s, c
-        if best_cos is None:
-            return "", ""
-        return best_word, round(best_cos, 6)
-
-    def _word_cos(self, vec, word):
-        """vecと指定した語(word)のプロトタイプとのコサイン類似度。無ければ""。"""
-        proto, vocab = self._lexicon_proto()
-        if proto is None:
-            return ""
-        for chunk, v in proto.items():
-            if vocab.decode(chunk) == word:
-                return round(self._cos(vec, v), 6)
-        return ""
+    # 【2026-09-15】_lexicon_proto / _nearest_lexicon_word / _word_cos は削除した。
+    #   意味の表（lexicon.proto）を読んで 注意.csv の nearest_word / nearest_cos /
+    #   target_cos を書くためだけの関数で、注意の動き自体には使っていなかった。
+    #   表そのものを削除したため、これらの列は空になる。
 
     def _process_attention(self, t, res):
         """検出コマ(interval_sごと)に呼ばれる。仕様書「決めたこと」1〜3を実装する。
@@ -940,11 +905,8 @@ class VisualAttention:
         self.noticed_gone = bool(vanished and not _prev_vanished)
 
         # ---- nearest_word（描画・CSV両方で使うのでここで一度だけ計算） --------
-        if self._attended_last_seen_vec is not None:
-            nearest_word, _nearest_cos = self._nearest_lexicon_word(
-                self._attended_last_seen_vec)
-        else:
-            nearest_word, _nearest_cos = "", ""
+        # 【2026-09-15】意味の表の削除に伴い常に空（上のコメント参照）。
+        nearest_word, _nearest_cos = "", ""
         self._last_nearest_word = nearest_word
 
         # 【2026-09-09・仕様_見る側の段構成_実装 5節】切り替えた合図。priority
@@ -981,7 +943,8 @@ class VisualAttention:
                         if self._last_target is not None else "")
         target_cos = ""
         if target_word and self._attended_last_seen_vec is not None:
-            target_cos = self._word_cos(self._attended_last_seen_vec, target_word)
+            # 【2026-09-15】意味の表の削除に伴い常に空。
+            target_cos = ""
 
         if attended_f is not None:
             dist_center = round(math.hypot(attended_f.pos[0] - CENTER_X,

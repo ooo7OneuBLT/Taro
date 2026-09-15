@@ -75,7 +75,6 @@ def _register():
     from run.plugins.common.produce_snapshot import ProduceSnapshot
     from run.plugins.common.vergence_probe import VergenceProbe
     from run.plugins.common.object_files import ObjectFiles
-    from run.plugins.common.word_similarity_map import WordSimilarityMap
     from run.plugins.common.world_predictor_log import WorldPredictorLog
     from run.plugins.common.world_predictor_record import WorldPredictorRecord
     PLUGINS["toy_touch"] = ToyTouch
@@ -100,7 +99,6 @@ def _register():
     PLUGINS["produce_snapshot"] = ProduceSnapshot   # 発話した瞬間の中心窩画像と視覚ベクトル（F2-11のりんご偏り究明）
     PLUGINS["vergence_probe"] = VergenceProbe   # 輻輳角の目標と実測（F2-15の切り分け）
     PLUGINS["object_files"] = ObjectFiles   # MobileSAM+物体ファイルを本番の走行で動かす（F2-67）
-    PLUGINS["word_similarity_map"] = WordSimilarityMap   # 語彙地図：語同士の見た目の近さをcheckpointごとに図・数値で残す（2026-09-04）
     PLUGINS["world_predictor_log"] = WorldPredictorLog   # 世界の予測器（M7a）の誤差をCSVに書く（測るだけ・2026-09-08）
     PLUGINS["world_predictor_record"] = WorldPredictorRecord   # 世界の予測器の入力を1回記録（切り分け実験用・2026-09-10）
     # 注意：self_model / trace / reach_success / double_touch は太郎の脳が要る

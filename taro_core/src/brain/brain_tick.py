@@ -1057,7 +1057,7 @@ class TaroBrainTick:
         全要素同値（谷が生まれない＝発話全体が1つの単位として切り出される）を渡す。
         """
         t = self
-        if getattr(t, "hearing", None) is None or getattr(t, "lexicon", None) is None:
+        if getattr(t, "hearing", None) is None or getattr(t, "segmenter", None) is None:
             return
         pu = info.get("parent_utterance") if isinstance(info, dict) else None
         if not pu:
@@ -1086,10 +1086,9 @@ class TaroBrainTick:
         #   従来と同じリストが返る＝1ビットも変わらない。
         _st = self._vision_channels(o)
         state = _st if isinstance(_st, dict) else _st.tolist()
-        # 【F2-8・2026-08-25】「見慣れた景色」の平均を育てる（reverse_lookupの
-        #   両側引き算に使う）。語彙にも想像にも触らない純粋な足し算で、
-        #   すでに計算済みのstateを渡すだけ＝追加の計算コストはゼロ。
-        t.lexicon.observe_view(state)
+        # 【2026-09-15】「見慣れた景色」の平均（observe_view）は削除した。
+        #   逆引き（reverse_lookup）の両側引き算専用で、その逆引き自体が
+        #   2026-09-02の段階2以降どこからも呼ばれていなかったため。
         # 【分節第2案・2026-09-03】設計_分節（語の切れ目の発見）.md 第2案 第2部
         #   「切り出しの差し替え」節。既定segment_mode="valley"では_end_probsが
         #   Noneのまま＝下のobserve呼び出しは従来と同じ2引数呼び出しになり
@@ -1107,10 +1106,10 @@ class TaroBrainTick:
                     if len(_ps_ep) == len(tokens):
                         _end_probs = _ps_ep
         if _end_probs is not None:
-            chunk = t.lexicon.observe(tokens, confidences, state=state,
-                                      end_probs=_end_probs, mode="end_prob")
+            chunk = t.segmenter.observe(tokens, confidences,
+                                        end_probs=_end_probs, mode="end_prob")
         else:
-            chunk = t.lexicon.observe(tokens, confidences, state=state)
+            chunk = t.segmenter.observe(tokens, confidences)
         # 【塊レベル層・2026-09-07・仕様_M5_塊レベル層.md §3】observe直後に
         #   このtickの塊の列（lexicon.last_chunks）を塊idへ変換しておく。
         #   実際に文脈・海馬へ流す（_chunk_context_feed呼び出し）のは、下の
@@ -1119,7 +1118,7 @@ class TaroBrainTick:
         #   （chunk_level無し）ではNoneのまま＝何も起きない。
         _chunk_cids = None
         if getattr(t, "chunk_level", False) and getattr(t, "chunk_vocab", None) is not None:
-            _chunk_cids = t.chunk_vocab.encode_chunks(t.lexicon.last_chunks)
+            _chunk_cids = t.chunk_vocab.encode_chunks(t.segmenter.last_chunks)
             self._ensure_chunk_capacity()
         # 【なぜstateもここに置くか】word_learningプラグイン（読むだけ）が「正解物の
         #   特徴EMA」を作るのに使う（プラグインがtaro.fusionを呼び直すと二重計算に
@@ -1191,10 +1190,9 @@ class TaroBrainTick:
         #   F/docs/設計_F1-4b_語から注意への読み出し回路.md 後半「部品2」）。
         #   cfg.word_attentionがNoneのままなら、この行自体を実行しない
         #   （lexicon.assoc()の呼び出しコストすら払わない＝既定挙動・コスト不変）。
-        if self.cfg.word_attention is not None and chunk is not None:
-            vec = t.lexicon.assoc(chunk)
-            if vec is not None:
-                self.tick._active_assoc = (vec, self.now.sim_sec)
+        # 【2026-09-15】語から注意への読み出し回路（F1-4b）は削除した。
+        #   意味の表（lexicon.assoc）が元だったため、表と一緒に落ちる。
+        #   使っていた実験は4本のみで、F2-129 以降は word_attention=null。
 
     def _apply_word_attention(self, o):
         """語から注意への読み出し回路（設計：F/docs/設計_F1-4b_....md 後半「部品2」）。
@@ -1208,12 +1206,13 @@ class TaroBrainTick:
         encode等の追加計算は一切走らない＝既存実験の挙動・コストは1ビットも
         変わらない（仕様の要求どおり）。
         """
+        # 【2026-09-15】意味の表の削除に伴い、この回路は常に無効
+        #   （_active_assoc を作る側を消したため）。
+        return
         wa = self.cfg.word_attention
         if wa is None or not wa.get("enabled", True):
             return
         t = self
-        if getattr(t, "hearing", None) is None or getattr(t, "lexicon", None) is None:
-            return          # 耳無効なら思い浮かべる元(_active_assoc)自体が育たない
         orienting = getattr(self.env.unwrapped, "_orienting", None)
         if orienting is None:
             return          # 視線誘導反射(orienting_reflex)が無効なら渡す先が無い
@@ -1269,8 +1268,8 @@ class TaroBrainTick:
             self._apply_babble(pd)
             return
 
-        if getattr(t, "hearing", None) is None or getattr(t, "lexicon", None) is None:
-            return          # 耳/連合器の配線が無ければ何もしない
+        if getattr(t, "hearing", None) is None or getattr(t, "segmenter", None) is None:
+            return          # 耳/分節の配線が無ければ何もしない
         orienting = getattr(self.env.unwrapped, "_orienting", None)
         if orienting is None:
             return          # 視線誘導反射が無効なら「注視している」を判定できない
@@ -1291,9 +1290,7 @@ class TaroBrainTick:
         #   （object_files.py が「注意中の物の見た目」として使う。仕様書決定2：
         #   物体ファイル自身のappearanceとは別物なのでここでしか取れない）。
         self.tick.last_vision_vec = vec
-        # 【F2-8・2026-08-25】逆引きの前に「見慣れた景色」の平均へ今の見えを足す。
-        #   ここは毎ステップ通るので、産出中は太郎が見たものすべてが平均に入る。
-        t.lexicon.observe_view(vec)
+        # 【2026-09-15】「見慣れた景色」の平均（observe_view）は削除した（逆引き専用だった）。
 
         # 【M4・2026-09-06・仕様_M4_消えた物について「○○ないね」と言う】
         #   黙る門：注意している物が無いとき（走行の最初や、記録が消えた後）は
@@ -1325,7 +1322,10 @@ class TaroBrainTick:
         _here_now = bool(
             _here_input and _att is not None and not _gone_now
             and _att.get("last_seen_vec") is not None)
-        chunk, sim = t.lexicon.reverse_lookup(vec)
+        # 【2026-09-15】逆引き（意味の表から語を引く）は削除した。
+        #   2026-09-02の段階2以降、この直後のブロックで必ず上書きされていて
+        #   結果は一度も使われていなかった（word_choice は gru_hippo のみ）。
+        chunk, sim = None, 0.0
         # 【文脈・2026-08-30・設計_文脈（コンテキスト）.md 決定4】語の選択に
         #   文脈の「言いやすさ」を足す：点数 = コサイン + λ × 幾何平均確率。
         #   λ（produce.context_lambda・既定0.0）が0なら一切通らない＝従来どおり。
@@ -1334,21 +1334,12 @@ class TaroBrainTick:
         #   結果（chunk, sim）が直後の段階2ブロックで丸ごと上書きされ、λは
         #   一切効かない（起動時に_setup_produceが組み合わせを検証して止める・
         #   taro_setup.py参照）。無駄な計算を避けるためここでも通らないようにする。
-        _wc = pd.get("word_choice", "lexicon")
-        _lam = float(pd.get("context_lambda", 0.0))
-        if (_wc != "gru_hippo" and _lam > 0.0
-                and getattr(t, "_context_enabled", False)
-                and t._context_hidden is not None):
-            _scores = t.lexicon.reverse_scores(vec)
-            _best, _bestv = None, None
-            for _c, _cos in _scores.items():
-                _ids = self._to_produce_ids(t.hearing.vocab.decode(list(_c)))
-                _p = t.brain.sequence_prob(_ids, hidden=t._context_hidden)
-                _v = _cos + _lam * _p if _p is not None else _cos
-                if _bestv is None or _v > _bestv:
-                    _best, _bestv = _c, _v
-            if _best is not None:
-                chunk, sim = _best, _scores[_best]
+        # 【罠つぶし・2026-09-15】ここの "lexicon" は**もう既定ではない**。
+        #   run/taro_setup.py が起動時に word_choice の明示を必須にして止めるので、
+        #   本番の経路（run/main.py → taro_setup）ではこの既定値に落ちることはない。
+        #   残してあるのは taro_setup を通らない検査スクリプトのためだけ。
+        #   本番はすべて "gru_hippo"（2026-09-02の段階2以降）。
+        _wc = pd["word_choice"] if "word_choice" in pd else "gru_hippo"
         # 【段階2・海馬の即答・2026-09-02・設計_言語海馬と睡眠リプレイ.md 段階2】
         #   produce.word_choice="gru_hippo" のとき、語の選択を表（lexicon逆引き）から
         #   「本体（GRU）自力 vs 海馬の想起」の2候補比較へ切り替える（既定"lexicon"＝従来不変）。

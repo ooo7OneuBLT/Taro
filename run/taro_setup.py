@@ -345,23 +345,24 @@ def _setup_hearing(taro, cfg, *, verbose=True):
     """
     if not cfg.hearing:
         taro.hearing = None
-        taro.lexicon = None
+        taro.segmenter = None
         taro.vision_backend = None
         return
     from hearing import Hearing
-    from lexicon import Lexicon
+    from cerebral_cortex.temporal_lobe.segmentation import Segmenter
     from vision_backends import get_backend
     taro.hearing = Hearing()
     # 手打ち数字の根絶：state_dimはバックエンドのdimプロパティから取る
     #   （既定null時はcustomバックエンド経由でfusion.visionの出力次元＝従来どおり64）。
     taro.vision_backend = get_backend(cfg.lexicon_vision, vision_encoder=taro.fusion.vision)
-    # 【F1-5・2026-08-21】lexicon_mode="sum"（既定）なら旧挙動と完全一致。
-    #   "contrast"のときだけ対照学習（引き寄せ＋引き離し）が有効になる。
-    #   設計：F/docs/設計_F1-5_連合器の対照学習化.md
-    taro.lexicon = Lexicon(state_dim=taro.vision_backend.dim, mode=cfg.lexicon_mode,
-                          eta_pull=cfg.lexicon_eta_pull, eta_push=cfg.lexicon_eta_push)
+    # 【2026-09-15】旧 Lexicon（原-辞書）から**切り分けだけ**を残した Segmenter。
+    #   意味の表（proto）と逆引きは削除した（2026-09-02の段階2以降、発話の
+    #   経路から外れていて誰も読んでいなかった。doc/状況整理_語彙の仕組みを
+    #   どうするか_2026-09-14.md §11）。呼称は 現在地.md の「呼称」節。
+    #   vision_backend は残す（見えのベクトルは塊GRU・言語海馬が使う）。
+    taro.segmenter = Segmenter()
     if verbose:
-        print(f"[耳] taro.hearing/taro.lexicon ON（視覚バックエンド="
+        print(f"[耳] taro.hearing/taro.segmenter ON（視覚バックエンド="
               f"{taro.vision_backend.name} state_dim={taro.vision_backend.dim}）",
               flush=True)
 
@@ -476,6 +477,26 @@ def _setup_produce(taro, cfg, env, *, verbose=True):
     from vocal_tract import VocalTract
     from hearing import Vocabulary
     pd = cfg.produce
+    # 【罠つぶし・2026-09-15】`word_choice` の既定は "lexicon"（表の逆引き）だったが、
+    #   本番はすべて "gru_hippo"（GRU自力 vs 海馬の想起）で走っている。
+    #   ＝**既定が「実際には使っていない方」**という状態で、書き忘れると黙って
+    #   旧経路になる。実測：produce欄のある634本のうち430本が未指定（うち67本は海馬あり）。
+    #   既定を差し替えると、その430本の挙動が黙って変わる（同じ種類の事故）ので、
+    #   **どちらを使うかを書かせる**ことにした。昔の走行をそのまま再現したいときは
+    #   明示的に "lexicon" と書けばよい（意味は変わらない）。
+    if "word_choice" not in pd:
+        raise ValueError(
+            "produce.word_choice が書かれていません（既定は廃止しました）。\n"
+            "  \"gru_hippo\" … GRU自力 vs 海馬の想起を比べて自信の高い方を言う。"
+            "本番の実験204本はすべてこちら（2026-09-02以降）\n"
+            "  \"lexicon\"   … 語彙の表を逆引きして言う。"
+            "2026-09-02より前の経路。昔の走行を再現したいときだけ\n"
+            "実験ファイルの produce 欄に word_choice を足してください。"
+            "経緯は doc/状況整理_語彙の仕組みをどうするか_2026-09-14.md §11。")
+    if str(pd["word_choice"]) not in ("gru_hippo", "lexicon"):
+        raise ValueError(
+            "produce.word_choice は 'gru_hippo' か 'lexicon' のどちらかです"
+            "（受け取った値：%r）。" % (pd["word_choice"],))
     vt = VocalTract()
     # 【Tier3・工学的判断・2026-08-22】「わんわん」の「わ」(両唇+半母音)は
     #   coupledモード（調音点→調音法が自動決定）では出せない（両唇は鼻音に
@@ -613,7 +634,7 @@ def _setup_produce(taro, cfg, env, *, verbose=True):
     #   （run/trainer.py _apply_word_production参照）。効かない値を設定したまま
     #   気づかない「設定が静かに無視される」事故（過去5件目相当）を防ぐため、
     #   起動時に組み合わせを検証して止める。
-    if (str(pd.get("word_choice", "lexicon")) == "gru_hippo"
+    if (str(pd["word_choice"]) == "gru_hippo"
             and float(pd.get("context_lambda", 0.0)) != 0.0):
         raise ValueError(
             "produce.word_choice='gru_hippo' のとき produce.context_lambda は"
@@ -668,7 +689,7 @@ def _setup_produce(taro, cfg, env, *, verbose=True):
     taro._chunk_optimizer = None
     taro._chunk_context_hidden = None
     if taro.chunk_level:
-        if not taro._context_enabled or str(pd.get("word_choice", "lexicon")) != "gru_hippo":
+        if not taro._context_enabled or str(pd["word_choice"]) != "gru_hippo":
             raise ValueError(
                 "produce.chunk_level=true には produce.context=true と "
                 "produce.word_choice='gru_hippo' が必要"
@@ -1439,40 +1460,16 @@ class Taro(TaroBrainTick):
                 self.hearing.vocab.char2idx = hv["char2idx"]
                 self.hearing.vocab.idx2char = hv["idx2char"]
                 self.hearing.vocab.size = hv["size"]
-                lx = blob["lexicon"]
-                self.lexicon.counts = lx["counts"]
-                self.lexicon.state_sum = lx["state_sum"]
-                self.lexicon.min_len = lx["min_len"]
-                # 【分節第2案・2026-09-03】設計_分節（語の切れ目の発見）.md 第2案
-                #   第2部「発話まるごとの記録」節。旧保存にはキーが無いので空辞書。
-                self.lexicon.utterance_counts = lx.get("utterance_counts", {})
-                self.lexicon.end_prob_sum = float(lx.get("end_prob_sum", 0.0))   # 【分節第2案】走行平均も引き継ぐ
-                self.lexicon.end_prob_n = int(lx.get("end_prob_n", 0))
-                # 【F1-5・2026-08-21】旧blob（mode/protoキー無し）はそのまま
-                #   sumモード・proto空辞書として復元される（従来どおり）。
-                if "mode" in lx:
-                    self.lexicon.mode = lx["mode"]
-                # 【F2-12・2026-08-27】設計：F/docs/設計_F2-12_意味を感覚ごとに
-                #   分けて持つ.md。channels優先で読み、無ければ旧キー
-                #   (state_dim/proto/view_sum/view_n)からvisionチャンネルを
-                #   組み立てる（後方互換。旧形式のモデルにはchannelsキーが無い）。
-                if "channels" in lx:
-                    self.lexicon.channels = lx["channels"]
-                else:
-                    self.lexicon.channels = {
-                        "vision": {
-                            "dim": lx["state_dim"],
-                            "proto": lx.get("proto", {}),
-                            "view_sum": lx.get("view_sum"),
-                            "view_n": lx.get("view_n", 0),
-                        }
-                    }
+                # 【2026-09-15】保存側のキー名は "lexicon" のまま（過去のモデルを
+                #   そのまま読めるようにするため）。意味の表のキー（proto/channels/
+                #   state_sum/view_*）は読み飛ばす。
+                self.segmenter.load_state_dict(blob["lexicon"])
                 if verbose:
-                    print(f"  [語彙] 復元：耳={self.hearing.vocab.size}文字"
-                          f" 語彙={len(self.lexicon.counts)}語", flush=True)
+                    print(f"  [耳] 復元：耳={self.hearing.vocab.size}文字"
+                          f" 塊={len(self.segmenter.counts)}個", flush=True)
             else:
                 print("注意[load] いまの設定は耳(hearing)ありですが、保存されたモデルに"
-                      "語彙(hearing_vocab/lexicon)がありません"
+                      "耳の記録(hearing_vocab/lexicon)がありません"
                       "（2026-08-19以前の保存）。語彙は空から開始します。", flush=True)
         # 【F2-1・作業A・2026-08-23】発話小脳（口の動き→音の帳面）の復元。
         #   _load() は Taro.__init__ の"⑦続きから学習する"（_setup_produceより前）
@@ -1862,35 +1859,11 @@ class Taro(TaroBrainTick):
             blob["hearing_vocab"] = {"char2idx": vocab.char2idx,
                                       "idx2char": vocab.idx2char,
                                       "size": vocab.size}
-            blob["lexicon"] = {"counts": self.lexicon.counts,
-                                "state_sum": self.lexicon.state_sum,
-                                "state_dim": self.lexicon.state_dim,
-                                "min_len": self.lexicon.min_len,
-                                # 【分節第2案・2026-09-03】設計_分節（語の切れ目の
-                                #   発見）.md 第2案 第2部「発話まるごとの記録」節。
-                                "utterance_counts": self.lexicon.utterance_counts,
-                                "end_prob_sum": float(getattr(self.lexicon, "end_prob_sum", 0.0)),
-                                "end_prob_n": int(getattr(self.lexicon, "end_prob_n", 0))}
-            # 【F1-5・2026-08-21】mode/protoは既定sumモードでは追加しない
-            #   （旧blobとバイト互換を維持する。落とし穴メモリ「新キーは条件付きで」
-            #   と同じ流儀。設計：F/docs/設計_F1-5_連合器の対照学習化.md）。
-            if self.lexicon.mode == "contrast":
-                blob["lexicon"]["mode"] = self.lexicon.mode
-                blob["lexicon"]["proto"] = self.lexicon.proto
-                # 【F2-8・2026-08-25】「見慣れた景色」の平均も保存する。
-                #   これを保存しないと、続きから学習したとき逆引きの引き算が
-                #   ゼロからやり直しになる（＝最初の数十歩は引き算が効かない）。
-                #   視覚未保存・語彙未保存・帳面未保存に続く同型事故を作らない。
-                blob["lexicon"]["view_sum"] = self.lexicon.view_sum
-                blob["lexicon"]["view_n"] = self.lexicon.view_n
-                # 【F2-12・2026-08-27】設計：F/docs/設計_F2-12_意味を感覚ごとに
-                #   分けて持つ.md。旧キー(proto/view_sum/view_n)と新キー
-                #   (channels)を両方書く。旧キーは上の3行と同じ中身の別名
-                #   （channels["vision"]の中身と一致）なので、旧コードで読んでも
-                #   新コードで読んでも同じ結果になる。
-                blob["lexicon"]["channels"] = self.lexicon.channels
+            # 【2026-09-15】キー名は "lexicon" のまま（過去のモデルとの
+            #   相互運用のため）。中身は分節（切り分け）の状態だけ。
+            blob["lexicon"] = self.segmenter.state_dict()
         assert self.hearing is None or ("hearing_vocab" in blob and "lexicon" in blob), (
-            "耳(hearing)が有効なのに語彙(vocab/lexicon)がblobに入っていない。"
+            "耳(hearing)が有効なのに耳の記録(vocab/lexicon)がblobに入っていない。"
             "視覚未保存事件(2026-08-19発覚)・語彙未保存(同日発覚)に続く同型バグを"
             "機械で止める（このassertを消さないこと）。")
         # 【F2-1・作業A・2026-08-23】発話小脳（口の動き→音の帳面）の保存。

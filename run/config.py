@@ -479,6 +479,24 @@ class Config:
                 raise ValueError(
                     f"実験ファイルの {name} 欄に知らない設定がある: {sorted(unknown)}\n"
                     f"  使えるもの: {sorted(d)}")
+        # 【2026-09-15】意味の表（lexicon.proto）の削除で意味を失った設定。
+        #   黙って無視すると「設定したのに効かない」事故になるので名指しで止める。
+        #   経緯は doc/状況整理_語彙の仕組みをどうするか_2026-09-14.md §11。
+        _retired = {
+            "lexicon_mode": "語ごとの見えの平均（意味の表）の学習則",
+            "lexicon_eta_pull": "意味の表の引き寄せの学習率",
+            "lexicon_eta_push": "意味の表の引き離しの学習率",
+            "lexicon_peripheral": "周辺視も意味の表に使うか",
+            "word_attention": "語から注意への読み出し（意味の表が元）",
+        }
+        _found = sorted(k for k in _retired if k in self._taro)
+        if _found:
+            _lines = ["実験ファイルの taro 欄に、2026-09-15 に廃止した設定があります："]
+            _lines += ["  %s … %s" % (k, _retired[k]) for k in _found]
+            _lines += ["いずれも「意味の表」を育てるための設定で、表ごと削除しました。",
+                       "これらの行を消してください（消しても走行の中身は変わりません）。",
+                       "経緯は doc/状況整理_語彙の仕組みをどうするか_2026-09-14.md §11。"]
+            raise ValueError(chr(10).join(_lines))
         for key, (dflt, _doc, _envname) in TARO_DEFAULTS.items():
             setattr(self, key, self._taro.get(key, dflt))
         for key, (dflt, _doc, _envname) in RUN_DEFAULTS.items():
@@ -776,12 +794,11 @@ class Config:
                     "  例：{'threshold': 0.80, 'cooldown_sec': 2.0}")
             if not self.hearing:
                 raise ValueError(
-                    "produce=有効 には hearing=true が要る（逆引きの元＝"
-                    "lexicon.protoは耳が無いと育たない。taro_setup.py _setup_produce）。")
-            if str(self.lexicon_mode) != "contrast":
-                raise ValueError(
-                    "produce=有効 には lexicon_mode='contrast' が要る（mode='sum'では"
-                    "lexicon.protoが育たず逆引きが常にNoneのまま＝機能しない）。")
+                    "produce=有効 には hearing=true が要る（分節＝聞いた音を語の塊に"
+                    "切り分ける処理が耳の下にあるため。taro_setup.py _setup_produce）。")
+            # 【2026-09-15】「produce には lexicon_mode='contrast' が要る」という検査は
+            #   削除した。意味の表（lexicon.proto）を育てるための条件だったが、
+            #   その表自体を削除したため。
         if self.K >= 100:
             print(f"[!] K={self.K}（{100/self.K:.0f}Hz）＝人間の最遅神経発火7Hzより遅い。"
                   f"比較・再現目的でなければ K=10 を使うこと", flush=True)

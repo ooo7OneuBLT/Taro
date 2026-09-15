@@ -91,7 +91,7 @@ class WordLearning(Plugin):
 
     def _assoc_sep(self, ctx):
         taro = getattr(ctx, "taro", None)
-        lexicon = getattr(taro, "lexicon", None) if taro is not None else None
+        lexicon = None   # 【2026-09-15】意味の表は削除（assoc_sep は常に None）
         hearing = getattr(taro, "hearing", None) if taro is not None else None
         if lexicon is None or hearing is None or not self.rows:
             return None
@@ -107,14 +107,10 @@ class WordLearning(Plugin):
             if not others or self.feat_ema[t] is None or self.feat_ema[others[0]] is None:
                 continue
             tokens = hearing.hear(word_for[t])
-            assoc = lexicon.assoc(tuple(tokens))
-            if assoc is None:
-                continue
-            c_correct = _cos(assoc, self.feat_ema[t])
-            c_wrong = _cos(assoc, self.feat_ema[others[0]])
-            if c_correct is None or c_wrong is None:
-                continue
-            seps.append(c_correct - c_wrong)
+            # 【2026-09-15】意味の表（lexicon.assoc）を削除したため、
+            #   assoc_sep（正解物と不正解物の見えの分離度）は計算できない。
+            #   常に None を返す。
+            return None
         return (sum(seps) / len(seps)) if seps else None
 
     def report(self, ctx):

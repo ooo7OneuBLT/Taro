@@ -255,7 +255,6 @@ class ObjectFiles(Plugin):
                     print("[efference] WARNING ctx.env が無く cam_fovy を読めない。60度で代用")
 
             taro = getattr(ctx, "taro", None)
-            lexicon_obj = getattr(taro, "lexicon", None) if taro is not None else None
             hearing = getattr(taro, "hearing", None) if taro is not None else None
             vocab_obj = getattr(hearing, "vocab", None) if hearing is not None else None
 
@@ -268,7 +267,7 @@ class ObjectFiles(Plugin):
                 surprise_trace=getattr(ctx, "surprise_trace", None),
                 vision_vec=getattr(ctx, "last_vision_vec", None),
                 parent_target=getattr(ctx, "last_parent_utterance", None),
-                lexicon=lexicon_obj, vocab=vocab_obj)
+                vocab=vocab_obj)
 
             # ---- 掲示板へ置く（後方互換の経路だけ。太郎が持つときは学習ループの
             #      `_visual_attention_step` が同じ値を同じ順で置く）------------
