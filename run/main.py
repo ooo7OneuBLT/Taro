@@ -112,7 +112,10 @@ def load_spec(path):
         spec = json.load(fp)
     # 【2026-09-11】expect＝「この走行は何を出すはずか」の宣言。走行そのものには
     #   使わない（run/tools/smoke.py が試し走行の結果と突き合わせる）。
-    known = {"name", "note", "scene", "world", "taro", "run", "plugins", "expect"}
+    # 【2026-09-16】`body`・`setup` を追加。場面の体・姿勢を**その回だけ**上書きする欄。
+    #   場面ファイルを複製せずに済ませるため（run/world/scene.py の resolve 参照）。
+    known = {"name", "note", "scene", "world", "body", "setup",
+             "taro", "run", "plugins", "expect"}
     unknown = set(spec) - known
     if unknown:
         raise ValueError(f"実験ファイルに知らない欄がある: {sorted(unknown)}\n"
@@ -211,7 +214,7 @@ def _write_run_meta(spec, out_dir):
     from run.world import scene as scene_mod
 
     sc = scene_mod.resolve(spec["scene"], spec.get("taro") or {},
-                           spec.get("world"))
+                           spec.get("world"), spec.get("body"), spec.get("setup"))
 
     rev = None
     try:
@@ -226,6 +229,9 @@ def _write_run_meta(spec, out_dir):
         "name": spec.get("name"),
         "scene": spec.get("scene"),
         "world_override": spec.get("world"),   # 実験ファイルが上書きした分（ステップ3）
+        # 【2026-09-16】体・姿勢の上書きも記録に残す（world_override と同じ理由）。
+        "body_override": spec.get("body"),
+        "setup_override": spec.get("setup"),
         "taro": spec.get("taro"),
         "run": spec.get("run"),
         "tools": sorted(k for k, v in (spec.get("plugins") or {}).items() if v),
@@ -373,7 +379,9 @@ def run(spec, *, steps_override=None, verbose=False):
     import numpy as np
     env, sc, _hands = scene_mod.build(spec["scene"], taro=spec["taro"],
                                       seed=seed, verbose=verbose,
-                                      world=spec.get("world"))
+                                      world=spec.get("world"),
+                                      body=spec.get("body"),
+                                      setup=spec.get("setup"))
     u = env.unwrapped
     K = int(r.get("K", 10))
     dt = float(u.model.opt.timestep) * int(u.frame_skip) * K

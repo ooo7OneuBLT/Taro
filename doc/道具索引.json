@@ -2789,9 +2789,9 @@
   "defs": [
    "Plugin"
   ],
-  "lines": 110,
+  "lines": 112,
   "goal": "",
-  "last_commit": "2026-09-14"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "run/plugins/common/babble_probe.py",
@@ -2800,9 +2800,9 @@
    "_abs_path",
    "BabbleProbe"
   ],
-  "lines": 177,
+  "lines": 184,
   "goal": "",
-  "last_commit": "2026-08-27"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "run/plugins/common/block_progress_probe.py",
@@ -2810,9 +2810,9 @@
   "defs": [
    "BlockProgressProbe"
   ],
-  "lines": 113,
+  "lines": 118,
   "goal": "",
-  "last_commit": "2026-08-11"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "run/plugins/common/body_geoms.py",
@@ -2834,9 +2834,9 @@
    "_label_for_geom",
    "ContactReward"
   ],
-  "lines": 504,
+  "lines": 517,
   "goal": "",
-  "last_commit": "2026-08-11"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "run/plugins/common/dashboard.py",
@@ -2844,9 +2844,9 @@
   "defs": [
    "Dashboard"
   ],
-  "lines": 150,
+  "lines": 153,
   "goal": "",
-  "last_commit": "2026-09-14"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "run/plugins/common/double_touch.py",
@@ -2854,7 +2854,7 @@
   "defs": [
    "DoubleTouch"
   ],
-  "lines": 214,
+  "lines": 224,
   "goal": "",
   "last_commit": "2026-09-15"
  },
@@ -2865,9 +2865,9 @@
    "_abs_path",
    "GazeProbe"
   ],
-  "lines": 106,
+  "lines": 113,
   "goal": "",
-  "last_commit": "2026-09-11"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "run/plugins/common/hand_in_view.py",
@@ -2875,9 +2875,9 @@
   "defs": [
    "HandInView"
   ],
-  "lines": 57,
+  "lines": 62,
   "goal": "",
-  "last_commit": "2026-07-31"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "run/plugins/common/model_snapshots.py",
@@ -2885,9 +2885,9 @@
   "defs": [
    "ModelSnapshots"
   ],
-  "lines": 51,
+  "lines": 54,
   "goal": "",
-  "last_commit": "2026-09-05"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "run/plugins/common/movement_units.py",
@@ -2895,7 +2895,7 @@
   "defs": [
    "MovementUnits"
   ],
-  "lines": 232,
+  "lines": 245,
   "goal": "",
   "last_commit": "2026-09-15"
  },
@@ -2906,7 +2906,7 @@
    "_abs_path",
    "ObjectFiles"
   ],
-  "lines": 659,
+  "lines": 670,
   "goal": "",
   "last_commit": "2026-09-15"
  },
@@ -2916,9 +2916,9 @@
   "defs": [
    "PlateauStop"
   ],
-  "lines": 190,
+  "lines": 197,
   "goal": "",
-  "last_commit": "2026-08-17"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "run/plugins/common/posture_probe.py",
@@ -2926,9 +2926,9 @@
   "defs": [
    "PostureProbe"
   ],
-  "lines": 83,
+  "lines": 89,
   "goal": "",
-  "last_commit": "2026-08-17"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "run/plugins/common/probe_defaults.py",
@@ -2945,9 +2945,9 @@
    "_abs_path",
    "ProduceSnapshot"
   ],
-  "lines": 268,
+  "lines": 272,
   "goal": "",
-  "last_commit": "2026-09-14"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "run/plugins/common/reach_success.py",
@@ -2955,9 +2955,9 @@
   "defs": [
    "ReachSuccess"
   ],
-  "lines": 168,
+  "lines": 176,
   "goal": "",
-  "last_commit": "2026-08-11"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "run/plugins/common/scene.py",
@@ -2973,9 +2973,9 @@
   "defs": [
    "SelfModel"
   ],
-  "lines": 143,
+  "lines": 152,
   "goal": "",
-  "last_commit": "2026-08-11"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "run/plugins/common/toy_in_view.py",
@@ -2983,9 +2983,9 @@
   "defs": [
    "ToyInView"
   ],
-  "lines": 72,
+  "lines": 79,
   "goal": "",
-  "last_commit": "2026-08-17"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "run/plugins/common/toy_touch.py",
@@ -2993,9 +2993,9 @@
   "defs": [
    "ToyTouch"
   ],
-  "lines": 74,
+  "lines": 82,
   "goal": "",
-  "last_commit": "2026-07-31"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "run/plugins/common/trace.py",
@@ -3004,9 +3004,9 @@
    "_fp",
    "Trace"
   ],
-  "lines": 129,
+  "lines": 133,
   "goal": "",
-  "last_commit": "2026-09-05"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "run/plugins/common/vergence_probe.py",
@@ -3015,9 +3015,9 @@
    "_abs_path",
    "VergenceProbe"
   ],
-  "lines": 97,
+  "lines": 102,
   "goal": "",
-  "last_commit": "2026-08-28"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "run/plugins/common/view_video.py",
@@ -3025,9 +3025,9 @@
   "defs": [
    "ViewVideo"
   ],
-  "lines": 211,
+  "lines": 215,
   "goal": "",
-  "last_commit": "2026-09-11"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "run/plugins/common/word_learning.py",
@@ -3036,7 +3036,7 @@
    "_cos",
    "WordLearning"
   ],
-  "lines": 134,
+  "lines": 149,
   "goal": "",
   "last_commit": "2026-09-15"
  },
@@ -3046,9 +3046,9 @@
   "defs": [
    "WordProduction"
   ],
-  "lines": 147,
+  "lines": 195,
   "goal": "",
-  "last_commit": "2026-09-07"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "run/plugins/common/world_predictor_log.py",
@@ -3058,9 +3058,9 @@
    "_by_file_path",
    "WorldPredictorLog"
   ],
-  "lines": 150,
+  "lines": 155,
   "goal": "",
-  "last_commit": "2026-09-09"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "run/plugins/common/world_predictor_record.py",
@@ -3070,9 +3070,9 @@
    "_cast_vision",
    "WorldPredictorRecord"
   ],
-  "lines": 90,
+  "lines": 93,
   "goal": "",
-  "last_commit": "2026-09-08"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "run/scene_tools/catalog.py",
@@ -3845,7 +3845,7 @@
    "_write",
    "main"
   ],
-  "lines": 755,
+  "lines": 779,
   "goal": "",
   "last_commit": "2026-09-15"
  },
@@ -3901,7 +3901,7 @@
    "run_check",
    "main"
   ],
-  "lines": 501,
+  "lines": 541,
   "goal": "",
   "last_commit": "2026-09-15"
  },

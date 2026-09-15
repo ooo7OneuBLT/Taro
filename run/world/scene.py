@@ -28,7 +28,7 @@ for _p in (os.path.join(_ROOT, "run", "scene_tools"),
         sys.path.insert(0, _p)
 
 
-def resolve(scene_name, taro=None, world=None):
+def resolve(scene_name, taro=None, world=None, body=None, setup=None):
     """シーンを読んで、実験ファイルの `taro` 欄による上書きまで済ませた辞書を返す。
 
     【なぜ切り出したか、2026-09-14】走行の記録（`run.meta.json`）に
@@ -44,12 +44,26 @@ def resolve(scene_name, taro=None, world=None):
             そのため壁を足す・おもちゃを1個増やすたびに213項目の場面を丸ごと複製し、
             340本まで増えた（実測で94%が複製）。ここが3層目。
             書かなければ（None）1ビットも変わらない。
+        body, setup: 同じ3層目を体（`body`）と姿勢の作り方（`setup`）にも通す。
+            【なぜ足したか、2026-09-16】3層目が `world` にしか無かったため、
+            目や首の設定を**真偽値1個**変えるだけでも場面を丸ごと複製していた。
+            実測：土台の派生3本は土台と1項目しか違わない
+            （_バネを切る=body.eye_centering / _保持を切る=body.orienting_hold /
+              _輻輳を切る=body.vergence、いずれも true→false）。
+            場面は多くの実験から選ばれる「部品」なので、増えると選び間違いが起きる
+            （F2-129・F2-131 で実際に壁なしの場面を選んだ）。実験ファイルは
+            1走行に1本＝選ぶ対象ではないので、その回だけの差はそちらに置く。
     """
     import scene_io
     taro = taro or {}
     sc = scene_io.load(scene_name)
     if world:
         sc["world"] = scene_io._merge(sc["world"], world)
+    if body:
+        sc["body"] = scene_io._merge(sc.get("body") or {}, body)
+        sc["fingerprint"] = None      # 体を変えたら場面の指紋とは一致しない
+    if setup:
+        sc["setup"] = scene_io._merge(sc.get("setup") or {}, setup)
 
     # 月齢は実験ファイルで上書きできる（体を育てる実験のため）。
     #   注意：上書きしたらシーンの指紋とは一致しないので照合を外す。
@@ -60,13 +74,16 @@ def resolve(scene_name, taro=None, world=None):
 
 
 def build(scene_name, *, taro=None, seed=0, verbose=False, hybrid=False,
-          world=None):
+          world=None, body=None, setup=None):
     """シーンの名前から環境を作る。
 
     Args:
         scene_name: run/scenes/<名前>.json の名前
         taro: 実験ファイルの `taro` 欄（月齢の上書き・駆動モードの指定に使う）
         seed: リセットの乱数の種
+        world, body, setup: 実験ファイルの同名の欄。**その回だけ**場面に重ねる
+            （`resolve()` へそのまま渡す。書かなければ1ビットも変わらない）。
+            何のためにあるかは `resolve()` の説明を読む
         hybrid: 内臓（内受容感覚）を足すか。**学習では必須**。
             【なぜ、2026-07-30】太郎の融合層（MinimalFusion）は観測の
             `interoception`（空腹・眠気・不快・覚醒）を島皮質(insula)経由で使う。
@@ -78,7 +95,7 @@ def build(scene_name, *, taro=None, seed=0, verbose=False, hybrid=False,
     """
     import scene_io
     taro = taro or {}
-    sc = resolve(scene_name, taro, world)
+    sc = resolve(scene_name, taro, world, body, setup)
 
     # 駆動モデル。既定（None）＝ scene_io の既定＝筋肉モード。
     act = None

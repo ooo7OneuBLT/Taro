@@ -182,22 +182,27 @@ def check(spec, spec_path=""):
     #   CLAUDE.md「同じミスが2回起きたら文書ではなく機械で防ぐ」に従い、止める。
     #   わざと壁なしにするとき（昔の走行と条件を揃える等）は --skip-preflight。
     if scene:
+        # 【2026-09-16に直した誤発火】以前はここで**場面ファイルの生JSONだけ**を
+        #   読んでいた。そのため実験ファイルの `world.backdrop` で壁を足した走行
+        #   （＝3層目という公認のやり方）でも「壁がありません」で止まった。
+        #   実測で確認：resolve() は backdrop.enabled=True を返すのに、ここは止めていた。
+        #   誤発火は `--skip-preflight` で逃げる癖を作るので、実際に使われる値
+        #   （場面＋実験ファイルの上書き）を返す resolve() を読む。
         sc = {}
-        for _d in ("run/scenes", "run/scenes/_旧"):
-            _p = _abs(os.path.join(_d, str(scene) + ".json"))
-            if os.path.exists(_p):
-                try:
-                    with open(_p, encoding="utf-8") as f:
-                        sc = json.load(f)
-                except Exception:
-                    sc = {}
-                break
+        try:
+            from run.world import scene as _scene_mod
+            sc = _scene_mod.resolve(str(scene), spec.get("taro") or {},
+                                    spec.get("world"), spec.get("body"),
+                                    spec.get("setup"))
+        except Exception:       # noqa: BLE001  場面が無いことは上の検査4が知らせる
+            sc = {}
         bd = ((sc.get("world") or {}).get("backdrop") or {})
         if sc and not bd.get("enabled"):
             兄弟 = [x for x in _場面の兄弟(str(scene)) if "背景あり" in x]
             m = ["場面 %s に**壁（背景）がありません**。" % scene,
                  "      2026-09-11のユーザー決定「壁は今後も常に使い続けて」に反します。",
-                 "      場面ファイルに1行足すだけで直ります：",
+                 "      **実験ファイル**に1行足すだけで直ります"
+                 "（場面ファイルは触らない。2026-09-16）：",
                  '        "world": { "backdrop": { "enabled": true, "dist": 1.2,'
                  ' "height": 2.0, "repeat": [4, 4] } }']
             if 兄弟:
