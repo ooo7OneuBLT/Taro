@@ -358,6 +358,57 @@ def _引用の指す先が消えていないか():
         pass
 
 
+def _文献の散らばりを知らせる():
+    """文献調査が doc/文献調査/ の外にないか、原文が混ざっていないかを見る（2026-09-15）。
+
+    【なぜ】2026-09-15 まで、文献調査は organization 側・目標フォルダ下・doc/ の
+      **23箇所**に散っていた。散ると読まれず、実害が出た（同じ文献を調べ直した）。
+      1か所に集めたので、また散り始めたらすぐ知らせる。
+      規則は 研究の原則.md §A。調査エージェントの書き先も
+      ~/.claude/agents/research.md で Taro/doc/文献調査/ に変えてある。
+
+    見るもの：
+      (1) doc/文献調査/ の外に「文献」を含む名前のフォルダができていないか
+      (2) doc/文献調査/ の作業記録側（原文/ の外）に .md 以外が混ざっていないか
+    実験は止めない。
+    """
+    try:
+        base = _abs(os.path.join("doc", "文献調査"))
+        if not os.path.isdir(base):
+            return
+        gen = os.path.join(base, "原文")
+        # (1) 外に散っていないか
+        散り = []
+        for r in ("doc", "A", "B", "C", "D", "E", "F"):
+            root = _abs(r)
+            if not os.path.isdir(root):
+                continue
+            for dp, dn, fn in os.walk(root):
+                dn[:] = [d for d in dn if d not in ("__pycache__", ".git")]
+                if os.path.abspath(dp).startswith(os.path.abspath(base)):
+                    continue
+                if "文献" in os.path.basename(dp):
+                    散り.append(os.path.relpath(dp, _abs("")))
+        for d in 散り[:3]:
+            print("  [注意] 文献調査が doc/文献調査/ の外にあります：%s"
+                  "（文献は目標をまたぐので1か所に集める。研究の原則.md §A）" % d)
+        # (2) 作業記録側に原文が混ざっていないか
+        混入 = []
+        for dp, dn, fn in os.walk(base):
+            if os.path.abspath(dp).startswith(os.path.abspath(gen)):
+                continue
+            for f in fn:
+                if not f.lower().endswith(".md"):
+                    混入.append(os.path.relpath(os.path.join(dp, f), base))
+        if 混入:
+            print("  [注意] doc/文献調査/ に作業記録(.md)以外が %d 件あります"
+                  "（原文は doc/文献調査/原文/ へ）：" % len(混入))
+            for f in 混入[:3]:
+                print("           %s" % f)
+    except Exception:
+        pass
+
+
 def run_check(spec, spec_path="", skip=False):
     """点検して表示する。ERROR があれば False を返す（走らせない）。"""
     if skip:
@@ -372,6 +423,7 @@ def run_check(spec, spec_path="", skip=False):
     _コミットの溜まりを知らせる()
     _目視の欠けを知らせる(spec)
     _引用の指す先が消えていないか()
+    _文献の散らばりを知らせる()
     if not errors:
         print("走行前点検：問題なし（%d 件の注意）" % len(warns))
         return True
