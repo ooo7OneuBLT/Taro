@@ -11,7 +11,7 @@
 「図（figure）」とする（`figure_mask()`）。成人でも注視している対象が図になるので、
 中心を種にするのは不自然ではない[Tier3・工学的近似]。ただし実測（F2-63）で
 「視野に何も無くても必ず何か検出する」「離れた2物体を安定して見分けられない」
-という弱点が確認された（`F/docs/物体ファイルと注意/文献調査/2026-09-04_複数物体検出_診断.md`）。
+という弱点が確認された（`doc/文献調査/物体ファイルと注意/2026-09-04_複数物体検出_診断.md`）。
 
 【2026-09-04・切り出しをMobileSAMに交換】感覚の入出力は既製部品を先に検討する方針
 （[[project-policy-emergence-scope-2026-08-19]]、視覚をDINOv2で代用しているのと同じ
@@ -122,7 +122,7 @@ def load_mobilesam(weights_path=None, device=None, points_per_batch=None):
     使い回すこと（読み込みが重い）。返り値を `detect(..., mask_generator=...)` に渡す。
 
     【出典】Zhang et al. 2023, arXiv:2306.14289「Faster Segment Anything」。
-    Apache License 2.0（`F/docs/物体ファイルと注意/文献調査/2026-09-04c_mobilesam_ライセンス.md`
+    Apache License 2.0（`doc/文献調査/物体ファイルと注意/2026-09-04c_mobilesam_ライセンス.md`
     で確認済み・商用利用可・AI学習禁止条項なし）。
     パラメータ（points_per_side等）はF2-64検証時と同じ設定
     （`F/docs/物体ファイルと注意/2026-09-04c_統合まとめ.md`）。

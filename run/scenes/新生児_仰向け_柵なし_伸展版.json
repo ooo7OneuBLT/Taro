@@ -1,6 +1,6 @@
 {
   "name": "新生児_仰向け_柵なし_伸展版",
-  "note": "0ヶ月・仰向け・柵なし・おもちゃなし・生理的屈曲なし（伸展版）。2026-08-03 新設。「新生児_仰向け_柵なし」(flexion=true)の複製で、body.flexion だけ false に変えた比較対照。それ以外(age_months=0.0, toy無効, limb_tone/body_support/head_hold null等)は一切変えていない。屈曲姿勢が自己接触の頻度に与える因果は一次資料では未検証の仮説（E/docs/リーチング/文献調査/屈曲姿勢と自己接触頻度_2026-08-03.md）のため、flexion有無の比較実験の対照シーンとして作った。初期姿勢(state.qpos)は元シーンと同じ値から出発するが、flexionをOFFにしたことで四肢の伸展側の壁(apply_physiological_flexion)と屈筋トーンのバネ(apply_flexor_tone)の両方が働かなくなる（taro_core/src/body/infant_body.py:837-878、flexionフラグは両機構を同時にON/OFFする）。そのため3秒間の安定性チェック(settle)はこのシーン専用に実測し直した（下記fingerprint.settle参照。数値は手で書き換えていない）。",
+  "note": "0ヶ月・仰向け・柵なし・おもちゃなし・生理的屈曲なし（伸展版）。2026-08-03 新設。「新生児_仰向け_柵なし」(flexion=true)の複製で、body.flexion だけ false に変えた比較対照。それ以外(age_months=0.0, toy無効, limb_tone/body_support/head_hold null等)は一切変えていない。屈曲姿勢が自己接触の頻度に与える因果は一次資料では未検証の仮説（doc/文献調査/リーチング/屈曲姿勢と自己接触頻度_2026-08-03.md）のため、flexion有無の比較実験の対照シーンとして作った。初期姿勢(state.qpos)は元シーンと同じ値から出発するが、flexionをOFFにしたことで四肢の伸展側の壁(apply_physiological_flexion)と屈筋トーンのバネ(apply_flexor_tone)の両方が働かなくなる（taro_core/src/body/infant_body.py:837-878、flexionフラグは両機構を同時にON/OFFする）。そのため3秒間の安定性チェック(settle)はこのシーン専用に実測し直した（下記fingerprint.settle参照。数値は手で書き換えていない）。",
   "created": "2026-08-03",
   "schema": 1,
   "body": {

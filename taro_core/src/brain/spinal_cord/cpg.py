@@ -273,7 +273,7 @@ def is_antagonist_action(action, n_actuator):
 #   拮抗筋側の運動ニューロンは一時的に発火がゼロになる）。つまり**この修正は
 #   人間に近づける方向として正しいが、単独では成立しない**。
 #   減衰の不足という別の問題を先に直す必要がある。
-#   調査：F/docs/二語文/文献調査/2026-09-11_VORとサッケードの合成_人間側.md
+#   調査：doc/文献調査/二語文/2026-09-11_VORとサッケードの合成_人間側.md
 #   記録：F/logs/_机上/保持の残り_原因の切り分け_2026-09-11.md
 _SUM_BEFORE_MUSCLE = _os.environ.get("E_SUM_BEFORE_MUSCLE", "0") == "1"
 
@@ -327,7 +327,7 @@ def write_joint_command(action, joint_index, cmd, n_actuator, co_activation=0.0,
     #   拮抗筋は積極的に抑制される＝共収縮しない。このファイルの
     #   co_activation の注釈（Sherrington の相反神経支配の法則）が既に
     #   そう書いているのに、additive の経路がそれを破っていた。
-    #   ※ この生理の裏取りは調査中（F/docs/二語文/文献調査/
+    #   ※ この生理の裏取りは調査中（doc/文献調査/二語文/
     #     2026-09-11_VORとサッケードの合成_人間側.md）。
     #
     # 【何が変わるか】向きが同じときは結果が変わらない（足し算は足し算）。

@@ -34,7 +34,7 @@ Berthier & Keen 2006 24.0         49.0
 出典：Berthier NE, Keen R (2006) "Development of reaching in infancy."
   *Exp Brain Res* 169:507-518. http://people.umass.edu/neb/papers/berthier2006.pdf
   （Table 4 に上記の各研究の値がまとまっている）
-詳しい調査：E/docs/リーチング/文献調査/乳児の手の運動速度_2026-07-31.md
+詳しい調査：doc/文献調査/リーチング/乳児の手の運動速度_2026-07-31.md
 
 【太郎ではどう数えるか（文献との違い）】
 文献は「1回のリーチ」を単位に数える。**太郎はまだリーチをしないので、
@@ -227,5 +227,5 @@ class MovementUnits(Plugin):
             "しきい値_深さ_ms": self.prominence,
             "しきい値_最短間隔_ms": self.min_gap_ms,
             "注意": "文献値はリーチ中の値。自発運動の文献値は見つかっていない"
-                    "（E/docs/リーチング/文献調査/乳児の手の運動速度_2026-07-31.md）",
+                    "（doc/文献調査/リーチング/乳児の手の運動速度_2026-07-31.md）",
         }
