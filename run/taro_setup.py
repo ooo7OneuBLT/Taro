@@ -867,6 +867,7 @@ class _DoubleTouchBonusContributor:
         self.bonus = float(bonus)
 
     def compute(self, ctx):
+        """ctx を受け取り、直前のダブルタッチ判定（ctx.last_double_touch）が命中していれば bonus を、していなければ 0.0 を返す。"""
         ld = getattr(ctx, "last_double_touch", None)
         if ld is not None and ld.get("hit"):
             return self.bonus
@@ -908,6 +909,8 @@ class _MouthTouchBonusContributor:
         self._prev_hit = False
 
     def compute(self, ctx):
+        """ctx を受け取り、口元への接触が前tickは無く今tickで新たに立ち上がったときだけ bonus を返し、それ以外は 0.0 を返す。内部の立ち上がり検出状態（_prev_hit）を更新する。
+        """
         ld = getattr(ctx, "last_double_touch", None)
         last = getattr(ctx, "last", None)
         if ld is None or last is None:

@@ -45,6 +45,7 @@ class BlockProgressProbe(Plugin):
     name = "block_progress_probe"
 
     def setup(self, ctx):
+        """ctx を受け取り、out_path設定・ブロックごとのLearningProgress辞書・記録行リスト・記録tick数を初期化する。戻り値は無い。"""
         self.out_path = self.config.get("out_path")
         # ブロック名ごとに別々のLearningProgressインスタンスを持つ（設計3節）。
         #   最初に見た時のtau_fast/tau_slowで作る（既存のprogress報酬と同じ時定数、
@@ -55,6 +56,8 @@ class BlockProgressProbe(Plugin):
 
     def on_step(self, ctx):
         # 【仕様の明記どおり】last/blocksのいずれかが無い/空なら、何もせず早期return。
+        """ctx を受け取り、太郎の各感覚ブロックについて予測と実際の区間MSEを計算し、ブロックごとのLearningProgressを更新して誤差・進度を1行ずつ記録する。戻り値は無い。
+        """
         last = getattr(ctx, "last", None)
         taro = getattr(ctx, "taro", None)
         blocks = getattr(taro, "blocks", None) if taro is not None else None
@@ -83,6 +86,8 @@ class BlockProgressProbe(Plugin):
         self.steps_recorded += 1
 
     def report(self, ctx):
+        """ctx を受け取り、記録が無ければNoneを返し、それ以外は記録tick数・ブロック名一覧・行数をまとめ、out_path指定時はCSVに書き出してパスを加えて返す。
+        """
         if not self.rows:
             return None
         out = {

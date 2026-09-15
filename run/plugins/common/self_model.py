@@ -44,6 +44,8 @@ class SelfModel(Plugin):
     name = "self_model"
 
     def setup(self, ctx):
+        """ctx を受け取り、太郎の脳が無ければ例外を出し、agency/inverse/inverse_exec/closed_loopの計測要否を設定から読み込んで記録用リストを初期化する。戻り値は無い。
+        """
         if ctx.brain is None:
             raise ValueError(
                 "self_model は太郎の脳が要る（run.type=train で使う）。\n"
@@ -60,6 +62,8 @@ class SelfModel(Plugin):
         self._last = None
 
     def on_checkpoint(self, ctx):
+        """ctx を受け取り、probe_ctxを使ってe_probes.evaluateでclassify・margin・corr・persist（要求時はagencyも）を測り、1行として履歴に積む。戻り値は無い。
+        """
         import e_probes
         probe_ctx = getattr(ctx, "probe_ctx", None)
         if probe_ctx is None:
@@ -78,6 +82,7 @@ class SelfModel(Plugin):
         #   集めて**1行**にする（道具ごとに行が分裂するのを避ける）。
 
     def metrics(self, ctx):
+        """ctx を受け取り、直近の測定値(step以外)を辞書で返す（無ければNone）。"""
         r = self._last
         if not r:
             return None
@@ -85,6 +90,8 @@ class SelfModel(Plugin):
         return {k: v for k, v in r.items() if k != "step"}
 
     def line(self, ctx):
+        """ctx を受け取り、直近の測定値(classify/margin/corr/persist、必要ならagency)をまとめた1行の文字列を返す（無ければNone）。
+        """
         r = self._last
         if not r:
             return None
@@ -95,6 +102,8 @@ class SelfModel(Plugin):
         return s
 
     def report(self, ctx):
+        """ctx を受け取り、終盤の測定値の平均などをまとめ、要求されていればinverse・inverse_exec・closed_loopの診断を1回実行して結果を加えた辞書を返す。
+        """
         if not self.rows:
             out = None
         else:

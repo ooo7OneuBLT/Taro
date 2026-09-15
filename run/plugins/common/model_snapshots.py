@@ -22,12 +22,14 @@ class ModelSnapshots(Plugin):
     name = "model_snapshots"
 
     def setup(self, ctx):
+        """ctx を受け取り、out_dirの設定を読み込んでディレクトリを作成し、保存件数を初期化する。戻り値は無い。"""
         self.out_dir = self.config.get("out_dir")
         if self.out_dir:
             os.makedirs(self.out_dir, exist_ok=True)
         self.saved = 0
 
     def on_checkpoint(self, ctx):
+        """ctx を受け取り、out_dirがあり太郎の脳があれば、脳と（あれば）視覚投影・発話語彙の対応表をまとめてstep番号つきのファイルに保存する。戻り値は無い。"""
         if not self.out_dir:
             return
         taro = getattr(ctx, "taro", None)
@@ -45,6 +47,7 @@ class ModelSnapshots(Plugin):
         self.saved += 1
 
     def report(self, ctx):
+        """ctx を受け取り、out_dir未指定ならNoneを返し、指定されていれば保存した件数と出力先を辞書で返す。"""
         if not self.out_dir:
             return None
         return {"保存した途中の脳": self.saved, "出力": self.out_dir}

@@ -52,6 +52,8 @@ class Trace(Plugin):
     name = "trace"
 
     def setup(self, ctx):
+        """ctx を受け取り、出力先や生データダンプの設定(out/dump_dir/dump_keys/dump_until)を読み込み、記録用リストを初期化する。戻り値は無い。
+        """
         self.out = self.config.get("out")
         self.rows = []
         self.keys = None
@@ -64,6 +66,7 @@ class Trace(Plugin):
             os.makedirs(self.dump_dir, exist_ok=True)
 
     def on_step(self, ctx):
+        """ctx を受け取り、観測や内部ベクトルの指紋(ハッシュ)を1行として記録し、設定に応じて物理状態や指定キーの生配列をnpyで保存する。戻り値は無い。"""
         last = getattr(ctx, "last", None)
         if last is None:
             return          # 脳を通さない実行（measure）では何も置かれない
@@ -112,6 +115,7 @@ class Trace(Plugin):
         self.rows.append(row)
 
     def report(self, ctx):
+        """ctx を受け取り、記録した行をCSVに書き出し、記録したステップ数と出力先を辞書で返す（行が無いか出力先未指定ならNone）。"""
         if not self.rows or not self.out:
             return None
         path = self.out if os.path.isabs(self.out) else os.path.join(

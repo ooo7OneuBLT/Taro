@@ -74,6 +74,7 @@ class _JaFormatter(logging.Formatter):
     """等級を日本語にして、行を短く保つ。"""
 
     def format(self, record):
+        """ログレコードを受け取り、等級（levelno）を日本語ラベルに変換してレコードに付け、親クラスで整形した文字列を返す。"""
         record.等級 = _LEVEL_JA.get(record.levelno, record.levelname)
         return super().format(record)
 
@@ -89,6 +90,7 @@ class _ShortFormatter(_JaFormatter):
     LIMIT = 1800
 
     def format(self, record):
+        """ログレコードを受け取り、親クラスで整形した文字列を作る。長さが上限（LIMIT）を超えていればそこで切り、省略した旨を付け足して返す。"""
         s = super().format(record)
         if len(s) <= self.LIMIT:
             return s
@@ -104,6 +106,7 @@ class _Counter(logging.Handler):
         self.n = {"警告": 0, "エラー": 0}
 
     def emit(self, record):
+        """ログレコードを受け取り、レベルがエラー以上かどうかで「警告」または「エラー」の件数のどちらかを1増やす。戻り値は無い。"""
         key = "エラー" if record.levelno >= logging.ERROR else "警告"
         self.n[key] += 1
 
@@ -116,6 +119,8 @@ class _MikanFilter(logging.Filter):
         self.keep = keep
 
     def filter(self, record):
+        """ログレコードを受け取り、ロガー名が taro.未実装 で始まるかを判定する。self.keep が真ならその判定を、偽なら反転した値を、レコードを通すかどうかの真偽値として返す。
+        """
         is_mikan = record.name.startswith("taro.未実装")
         return is_mikan if self.keep else not is_mikan
 
@@ -241,6 +246,8 @@ def _install_excepthook():
     prev = sys.excepthook
 
     def hook(exc_type, exc, tb):
+        """例外の型・値・トレースバック（exc_type, exc, tb）を受け取る。KeyboardInterrupt でなければ log_crash を呼んで記録し、そのあと元の excepthook を同じ引数で呼ぶ。戻り値は無い。
+        """
         if not issubclass(exc_type, KeyboardInterrupt):
             log_crash(exc)
         prev(exc_type, exc, tb)
@@ -281,6 +288,7 @@ def counts():
 
 
 def paths():
+    """引数は無い。setup_logging が作ったログ置き場のパス辞書を返す。まだ setup_logging を呼んでいなければ None を返す。"""
     return _STATE["paths"]
 
 
@@ -304,6 +312,7 @@ def log_tail(p=None, *, max_lines=40):
     #   前に流れてしまい、「画面の一番下に出る」という仕掛けが壊れる
     #   （実際に壊れたのを確認した）。同じ流れに出せば順序が保証される。
     def out(s):
+        """文字列 s を受け取り、標準エラー出力へ即座に（flush して）書き出す。戻り値は無い。"""
         print(s, file=sys.stderr, flush=True)
 
     out("-" * 74)

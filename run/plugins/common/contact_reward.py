@@ -168,6 +168,8 @@ class ContactReward(Plugin):
     name = "contact_reward"
 
     def setup(self, ctx):
+        """ctx.brain が無ければ例外を出す。config または taro の設定から toucher と touched_groups としきい値を決め（決まらなければ例外）、環境から触覚マップを作って自前の SomatosensoryCortex を構築し、対象部位の存在を確認する。world_targets が config にあれば外界接触の集計も準備する。戻り値は無い。
+        """
         if ctx.brain is None:
             raise ValueError(
                 "contact_reward は太郎の脳が要る（run.type=train で使う）。\n"
@@ -306,6 +308,8 @@ class ContactReward(Plugin):
         #   体を作り直すとTouchMap（点→部位の対応）がrebuildされる。
         #   taro.on_body_change・double_touch.on_body_change と同じ理由で
         #   ここでも地図を差し替えて確認し直す（落とし穴チェックリスト 項86）。
+        """体を作り直した直後に呼ばれる。環境から触覚マップを作り直して SomatosensoryCortex を再構築し、対象部位の存在を再確認する。world_targets が有効なら外界側のgeom集合も作り直す。戻り値は無い。
+        """
         tm = build_touch_map_from_env(ctx.env)
         self._touch_cortex.rebuild(tm)
         self._check_groups()
@@ -321,6 +325,8 @@ class ContactReward(Plugin):
         #   presenceを得て、group_namesで毎回名前で検索する）。
         #   【2026-08-05】taro.target_fusion.touch ではなく self._touch_cortex
         #   （自前のインスタンス）を使う。
+        """毎ステップ呼ばれる。触覚観測から toucher と touched_groups 各部位の presence を計算し、しきい値を超えた touched_groups の部位名を self._last_hit_parts に記録する。world_targets が有効なら、実際の接触ペアから toucher側geomと外界側geomの接触も記録する。戻り値は無い。
+        """
         last = getattr(ctx, "last", None)
         if last is None:
             # 異常系（on_stepが呼ばれなかった等）の安全弁。
@@ -363,6 +369,8 @@ class ContactReward(Plugin):
         # on_step_late は rew・rpe が確定した"後"に呼ばれる（base.Plugin docstring参照）。
         #   ctx.last_reward が無い＝古い trainer（この変更が入る前）で呼ばれた場合の
         #   安全弁。通常は毎tick必ず存在する。
+        """rew・rpe確定後に毎ステップ呼ばれる。ctx.last_reward が無ければ何もしない。self._last_hit_parts の有無で self/none に分類し、回数・rew・rpeの合計を区間・通し双方に加算する。self_trace_out 設定時は self のtickを1行ずつ記録し、world_targets 有効時は self/外界接触の組み合わせで4区分にも分類する。戻り値は無い。
+        """
         lr = getattr(ctx, "last_reward", None)
         if lr is None:
             return
@@ -422,6 +430,8 @@ class ContactReward(Plugin):
                     self.total_world_breakdown[nm] = self.total_world_breakdown.get(nm, 0) + 1
 
     def metrics(self, ctx):
+        """区間内にステップが無ければ None を返す。self/none各区分の回数・rew平均・rpe平均をまとめ、world_targets有効時は4区分の回数も加えた辞書を返す。呼んだ後は区間の集計をリセットする。
+        """
         if not self._seg_steps:
             return None
         out = {}
@@ -439,12 +449,15 @@ class ContactReward(Plugin):
         return out
 
     def line(self, ctx):
+        """まだ測定していなければ None を返す。通しでの self 分類の回数と総ステップ数を「creward_self=N/M」という短い文字列で返す。"""
         if not self.steps:
             return None
         n_self = self.total_count["self"]
         return f"creward_self={n_self}/{self.steps}"
 
     def report(self, ctx):
+        """まだ測定していなければ None を返す。通しの測定ステップ数・toucher/touched_groups・区分ごとの平均rew/rpe・近似の限界や接触頻度についての注意をまとめた辞書を返す。self_trace_out設定時はCSVを書き出し、world_targets有効時は外界接触の内訳も加える。
+        """
         if not self.steps:
             return None
         out = {

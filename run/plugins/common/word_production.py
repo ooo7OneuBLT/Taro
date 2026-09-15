@@ -47,6 +47,7 @@ class WordProduction(Plugin):
     name = "word_production"
 
     def setup(self, ctx):
+        """ctx を受け取り、events_out設定・語と対象物の対応表・発話行のリストを初期化する。戻り値は無い。"""
         self.events_out = self.config.get("events_out")
         self.word_to_target = {}     # 語(text) -> 見ていた物(toy1/toy2)
         self.rows = []
@@ -54,6 +55,8 @@ class WordProduction(Plugin):
     def on_step(self, ctx):
         # word_learningプラグインと同じ手法：親の発話イベントから
         # 「語→対象」の対応表を育てる（太郎の状態には一切触れない）。
+        """ctx を受け取り、親の発話イベントから語と対象物の対応表を更新し、太郎自身の発話イベントがあれば対象語・確信度・生成語・報酬などを1行として蓄積する。戻り値は無い。
+        """
         for ev in (getattr(ctx, "last_parent_utterance", None) or []):
             text, target = ev.get("text"), ev.get("target")
             if text and target:
@@ -107,6 +110,7 @@ class WordProduction(Plugin):
         })
 
     def metrics(self, ctx):
+        """ctx を受け取り、発話回数・直近の報酬・目標語との完全一致率を辞書で返す。"""
         out = {"word_production.count": len(self.rows)}
         if self.rows:
             rewards = [r["reward"] for r in self.rows if r["reward"] != ""]
@@ -117,6 +121,7 @@ class WordProduction(Plugin):
         return out
 
     def report(self, ctx):
+        """ctx を受け取り、events_out指定時は蓄積した発話行をCSVに書き出し、発話回数と完全一致数を辞書で返す。"""
         if self.rows and self.events_out:
             path = (self.events_out if os.path.isabs(self.events_out) else
                     os.path.join(os.path.abspath(os.path.join(

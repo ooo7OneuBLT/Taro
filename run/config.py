@@ -806,6 +806,7 @@ class Config:
     # ---------------------------------------------------------- 便利な読み
     @property
     def is_muscle(self):
+        """actuation の値が筋肉系（muscle・muscles・空文字）かどうかを判定し、真偽値を返す。"""
         return str(self.actuation).lower() in ("muscle", "muscles", "")
 
     @property
@@ -815,10 +816,12 @@ class Config:
 
     @property
     def target_has_vision(self):
+        """target_kind が視覚を含む値（'1'・'vision'・'all'）かどうかを判定し、真偽値を返す。"""
         return self.target_kind in ("1", "vision", "all")
 
     @property
     def target_has_all(self):
+        """target_kind が 'all' かどうかを判定し、真偽値を返す。"""
         return self.target_kind == "all"
 
     @property

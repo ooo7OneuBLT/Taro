@@ -97,6 +97,8 @@ class MovementUnits(Plugin):
     name = "movement_units"
 
     def setup(self, ctx):
+        """config から prominence（谷とみなす深さ）と min_gap_ms（区切りとみなす最短間隔）を読み、_bind でモデルの部位idと1ステップの秒数を求める。通し・区間の集計カウンタと、速度の山谷を追う内部状態を初期化する。戻り値は無い。
+        """
         self.prominence = float(self.config.get("prominence", DEFAULT_PROMINENCE))
         self.min_gap_ms = float(self.config.get("min_gap_ms", DEFAULT_MIN_GAP_MS))
         self._bind(ctx)
@@ -129,6 +131,7 @@ class MovementUnits(Plugin):
 
     def on_body_change(self, ctx):
         # 注意：体を作り直すと body の id が変わりうる。累積した値は消さない。
+        """体を作り直した直後に呼ばれる。_bind を呼び直して部位idと1ステップの秒数を引き直す。戻り値は無い。"""
         self._bind(ctx)
 
     def _seg_reset(self):
@@ -138,6 +141,8 @@ class MovementUnits(Plugin):
         self._seg_vsum = 0.0
 
     def on_step(self, ctx):
+        """毎ステップ呼ばれる。腰から見た手の速度（手と腰のcvelの差のノルム）を計算し、feed に渡して movement unit（動きの区切り）の検出を進める。戻り値は無い。
+        """
         d = ctx.data
         # 腰から見た手の速度（体ごと転がった分を差し引く）
         self.feed(float(np.linalg.norm(
@@ -185,6 +190,8 @@ class MovementUnits(Plugin):
         return (units / sec) if sec > 0 else 0.0
 
     def metrics(self, ctx):
+        """区間内にステップが無ければ None を返す。区間内のmovement unit発生頻度(1秒あたり)・平均間隔(ms)・手の速度の平均と最大(cm/s)をまとめた辞書を返し、区間の集計をリセットする。
+        """
         if not self._seg_steps:
             return None
         out = {
@@ -201,12 +208,15 @@ class MovementUnits(Plugin):
         return out
 
     def line(self, ctx):
+        """まだ測定していなければ None を返す。通しでのmovement unit頻度と最大速度を短い文字列にして返す。"""
         if not self.steps:
             return None
         return (f"mu={self._per_sec(self.units, self.steps):.2f}/s "
                 f"peak={100.0 * self.peak:.0f}cm/s")
 
     def report(self, ctx):
+        """まだ測定していなければ None を返す。通しでのmovement unit頻度・平均間隔・人間の文献値との比較判定・最大速度・測ったステップ数・しきい値をまとめた辞書を返す。
+        """
         if not self.steps:
             return None
         per_sec = self._per_sec(self.units, self.steps)

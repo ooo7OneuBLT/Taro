@@ -261,6 +261,7 @@ TIER_STYLE = {
 
 
 def node_index():
+    """引数は無い。NODES の各要素を、その先頭にある id をキーにした辞書に組み直して返す。"""
     return {n[0]: n for n in NODES}
 
 

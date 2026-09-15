@@ -44,6 +44,7 @@ class Dashboard(Plugin):
 
     def setup(self, ctx):
         # 出力先は「CSVを置いたフォルダ」が既定（同じ実験の仲間が並ぶ場所）
+        """ctx を受け取り、出力先ディレクトリとタイトルを設定または実験名から決めてダッシュボードHTMLを作成し、必要ならブラウザで一度だけ開く。戻り値は無い。"""
         d = self.config.get("dir")
         if not d:
             csv_path = (ctx.spec.get("run") or {}).get("csv")
@@ -138,9 +139,11 @@ class Dashboard(Plugin):
     def on_checkpoint(self, ctx):
         # 注意：CSV はこのあと書かれるので、ここで作る絵は**1つ前**の区切りまでを映す。
         #   （記録の順番＝測る→CSVに書く→次の学習。1区切り遅れるだけなので許容）
+        """ctx を受け取り、ダッシュボードHTMLを作り直す。戻り値は無い。"""
         self._make()
 
     def report(self, ctx):
+        """ctx を受け取り、ダッシュボードHTMLを最後にもう一度作り直し、作成できていれば出力パスを含む辞書を、できていなければNoneを返す。"""
         self._make()            # 最後にもう一度（最新の行まで入った絵にする）
         if not self.made:
             return None

@@ -164,6 +164,7 @@ def _csv_logger(path, spec):
     rows = []
 
     def log_row(row):
+        """1行分の記録 row を受け取り、これまでの行に足してCSVの全行を書き直す。新しい列が現れたら列を増やし、一時ファイルへ書いてから置き換える。戻り値は無い。"""
         if not isinstance(row, dict):
             return
         rows.append(dict(row))
@@ -256,6 +257,8 @@ def _write_run_meta(spec, out_dir):
 
 
 def run(spec, *, steps_override=None, verbose=False):
+    """実験仕様 spec（と任意の steps_override・verbose）を受け取り、run.type（train/view/edit/measure）に応じて学習・目視・編集用Viewer起動・脳を通さない測定のいずれかを行う。見出しの表示と run.meta.json の書き出し、プラグインの組み立てを行ったうえで各分岐へ渡す。プラグインの報告や終了コードをまとめた辞書を返す。
+    """
     from run.context import Ctx
     from run.plugins.common import scene as scene_mod
 
@@ -597,6 +600,8 @@ def _out_dir_of(spec):
 
 
 def main():
+    """コマンドライン引数（実験ファイルのパス・--steps・--verbose・--skip-preflight）を読み取り、テクスチャ解像度検査・プラグイン登録・ログ設定・おもちゃ距離の検査・走行前点検を順に行ってから run() を呼ぶ。点検で止めた場合は1を、それ以外は0を返す。
+    """
     ap = argparse.ArgumentParser(description="シミュレーションシステムの入口")
     ap.add_argument("spec", help="実験ファイル（JSON）のパス")
     ap.add_argument("--steps", type=int, default=None, help="ステップ数を上書きする")

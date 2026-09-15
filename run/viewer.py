@@ -123,6 +123,8 @@ def view(cfg, *, plugins=(), verbose=True):
 
     def policy_fn(obs, prev_a, hidden, *, recompute, frac):
         # 連続制御の frac は今のモデルでは使わない（policy は境界でのみ再計算）
+        """観測 obs・前回行動 prev_a・隠れ状態 hidden を受け取る。recompute が偽なら prev_a と hidden をそのまま返す。真なら選ばれている脳で潜在変数と平均行動を計算し、目標指向探索や探索ノイズを設定に応じて適用したうえで、新しい行動と隠れ状態の組を返す。
+        """
         if not recompute:
             return prev_a, hidden
         # 見比べモード：脳を切り替えた瞬間に GRU の記憶も入れ替える

@@ -100,6 +100,8 @@ class ToyTouchProbe:
             self.hand_geoms[side] = _geoms_of_body(model, bid, include_children=True)
 
     def update(self, model, data):
+        """model と data を受け取り、毎ステップ呼び出す。おもちゃと両手それぞれの最接近距離を更新し、おもちゃのgeomと手のgeomが接触リストに同時に含まれているかで「触れているか」を判定する。触れ始めた瞬間（直前のステップは触れていなかった場合）だけ touches を1増やし、触れているステップ数も数える。戻り値はない。
+        """
         if not self.ok:
             return
         self.steps += 1
@@ -136,6 +138,8 @@ class ToyTouchProbe:
                 "min_cm": {s: v * 100.0 for s, v in self.min_dist.items()}}
 
     def line(self, dt_per_step=0.1):
+        """dt_per_step（1ステップの秒数、既定0.1秒）を受け取り、summary() の結果をもとに1行の文字列を返す。おもちゃが無い場合は「toy=なし」を返し、それ以外は接触回数・1分あたりの接触回数・各手の最接近距離（未測定なら「-」）・経過シミュレーション秒数をまとめた文字列を返す。
+        """
         s = self.summary(dt_per_step)
         if not s["ok"]:
             return "toy=なし"

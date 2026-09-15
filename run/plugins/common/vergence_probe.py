@@ -29,10 +29,13 @@ class VergenceProbe(Plugin):
     name = "vergence_probe"
 
     def setup(self, ctx):
+        """config から out（CSV出力先）を読み、行を貯める self.rows を初期化する。戻り値は無い。"""
         self.out = self.config.get("out")
         self.rows = []
 
     def on_step(self, ctx):
+        """毎ステップ呼ばれる。左右の眼球関節角度から diff_deg（共同運動）・sum_deg（輻輳・開散）を求め、_vergence があれば目標輻輳角・視差・相関・オーバーラップ画素数・測定可否も加えて1行を self.rows に積む。戻り値は無い。
+        """
         u = ctx.env.unwrapped
         v = getattr(u, "_vergence", None)
         d = getattr(u, "data", None)
@@ -71,6 +74,8 @@ class VergenceProbe(Plugin):
         self.rows.append(row)
 
     def report(self, ctx):
+        """rows が空なら件数0の辞書を返す。out が設定されていれば self.rows をCSVに書き出す。記録件数と diff_deg・sum_deg・target_deg・disparity_deg・corr・measurable それぞれの平均・最小・最大をまとめた辞書を返す。
+        """
         if not self.rows:
             return {"輻輳の記録": 0}
         keys = []

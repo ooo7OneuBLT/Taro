@@ -330,6 +330,7 @@ class CaregiverHands:
     # ------------------------------------------------------------------
     @property
     def holding(self):
+        """引数を受け取らない。今このCaregiverHandsが関節を支えている最中（hold()呼び出し後でrelease()していない状態）かどうかを真偽値で返す。"""
         return self._holding
 
     def head_angles(self):

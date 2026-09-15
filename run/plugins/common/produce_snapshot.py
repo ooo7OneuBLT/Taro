@@ -52,6 +52,7 @@ class ProduceSnapshot(Plugin):
     name = "produce_snapshot"
 
     def setup(self, ctx):
+        """ctx を受け取り、出力先ディレクトリ・保存件数上限・full_dir設定を読み込んでディレクトリを作成し、内部状態を初期化する。戻り値は無い。"""
         self.out_dir = _abs_path(self.config.get("out_dir", "F/logs/produce_snapshot"))
         self.max_images = int(self.config.get("max_images", 60))
         os.makedirs(self.out_dir, exist_ok=True)
@@ -97,6 +98,8 @@ class ProduceSnapshot(Plugin):
         return (lv.get("source") == "wide") if isinstance(lv, dict) else False
 
     def on_step(self, ctx):
+        """ctx を受け取り、発話イベントがあればそのときの視覚入力から画像を切り出して視覚ベクトルを求め、上限件数までPNGを保存する。視覚ベクトル自体は全件を内部に蓄積する。戻り値は無い。
+        """
         ev = getattr(ctx, "last_produce", None)
         if not ev:
             return
@@ -253,6 +256,7 @@ class ProduceSnapshot(Plugin):
             plt.close(fig)
 
     def report(self, ctx):
+        """ctx を受け取り、蓄積した視覚ベクトルをnpzファイルに保存し、記録した発話数・保存画像数・保存先を辞書で返す。"""
         if not self.vecs:
             return {"発話スナップ": 0}
         npz = os.path.join(self.out_dir, "視覚ベクトル.npz")

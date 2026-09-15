@@ -99,6 +99,8 @@ def eye_angles(model, data, target_pos):
 
 
 def main():
+    """コマンドライン引数からティック数nと乱数種seedを受け取る（省略時300・0）。学習前の方策で環境を走らせながら毎ティック左右の手が視野に入っているかと目からの距離を記録し、統計を標準出力に表示してから環境を閉じる。戻り値は無い。
+    """
     n = int(sys.argv[1]) if len(sys.argv) > 1 else 300
     seed = int(sys.argv[2]) if len(sys.argv) > 2 else 0
     half_fov = te.VISION_FOVY / 2.0

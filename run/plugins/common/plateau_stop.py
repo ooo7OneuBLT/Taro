@@ -51,6 +51,8 @@ class PlateauStop(Plugin):
     name = "plateau_stop"
 
     def setup(self, ctx):
+        """ctx を受け取り、window・min_improve_frac・min_checkpoints・max_steps・out_pathなどの設定を検証しつつ読み込み、履歴と打ち切り状態を初期化する。戻り値は無い。
+        """
         cfg = self.config
         # window: 直近K回・その前のK回を比べる、その「K」
         #   [Tier3・未較正]。デフォルト5は「何かを置かないとゼロ除算等で
@@ -90,6 +92,8 @@ class PlateauStop(Plugin):
     def on_checkpoint(self, ctx):
         # すでに打ち切りを決めた後（防御的：trainer側は break するはずだが、
         #   万一この後もう一度呼ばれても二重発火・二重printしない）。
+        """ctx を受け取り、小脳の予測誤差の履歴を1件積み、直近K件と直前K件の平均を比べて改善率が閾値未満なら頭打ちとして、上限ステップ数に達したら上限到達として学習の打ち切りを発火させる。戻り値は無い。
+        """
         if self._stopped:
             return
 
@@ -145,6 +149,7 @@ class PlateauStop(Plugin):
 
     def metrics(self, ctx):
         # CSV(run.csv) にも「監視中か／打ち切りが発火したか」が分かる列を残す。
+        """ctx を受け取り、監視中か打ち切り済みか・打ち切り理由・直近の予測誤差を辞書で返す。"""
         row = {"plateau_stop_active": 0 if self._stopped else 1,
                "plateau_stop_reason": (self._stop_info["reason"] if self._stopped else "")}
         if self.history:
@@ -152,6 +157,7 @@ class PlateauStop(Plugin):
         return row
 
     def line(self, ctx):
+        """ctx を受け取り、現在の監視状態（監視中／打ち切り済みとその理由・予測誤差）を表す1行の文字列を返す。"""
         if self._stopped:
             return f"plateau_stop=STOPPED({self._stop_info['reason']})"
         if self.history:
@@ -159,6 +165,7 @@ class PlateauStop(Plugin):
         return "plateau_stop=watching"
 
     def report(self, ctx):
+        """ctx を受け取り、打ち切りの有無・理由・発生ステップ・監視履歴件数をまとめ、out_path指定時はJSONファイルにも書き出して辞書で返す。"""
         out = {"打ち切りが発火したか": self._stopped}
         if self._stopped:
             out["理由"] = self._stop_info["reason"]

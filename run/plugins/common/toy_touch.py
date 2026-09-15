@@ -23,6 +23,8 @@ class ToyTouch(Plugin):
     name = "toy_touch"
 
     def setup(self, ctx):
+        """シーンでおもちゃが無効、またはモデルにおもちゃが無ければ self.probe を None にして以後測定しない。それ以外は ToyTouchProbe を作って self.probe に持つ。戻り値は無い。
+        """
         from e_toy_touch import ToyTouchProbe
         # 注意：シーンで「おもちゃなし」を指定していたら、ここで止める。
         #   【なぜ、2026-07-31】`toy.enabled=false` にしても MuJoCo のモデルからは
@@ -41,15 +43,19 @@ class ToyTouch(Plugin):
             self.probe = None
 
     def on_step(self, ctx):
+        """probe があれば毎ステップ probe.update を呼んで接触・最接近距離を更新させる。probe が無ければ何もしない。戻り値は無い。"""
         if self.probe is not None:
             self.probe.update(ctx.model, ctx.data)
 
     def on_body_change(self, ctx):
         # 体を作り直したら geom の id を引き直す（溜めた回数は保つ）
+        """体を作り直した直後に呼ばれる。probe があれば probe.rebind を呼んでgeomのidを引き直す。戻り値は無い。"""
         if self.probe is not None:
             self.probe.rebind(ctx.model)
 
     def metrics(self, ctx):
+        """probe が無ければ None を返す。probe.summary から区間の接触回数・1分あたり回数・各手の最接近距離(cm、まだ測っていない=1e8以上は除く)をまとめた辞書を返す。
+        """
         if self.probe is None:
             return None
         s = self.probe.summary(ctx.dt)
@@ -61,9 +67,11 @@ class ToyTouch(Plugin):
         return out
 
     def line(self, ctx):
+        """probe があれば probe.line が返す短い文字列を返し、無ければ None を返す。"""
         return self.probe.line(ctx.dt) if self.probe is not None else None
 
     def report(self, ctx):
+        """probe が無ければ「おもちゃ：無し」の辞書を返す。probe があれば接触回数・1分あたり回数・各手の最接近距離・測定sim秒をまとめた辞書を返す。"""
         if self.probe is None:
             return {"おもちゃ": "無し"}
         s = self.probe.summary(ctx.dt)

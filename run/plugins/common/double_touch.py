@@ -73,6 +73,8 @@ class DoubleTouch(Plugin):
     name = "double_touch"
 
     def setup(self, ctx):
+        """ctx.brain または taro.reach_touch_groups が無ければ例外を出す。しきい値・toucher（腕側の手のひら）・touched（taro.reach_touch_groups）を決めて部位の存在を確認し、通し・区間の集計カウンタを初期化する。戻り値は無い。
+        """
         if ctx.brain is None:
             raise ValueError(
                 "double_touch は太郎の脳が要る（run.type=train で使う）。\n"
@@ -113,6 +115,7 @@ class DoubleTouch(Plugin):
         # 【なぜ、2026-08-02】体を作り直すと TouchMap（点→部位の対応）が rebuild
         #   される。reach_success.on_body_change と同じ理由でここでも確認し直す
         #   （落とし穴チェックリスト 項86「配列が長くなる方向の変化は例外にならない」）。
+        """体を作り直した直後に呼ばれる。toucher・touched の対象部位が触覚の地図にまだ存在するかを再確認する。戻り値は無い。"""
         self._check_groups()
 
     def _seg_reset(self):
@@ -124,6 +127,8 @@ class DoubleTouch(Plugin):
         self._presence_max = {nm: 0.0 for nm in self.touched}
 
     def on_step(self, ctx):
+        """毎ステップ呼ばれる。触覚観測から toucher と touched 各部位の presence を計算し、両方が同時にしきい値を超えた部位を「ダブルタッチ」として通し・区間のカウンタに加算し、初めて成立したステップを記録する。戻り値は無い。
+        """
         last = getattr(ctx, "last", None)
         if last is None:
             return
@@ -157,6 +162,8 @@ class DoubleTouch(Plugin):
             self.first_double_step = self.steps
 
     def metrics(self, ctx):
+        """区間内にステップが無ければ None を返す。toucherと各touched部位のpresence平均・最大、部位別のダブルタッチ回数、成立した部位数をまとめた辞書を返し、区間の集計をリセットする。
+        """
         if not self._seg_steps:
             return None
         out = {
@@ -180,12 +187,15 @@ class DoubleTouch(Plugin):
         return out
 
     def line(self, ctx):
+        """まだ測定していなければ None を返す。ダブルタッチが成立した部位数と対象部位総数を「dtouch=N/M部位」という短い文字列で返す。"""
         if not self.steps:
             return None
         hit = sum(1 for nm in self.touched if self.total_double[nm] > 0)
         return f"dtouch={hit}/{len(self.touched)}部位"
 
     def report(self, ctx):
+        """まだ測定していなければ None を返す。toucher・touchedの対象、部位別のダブルタッチ回数と1分あたり回数、初めて成立したステップ、しきい値、近似の限界についての注意をまとめた辞書を返す。
+        """
         if not self.steps:
             return None
         sec = self.steps * ctx.dt

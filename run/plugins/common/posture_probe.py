@@ -29,6 +29,7 @@ class PostureProbe(Plugin):
     name = "posture_probe"
 
     def setup(self, ctx):
+        """区間・通しの頭の高さと報酬を貯める入れ物を初期化し、開始時の頭の高さを None にする。戻り値は無い。"""
         self._seg = []            # 区間ぶんの頭の高さ [m]
         self._seg_rew = []        # 区間ぶんの報酬
         self.all_n = 0
@@ -41,6 +42,8 @@ class PostureProbe(Plugin):
         #   `ctx.last_reward` が組み立てられた**あと**に呼ばれる `on_step_late` で
         #   読むこと（run/plugins/base.py:51 の指示）。頭の高さも同じ tick の値に
         #   揃えたいので、両方まとめてここで取る。
+        """rew・rpe確定後に毎ステップ呼ばれる。頭(head)の高さ(z座標)を区間・通しの集計に加え、開始時の高さが未設定ならここで記録する。ctx.last_reward があれば報酬値を取り出して区間の集計に加える。戻り値は無い。
+        """
         z = float(ctx.data.body("head").xpos[2])
         if self.start_z is None:
             self.start_z = z
@@ -58,6 +61,7 @@ class PostureProbe(Plugin):
                 pass
 
     def metrics(self, ctx):
+        """区間内に値が無ければ None を返す。区間の頭の高さの平均・最大(cm)をまとめ、報酬の値があれば平均も加えた辞書を返す。呼んだ後は区間の集計をリセットする。"""
         if not self._seg:
             return None
         out = {"head_z_mean": round(100.0 * sum(self._seg) / len(self._seg), 3),
@@ -68,12 +72,14 @@ class PostureProbe(Plugin):
         return out
 
     def line(self, ctx):
+        """まだ測定していなければ None を返す。通しでの頭の高さの平均・最大(cm)を短い文字列にして返す。"""
         if not self.all_n:
             return None
         return (f"頭の高さ 平均{100.0 * self.all_sum / self.all_n:.2f}cm "
                 f"最大{100.0 * self.all_max:.2f}cm")
 
     def report(self, ctx):
+        """まだ測定していなければ None を返す。通しでの頭の高さの平均・最大・開始時の高さ(cm)と測ったステップ数をまとめた辞書を返す。"""
         if not self.all_n:
             return None
         return {"頭の高さの平均cm": round(100.0 * self.all_sum / self.all_n, 3),

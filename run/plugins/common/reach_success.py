@@ -56,6 +56,8 @@ class ReachSuccess(Plugin):
     name = "reach_success"
 
     def setup(self, ctx):
+        """ctx.brain または taro.reach_touch_groups が無ければ例外を出す。しきい値と対象部位（taro.reach_touch_groups）を決めて部位の存在を確認し、通し・区間の集計カウンタを初期化する。戻り値は無い。
+        """
         if ctx.brain is None:
             raise ValueError(
                 "reach_success は太郎の脳が要る（run.type=train で使う）。\n"
@@ -94,6 +96,7 @@ class ReachSuccess(Plugin):
         #   索引はキャッシュしていないが、対象部位そのものが消えていないかは
         #   taro 側（`Taro.on_body_change`）とは独立にここでも確認する
         #   （落とし穴チェックリスト 項86「配列が長くなる方向の変化は例外にならない」）。
+        """体を作り直した直後に呼ばれる。対象部位が触覚の地図にまだ存在するかを再確認する。戻り値は無い。"""
         self._check_groups()
 
     def _seg_reset(self):
@@ -102,6 +105,8 @@ class ReachSuccess(Plugin):
         self._presence_max = {nm: 0.0 for nm in self.groups}
 
     def on_step(self, ctx):
+        """毎ステップ呼ばれる。触覚観測から対象各部位のpresenceを計算し、しきい値を超えた部位を「触れた」として通し・区間のカウンタに加算し、全部位に初めて触れたステップを記録する。戻り値は無い。
+        """
         last = getattr(ctx, "last", None)
         if last is None:
             return
@@ -126,6 +131,7 @@ class ReachSuccess(Plugin):
             self.all3_step = self.steps
 
     def metrics(self, ctx):
+        """区間内にステップが無ければ None を返す。部位ごとの接触回数・presence平均・最大、触れた部位数をまとめた辞書を返し、区間の集計をリセットする。"""
         if not self._seg_steps:
             return None
         out = {}
@@ -142,12 +148,14 @@ class ReachSuccess(Plugin):
         return out
 
     def line(self, ctx):
+        """まだ測定していなければ None を返す。触れた部位数と対象部位総数を「reach=N/M部位」という短い文字列で返す。"""
         if not self.steps:
             return None
         covered = sum(1 for nm in self.groups if self.total_touches[nm] > 0)
         return f"reach={covered}/{len(self.groups)}部位"
 
     def report(self, ctx):
+        """まだ測定していなければ None を返す。対象部位、部位別の接触回数と1分あたり回数、全部位に初めて触れたステップ、しきい値をまとめた辞書を返す。"""
         if not self.steps:
             return None
         sec = self.steps * ctx.dt

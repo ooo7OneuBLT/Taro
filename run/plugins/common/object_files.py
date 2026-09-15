@@ -172,6 +172,8 @@ class ObjectFiles(Plugin):
         #   誤りだった。(1) 環境の step の中で呼ぶと位置が変わり、発話が読む
         #   「注意している物」が前tick→今tickへずれる (2) 環境は太郎の語彙を
         #   覗けないので lexicon=None になり語と物が結びつかない。
+        """ctx.taro.visual_attention があればそれを、無ければ自分で新規に VisualAttention を作って self.attn に持つ。self.ofs（物体ファイル一覧）や attend 系のショートカット、frames_out・events_out のパス、行を貯める self.rows などの内部状態を作る。戻り値は無い。
+        """
         _taro = getattr(ctx, "taro", None)
         self._taro_attn = getattr(_taro, "visual_attention", None) if _taro is not None else None
         if self._taro_attn is not None:
@@ -224,6 +226,8 @@ class ObjectFiles(Plugin):
         self._mode_counts = {}
 
     def on_step(self, ctx):
+        """太郎が visual_attention を持つときは ctx から前ステップの検出結果を読むだけ、持たないときは自分で attn.step() を呼んで検出・注意を進めて結果を ctx に書き戻す。検出があれば、frames_out 設定時に検出フレームPNGを保存し、events_out 設定時に matched/created/individuated/revived/absorbed/unmatched/lost の各イベントを1行ずつ self.rows に積む。戻り値は無い。
+        """
         if self._taro_attn is not None:
             # 【段A・2026-09-13】太郎が毎tick見ている（run/trainer._visual_attention_step）。
             #   ここでは**呼ばない・掲示板にも書かない**。最後の結果を読んで
@@ -573,6 +577,8 @@ class ObjectFiles(Plugin):
         dr.text((x + 9, y - 9), "#%s m%s" % (f.id, f.misses), fill=color, font=self._frame_font)
 
     def metrics(self, ctx):
+        """この区間で検出が無ければ None を返す。区間内の n_files・n_dets・検出処理msの平均をまとめた辞書を作り、gaze_from_attention が有効なら眼球角度・サッケードのJSONを書き出してそのパスや発火回数も加えて返す。呼んだ後は区間の集計をリセットする。
+        """
         if not self._seg_n_files:
             return None
         out = {
@@ -616,9 +622,12 @@ class ObjectFiles(Plugin):
         return out
 
     def line(self, ctx):
+        """いま追跡している物体ファイルの数を「物体:N」という短い文字列にして返す。"""
         return f"物体:{len(self.ofs.files)}"
 
     def report(self, ctx):
+        """self.rows があれば events_out へ物体ファイルのイベントCSVを、attend_rows があれば attend_out へ注意ログCSVを書き出す。検出回数・平均処理ms・最終的な物体ファイル数をまとめた辞書を返す。
+        """
         if self.rows and self.events_out:
             os.makedirs(os.path.dirname(self.events_out) or ".", exist_ok=True)
             with open(self.events_out, "w", newline="", encoding="utf-8") as fp:

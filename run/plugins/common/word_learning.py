@@ -54,12 +54,14 @@ class WordLearning(Plugin):
     name = "word_learning"
 
     def setup(self, ctx):
+        """ctx を受け取り、対象物ごとの発話回数・視覚特徴のEMA・記録行のリストを初期化する。戻り値は無い。"""
         self.events_out = self.config.get("events_out")
         self.label_count = {"toy1": 0, "toy2": 0}
         self.feat_ema = {"toy1": None, "toy2": None}
         self.rows = []          # 発話イベントCSV用（1発話=1行）
 
     def on_step(self, ctx):
+        """ctx を受け取り、親の発話イベントから対象物ごとの発話回数と記録行を積み、対象物ごとの視覚特徴のEMAを更新する。戻り値は無い。"""
         events = getattr(ctx, "last_parent_utterance", None) or []
         for ev in events:
             target = ev.get("target")
@@ -84,6 +86,7 @@ class WordLearning(Plugin):
                                       for s, p in zip(state, prev)])
 
     def metrics(self, ctx):
+        """ctx を受け取り、対象物toy1/toy2それぞれの発話回数と assoc_sep（現状は常にNone）を辞書で返す。"""
         out = {"word_learning.label_count_toy1": self.label_count["toy1"],
                "word_learning.label_count_toy2": self.label_count["toy2"],
                "word_learning.assoc_sep": self._assoc_sep(ctx)}
@@ -114,6 +117,7 @@ class WordLearning(Plugin):
         return (sum(seps) / len(seps)) if seps else None
 
     def report(self, ctx):
+        """ctx を受け取り、events_out指定時は発話イベントをCSVに書き出し、発話イベント数・対象物ごとの発話回数・assoc_sepをまとめた辞書を返す。"""
         if self.rows and self.events_out:
             path = (self.events_out if os.path.isabs(self.events_out) else
                     os.path.join(os.path.abspath(os.path.join(

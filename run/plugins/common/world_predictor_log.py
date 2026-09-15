@@ -73,6 +73,7 @@ class WorldPredictorLog(Plugin):
     name = "world_predictor_log"
 
     def setup(self, ctx):
+        """ctx を受け取り、出力先(events_out)と記録行のリスト(通常/物ごと)、勾配検査結果の保持用フィールドを初期化する。戻り値は無い。"""
         self.events_out = self.config.get("events_out")
         self.rows = []
         self.by_file_rows = []
@@ -82,6 +83,8 @@ class WorldPredictorLog(Plugin):
         self._grad_report = None
 
     def on_step_late(self, ctx):
+        """ctx を受け取り、世界の予測器の誤差イベントがあれば1行として蓄積し、物ごとの予測イベントがあればそれも蓄積し、勾配検査結果があれば初めて見えた時点の内容を保持する。戻り値は無い。
+        """
         ev = getattr(ctx, "last_world_pred", None)
         if ev:
             self.rows.append({k: ev.get(k) for k in _COLUMNS})
@@ -106,6 +109,7 @@ class WorldPredictorLog(Plugin):
                 })
 
     def metrics(self, ctx):
+        """ctx を受け取り、蓄積した行のerr_totalの平均を辞書で返す（行やerr_totalが無ければNone）。"""
         if not self.rows:
             return None
         errs = [r["err_total"] for r in self.rows if r.get("err_total") is not None]
@@ -114,6 +118,8 @@ class WorldPredictorLog(Plugin):
         return {"world_predictor.err_total_mean": sum(errs) / len(errs)}
 
     def report(self, ctx):
+        """ctx を受け取り、蓄積した行と物ごとの行をそれぞれCSVに書き出し、保持していた勾配検査結果をJSONに書き出して未更新の重みの数を数え、行数・物ごと行数・未更新数を辞書で返す。
+        """
         if self.rows and self.events_out:
             path = _abs_path(self.events_out)
             os.makedirs(os.path.dirname(path) or ".", exist_ok=True)

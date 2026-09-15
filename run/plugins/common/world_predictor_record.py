@@ -54,10 +54,12 @@ class WorldPredictorRecord(Plugin):
     name = "world_predictor_record"
 
     def setup(self, ctx):
+        """ctx を受け取り、出力先(out)と記録行のリストを初期化する。戻り値は無い。"""
         self.out = self.config.get("out")
         self.rows = []
 
     def on_step_late(self, ctx):
+        """ctx を受け取り、世界の予測器への入力(視覚・聴覚・身体・注意対象・見えている物・消えた物)があれば1tickぶん整形して蓄積する。戻り値は無い。"""
         inp = getattr(ctx, "world_pred_inputs", None)
         if not inp:
             return
@@ -80,6 +82,7 @@ class WorldPredictorRecord(Plugin):
         })
 
     def report(self, ctx):
+        """ctx を受け取り、蓄積した行があり出力先が指定されていればpickleファイルに書き出し、記録行数（書き出した場合は出力先も）を辞書で返す。"""
         if not self.rows or not self.out:
             return {"世界の予測器_入力記録_行数": len(self.rows)}
         path = _abs_path(self.out)

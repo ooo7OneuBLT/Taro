@@ -69,6 +69,7 @@ class Ctx:
         raise AttributeError(name)
 
     def log(self, row):
+        """行の辞書 row を受け取り、生成時に渡されたログ用の関数へそのまま渡す。戻り値は無い。"""
         self._log(row)
 
     @property

@@ -45,6 +45,8 @@ class GazeProbe(Plugin):
     GAZE_DEG = 10.0     # 親の判定と同じ閾値（parent_labeling.py の gaze_deg 既定）
 
     def setup(self, ctx):
+        """config から angles_out（角度ログの出力先）を読み、行を貯める self.rows、連続注視区間の長さを貯める self.runs、現在の区間長 self._cur_run を初期化する。戻り値は無い。
+        """
         self.angles_out = self.config.get("angles_out")
         self.rows = []
         # 的（親が振っている方）への連続注視の区間長[判断数]を集める
@@ -52,6 +54,8 @@ class GazeProbe(Plugin):
         self._cur_run = 0
 
     def on_step(self, ctx):
+        """毎ステップ呼ばれる。環境から test_object1・test_object2 への視線角度と親のラベリング状態・対象を読み、対象への角度（無ければ小さい方）を求めて1行を self.rows に積む。親の状態が「shake」かつ角度がGAZE_DEG以下なら連続注視区間を延ばし、そうでなければ区間を締めて self.runs に記録する。戻り値は無い。
+        """
         u = ctx.env.unwrapped
         a1 = u._gaze_angle_to("test_object1")
         a2 = u._gaze_angle_to("test_object2")
@@ -84,6 +88,8 @@ class GazeProbe(Plugin):
             self._cur_run = 0
 
     def report(self, ctx):
+        """終わっていない連続区間があれば締めて self.runs に加える。angles_out が設定されていれば self.rows をCSVに書き出す。連続注視区間の本数と、区間長の中央値・最大・1秒以上/3秒以上の区間数をまとめた辞書を返す。
+        """
         if self._cur_run > 0:
             self.runs.append(self._cur_run)
         if self.angles_out:

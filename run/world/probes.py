@@ -110,6 +110,8 @@ class ProbeContext:
 
 
 def evaluate(ctx):
+    """ctx（ProbeContext）を受け取り、n_eval回ぶん現在の方策で環境を進めながら、順モデルによる自己予測誤差と、行動を他ステップのものに差し替えたときの誤差を比較する。識別成功率classify・誤差の相対差margin・予測変化量と実際の変化量の相関corr・変化なし基準に対する誤差比persistの4値をタプルで返す。
+    """
     fusion, target_fusion, ln_prop = ctx.fusion, ctx.target_fusion, ctx.ln_prop
     zc, act_mean, nat_head = ctx.zc, ctx.act_mean, ctx.nat_head
     step_k, rescale_action, env = ctx.step_k, ctx.rescale_action, ctx.env
@@ -150,6 +152,8 @@ def evaluate(ctx):
 def agency_probe(ctx, n=_pd.AGENCY_PROBE_N):
     # 遠心性コピー(=太郎の意図a_self)は両トライアル共通。体が自分の意図どおり(自己)か
     # 外部指令(外因)かだけが違う。GRUに渡す前回行動は常に「太郎自身の意図」。
+    """ctx（ProbeContext）と回数nを受け取り、自分の意図した行動を使った場合と、他ステップから無作為に差し替えた行動を使った場合とで順モデルの予測誤差を比較しながら環境を進める。自分の行動の方が誤差が小さい割合agencyと、変化量の比mag_ratioの2値を返す。
+    """
     fusion, target_fusion, ln_prop = ctx.fusion, ctx.target_fusion, ctx.ln_prop
     zc, act_mean, nat_head = ctx.zc, ctx.act_mean, ctx.nat_head
     step_k, rescale_action, env = ctx.step_k, ctx.rescale_action, ctx.env
@@ -210,6 +214,10 @@ def inverse_probe(ctx, n=_pd.INVERSE_PROBE_N, n_steps=_pd.INVERSE_PROBE_STEPS,
         target = (ln_prop(state["obs"]) - clp).detach()  # 望む変化＝実際の次感覚−今
 
         def ferr(a):
+            """（inverse_exec_probe内）候補行動aを受け取り、順モデルnat_headによる予測とtarget（MuJoCoで実際に実行して得た変化量g−clp）との二乗誤差の平均を返す。勾配降下でaを最適化する際の目的関数として使う。
+            """
+            """（inverse_probe内）候補行動aを受け取り、順モデルnat_headによる予測とtarget（実際に生じた固有感覚の変化量）との二乗誤差の平均を返す。勾配降下でaを最適化する際の目的関数として使う。
+            """
             return ((nat_head(torch.cat([z, a], dim=-1)) - target) ** 2).mean()
 
         best_a, best_e = a_real, ferr(a_real).item()
@@ -256,6 +264,7 @@ def inverse_exec_probe(ctx, n=_pd.INVERSE_EXEC_PROBE_N, n_steps=_pd.INVERSE_EXEC
     d_star, d_rand, d_floor, mi_model = [], [], [], []
 
     def real_rollout(a, qpos, qvel):
+        """行動aと物理状態qpos・qvelを受け取り、MuJoCoの状態をその値に復元してから行動aを1回実行する。実行後の固有感覚予測値（ln_propの出力）を返す。"""
         mj.set_state(qpos.copy(), qvel.copy())
         o, _ = step_k(ctx._to_env_ctrl(a))
         return ln_prop(o)
@@ -324,6 +333,8 @@ def closed_loop_probe(ctx, goal_buf, n=_pd.CLOSED_LOOP_PROBE_N,
     dc, do, dr, dn, steps = [], [], [], [], []
 
     def const_rollout(a, nsteps, qpos, qvel):
+        """行動aと繰り返し数nsteps、物理状態qpos・qvelを受け取り、MuJoCoの状態を復元してから行動aを一定のままnsteps回実行する（エピソードが終わればそこで打ち切る）。到達後の固有感覚予測値を返す。
+        """
         mj.set_state(qpos.copy(), qvel.copy())
         ra = ctx._to_env_ctrl(a); o = state["obs"]
         for _ in range(nsteps):
@@ -333,6 +344,8 @@ def closed_loop_probe(ctx, goal_buf, n=_pd.CLOSED_LOOP_PROBE_N,
         return ln_prop(o)
 
     def closed_rollout(g, z0, clp0, h0, pa0, qpos, qvel):
+        """目標g・現在の潜在状態z0・固有感覚clp0・隠れ状態h0・直前行動pa0・物理状態qpos・qvelを受け取る。MuJoCoの状態を復元し、infer_goal_actionで目標gに近づく行動を毎回推論しながらk_inner刻みで環境を進める。目標との誤差が縮まらなくなるか、あるいはmax_reachに達したら止め、最終的な固有感覚予測値と実行したリーチ回数を返す。
+        """
         mj.set_state(qpos.copy(), qvel.copy())
         z_now, clp_now, hcl, pacl = z0, clp0, h0, pa0
         o = state["obs"]; prev_d = mse(clp_now, g).item(); nstep = 0

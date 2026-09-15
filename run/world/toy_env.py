@@ -2179,6 +2179,8 @@ class ToySupineEnv(SupineMimoEnv):
 
     # ------------------------------------------------------------------
     def reset_model(self):
+        """引数は無い（self のみ）。親クラスの reset_model を呼んだあと、両目を正中位へ戻し、おもちゃ・2〜4個目の物体・差し出しスロットの位置を初期化し、視線誘導反射・輻輳反射・親の発話・立ち直り反射などの内部状態をリセットする。座位開始時のqposと頭の高さを姿勢制御の基準値として記録し、最新の観測（_get_obs()の戻り値）を返す。
+        """
         obs = super().reset_model()        # 仰向け＋jitter＋settle
         # 眼球を正中位に戻してからおもちゃを置く。順序が重要：
         #   おもちゃは「視線の正面」に置くので、眼球がずれたままだと
@@ -2264,6 +2266,8 @@ class ToySupineEnv(SupineMimoEnv):
         #   qposを座位へ書き換えるのは「env.reset()の呼び出しが終わったあと・
         #   最初のstep()が呼ばれる前」なので、ここが「シーンの最終姿勢」を
         #   確実に捉えられる最初のタイミングになる（reset_model()のdocstring参照）。
+        """方策が出した action を受け取る。親の介入判定・おもちゃの運搬や保持・親の発話更新・おもちゃの発光更新を行ったあと、VOR・視線誘導反射・輻輳反射・姿勢制御反射の順で action を上書きし、親クラスの step で物理を1歩進める。体幹の姿勢を留め直して倒れ判定を行い、親の発話があれば info に parent_utterance を追加して、(観測, 報酬, terminated, truncated, info) の5要素タプルを返す。
+        """
         if getattr(self, "_posture_baseline_pending", False):
             self._posture_seated_qpos = self.data.qpos.copy()
             self._posture_head_height_ref = float(self.data.body("head").xpos[2])

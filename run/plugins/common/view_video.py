@@ -35,6 +35,8 @@ class ViewVideo(Plugin):
     name = "view_video"
 
     def setup(self, ctx):
+        """ctx を受け取り、出力先・撮影範囲・第三者視点や重ね描画などの設定を読み込み、フォントと一時フォルダ、必要ならMuJoCoのレンダラとカメラを準備する。戻り値は無い。
+        """
         from PIL import ImageFont
         c = self.config
         self.out = c.get("out") or "F/logs/view_video.mp4"
@@ -100,6 +102,7 @@ class ViewVideo(Plugin):
         return self.ren.render().copy()
 
     def on_step(self, ctx):
+        """ctx を受け取り、指定した目の画像を取り出し、親や太郎の発話があれば字幕として保持しつつ、1コマぶんの画像を一時フォルダにPNGで書き出す。戻り値は無い。"""
         if self.until and ctx.step > self.until:
             return
         last = getattr(ctx, "last", None)
@@ -174,6 +177,7 @@ class ViewVideo(Plugin):
         self.n += 1
 
     def report(self, ctx):
+        """ctx を受け取り、蓄積したコマからffmpegで動画を作成し（無ければPNG連番のまま残し）、代表コマと発話時の目の一覧画像も作って結果を辞書で返す。"""
         if self.ren is not None:
             self.ren.close()
         if self.n == 0:

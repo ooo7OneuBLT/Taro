@@ -27,6 +27,8 @@ class ToyInView(Plugin):
     name = "toy_in_view"
 
     def setup(self, ctx):
+        """e_hand_in_view の eye_angles・VISION_FOVY_HALF を取り込み、通し・区間のヒット数とステップ数、視線とのずれ角度を貯めるリストを初期化する。戻り値は無い。
+        """
         from e_hand_in_view import eye_angles, VISION_FOVY_HALF
         self._eye_angles = eye_angles
         self._half = VISION_FOVY_HALF
@@ -36,6 +38,8 @@ class ToyInView(Plugin):
         self._seg_hit, self._seg_tot = 0.0, 0
 
     def on_step(self, ctx):
+        """毎ステップ呼ばれる。おもちゃ(test_object1)の位置が取れなければ何もしない。取れれば両目からの視線角度を計算し、片目でも視野角の半分以内なら「視界に入っている」として通し・区間のカウンタとずれ角度のリストに加える。戻り値は無い。
+        """
         try:
             p = np.array(ctx.data.body(_TOY_BODY).xpos, dtype=float)
         except Exception:
@@ -49,6 +53,7 @@ class ToyInView(Plugin):
         self._seg_tot += 1
 
     def metrics(self, ctx):
+        """区間内にステップが無ければ None を返す。区間内でおもちゃが視界に入っていた割合(%)をまとめた辞書を返し、区間の集計をリセットする。"""
         if not getattr(self, "_seg_tot", 0):
             return None
         v = 100.0 * self._seg_hit / self._seg_tot
@@ -56,12 +61,14 @@ class ToyInView(Plugin):
         return {"toy_in_view": round(v, 3)}
 
     def line(self, ctx):
+        """まだ測定していなければ None を返す。通しでの視界に入っていた割合(%)と視線とのずれの最小値を短い文字列にして返す。"""
         if not self.tot:
             return None
         return (f"toy_in_view={100.0 * self.hit / self.tot:.1f}%"
                 f" ずれmin={min(self.angs):.1f}°")
 
     def report(self, ctx):
+        """まだ測定していなければ None を返す。通しでの視界に入っていた割合(%)、視線とのずれの平均・最小、測ったステップ数をまとめた辞書を返す。"""
         if not self.tot:
             return None
         a = np.asarray(self.angs)

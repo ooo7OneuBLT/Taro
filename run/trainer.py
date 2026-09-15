@@ -292,6 +292,8 @@ class Trainer:
         self._prof[key] = self._prof.get(key, 0.0) + (time.perf_counter() - t0)
 
     def reset_state(self):
+        """環境をリセットし、観測・隠れ状態・前回行動を初期化する。触覚順応を新しい観測に適用し、reset を持つ報酬要素があればそれぞれ呼ぶ。引数は無く、self.state を書き換えるだけで戻り値は無い。
+        """
         self.state["obs"], _ = self.env.reset()
         # 【2026-08-13・触覚の順応】新しい物理観測が生まれる瞬間（env.reset()直後）
         #   にだけ適用する（仕様4節。fusion.py・encode_targetの中では絶対に呼ばない）。

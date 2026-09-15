@@ -56,6 +56,8 @@ class BabbleProbe(Plugin):
     name = "babble_probe"
 
     def setup(self, ctx):
+        """ctx を受け取り、出力先(events_out/growth_out/practice_out)とgrowth_every・記録用リスト・子音率カウンタを初期化する。戻り値は無い。
+        """
         self.events_out = self.config.get("events_out")
         self.growth_out = self.config.get("growth_out")
         self.practice_out = self.config.get("practice_out")
@@ -71,6 +73,8 @@ class BabbleProbe(Plugin):
         self._win_total = 0
 
     def on_step(self, ctx):
+        """ctx を受け取り、喃語イベントがあれば1発話分を記録して生成語の各文字の調音点から子音率を更新し、growth_everyステップごとに小脳の帳面の件数と子音率も記録する。戻り値は無い。
+        """
         ev = getattr(ctx, "last_babble", None)
         if ev:
             word = ev.get("generated_word", "")
@@ -113,6 +117,7 @@ class BabbleProbe(Plugin):
                 self._win_total = 0
 
     def metrics(self, ctx):
+        """ctx を受け取り、記録が無ければNoneを返し、それ以外は発話数と（あれば）帳面の最新の件数を辞書で返す。"""
         if not self.event_rows and not self.growth_rows:
             return None
         out = {"babble_probe.events": len(self.event_rows)}
@@ -123,6 +128,8 @@ class BabbleProbe(Plugin):
         return out
 
     def report(self, ctx):
+        """ctx を受け取り、指定された出力先へ発話イベント・帳面の成長・音ごとの練習回数をそれぞれCSVで書き出し、喃語の発話数・練習した音の種類数・練習総数を辞書で返す。
+        """
         if self.event_rows and self.events_out:
             path = _abs_path(self.events_out)
             os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
