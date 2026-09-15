@@ -82,8 +82,9 @@ def run_train(spec, *, steps, seed=0, view=False, log_path=None):
     cmd = [os.path.join(_ROOT, ".venv", "Scripts", "python.exe"), "-u",
            os.path.join(_ROOT, "E", "scripts", "e_growth_train.py"),
            str(int(seed)), str(int(steps))]
-    print("  注意[loop] いまは e_growth_train を包んでいる段階です"
-          "（脳の構築・学習ループ・測定は未移行）", flush=True)
+    print("  注意[loop] これは古い経路（E/scripts/e_growth_train.py）を呼ぶ橋です。"
+          "run/main.py はもうこれを使いません（比較のためだけに残しています）",
+          flush=True)
     if log_path:
         os.makedirs(os.path.dirname(log_path), exist_ok=True)
         with open(log_path, "w", encoding="utf-8") as fp:

@@ -16,14 +16,13 @@ M7b-1（物ごとの予測器と驚きの配線）追記：F/docs/二語文/仕�
   物ごとCSV（`世界の予測器_物ごと.csv`）は同じフォルダに自動で置く（events_outの
   ファイル名を置き換えるだけ、新しいconfigキーは増やさない）。
 
-【列】step, t_sec, present, visible, vanished, parent_spoke, parent_text,
-  err_state, err_vec, err_parent, err_slow, err_total, baseline, z,
-  n_files, z_max, z_max_id, ne_level
-  （err_slowは追記2026-09-08。n_files以降はM7b-1で追記。multi_object無効時は
-  空文字。仕様書末尾「追記」節）
+【列】**唯一の定義は `_COLUMNS`**（このファイルの中。2026-09-15時点で24列）。
+  ここに書き写さない（18列と書いてあったが、err_body・z_hearing・z_body・
+  attend_port・z_vec_att・z_vec_max の6列が抜けていて腐っていた）。
+  （err_slowは追記2026-09-08。n_files以降はM7b-1で追記。multi_object無効時は空文字）
 
 【世界の予測器_物ごと.csv の列】
-  step, t_sec, file_id, attended, visible, vanished, err_state, z_state
+  **唯一の定義は `_BY_FILE_COLUMNS`**（10列。z_vec と masked も含む）
   （ctx.world_pred_by_file から。毎tick・物ごとに1行。multi_object無効時は
   この辞書が置かれない/空のため1行も出ない＝ファイル自体を作らない）
 """

@@ -328,11 +328,13 @@ def _setup_hearing(taro, cfg, *, verbose=True):
     """耳＋連合器の配線（2026-08-18新設・F1-3）。Taro.__init__ から呼ぶ。
 
     F1-2「耳の移植」（F/docs/仕様_F1-2_耳の移植.md）で taro_core 側に置いた部品
-    （taro_core/src/senses/hearing.py の Hearing、taro_core/src/brain/lexicon.py の
-    Lexicon）をそのまま装着するだけ。env（体）に依存しないので、_setup_postural_gate
+    （taro_core/src/senses/hearing.py の Hearing、視覚バックエンド、
+    taro_core/src/brain/cerebral_cortex/temporal_lobe/segmentation.py の Segmenter）
+    をそのまま装着するだけ。
+    注意：2026-09-15までは Lexicon（語彙の表）も装着していたが、削除した。env（体）に依存しないので、_setup_postural_gate
     等と違い on_body_change での再構築は不要。
 
-    既定OFF（cfg.hearing=False）：taro.hearing/taro.lexicon/taro.vision_backendは
+    既定OFF（cfg.hearing=False）：taro.hearing/taro.segmenter/taro.vision_backendは
     Noneのまま＝run/trainer.py の step_k 内の配線コードが1行も実行されない
     （既存実験の挙動は1ビットも変わらない）。
 
@@ -371,8 +373,10 @@ def _setup_produce(taro, cfg, env, *, verbose=True):
     """見た物の名前を言う（初語）の配線（2026-08-22新設・F2）。
 
     設計：F/docs/設計_F2_初語（見た物の名前を言う）.md 第2部「実装作業」より：
-      ① 逆引き：taro.lexicon.reverse_lookup()（既存の連合器に追加したメソッド、
-         taro_core/src/brain/lexicon.py）
+      ① どの語を言うか：塊GRU（chunk_brain）と言語海馬を比べて自信の高い方
+         （produce.word_choice="gru_hippo"。doc/脳の地図.md §0「語を選ぶ経路」）。
+         注意：当初の設計は taro.lexicon.reverse_lookup() による逆引きだったが、
+         その経路は2026-09-02に置き換え、lexicon 自体を2026-09-15に削除した
       ② 産出：taro.brain.generate()（既存の調音ヘッド＋VocalTract、新規機構なし）
       ③ 報酬：taro_core/src/brain/imitation_reward.py（B原本 instincts/imitation.py
          からの移植）
@@ -930,9 +934,10 @@ class _MouthTouchBonusContributor:
 class Taro(TaroBrainTick):
     """太郎そのもの。脳・学習器・神経調節・小脳・海馬を持つ。
 
-    注意：ここは「太郎の中身」だけ。環境（env）は組み立てに必要なので受け取るが、
-      **保持しない**（体を作り直しても Taro は作り直さないため）。
-      env が要る操作（step / reset）は呼び出し側（run/trainer.py）が持つ。
+    注意：ここは「太郎の中身」だけ。環境（env）は組み立てに必要なので受け取り、
+      **self.env として保持する**（2026-09-13・段B-2c3。それ以前は保持しておらず、
+      脳の処理が掲示板 ctx.env から世界を取りにいっていた）。
+      step / reset を回すのは今も呼び出し側（run/trainer.py）。
 
     属性:
         brain, fusion, target_fusion, nat_head, emb_proj
@@ -1456,7 +1461,9 @@ class Taro(TaroBrainTick):
         # 【2026-08-19・F1-4a】語彙(hearing.vocab / lexicon)の復元。
         #   _load は __init__ から呼ばれるが、_setup_hearing はそれより前
         #   （taro_setup.py内の呼び出し順）に実行済みなので、この時点で
-        #   self.hearing/self.lexicon は（hearing有効なら）生成済み。
+        #   self.hearing/self.segmenter は（hearing有効なら）生成済み。
+        #   注意：保存ファイルのキー名は "lexicon" のままにしてある
+        #   （2026-09-15より前のモデルを読めるようにするため）。
         if self.hearing is not None:
             if "hearing_vocab" in blob and "lexicon" in blob:
                 hv = blob["hearing_vocab"]

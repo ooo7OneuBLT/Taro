@@ -30,7 +30,9 @@ TARO_DEFAULTS = {
     # 駆動モード。muscle＝拮抗筋2本/関節・引くだけ・行動180次元[0,1]。
     # joint（90関節を独立に駆動）は逸脱リスト「逸脱5」の逸脱
     #   （Hadders-Algra et al. 1992［Tier1］＝新生児は拮抗筋を同時に力ませる）。
-    "actuation":     ("muscle", "駆動モード muscle/joint", "E_MUSCLE"),
+    "actuation":     ("muscle", "駆動モード。muscle（既定・拮抗筋[0,1]）/ muscles / "
+                     "joint / spring / springdamper / torque の6つを受け付ける",
+                     "E_MUSCLE"),
     "age_months":    (None, "体の月齢。None＝シーンの値を使う", "E_AGE"),
     "age_to":        (None, "終わりの月齢。None＝体を育てない", "E_AGE_TO"),
     "age_start":     (0, "何回目の学習から月齢を変え始めるか", "E_AGE_START"),
@@ -123,9 +125,10 @@ TARO_DEFAULTS = {
     # 【F2新設・2026-08-22】見た物の名前を言う（初語）。既定None＝OFF：
     #   run/trainer.py側は設定がNoneなら逆引き(lexicon.reverse_lookup)・generate()等の
     #   追加計算を一切しない（既存実験の挙動もコストも1ビットも変わらない）。
-    #   hearing=true かつ lexicon_mode="contrast"（protoが育つ設定）かつ
-    #   orienting_reflex=true のときだけ意味を持つ（taro_setup.py起動時に確認、
-    #   無ければValueErrorで止める）。
+    #   【2026-09-15・訂正】ここには「hearing=true かつ lexicon_mode='contrast' かつ
+    #   orienting_reflex=true のときだけ意味を持つ」と書いてあったが、いま実際に
+    #   ValueError で止めるのは **hearing=true** の1つだけ（このファイルの _check 内）。
+    #   lexicon_mode の検査は2026-09-15に削除し、orienting_reflex の検査は元から無い。
     #   設計：F/docs/設計_F2_初語（見た物の名前を言う）.md
     # 【未決・2026-09-13】`produce.social` を書くと発話の門（SpeechGate＝言うか黙るかを
     #   学ぶ部品）が作られる。その学習率 `gate_lr` の既定が **core と run で食い違って
@@ -142,7 +145,9 @@ TARO_DEFAULTS = {
     "produce": (None, "見た物の名前を言う（初語）。None=OFF（既定）。有効化するときは"
                "{'threshold': 0.80, 'cooldown_sec': 2.0, 'max_length': 8, "
                "'vocal_tract_stage': 2, 'vocal_tract_decoupled': true, 'lr': 0.005} の"
-               "形（辞書、すべて省略可）", None),
+               "形（辞書）。**word_choice だけは必須**（2026-09-15に既定を廃止した。"
+               "'gru_hippo'＝塊GRUと言語海馬を比べる／'lexicon'＝2026-09-02より前の"
+               "経路）。ほかは省略可", None),
     # 【M7a・2026-09-08・仕様_M7a_世界の予測器_測るだけ】連合野の世界予測器（測るだけ、
     #   太郎の行動・発話・既存の学習には一切影響しない）。None=OFF（既定）。
     #   有効化するときは{'h_fast':64,'h_slow':32,'tau_fast':5,'tau_slow':40,
@@ -239,8 +244,9 @@ TARO_DEFAULTS = {
     # `run/plugins/common/double_touch.py`（測定専用）で6000ステップ実測した結果、
     #   「頭」でのダブルタッチだけが reach_success.py の頭タッチ回数と完全一致する
     #   信頼できる指標だった（胸は座面confound、反対の手は未検出）。
-    #   reach_space（goal_babbling and goal_space=="reach_self"）が有効なときだけ
-    #   taro_setup.py が taro.double_touch を構築する（既定は None のまま）。
+    #   taro_setup.py が taro.double_touch を構築するのは、reach_space
+    #   （goal_babbling and goal_space=="reach_self"）**または** double_touch_bonus≠0
+    #   **または** mouth_touch_bonus≠0 のとき（3つのOR。2026-08-05と08-12に広げた）。
     "double_touch_threshold": (0.5, "頭への自己接触presenceのしきい値[Tier3・工学的判断、"
                                "既存プラグインと同じ値]", "E_DTOUCH_THRESH"),
     "double_touch_bonus": (0.0, "頭へのダブルタッチが起きたtickに足す報酬ボーナス"

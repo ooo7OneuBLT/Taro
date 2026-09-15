@@ -436,7 +436,11 @@ def _all_names():
                     pass
     # 実在するファイル名（`e_body_measure.py` のような引用のため）。
     # F/ は7万ファイル・6.8GBあるので全体は歩かない。道具の置き場だけを見る。
-    for d in ["taro_core", "run", "tests", "E/scripts", "F/scripts", "doc", "MIMo"]:
+    # 【2026-09-15】D/scripts を入れ忘れていて `d1_contact_test.py` を誤検知した。
+    # 目標フォルダは A〜F まであるので、scripts はまとめて見る。
+    for d in ["taro_core", "run", "tests", "doc", "MIMo",
+              "A/scripts", "B/scripts", "C/scripts", "D/scripts",
+              "E/scripts", "F/scripts"]:
         base = os.path.join(ROOT, d)
         if not os.path.isdir(base):
             continue

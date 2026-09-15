@@ -631,8 +631,10 @@ class ToySupineEnv(SupineMimoEnv):
         toy_offset: 肩から見た配置オフセット[m]（x,y,z）。zは接地させるので実質x,yのみ。
         toy_radius: 箱の half-size[m]。
         toy_mass: 質量[kg]。
-        respawn_dist: 肩からこの距離[m]より遠ざかったら手元に置き直す（＝親が渡す）。
-            Noneで無効。既定はREACH_MAX（届かなくなったら戻す）。
+        注意：ここには `respawn_dist`（肩から離れたら瞬間移動で置き直す）の説明が
+            ありましたが、**その引数はもう存在しません**。置き直しは廃止し、
+            いまは紐（_apply_tether）が振り子として位置を保っています。
+            `n_respawn` はエピソードのリセット回数であって距離による置き直しではありません。
     """
 
     def __init__(self, toy=None, toy_side="right", toy_offset=None,

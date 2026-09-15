@@ -182,7 +182,11 @@ def close_renderers():
 
 
 def report(model, data, toy_bid, image=None, camera="eye_left"):
-    """3つの判定をまとめて返す。食い違いがあれば、それ自体が情報になる。"""
+    """4つの判定をまとめて返す。食い違いがあれば、それ自体が情報になる。
+
+    角度（in_fov）・光線（ray_ok）・描き分け（seg_seen ほか。2026-07-27に追加）・
+    色による画素（pix_seen ほか）。
+    """
     ang = gaze_angle(model, data, toy_bid, camera)
     ray_ok, hit = visible_by_ray(model, data, toy_bid, camera)
     out = dict(angle=ang, in_fov=bool(ang < HALF_FOV), ray_ok=ray_ok, ray_hit=hit,

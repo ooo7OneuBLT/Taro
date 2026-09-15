@@ -55,9 +55,10 @@
     points_per_side : None  # MobileSAMの自動マスク生成の点の密度。Noneなら load_mobilesam の既定。速度が足りなければ下げる
 
 【events_out CSVの列】
-    step, sim_time, n_dets, n_files, file_id, x, y, area, event,
-    misses, since_seen, app_cos_created
-    物体ファイル1つにつき1行。event は matched/created/lost/unmatched のいずれか。
+    **唯一の定義は `_EVENT_COLUMNS`**（このファイルの中。2026-09-15時点で56列）。
+    ここに書き写さない（12列と書いてあったが実際は56列に増えていて腐っていた）。
+    物体ファイル1つにつき1行。event は
+    matched / created / individuated / revived / absorbed / unmatched / lost の7種類。
     物体ゼロ（このステップで検出も既存の追跡イベントも無い）のときは file_id 空で1行だけ書く。
 
 【frames_out（config、任意。既定None＝描画しない）】
@@ -67,7 +68,7 @@
     `F/scripts/f73b_stitch_detection_frames.py` で作る）。既存のCSV・検出・
     対応づけロジックには一切触れない（描画は読むだけ）。
     仕様：`F/docs/二語文/仕様_M1.5b_視界動画_検出と物体ファイルの重ね描き_2026-09-05.md`。
-    色：matched=緑、unmatched=灰、created=青、lost=赤。
+    色：matched=緑、revived=紫、created=青、unmatched=灰、lost=赤。
 
 【attend用config（既定は全てOFF相当で既存挙動は不変）】
     attend           : false   # true で「注意中のファイル」の選択と消失信号を有効化
@@ -76,10 +77,11 @@
     attend_out       : None    # 注意.csv の出力先（相対パスはリポジトリルート基準）
 
 【注意.csvの列】
-    step, sim_time, attended_id, visible, misses, vanished, dist_center, area,
-    nearest_word, nearest_cos, target_word, target_cos
+    **唯一の定義は report() の中の writerow**（2026-09-15時点で18列）。
+    ここに書き写さない（12列と書いてあったが、2026-09-09に priority / switch /
+    explore_x / explore_y / ior / switch_decided の6列が増えていた）。
     検出コマ（interval_sごと）に1行。nearest_word/target_wordは
-    ctx.taro.lexicon.proto（DINOv2の見た目ベクトル→語のプロトタイプ）との
+    見た目ベクトル→語の対応との
     コサイン類似度で決める（word_similarity_map.pyの手本と同じ読み方）。
 
 【ctx.attended_object（辞書 or None）】
