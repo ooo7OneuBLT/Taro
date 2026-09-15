@@ -79,7 +79,7 @@
   "defs": [],
   "lines": 22,
   "goal": "E",
-  "last_commit": "2026-07-31"
+  "last_commit": "2026-09-14"
  },
  {
   "path": "E/scripts/e_body_fit.py",
@@ -434,7 +434,7 @@
   ],
   "lines": 1387,
   "goal": "E",
-  "last_commit": "2026-08-11"
+  "last_commit": "2026-09-14"
  },
  {
   "path": "E/scripts/e_hand_in_view.py",
@@ -442,7 +442,7 @@
   "defs": [],
   "lines": 25,
   "goal": "E",
-  "last_commit": "2026-07-31"
+  "last_commit": "2026-09-14"
  },
  {
   "path": "E/scripts/e_head_hold.py",
@@ -450,7 +450,7 @@
   "defs": [],
   "lines": 25,
   "goal": "E",
-  "last_commit": "2026-08-17"
+  "last_commit": "2026-09-14"
  },
  {
   "path": "E/scripts/e_head_hold_test.py",
@@ -615,7 +615,7 @@
   ],
   "lines": 366,
   "goal": "E",
-  "last_commit": "2026-08-11"
+  "last_commit": "2026-09-14"
  },
  {
   "path": "E/scripts/e_orient_diag.py",
@@ -834,7 +834,7 @@
   "defs": [],
   "lines": 23,
   "goal": "E",
-  "last_commit": "2026-07-31"
+  "last_commit": "2026-09-14"
  },
  {
   "path": "E/scripts/e_orienting_v2.py",
@@ -887,7 +887,7 @@
   "defs": [],
   "lines": 25,
   "goal": "E",
-  "last_commit": "2026-08-11"
+  "last_commit": "2026-09-14"
  },
  {
   "path": "E/scripts/e_prone_check.py",
@@ -910,7 +910,7 @@
   ],
   "lines": 159,
   "goal": "E",
-  "last_commit": "2026-08-11"
+  "last_commit": "2026-09-14"
  },
  {
   "path": "E/scripts/e_reach_distance_check.py",
@@ -932,7 +932,7 @@
   ],
   "lines": 178,
   "goal": "E",
-  "last_commit": "2026-08-11"
+  "last_commit": "2026-09-14"
  },
  {
   "path": "E/scripts/e_reach_space.py",
@@ -1051,7 +1051,7 @@
   ],
   "lines": 146,
   "goal": "E",
-  "last_commit": "2026-08-11"
+  "last_commit": "2026-09-14"
  },
  {
   "path": "E/scripts/e_saccade_size_probe.py",
@@ -1086,7 +1086,7 @@
   ],
   "lines": 159,
   "goal": "E",
-  "last_commit": "2026-08-11"
+  "last_commit": "2026-09-14"
  },
  {
   "path": "E/scripts/e_scene_selftest.py",
@@ -1098,7 +1098,7 @@
   ],
   "lines": 156,
   "goal": "E",
-  "last_commit": "2026-08-11"
+  "last_commit": "2026-09-14"
  },
  {
   "path": "E/scripts/e_selfmodel_ceiling_figure.py",
@@ -1198,7 +1198,7 @@
   "defs": [],
   "lines": 25,
   "goal": "E",
-  "last_commit": "2026-09-11"
+  "last_commit": "2026-09-14"
  },
  {
   "path": "E/scripts/e_toy_in_view.py",
@@ -1218,7 +1218,7 @@
   "defs": [],
   "lines": 25,
   "goal": "E",
-  "last_commit": "2026-07-31"
+  "last_commit": "2026-09-14"
  },
  {
   "path": "E/scripts/e_vergence.py",
@@ -1234,7 +1234,7 @@
   "defs": [],
   "lines": 25,
   "goal": "E",
-  "last_commit": "2026-07-31"
+  "last_commit": "2026-09-14"
  },
  {
   "path": "E/scripts/e_vision_signal.py",
@@ -1292,7 +1292,7 @@
   "defs": [],
   "lines": 25,
   "goal": "E",
-  "last_commit": "2026-09-11"
+  "last_commit": "2026-09-14"
  },
  {
   "path": "E/scripts/test_e_vergence.py",
@@ -1441,7 +1441,7 @@
   ],
   "lines": 92,
   "goal": "F",
-  "last_commit": "2026-09-11"
+  "last_commit": "2026-09-14"
  },
  {
   "path": "F/scripts/f106_small_saccade_probe.py",
@@ -1491,7 +1491,7 @@
   ],
   "lines": 807,
   "goal": "F",
-  "last_commit": "2026-08-27"
+  "last_commit": "2026-09-14"
  },
  {
   "path": "F/scripts/f14_test_metrics.py",
@@ -1536,7 +1536,7 @@
   ],
   "lines": 753,
   "goal": "F",
-  "last_commit": "2026-08-27"
+  "last_commit": "2026-09-14"
  },
  {
   "path": "F/scripts/f17_fovea_check.py",
@@ -1550,7 +1550,7 @@
   ],
   "lines": 239,
   "goal": "F",
-  "last_commit": "2026-08-27"
+  "last_commit": "2026-09-14"
  },
  {
   "path": "F/scripts/f17_fovea_edge_check.py",
@@ -1564,7 +1564,7 @@
   ],
   "lines": 193,
   "goal": "F",
-  "last_commit": "2026-08-27"
+  "last_commit": "2026-09-14"
  },
  {
   "path": "F/scripts/f49_learning_order.py",
@@ -2451,7 +2451,7 @@
   ],
   "lines": 139,
   "goal": "F",
-  "last_commit": ""
+  "last_commit": "2026-09-14"
  },
  {
   "path": "F/scripts/f_eye_param_sweep.py",
@@ -2461,7 +2461,7 @@
   ],
   "lines": 169,
   "goal": "F",
-  "last_commit": ""
+  "last_commit": "2026-09-14"
  },
  {
   "path": "F/scripts/f_filing_probe.py",
@@ -2471,7 +2471,7 @@
   ],
   "lines": 229,
   "goal": "F",
-  "last_commit": ""
+  "last_commit": "2026-09-14"
  },
  {
   "path": "F/scripts/f_gen_10way.py",
@@ -2715,7 +2715,7 @@
   ],
   "lines": 81,
   "goal": "F",
-  "last_commit": ""
+  "last_commit": "2026-09-14"
  },
  {
   "path": "F/scripts/f_saccade_command_probe.py",
@@ -2725,7 +2725,7 @@
   ],
   "lines": 76,
   "goal": "F",
-  "last_commit": ""
+  "last_commit": "2026-09-14"
  },
  {
   "path": "F/scripts/f_wordreadout_nway.py",
@@ -2791,7 +2791,7 @@
   ],
   "lines": 110,
   "goal": "",
-  "last_commit": "2026-08-11"
+  "last_commit": "2026-09-14"
  },
  {
   "path": "run/plugins/common/babble_probe.py",
@@ -2906,9 +2906,9 @@
    "_abs_path",
    "ObjectFiles"
   ],
-  "lines": 660,
+  "lines": 659,
   "goal": "",
-  "last_commit": "2026-09-11"
+  "last_commit": "2026-09-14"
  },
  {
   "path": "run/plugins/common/plateau_stop.py",
@@ -2947,7 +2947,7 @@
   ],
   "lines": 268,
   "goal": "",
-  "last_commit": "2026-09-11"
+  "last_commit": "2026-09-14"
  },
  {
   "path": "run/plugins/common/reach_success.py",
@@ -2965,7 +2965,7 @@
   "defs": [],
   "lines": 21,
   "goal": "",
-  "last_commit": "2026-08-13"
+  "last_commit": "2026-09-14"
  },
  {
   "path": "run/plugins/common/self_model.py",
@@ -3036,7 +3036,7 @@
    "_cos",
    "WordLearning"
   ],
-  "lines": 138,
+  "lines": 134,
   "goal": "",
   "last_commit": "2026-09-05"
  },
@@ -3049,18 +3049,6 @@
   "lines": 147,
   "goal": "",
   "last_commit": "2026-09-07"
- },
- {
-  "path": "run/plugins/common/word_similarity_map.py",
-  "doc": "語彙地図：太郎が知っている語同士の見た目の近さ（コサイン類似度）を、",
-  "defs": [
-   "_abs_path",
-   "_cos",
-   "WordSimilarityMap"
-  ],
-  "lines": 182,
-  "goal": "",
-  "last_commit": "2026-09-05"
  },
  {
   "path": "run/plugins/common/world_predictor_log.py",
@@ -3099,10 +3087,21 @@
   ],
   "lines": 198,
   "goal": "",
-  "last_commit": "2026-08-27"
+  "last_commit": "2026-09-14"
  },
  {
-  "path": "run/scene_tools/e_scene.py",
+  "path": "run/scene_tools/e_scene_make.py",
+  "doc": "既存のプリセットからシーンファイルを作る（シーン方式への引っ越し）。",
+  "defs": [
+   "_scene",
+   "main"
+  ],
+  "lines": 357,
+  "goal": "",
+  "last_commit": "2026-09-14"
+ },
+ {
+  "path": "run/scene_tools/scene_io.py",
   "doc": "シーン方式 — 実験環境を「1つのファイル」で決める唯一の入口。",
   "defs": [
    "default_scene",
@@ -3138,20 +3137,9 @@
    "from_env_var",
    "open_scene"
   ],
-  "lines": 1751,
+  "lines": 1762,
   "goal": "",
   "last_commit": "2026-09-14"
- },
- {
-  "path": "run/scene_tools/e_scene_make.py",
-  "doc": "既存のプリセットからシーンファイルを作る（シーン方式への引っ越し）。",
-  "defs": [
-   "_scene",
-   "main"
-  ],
-  "lines": 357,
-  "goal": "",
-  "last_commit": "2026-08-07"
  },
  {
   "path": "run/tools/check_12mo_scene_posture.py",
@@ -3161,7 +3149,7 @@
   ],
   "lines": 101,
   "goal": "",
-  "last_commit": "2026-08-27"
+  "last_commit": "2026-09-14"
  },
  {
   "path": "run/tools/check_15mo_scene_posture.py",
@@ -3171,7 +3159,7 @@
   ],
   "lines": 104,
   "goal": "",
-  "last_commit": "2026-08-27"
+  "last_commit": "2026-09-14"
  },
  {
   "path": "run/tools/check_babble_probe.py",
@@ -3316,7 +3304,7 @@
   "defs": [],
   "lines": 79,
   "goal": "",
-  "last_commit": "2026-08-11"
+  "last_commit": "2026-09-14"
  },
  {
   "path": "run/tools/check_figure.py",
@@ -3341,7 +3329,7 @@
   ],
   "lines": 126,
   "goal": "",
-  "last_commit": ""
+  "last_commit": "2026-09-14"
  },
  {
   "path": "run/tools/check_jitter.py",
@@ -3385,7 +3373,7 @@
   ],
   "lines": 887,
   "goal": "",
-  "last_commit": "2026-08-17"
+  "last_commit": "2026-09-14"
  },
  {
   "path": "run/tools/check_js.py",
@@ -3406,7 +3394,7 @@
   ],
   "lines": 195,
   "goal": "",
-  "last_commit": "2026-08-11"
+  "last_commit": "2026-09-14"
  },
  {
   "path": "run/tools/check_physics.py",
@@ -3435,7 +3423,7 @@
   ],
   "lines": 303,
   "goal": "",
-  "last_commit": ""
+  "last_commit": "2026-09-14"
  },
  {
   "path": "run/tools/check_posture_reflex.py",
@@ -3456,7 +3444,7 @@
   ],
   "lines": 540,
   "goal": "",
-  "last_commit": "2026-08-17"
+  "last_commit": "2026-09-14"
  },
  {
   "path": "run/tools/check_produce_cerebellum_passthrough.py",
@@ -3585,7 +3573,7 @@
   ],
   "lines": 101,
   "goal": "",
-  "last_commit": "2026-07-31"
+  "last_commit": "2026-09-14"
  },
  {
   "path": "run/tools/check_scene_reset_consistency.py",
@@ -3598,7 +3586,7 @@
   ],
   "lines": 197,
   "goal": "",
-  "last_commit": "2026-08-11"
+  "last_commit": "2026-09-14"
  },
  {
   "path": "run/tools/check_self_touch_interest.py",
@@ -3639,7 +3627,7 @@
   ],
   "lines": 165,
   "goal": "",
-  "last_commit": "2026-08-11"
+  "last_commit": "2026-09-14"
  },
  {
   "path": "run/tools/check_touch_adaptation.py",
@@ -3681,7 +3669,7 @@
   ],
   "lines": 234,
   "goal": "",
-  "last_commit": "2026-08-11"
+  "last_commit": "2026-09-14"
  },
  {
   "path": "run/tools/check_wiring_viewer_contrast.py",
@@ -3858,7 +3846,7 @@
   ],
   "lines": 175,
   "goal": "",
-  "last_commit": "2026-08-17"
+  "last_commit": "2026-09-14"
  },
  {
   "path": "run/tools/preflight.py",
@@ -3870,10 +3858,15 @@
    "_場面の兄弟",
    "check",
    "_索引の遅れを知らせる",
+   "_置き場の乱れを知らせる",
+   "_記録の遅れを知らせる",
+   "_コミットの溜まりを知らせる",
+   "_目視の欠けを知らせる",
+   "_引用の指す先が消えていないか",
    "run_check",
    "main"
   ],
-  "lines": 232,
+  "lines": 395,
   "goal": "",
   "last_commit": "2026-09-14"
  },
@@ -3895,7 +3888,7 @@
   ],
   "lines": 266,
   "goal": "",
-  "last_commit": "2026-08-17"
+  "last_commit": "2026-09-14"
  },
  {
   "path": "run/tools/record_orienting_reflex_clip.py",
@@ -3915,7 +3908,7 @@
   ],
   "lines": 231,
   "goal": "",
-  "last_commit": "2026-08-17"
+  "last_commit": "2026-09-14"
  },
  {
   "path": "run/tools/record_self_touch_clip.py",
@@ -3935,11 +3928,11 @@
   ],
   "lines": 216,
   "goal": "",
-  "last_commit": "2026-08-11"
+  "last_commit": "2026-09-14"
  },
  {
   "path": "run/tools/refactor_harness.py",
-  "doc": "設定配線の大改修（シーンJSON→環境構築、`run/scene_tools/e_scene.py` 363〜411行の",
+  "doc": "設定配線の大改修（シーンJSON→環境構築、`run/scene_tools/scene_io.py` 363〜411行の",
   "defs": [
    "_list_scenes",
    "_run_child",
@@ -3953,7 +3946,7 @@
   ],
   "lines": 337,
   "goal": "",
-  "last_commit": "2026-08-17"
+  "last_commit": "2026-09-14"
  },
  {
   "path": "run/tools/smoke.py",
@@ -3966,7 +3959,7 @@
   ],
   "lines": 222,
   "goal": "",
-  "last_commit": "2026-09-11"
+  "last_commit": "2026-09-14"
  },
  {
   "path": "run/tools/test_themes_keys.py",
@@ -4026,7 +4019,7 @@
   ],
   "lines": 192,
   "goal": "",
-  "last_commit": "2026-08-07"
+  "last_commit": "2026-09-14"
  },
  {
   "path": "run/viewer_tools/e_launch_qt.py",
@@ -4036,7 +4029,7 @@
   ],
   "lines": 70,
   "goal": "",
-  "last_commit": "2026-08-13"
+  "last_commit": "2026-09-14"
  },
  {
   "path": "run/viewer_tools/e_viewer.py",
@@ -4048,7 +4041,7 @@
   ],
   "lines": 3260,
   "goal": "",
-  "last_commit": "2026-08-27"
+  "last_commit": "2026-09-14"
  },
  {
   "path": "run/viewer_tools/e_viewer_qt.py",
@@ -4064,7 +4057,7 @@
   ],
   "lines": 1900,
   "goal": "",
-  "last_commit": "2026-08-17"
+  "last_commit": "2026-09-14"
  },
  {
   "path": "run/viewer_tools/e_viewer_qt_drive.py",
@@ -4162,7 +4155,7 @@
   ],
   "lines": 189,
   "goal": "",
-  "last_commit": "2026-08-17"
+  "last_commit": "2026-09-14"
  },
  {
   "path": "run/viewer_tools/wiring_viewer/app.py",
@@ -4460,7 +4453,7 @@
   ],
   "lines": 148,
   "goal": "",
-  "last_commit": "2026-08-27"
+  "last_commit": "2026-09-14"
  },
  {
   "path": "taro_core/src/body/homeostasis.py",
@@ -4494,7 +4487,7 @@
   ],
   "lines": 1184,
   "goal": "",
-  "last_commit": "2026-08-17"
+  "last_commit": "2026-09-14"
  },
  {
   "path": "taro_core/src/body/infant_limbs.py",
@@ -4515,7 +4508,7 @@
   ],
   "lines": 704,
   "goal": "",
-  "last_commit": "2026-08-12"
+  "last_commit": "2026-09-14"
  },
  {
   "path": "taro_core/src/body/infant_neck.py",
@@ -4605,9 +4598,9 @@
    "BrainTickState",
    "TaroBrainTick"
   ],
-  "lines": 2024,
+  "lines": 2015,
   "goal": "",
-  "last_commit": ""
+  "last_commit": "2026-09-14"
  },
  {
   "path": "taro_core/src/brain/brainstem/atnr.py",
@@ -4769,9 +4762,9 @@
    "_abs_path",
    "VisualAttention"
   ],
-  "lines": 1025,
+  "lines": 988,
   "goal": "",
-  "last_commit": ""
+  "last_commit": "2026-09-14"
  },
  {
   "path": "taro_core/src/brain/cerebral_cortex/recurrent_core.py",
@@ -4805,17 +4798,14 @@
   "last_commit": "2026-08-30"
  },
  {
-  "path": "taro_core/src/brain/cerebral_cortex/temporal_lobe/lexicon.py",
-  "doc": "原-辞書（Proto-Lexicon） — 聞いた発話から「単語の型」を切り出して蓄える",
+  "path": "taro_core/src/brain/cerebral_cortex/temporal_lobe/segmentation.py",
+  "doc": "分節 — 聞いた音の列を「語の塊」に切り分ける（側頭葉）",
   "defs": [
-   "_cosine",
-   "_unit",
-   "_as_channels",
-   "Lexicon"
+   "Segmenter"
   ],
-  "lines": 592,
+  "lines": 226,
   "goal": "",
-  "last_commit": "2026-09-07"
+  "last_commit": ""
  },
  {
   "path": "taro_core/src/brain/cerebral_cortex/visual_projection.py",
@@ -4991,14 +4981,6 @@
   "last_commit": "2026-08-27"
  },
  {
-  "path": "taro_core/src/brain/lexicon.py",
-  "doc": "【転送のみ】このファイルの中身は cerebral_cortex/temporal_lobe/lexicon.py へ移した（2026-08-30の整理）。",
-  "defs": [],
-  "lines": 12,
-  "goal": "",
-  "last_commit": "2026-08-30"
- },
- {
   "path": "taro_core/src/brain/limbic/hippocampus.py",
   "doc": "海馬（Hippocampus） — 運動性自己モデル用の短期経験バッファ＆睡眠リプレイ",
   "defs": [
@@ -5059,7 +5041,7 @@
   ],
   "lines": 1866,
   "goal": "",
-  "last_commit": "2026-09-11"
+  "last_commit": "2026-09-14"
  },
  {
   "path": "taro_core/src/brain/midbrain/orienting_v1.py",
@@ -5069,7 +5051,7 @@
   ],
   "lines": 147,
   "goal": "",
-  "last_commit": ""
+  "last_commit": "2026-09-14"
  },
  {
   "path": "taro_core/src/brain/midbrain/preattentive_map.py",
@@ -5233,7 +5215,7 @@
   ],
   "lines": 345,
   "goal": "",
-  "last_commit": "2026-08-17"
+  "last_commit": "2026-09-14"
  },
  {
   "path": "taro_core/src/brain/spinal_cord/righting_damper.py",
@@ -5245,7 +5227,7 @@
   ],
   "lines": 215,
   "goal": "",
-  "last_commit": "2026-08-17"
+  "last_commit": "2026-09-14"
  },
  {
   "path": "taro_core/src/brain/spinal_cord/stretch_reflex.py",
