@@ -105,6 +105,33 @@ if [ -n "$new_py" ]; then
   done
 fi
 
+
+# ------------------------------------------------------------------
+# 8. 索引の作り直しと、説明文の置き去りの検出（2026-09-15）
+#
+# 【なぜ】それまでの仕組みには穴が2つあった。実際に確かめた：
+#   ・再生成が走るのは「**新しい** .py を足したとき」だけ（--diff-filter=A）。
+#     既存ファイルを直しても索引は作り直されなかった
+#   ・フックに git add が1行も無く、作り直しても**そのコミットには入らなかった**
+#     ＝コミットされた索引は常に1つ古い
+#   直して、変更(M)も対象にし、作り直したら git add する。
+#
+#   あわせて「本体を10行以上変えたのに、冒頭の説明文を1行も触っていない」を知らせる。
+#   実測（2026-09-15）：本体143本のうち31本（22%）が、説明文を書いた後にコードが
+#   変わって置き去りになっていた。trainer.py は説明文から33回も変更されている。
+#   .md と違って .py は git が全部追跡しているので、ここでの検査はちゃんと効く。
+export PYTHONIOENCODING=utf-8
+touched_py=$(git diff --cached --name-only --diff-filter=ACM --   'taro_core/src' 'run' | grep -E '\.py$' || true)
+if [ -n "$touched_py" ]; then
+  pyx=".venv/Scripts/python.exe"
+  [ -x "$pyx" ] || pyx="python"
+  "$pyx" run/tools/index_tools.py >/dev/null 2>&1
+  "$pyx" run/tools/index_core.py  >/dev/null 2>&1
+  git add doc/道具索引.md doc/道具索引.json           doc/太郎の構造.md doc/部位の入出力一覧.md >/dev/null 2>&1 || true
+  m=$("$pyx" run/tools/index_core.py --commit 2>/dev/null)
+  [ -n "$m" ] && report "本体を変えたのに説明文が置き去り" "$m"
+fi
+
 if [ "$hit" = "1" ]; then
   echo ""
   echo "=================================================================="
@@ -125,6 +152,10 @@ if [ "$hit" = "1" ]; then
   echo "     上に似た道具を5本出しました。**同じものが既にないか確かめてください。**"
   echo "     探す：python run/tools/index_tools.py --find <語> <語>"
   echo "     対処：既にあるなら、それを使う。無いなら下の --no-verify で通す"
+  echo ""
+  echo "  【8】本体を変えたのに、冒頭の説明文を触っていない"
+  echo "     説明文はコードの隣にあっても腐ります（実測：本体143本中31本＝22%）。"
+  echo "     対処：説明文が今のコードと合っているか見る。合っていれば --no-verify で通す"
   echo ""
   echo "  どれも誤検知なら → git commit --no-verify で通す（理由を1行考えてから）"
   echo ""

@@ -22,6 +22,10 @@
 - 知らせる（WARN）＝意図的なこともあるもの。止めない
 - **偽陽性で作業を止めない**こと。迷ったら WARN 側にする
 
+【走らせる前に知らせるもの（止めない）】実験そのものではなく、記録の遅れを見る。
+    索引の遅れ・置き場の乱れ・記録の遅れ・コミットの溜まり・目視の欠け・
+    引用の指す先・文献の散らばり・**説明文の腐り**（2026-09-15追加）
+
 【使い方】`run/main.py` が走行の前に自動で呼ぶ。単体でも動く：
     python run/tools/preflight.py F/experiments/<実験>.json
 """
@@ -195,6 +199,47 @@ def _索引の遅れを知らせる():
                   "`python -m run.tools.check_index` で一覧" % len(漏れ))
     except Exception:
         pass      # 点検の付け足しで走行を止めない
+
+
+def _説明文の腐りを知らせる():
+    """太郎の構造の文書が古い／説明文がコードとずれていれば知らせる。
+
+    【2026-09-15・ユーザー指摘「あなたは過去の古い記録で判断している」】
+      手で書いた構造の文書は 2/2 で腐っていた（コード構成.md 69日・部位の入出力一覧.md 12日）。
+      自動生成に替えたが、**説明文そのものは腐る**（本体143本中31本＝22%）。
+      検査は3つあり、それぞれ別のものを見つける（2026-09-15の実測で重なりは4本だけ）：
+        ① 文書が古い     … コードが変わったのに作り直していない
+        ② 検査A          … 説明文の中の名前がコードに実在しない（消えた名前）
+        ③ 検査B          … 説明文を書いた後にコードが変わった（中身のズレ）
+      どれでも**実験は止めない**（文書の遅れで走行を止めるのは本末転倒）。
+      直せる瞬間に止めるのは pre-commit の役目。
+    """
+    try:
+        from run.tools import index_core as ic
+        entries = ic.collect()
+        if ic.render_struct(entries) != _読む(ic.OUT_STRUCT) \
+                or ic.render_io(entries) != _読む(ic.OUT_IO):
+            print("  [注意] 太郎の構造の文書が古いです。"
+                  "`python run/tools/index_core.py` で作り直してください")
+        hits = ic.check_unknown(entries)
+        if hits:
+            print("  [注意] 説明文の中の名前が %d 件、コードに実在しません"
+                  "（`python run/tools/index_core.py --unknown` で一覧）" % len(hits))
+        stale = ic.check_stale()
+        if stale:
+            print("  [注意] 説明文を書いた後にコードが変わったファイルが %d 本あります"
+                  "（`python run/tools/index_core.py --stale` で一覧）" % len(stale))
+    except Exception:
+        pass      # 点検の付け足しで走行を止めない
+
+
+def _読む(rel):
+    """ファイルの中身を返す。無ければ None。"""
+    p = _abs(rel)
+    if not os.path.exists(p):
+        return None
+    with open(p, encoding="utf-8", errors="replace") as f:
+        return f.read()
 
 
 def _置き場の乱れを知らせる():
@@ -424,6 +469,7 @@ def run_check(spec, spec_path="", skip=False):
     _目視の欠けを知らせる(spec)
     _引用の指す先が消えていないか()
     _文献の散らばりを知らせる()
+    _説明文の腐りを知らせる()
     if not errors:
         print("走行前点検：問題なし（%d 件の注意）" % len(warns))
         return True

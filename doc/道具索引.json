@@ -2608,7 +2608,7 @@
   ],
   "lines": 107,
   "goal": "F",
-  "last_commit": "2026-09-05"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "F/scripts/f_gso_fetch.py",
@@ -2856,7 +2856,7 @@
   ],
   "lines": 214,
   "goal": "",
-  "last_commit": "2026-08-11"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "run/plugins/common/gaze_probe.py",
@@ -2897,7 +2897,7 @@
   ],
   "lines": 232,
   "goal": "",
-  "last_commit": "2026-07-31"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "run/plugins/common/object_files.py",
@@ -2908,7 +2908,7 @@
   ],
   "lines": 659,
   "goal": "",
-  "last_commit": "2026-09-14"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "run/plugins/common/plateau_stop.py",
@@ -2965,7 +2965,7 @@
   "defs": [],
   "lines": 21,
   "goal": "",
-  "last_commit": "2026-09-14"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "run/plugins/common/self_model.py",
@@ -3038,7 +3038,7 @@
   ],
   "lines": 134,
   "goal": "",
-  "last_commit": "2026-09-05"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "run/plugins/common/word_production.py",
@@ -3098,7 +3098,7 @@
   ],
   "lines": 357,
   "goal": "",
-  "last_commit": "2026-09-14"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "run/scene_tools/scene_io.py",
@@ -3139,7 +3139,7 @@
   ],
   "lines": 1762,
   "goal": "",
-  "last_commit": "2026-09-14"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "run/tools/check_12mo_scene_posture.py",
@@ -3818,6 +3818,34 @@
   "last_commit": "2026-08-27"
  },
  {
+  "path": "run/tools/index_core.py",
+  "doc": "太郎の本体（taro_core/src）の構造を、コードから自動で書き起こす。",
+  "defs": [
+   "_iter_py",
+   "_region",
+   "_first",
+   "_sig",
+   "_returns",
+   "collect",
+   "_by_region",
+   "_n_funcs",
+   "_keep_handwritten",
+   "render_struct",
+   "_func_table",
+   "render_io",
+   "_all_names",
+   "check_unknown",
+   "_git",
+   "check_commit",
+   "check_stale",
+   "_write",
+   "main"
+  ],
+  "lines": 586,
+  "goal": "",
+  "last_commit": ""
+ },
+ {
   "path": "run/tools/index_tools.py",
   "doc": "太郎のコード全部の索引を自動で作り、コマンドラインから探せるようにする。",
   "defs": [
@@ -3835,7 +3863,7 @@
   ],
   "lines": 263,
   "goal": "",
-  "last_commit": "2026-09-11"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "run/tools/memory_guard.py",
@@ -3858,17 +3886,20 @@
    "_場面の兄弟",
    "check",
    "_索引の遅れを知らせる",
+   "_説明文の腐りを知らせる",
+   "_読む",
    "_置き場の乱れを知らせる",
    "_記録の遅れを知らせる",
    "_コミットの溜まりを知らせる",
    "_目視の欠けを知らせる",
    "_引用の指す先が消えていないか",
+   "_文献の散らばりを知らせる",
    "run_check",
    "main"
   ],
-  "lines": 395,
+  "lines": 492,
   "goal": "",
-  "last_commit": "2026-09-14"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "run/tools/queue_train.py",
@@ -4487,7 +4518,7 @@
   ],
   "lines": 1184,
   "goal": "",
-  "last_commit": "2026-09-14"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "taro_core/src/body/infant_limbs.py",
@@ -4508,7 +4539,7 @@
   ],
   "lines": 704,
   "goal": "",
-  "last_commit": "2026-09-14"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "taro_core/src/body/infant_neck.py",
@@ -4600,7 +4631,7 @@
   ],
   "lines": 2015,
   "goal": "",
-  "last_commit": "2026-09-14"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "taro_core/src/brain/brainstem/atnr.py",
@@ -4620,7 +4651,7 @@
   ],
   "lines": 194,
   "goal": "",
-  "last_commit": "2026-09-08"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "taro_core/src/brain/brainstem/vergence.py",
@@ -4645,7 +4676,7 @@
   ],
   "lines": 287,
   "goal": "",
-  "last_commit": "2026-09-11"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "taro_core/src/brain/cerebellum.py",
@@ -4753,7 +4784,7 @@
   ],
   "lines": 176,
   "goal": "",
-  "last_commit": "2026-09-11"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "taro_core/src/brain/cerebral_cortex/parietal_lobe/visual_attention.py",
@@ -4764,7 +4795,7 @@
   ],
   "lines": 988,
   "goal": "",
-  "last_commit": "2026-09-14"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "taro_core/src/brain/cerebral_cortex/recurrent_core.py",
@@ -4805,7 +4836,7 @@
   ],
   "lines": 226,
   "goal": "",
-  "last_commit": ""
+  "last_commit": "2026-09-15"
  },
  {
   "path": "taro_core/src/brain/cerebral_cortex/visual_projection.py",
@@ -4829,7 +4860,7 @@
   ],
   "lines": 1448,
   "goal": "",
-  "last_commit": "2026-09-09"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "taro_core/src/brain/corticospinal.py",
@@ -4880,7 +4911,7 @@
   ],
   "lines": 338,
   "goal": "",
-  "last_commit": "2026-08-30"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "taro_core/src/brain/drives/imitation_reward.py",
@@ -5028,7 +5059,7 @@
   ],
   "lines": 119,
   "goal": "",
-  "last_commit": "2026-09-10"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "taro_core/src/brain/midbrain/orienting.py",
@@ -5041,7 +5072,7 @@
   ],
   "lines": 1866,
   "goal": "",
-  "last_commit": "2026-09-14"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "taro_core/src/brain/midbrain/orienting_v1.py",
@@ -5075,7 +5106,7 @@
   ],
   "lines": 242,
   "goal": "",
-  "last_commit": "2026-09-10"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "taro_core/src/brain/midbrain/superior_colliculus.py",
@@ -5195,7 +5226,7 @@
   ],
   "lines": 369,
   "goal": "",
-  "last_commit": "2026-09-11"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "taro_core/src/brain/spinal_cord/grasp_reflex.py",
@@ -5300,7 +5331,7 @@
   ],
   "lines": 103,
   "goal": "",
-  "last_commit": "2026-08-13"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "taro_core/src/senses/hearing.py",
@@ -5344,7 +5375,7 @@
   ],
   "lines": 563,
   "goal": "",
-  "last_commit": "2026-09-11"
+  "last_commit": "2026-09-15"
  },
  {
   "path": "taro_core/src/senses/otolith_organs.py",
