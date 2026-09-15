@@ -583,6 +583,43 @@ def _check_toy_distance(spec):
     print("")
 
 
+def _前の走行を退避する(out_dir):
+    """走行の前に、出力フォルダの直下にあるものを `_前の走行_<日時>/` へ移す。
+
+    【なぜ機械でやるか・2026-09-15】同じフォルダに別の走行の成果物が同居できるせいで、
+    **前の走行の動画をユーザーに送ってしまった**（2026-09-15）。経緯：
+      2回目 … 出力名を 視界.mp4 にしていた
+      3回目 … 道具立てを戻したら出力名が 動画_視界.mp4 に変わった
+      4回目 … 動画_視界.mp4 を書いた。**視界.mp4（2回目の残骸）はそのまま残った**
+      そして名前で選んで古いほうを送り、「ログと歩数が合わない」と騒いだ
+    走行前点検は「既にあるものを上書きする」は見るが「**残骸が残る**」は見ない。
+    名前で選ぶ限り同じ間違いが起きるので、**直下に今の走行のものしか無い**状態にする。
+
+    消さずに退避する（前の走行のデータは研究の資産なので捨てない）。
+    退避先が既にあれば連番を付ける。何も無ければ何もしない。
+    """
+    import shutil
+    import datetime
+    if not os.path.isdir(out_dir):
+        return None
+    items = [x for x in os.listdir(out_dir) if not x.startswith("_前の走行_")]
+    if not items:
+        return None
+    stamp = datetime.datetime.now().strftime("%Y-%m-%d_%H%M")
+    dest = os.path.join(out_dir, "_前の走行_" + stamp)
+    n = 2
+    while os.path.exists(dest):
+        dest = os.path.join(out_dir, "_前の走行_%s_%d" % (stamp, n))
+        n += 1
+    os.makedirs(dest)
+    for x in items:
+        try:
+            shutil.move(os.path.join(out_dir, x), os.path.join(dest, x))
+        except Exception as e:      # noqa: BLE001
+            print("  注意 退避できませんでした（%s）: %s" % (x, e), flush=True)
+    return dest
+
+
 def _out_dir_of(spec):
     """この走行のログ置き場を実験ファイルから決める（2026-09-12）。
 
@@ -627,6 +664,12 @@ def main():
     #   この走行のフォルダに エラー.log／走行.log／未実装.log を作る。
     #   画面の一番下にエラー.logの中身を出す（最後に呼ぶ log_tail）ので、
     #   読み忘れが注意力ではなく**位置**で防がれる。詳細は run/log_setup.py
+    # 【2026-09-15】ログを作る**前**に、前の走行の成果物を退避する。
+    #   直下に今の走行のものしか無い状態を作る（理由は関数の説明）。
+    _退避先 = _前の走行を退避する(_out_dir_of(spec))
+    if _退避先:
+        print("  退避     前の走行を %s へ移しました（直下は今の走行だけになります）"
+              % os.path.relpath(_退避先, _ROOT), flush=True)
     from run.log_setup import setup_logging, log_tail
     log_paths = setup_logging(_out_dir_of(spec))
     _check_toy_distance(spec)
