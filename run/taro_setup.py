@@ -817,10 +817,12 @@ def _setup_produce(taro, cfg, env, *, verbose=True):
     #   generate()は既に cerebellum= を受け取れる（taro_brain.py:177-179、
     #   コード改変ゼロ）。mode に関わらず cfg.produce が有効なら常に構築する
     #   （＝word/babbleどちらのモードでも学習経験を帳面に貯める）。
-    #   【判断を仰ぐ点・作業記録参照】forward_map/inverse_map/experience_countは
-    #   素のdictでありTaro.save()/_load()のblobには現時点で載らない
-    #   （state_dict()を持たない）。持ち越し学習（cfg.model指定）をすると
-    #   帳面は毎回空から再スタートする。保存方法は勝手に決めず報告する。
+    #   【2026-08-23に判断を仰いだ点・**その後すぐ実装した**】
+    #   forward_map/inverse_map/experience_count は素のdictでstate_dict()を持たない。
+    #   当初「blobに載らないので持ち越し学習では毎回空から再スタートする」と書いていたが、
+    #   **いまは載る**：save() が blob["produce_cerebellum"] に書き（入っていなければ
+    #   assert で止める）、_load() が _pending_produce_cerebellum に退避して、
+    #   このすぐ下で Cerebellum() を作った直後に復元する（作業A・2026-08-23）。
     taro.produce_cerebellum = SpeechCerebellum()
     # 【F2-1・作業A・2026-08-23】_load()が退避した帳面があれば、作った直後に
     #   流し込む（_load()は_setup_produceより前に呼ばれるため、_load()の時点では

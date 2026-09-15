@@ -77,7 +77,8 @@ TARO_DEFAULTS = {
     "vor":           (True, "前庭動眼反射（頭が動いても視線を保つ）", None),
     "orienting_reflex": (False, "視線誘導反射（動くものへ目を向ける）", None),
     # 【2026-08-18新設・F1-3】耳（発話→トークン化）と連合器（語↔見えていたものの統計学習）。
-    #   既定False：taro.hearing/taro.lexiconはNoneのまま＝run/trainer.pyのstep_k内の
+    #   既定False：taro.hearing/taro.segmenterはNoneのまま＝run/trainer.pyのstep_k内の
+    #   （2026-09-15までは taro.lexicon だった。分節だけを Segmenter に切り出した）
     #   配線が一度も実行されない＝既存実験の挙動は1ビットも変わらない。
     #   F1-2「耳の移植」で taro_core 側に置いた部品（Hearing・Lexicon）を装着するだけ。
     "hearing":       (False, "耳＋連合器（親の発話→トークン→見えているものとの連合）を装着", None),
@@ -85,7 +86,9 @@ TARO_DEFAULTS = {
     #   既定None＝従来どおりtaro.fusion.vision（未訓練の自作CNN、64次元）をそのまま使う
     #   （既存実験の挙動は1ビットも変わらない）。hearing=trueのときのみ意味を持つ。
     #   設計：F/docs/仕様_F1-3b_視覚バックエンドの差し替え機構.md
-    "lexicon_vision": (None, "語彙学習へ渡す視覚表現のバックエンド。None=従来通り"
+    "lexicon_vision": (None, "見えのベクトルの作り方。塊GRUと言語海馬が使う"
+                       "（設定名は語彙学習が使っていた頃の名残。値は今も生きている）。"
+                       "None=従来通り"
                        "fusion.vision(64次元)。辞書で指定：{'backend': 'dinov2_vits14', "
                        "'fovea_px': 64}等（taro_core/src/senses/vision_backends.py の"
                        "登録式レジストリから選ぶ）", None),
