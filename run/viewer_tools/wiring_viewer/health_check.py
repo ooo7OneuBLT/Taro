@@ -15,7 +15,7 @@
 【scan_taro_setup.py への依存について】
 (a)は `run/viewer_tools/wiring_viewer/scan_taro_setup.py` の
 `scan_taro_setup()`（{"constructed_classes": set[str], "self_attrs": dict}を返す）を
-使う。着手時点で既に他の実装担当により作成済みだったため、それを import して使う
+使う。着手時点で既に他の担当により作成済みだったため、それを import して使う
 （自己完結コードの二重実装はしない）。万一importに失敗した場合（並列作業中の
 一時的な欠落等を想定）だけ、このファイル内に持つ最小限のフォールバック実装
 （_fallback_scan_taro_setup）で自己完結させる。

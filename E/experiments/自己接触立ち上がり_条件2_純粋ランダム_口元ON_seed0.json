@@ -1,6 +1,6 @@
 {
   "name": "自己接触立ち上がり_条件2_純粋ランダム_口元ON_seed0",
-  "note": "2026-08-13 測定。「口元への報酬で2回目以降の自己接触が増えるか」の本実験（4条件×2シード、事前パイロット済み・E/experiments/自己接触立ち上がり_条件4_進度あり_口元ON_pilot_seed0.jsonでtick数を10000に決定）。条件: 条件2 / 純粋ランダム / 口元ON。reward=noneのときcerebellum=falseを併せて指定し、小脳の模倣学習(imitation_loss)による行動の変化も止めた純粋な無学習条件にしている（2026-08-13の実装で、reward=noneだけでは小脳が報酬と無関係に行動を模倣し続けると判明したため）。vision=falseは2026-08-13に配線されたstrip_textures経路を使う（1プロセスのメモリを大きく削減）。測定はscratchpadのselftouch_paceプラグイン（実行時登録、taro_core/runは無改変）で口元・頭への接触の立ち上がりエッジをtick単位で記録する。依頼：ユーザー（ユーザーの指示、重要度：高）。",
+  "note": "2026-08-13 測定。「口元への報酬で2回目以降の自己接触が増えるか」の本実験（4条件×2シード、事前パイロット済み・E/experiments/自己接触立ち上がり_条件4_進度あり_口元ON_pilot_seed0.jsonでtick数を10000に決定）。条件: 条件2 / 純粋ランダム / 口元ON。reward=noneのときcerebellum=falseを併せて指定し、小脳の模倣学習(imitation_loss)による行動の変化も止めた純粋な無学習条件にしている（2026-08-13の実装で、reward=noneだけでは小脳が報酬と無関係に行動を模倣し続けると判明したため）。vision=falseは2026-08-13に配線されたstrip_textures経路を使う（1プロセスのメモリを大きく削減）。測定はscratchpadのselftouch_paceプラグイン（実行時登録、taro_core/runは無改変）で口元・頭への接触の立ち上がりエッジをtick単位で記録する。依頼：ユーザーの指示（重要度：高）。",
   "scene": "新生児_仰向け_柵なし",
   "taro": {
     "spinal_drive_mode": "reflex_common",

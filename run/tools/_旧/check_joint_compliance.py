@@ -69,7 +69,7 @@ from run.trainer import Trainer                                # noqa: E402
 # MIMoのXMLで class 既定を持たない関節がもし存在すればこの値になる）。
 MUJOCO_RAW_DEFAULT_SOLIMP = (0.9, 0.95, 0.001, 0.5, 2)
 
-# 【2026-08-13の検証で判明・想定外】統合版設計・案B作業記録は「MIMoのXMLには
+# 【2026-08-13の検証で判明・想定外】統合版の設計・案B作業記録は「MIMoのXMLには
 # jointlimit用のsolimp指定が一切無く、全関節がraw MuJoCo既定のまま」としていたが、
 # 実測するとMIMoの全hinge関節93本は raw既定ではなく (0.98, 0.99, 0.001, 0.5, 1.0)
 # を共通して持っていた（MuJoCoの<default class>機構によるクラス既定と推測。

@@ -44,8 +44,7 @@ _ROOT = os.path.abspath(os.path.join(_HERE, os.pardir, os.pardir))
 #   今回の移設のスコープ外）。以前は _HERE が E/scripts を指していたため
 #   sys.path に _HERE を足すだけで暗黙に読めていたが、_HERE が run/viewer_tools に
 #   変わった今はこれが効かない。run/scene_tools/scene_io.py が2026-08-05に
-#   実際に踏んだのと同じ罠（設計：作業記録（非公開）
-#   2026-08-07_runSystem移設_統合版.md 2.3節）。
+#   実際に踏んだのと同じ罠（設計：作業記録（非公開） 2.3節）。
 for p in [os.path.join(_ROOT, "D", "scripts"), os.path.join(_ROOT, "MIMo"),
           os.path.join(_ROOT, "taro_core"),
           os.path.join(_ROOT, "taro_core", "src", "body"),
@@ -202,8 +201,7 @@ def main():
 
     # ---- 駆動モード（筋肉／関節）2026-08-10 新設 --------------------------
     #   【なぜ】run.type=edit（このファイル）は taro.actuation を一切見ておらず、
-    #   常に筋肉モードで体を組み立てていた（監査：作業記録（非公開）
-    #   2026-08-10_run系システムとViewerの型バグ横断監査.md「中2」）。
+    #   常に筋肉モードで体を組み立てていた（監査：作業記録（非公開）「中2」）。
     #   run/plugins/common/scene.py 57〜66行目と同じ語彙判定にする
     #   （joint/spring/springdamper/torque → 関節、それ以外→筋肉、不明値はエラー）。
     #   E_ACTUATION 未指定（既定）は "muscle" ＝今までと完全に同じ挙動。
@@ -326,8 +324,7 @@ def main():
     #   そこで「反射+共通駆動」区画がTaroを経由せずTaroBrainWithMotorを直接
     #   組み立てているのと同じ考え方で、Taro/脳の読み込みとは独立に、監視専用の
     #   インスタンスをここで一度だけ構築する（仕様
-    #   作業記録（非公開）
-    #   スライダー追加.md 2-2節）。用途は「報酬・順応がちゃんと発生しているかの
+    #   作業記録（非公開） 2-2節）。用途は「報酬・順応がちゃんと発生しているかの
     #   確認」であり、行動そのものはこれで変わらない。
     #
     # 【触覚センサが無い/構築に失敗するケース】_fs_available（四肢の筋力スライダー）
@@ -386,8 +383,7 @@ def main():
     #
     # 【なぜ】0ヶ月児の四肢の筋力が弱すぎて腕が物理的に上がらない問題が判明した
     # （実測：肩の外転筋に最大指令を20秒入れ続けても補正係数1.0では25.9度しか
-    # 上がらない。仕様 作業記録（非公開）
-    # 2026-08-12_Viewer筋力スライダーと筋緊張バグ修正.md 依頼1）。
+    # 上がらない。仕様 作業記録（非公開） 依頼1）。
     #
     # 【実体】`MuscleModel._update_torque()`（MIMo/mimoActuation/muscle.py
     # 306〜322行目）は毎物理stepで self.fmax を読んでトルクを計算する
@@ -1057,7 +1053,7 @@ def main():
     #   apply_limb_tone() が profile 引数（"newborn_flexor"/"reach_limb"）を受けるように
     #   なったので、目標角の種類を選ぶラジオボタンに統合した。
     #   _lt0 に target_deg があれば「新生児の既定姿勢（文献）」で保存されたシーン
-    #   （もう1人の実装担当が作る run/scenes/新生児_*.json 想定）とみなし、
+    #   （もう担当1人が作る run/scenes/新生児_*.json 想定）とみなし、
     #   無ければ従来どおり「今の姿勢を保つ」を初期モードにする。
     lt_mode = tk.StringVar(value=("newborn" if _lt0.get("target_deg") else "reach"))
     lt_hold = tk.DoubleVar(value=float(_lt0.get("hold_deg", 10.0)))
@@ -1430,8 +1426,7 @@ def main():
     #   両方から共有される状態なので、ここ1箇所にだけ置く（重複させない）。
     # 【なぜ、2026-08-12】4つ目の駆動モード「reflex_common」（伸張反射＋揺らぐ
     #   振動子の共通駆動、taro_core/src/brain/spinal_cord/common_drive.py・
-    #   stretch_reflex.py）を追加した。仕様：作業記録（非公開）
-    #   2026-08-12_Viewer反射共通駆動モード追加.md。
+    #   stretch_reflex.py）を追加した。仕様：作業記録（非公開）。
     #   actuation=muscle が必須（moment_1/moment_2はMuscleModel構築時にしか
     #   計算されないため、run/config.pyのバリデーションと同じ制約）。
     NOISE_MODES = ["white", "colored", "colored+synergy", "reflex_common"]
@@ -1552,8 +1547,7 @@ def main():
 
     # ---- 反射+共通駆動パラメータ調整（2026-08-12 新設）--------------------
     #
-    # 【なぜ】仕様 作業記録（非公開）
-    #   2026-08-12_Viewer反射共通駆動モード追加.md やること3。駆動モード
+    # 【なぜ】仕様 作業記録（非公開） やること3。駆動モード
     #   「反射+共通駆動」を選んだときだけ効く（もがき運動が「①〜⑤」で
     #   white/colored/colored+synergyだけを制御するのと同じ切り分け）。
     #
@@ -1578,7 +1572,7 @@ def main():
     # ρの既定値0.3とグルーピングの既定値の組み合わせに注意（仕様やること3）：
     #   grouping="none"だと各関節が1要素グループになりρが実質無効になる
     #   （RhythmicCommonDriveGroupのdocstring参照）。既定でρが目に見える効果を
-    #   持つよう、grouping既定は"per_limb"を選んだ（実装担当の判断。作業記録に明記）。
+    #   持つよう、grouping既定は"per_limb"を選んだ（実装時の判断。作業記録に明記）。
     _RC_DEFAULTS = dict(rho=0.3, f0=0.5, a0=1.0, k_s=float(_RC_DEFAULT_K_S),
                         grouping="per_limb")
     rc_rho_var = tk.DoubleVar(value=_RC_DEFAULTS["rho"])
@@ -1981,8 +1975,7 @@ def main():
     #   infant_limbs.disable_limb_tone_spring(model, groups=("arm","leg")) を呼び、
     #   四肢の関節の jnt_stiffness を問答無用で0にする。これを元に戻す経路が
     #   今まで無く、駆動モードを他へ切り替えても四肢のバネが0のまま戻らなかった
-    #   （仕様 作業記録（非公開）
-    #   2026-08-12_Viewer筋力スライダーと筋緊張バグ修正.md 依頼2）。
+    #   （仕様 作業記録（非公開） 依頼2）。
     #   既存の limb_tone_apply()/limb_tone_release()（_limb_saved、819〜906行目
     #   付近）が「書き換える前に保存し、離れるときに復元する」という全く同じ型の
     #   問題を正しく解いているので、その型をそのまま踏襲する。
@@ -2124,8 +2117,7 @@ def main():
             # 【なぜ、2026-08-10】以前は n_act（今の環境の行動次元）から
             #   "muscle 90超/joint" を逆算していたが、この環境は常に筋肉モードで
             #   作られていたため n_act は常に180超＝常に"muscle"と誤判定していた
-            #   （監査：作業記録（非公開）
-            #   2026-08-10_run系システムとViewerの型バグ横断監査.md「中2」）。
+            #   （監査：作業記録（非公開）「中2」）。
             #   実際に環境を組み立てたときの駆動モード（_ACTUATION_MODE、上で
             #   E_ACTUATION から決定済み）をそのまま使う。これで少なくとも
             #   「今の環境」と「今から作る脳の設計」は必ず一致する。

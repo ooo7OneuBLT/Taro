@@ -309,11 +309,9 @@ TARO_DEFAULTS = {
                               "double_touch_thresholdと同じ値・同じ考え方]",
                               "E_MOUTH_TOUCH_THRESH"),
     "mouth_touch_x_frac": (0.60, "頭のローカルx（前後）のうち、これより前を口元とする割合"
-                           "[Tier3・工学的判断。作業記録（非公開）"
-                           "自己接触の報酬設計.md 5-1節、2026-08-12決定]", "E_MOUTH_X_FRAC"),
+                           "[Tier3・工学的判断。2026-08-12決定]", "E_MOUTH_X_FRAC"),
     "mouth_touch_z_frac": (0.40, "頭のローカルz（上下）のうち、これより下を口元とする割合"
-                           "[Tier3・工学的判断。作業記録（非公開）"
-                           "自己接触の報酬設計.md 5-1節、2026-08-12決定]", "E_MOUTH_Z_FRAC"),
+                           "[Tier3・工学的判断。2026-08-12決定]", "E_MOUTH_Z_FRAC"),
     # ---- progress報酬のsurpriseボーナス（機構1、2026-08-04）------------------
     # 設計：作業記録（非公開）
     #   （案C・機構1のみ。設計は"novelty"と呼んでいるが、この量は理論分類上
@@ -405,7 +403,7 @@ TARO_DEFAULTS = {
         "振動子の周波数・振幅・揺らぎの大きさ・基準長への変換スケール"
         "[Tier3・感度分析対象、統合版7-2節の推奨値]", None),
     # ---- 潜在変数のサンプリング（揺らぎ）（2026-08-16）------------------------
-    # 依頼：作業記録（非公開）、潜在変数z決定的モードの実装）
+    # 依頼：2026-08-16（潜在変数z決定的モードの実装）
     #   PredictiveCodingLatent.infer()は毎ステップz=mean+randn*stdでzを引き直す
     #   （taro_core\src\brain\predictive_coding_latent.py）。実測（学習済みモデル
     #   E/logs/座位保持_6ヶ月/model_seed0.pt、シーン「座位_6ヶ月_土台_2026-08-16」）で、
@@ -587,7 +585,7 @@ class Config:
                     "spinal_drive_mode=reflex_common には actuation=muscle が要る。\n"
                     "  moment_1/moment_2はMuscleModel構築時にしか計算されない値のため、"
                     "  関節モード（SpringDamperModel）では使えません。")
-            # 【実装担当の判断・作業記録に明記】既存のnoise=coloredなCPG（色付き探索）と
+            # 【実装時の判断・作業記録に明記】既存のnoise=coloredなCPG（色付き探索）と
             #   新しい駆動モジュールを同時に有効化する組み合わせは、今回のスコープでは
             #   想定しない（両方が行動配列へ別々に加算/上書きすると混乱の元になる）。
             #   どちらか一方を黙って優先するのではなく、明示的なエラーで止める
@@ -672,8 +670,7 @@ class Config:
                 "  点数が変わっても層の形が変わらない。\n"
                 "  落とし穴チェックリスト 項75・項86")
         # 自己接触の興味度ボーナス（reach_self専用、2026-08-03）のバリデーション。
-        #   設計レビューの修正1〜3反映（作業記録（非公開）
-        #   2026-08-03_reach_self新奇性報酬_レビュー.md）。
+        #   設計レビューの修正1〜3反映（作業記録（非公開））。
         if self.self_touch_interest_bonus:
             if self.self_touch_interest_bonus < 0:
                 raise ValueError(

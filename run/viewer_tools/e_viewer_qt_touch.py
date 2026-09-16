@@ -3,8 +3,7 @@
 【これは何か】`run/viewer_tools/e_viewer.py`（旧版・tkinter製）312〜377行目
 （監視用インスタンスの構築）・2693〜2752行目（毎tickの更新）・2889〜2910行目
 （表示文字列の整形）を、GUIから独立した関数として書き直したもの。
-仕様 作業記録（非公開）
-2026-08-13_Viewerのモダン化_第3段階_感覚と報酬タブ.md 3節。
+仕様 作業記録（非公開） 3節。
 
 【なぜファイルを分けるか】`e_viewer_qt_status.py`と同じ考え方。表示は必ず実体
 （TouchAdaptation・DoubleTouchDetector・_MouthTouchBonusContributor）から

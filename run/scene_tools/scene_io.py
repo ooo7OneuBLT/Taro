@@ -608,8 +608,7 @@ def build(scene, orient=None, vor=True, seed=0, verbose=False, actuation_model=N
     #   四肢の筋緊張バネを起動する（setup.limb_tone とは完全に別の入口）。
     #   Viewerの「四肢の筋緊張」チェックボックスは setup.limb_tone だけを見ているため、
     #   setup.limb_tone を設定しないシーンでは、GUI表示OFFのまま物理にはバネが常時入る
-    #   （既知の型バグ。監査 作業記録（非公開）
-    #   2026-08-10_run系システムとViewerの型バグ横断監査.md「中1」参照）。
+    #   （既知の型バグ。監査 作業記録（非公開）「中1」参照）。
     #   現存シーンは両方のキーが整合しているため実害は無いが、今後の新規シーンで
     #   食い違いが混入するのを早期に発見できるよう、ここで検出して警告する。
     #   verboseに関係なく常に出す＝学習ログにも出て見つけやすくするため
@@ -618,7 +617,7 @@ def build(scene, orient=None, vor=True, seed=0, verbose=False, actuation_model=N
         print("[scene] 注意 body.flexion=True ですが setup.limb_tone が設定されていません。"
               "Viewerの「四肢の筋緊張」チェックボックスはOFF表示のままですが、"
               "infant_body.apply_runtime_corrections 経由で四肢の筋緊張バネが物理には"
-              "常時入ります（既知の型バグ。監査 作業記録（非公開）"
+              "常時入ります（既知の型バグ。監査記録 "
               "2026-08-10_run系システムとViewerの型バグ横断監査.md『中1』参照）。"
               "GUIと物理を一致させたい場合は setup.limb_tone を明示的に設定してください。")
 

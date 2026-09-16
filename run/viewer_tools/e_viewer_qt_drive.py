@@ -125,7 +125,7 @@ def build_drive_tab(win, tab_widget):
     # 【なぜ、2026-08-16】旧版削除にあたっての差分洗い出しで判明した欠落。
     #   新版はこれまで常に等倍速固定だった（メインループのsleep式に速度係数が
     #   無かった）。適用箇所はe_viewer_qt.pyのメインループ（sleep式を
-    #   `wall0 + t_sim / speed - time.time()`に変更）。実装担当の判断で追加
+    #   `wall0 + t_sim / speed - time.time()`に変更）。実装時の判断で追加
     #   （仕様に無い機能の復元。境界：このスライダー自体は見た目のみで
     #   ここでは配線しない）。
     box_speed = QtWidgets.QGroupBox("再生速度")

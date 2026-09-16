@@ -33,7 +33,7 @@
     テーマ（例："macos"）を足すときは、THEMES辞書に1エントリ追加するだけで
     済む。
 
-使い方（呼び出し側の実装担当向け）：
+使い方（呼び出し側の実装向け）：
     from e_viewer_qt_theme import apply_theme
     app = QtWidgets.QApplication(sys.argv)
     apply_theme(app)  # 既定はwindows11
@@ -343,8 +343,7 @@ def try_apply_mica(window, style: str = "mica") -> bool:
     """windowにWindows 11のMica（半透明の背景）を適用してみる。
 
     【なぜ、2026-08-13】仕様3節・4節。`pywinstyles`（PyPI、CC0ライセンス。
-    ライセンスの懸念は無い。作業記録（非公開）
-    2026-08-13_ViewerをWindows11風に本気で作り込む.md 2-4節参照）を使う。
+    ライセンスの懸念は無い。作業記録（非公開） 2-4節参照）を使う。
 
     pywinstyles未導入の環境（requirements.txtに追記したが`pip install`前）や、
     Windows以外の環境でも例外を投げず、False を返すだけにする（呼び出し側の

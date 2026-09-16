@@ -1,6 +1,6 @@
 {
   "name": "口元報酬_順応_条件2_口元ON_順応OFF_seed0",
-  "note": "2026-08-13 測定。口元自己接触報酬(mouth_touch_bonus)と触覚の順応(touch_adaptation)の2x2比較、条件2（口元ON_順応OFF）。依頼：作業記録（非公開）、重要度：高）。測定専用プラグイン selftouch_probe（測定が scratchpad に作成、taro_core/run のファイルは変更していない）を run.main.PLUGINS へ実行時登録して使用。詳細は測定作業記録参照。",
+  "note": "2026-08-13 測定。口元自己接触報酬(mouth_touch_bonus)と触覚の順応(touch_adaptation)の2x2比較、条件2（口元ON_順応OFF）。依頼：作業記録（非公開）、重要度：高）。測定専用プラグイン selftouch_probe（測定が scratchpad に作成、taro_core/run のファイルは変更していない）を run.main.PLUGINS へ実行時登録して使用。詳細は作業記録参照。",
   "scene": "新生児_仰向け_柵なし",
   "taro": {
     "spinal_drive_mode": "reflex_common",

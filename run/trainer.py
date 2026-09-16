@@ -744,8 +744,7 @@ class Trainer:
         # 自己接触の興味度ボーナス（reach_self専用、2026-08-03）用の、progress本体
         #   （t.lp）とは完全に独立な新しいトラッカー。初回tickで実測値から初期化する
         #   （固定init=1.0は使わない。落とし穴チェックリスト項96と同じ初期化
-        #   アーティファクトを避けるため）。設計：作業記録（非公開）
-        #   2026-08-03_reach_self専用新奇性報酬の設計.md（3.3節）。
+        #   アーティファクトを避けるため）。設計：作業記録（非公開）（3.3節）。
         self._self_touch_lp = None
         pe_fast, pe_slow = t.lp.pe_fast, t.lp.pe_slow
         reach_goal, reach_prev_dist = None, 0.0
@@ -1001,8 +1000,7 @@ class Trainer:
                 for contributor in t.reward_contributors:
                     rew = rew + contributor.compute(self.ctx)
                 # 自己接触の興味度ボーナス（reach_self専用、2026-08-03）。
-                #   設計：作業記録（非公開）
-                #   2026-08-03_reach_self専用新奇性報酬の設計.md（3.4節）＋
+                #   設計：作業記録（非公開）（3.4節）＋
                 #   レビュー（同フォルダ\2026-08-03_reach_self新奇性報酬_レビュー.md、
                 #   命名をnovelty→interestへ修正）。
                 #   【2026-08-05】以前は外側の if reach_space and t.double_touch is

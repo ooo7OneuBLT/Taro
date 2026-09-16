@@ -29,12 +29,22 @@ m=$(printf '%s\n' "$added" | grep -iE '[cC]:[\\/]+[uU]sers[\\/]+[a-z0-9_]' )
 [ -n "$m" ] && report "ユーザー名の入った絶対パス" "$m"
 
 # 2. メールアドレス
-m=$(printf '%s\n' "$added" | grep -iE '（非公開）|outlook\.jp|[a-z0-9._%-]+@[a-z0-9.-]+\.[a-z]{2,}' | grep -v 'noreply@anthropic.com')
+m=$(printf '%s\n' "$added" | grep -iE '[a-z0-9._%-]+@[a-z0-9.-]+\.[a-z]{2,}' | grep -v 'noreply@anthropic.com')
 [ -n "$m" ] && report "メールアドレス" "$m"
 
-# 3. 個人に固有の語（doc/_private/ に集約する方針）
-m=$(printf '%s\n' "$added" | grep -E '（非公開のパターンファイルを参照）')
-[ -n "$m" ] && report "個人に固有の語" "$m"
+# 3. 個人に固有の語（このファイル自身が公開されるので、語そのものはここに書かない）
+#    【なぜ、2026-09-16】ユーザー名・メールの断片・進学に関わる語をここへ直接書いていたが、
+#    このフックも追跡対象＝公開される。「検査するために書いた語」が漏れていた。
+#    ⇒ 語は doc/_private/個人情報パターン.txt（gitignore済み）へ移した。
+#    無ければこの検査は黙って飛ばす（上の汎用パターンは効いたまま）。
+_pat_file="doc/_private/個人情報パターン.txt"
+if [ -f "$_pat_file" ]; then
+  _pats=$(grep -v '^#' "$_pat_file" | grep -v '^$' | paste -sd'|' -)
+  if [ -n "$_pats" ]; then
+    m=$(printf '%s\n' "$added" | grep -E "$_pats")
+    [ -n "$m" ] && report "個人に固有の語（doc/_private/個人情報パターン.txt に該当）" "$m"
+  fi
+fi
 
 # 4. 家族への言及（誰の家族かを書かない方針。「育児経験者」と書く）
 #    【2026-08-18 ユーザー承認のうえ精密化】文献調査フォルダは対象外。

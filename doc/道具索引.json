@@ -2981,9 +2981,9 @@
    "_abs_path",
    "RunProfile"
   ],
-  "lines": 187,
+  "lines": 192,
   "goal": "",
-  "last_commit": ""
+  "last_commit": "2026-09-16"
  },
  {
   "path": "run/plugins/common/scene.py",
@@ -3122,7 +3122,7 @@
    "_scene",
    "main"
   ],
-  "lines": 357,
+  "lines": 354,
   "goal": "",
   "last_commit": "2026-09-15"
  },
@@ -3163,7 +3163,7 @@
    "from_env_var",
    "open_scene"
   ],
-  "lines": 1804,
+  "lines": 1803,
   "goal": "",
   "last_commit": "2026-09-16"
  },
@@ -3498,18 +3498,18 @@
    "check_existing_callers",
    "_run_all"
   ],
-  "lines": 617,
+  "lines": 616,
   "goal": "",
   "last_commit": ""
  },
  {
   "path": "run/tools/_旧/check_qt_theme_neutral.py",
-  "doc": "共有テーマファイルに、別システム側の言葉が混入していないかを調べる。",
+  "doc": "共有テーマファイルに、別プロジェクト側の言葉が混入していないかを調べる。",
   "defs": [
    "check_file",
    "main"
   ],
-  "lines": 88,
+  "lines": 86,
   "goal": "",
   "last_commit": ""
  },
@@ -3613,7 +3613,7 @@
    "check_positive_bonus_behavior",
    "_check_body_progress_vs_bonus"
   ],
-  "lines": 304,
+  "lines": 302,
   "goal": "",
   "last_commit": ""
  },
@@ -3927,7 +3927,7 @@
    "run_check",
    "main"
   ],
-  "lines": 528,
+  "lines": 526,
   "goal": "",
   "last_commit": "2026-09-16"
  },
@@ -4028,7 +4028,7 @@
   "defs": [
    "main"
   ],
-  "lines": 48,
+  "lines": 47,
   "goal": "",
   "last_commit": "2026-08-17"
  },
@@ -4100,7 +4100,7 @@
    "slider",
    "main"
   ],
-  "lines": 3260,
+  "lines": 3252,
   "goal": "",
   "last_commit": "2026-09-14"
  },
@@ -4116,7 +4116,7 @@
    "_confirm_overwrite",
    "main"
   ],
-  "lines": 1900,
+  "lines": 1899,
   "goal": "",
   "last_commit": "2026-09-14"
  },
@@ -4177,7 +4177,7 @@
    "apply_theme",
    "try_apply_mica"
   ],
-  "lines": 394,
+  "lines": 393,
   "goal": "",
   "last_commit": "2026-08-13"
  },
@@ -4191,7 +4191,7 @@
    "advance_touch_monitor",
    "format_touch_status"
   ],
-  "lines": 229,
+  "lines": 228,
   "goal": "",
   "last_commit": "2026-08-13"
  },
@@ -4202,7 +4202,7 @@
    "FloatSlider",
    "CollapsibleSection"
   ],
-  "lines": 165,
+  "lines": 163,
   "goal": "",
   "last_commit": "2026-08-13"
  },
@@ -4608,7 +4608,7 @@
    "apply_joint_compliance",
    "_rad2deg"
   ],
-  "lines": 462,
+  "lines": 460,
   "goal": "",
   "last_commit": "2026-09-15"
  },
@@ -5254,7 +5254,7 @@
    "write_joint_command",
    "read_joint_command"
   ],
-  "lines": 374,
+  "lines": 372,
   "goal": "",
   "last_commit": "2026-09-15"
  },

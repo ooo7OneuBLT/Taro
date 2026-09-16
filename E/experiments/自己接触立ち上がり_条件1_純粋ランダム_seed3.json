@@ -1,6 +1,6 @@
 {
   "name": "自己接触立ち上がり_条件1_純粋ランダム_seed3",
-  "note": "2026-08-13 測定。「口元への報酬で2回目以降の自己接触が増えるか」の本実験にseed3を追加（既存のseed0〜2と完全に同一設定。7シード化、「腕の姿勢を保てるかで点火が決まるか」の検証用）。条件: 条件1 / 純粋ランダム。reward=noneのときcerebellum=falseを併せて指定し、小脳の模倣学習(imitation_loss)による行動の変化も止めた純粋な無学習条件にしている。vision=falseはstrip_textures経路。測定はscratchpadのselftouch_pace v2プラグイン（実行時登録、taro_core/runは無改変。元のv1に胸(chest)の立ち上がり検出を追加しただけ、口元・頭の定義は不変）で口元・頭・胸への接触の立ち上がりエッジをtick単位で記録する。依頼：ユーザー（ユーザーの指示、重要度：高）。",
+  "note": "2026-08-13 測定。「口元への報酬で2回目以降の自己接触が増えるか」の本実験にseed3を追加（既存のseed0〜2と完全に同一設定。7シード化、「腕の姿勢を保てるかで点火が決まるか」の検証用）。条件: 条件1 / 純粋ランダム。reward=noneのときcerebellum=falseを併せて指定し、小脳の模倣学習(imitation_loss)による行動の変化も止めた純粋な無学習条件にしている。vision=falseはstrip_textures経路。測定はscratchpadのselftouch_pace v2プラグイン（実行時登録、taro_core/runは無改変。元のv1に胸(chest)の立ち上がり検出を追加しただけ、口元・頭の定義は不変）で口元・頭・胸への接触の立ち上がりエッジをtick単位で記録する。依頼：ユーザーの指示（重要度：高）。",
   "scene": "新生児_仰向け_柵なし",
   "taro": {
     "spinal_drive_mode": "reflex_common",

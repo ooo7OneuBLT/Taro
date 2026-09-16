@@ -2,7 +2,7 @@
 """測る道具：世界の予測器（M7a／M7b-1）の誤差をCSVに書く。
 
 【仕様】F/docs/二語文/仕様_M7a_世界の予測器_測るだけ_2026-09-08.md
-「後半：実装担当向け技術付録」4節。`run/plugins/common/word_production.py` の型を踏襲。
+「後半：実装向け技術付録」4節。`run/plugins/common/word_production.py` の型を踏襲。
 M7b-1（物ごとの予測器と驚きの配線）追記：F/docs/二語文/仕様_M7b-1_物ごとの予測器と
 驚きの配線_2026-09-09.md「後半」5節。
 

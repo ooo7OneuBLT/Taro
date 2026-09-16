@@ -1,6 +1,6 @@
 {
   "name": "自己接触立ち上がり_条件4_進度あり_口元ON_pilot_seed0",
-  "note": "2026-08-13 測定。「口元への報酬で2回目以降の自己接触が増えるか」の本実験（4条件×2シード）に先立ち、まず1本を長めに回して頭打ちになるtick数を見積もるための事前調査ラン。条件4（学習進度あり・口元報酬ON）に相当：reward=progress（既定）・mouth_touch_bonus=0.2・touch_adaptation=true・vision=false（2026-08-13新設のstrip_textures配線）。依頼：ユーザー（ユーザーの指示、重要度：高）。測定は scratchpad の selftouch_pace プラグイン（実行時登録、taro_core/runは無改変）。口元・頭の接触の立ち上がりエッジをtick単位で記録する。",
+  "note": "2026-08-13 測定。「口元への報酬で2回目以降の自己接触が増えるか」の本実験（4条件×2シード）に先立ち、まず1本を長めに回して頭打ちになるtick数を見積もるための事前調査ラン。条件4（学習進度あり・口元報酬ON）に相当：reward=progress（既定）・mouth_touch_bonus=0.2・touch_adaptation=true・vision=false（2026-08-13新設のstrip_textures配線）。依頼：ユーザーの指示（重要度：高）。測定は scratchpad の selftouch_pace プラグイン（実行時登録、taro_core/runは無改変）。口元・頭の接触の立ち上がりエッジをtick単位で記録する。",
   "scene": "新生児_仰向け_柵なし",
   "taro": {
     "spinal_drive_mode": "reflex_common",

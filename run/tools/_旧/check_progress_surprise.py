@@ -2,7 +2,6 @@
 """progress報酬のsurpriseボーナス（機構1、`cfg.progress_surprise_bonus`）の検証。
 
 設計：作業記録（非公開）
-      2026-08-04_progress報酬surpriseボーナス修正設計.md（担当の統合判断）
       同フォルダ\\作業中_案A/B/D_progress_surprise修正.md（各設計者の詳細）
 仕様：実装担当からの2026-08-04付・しきい値方式（超過量型・ヒンジ）修正指示
 

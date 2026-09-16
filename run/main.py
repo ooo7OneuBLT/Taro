@@ -319,8 +319,7 @@ def run(spec, *, steps_override=None, verbose=False):
     #   注意：中身は e_viewer.py のまま（統合の第4段階・ステップ2）。
     #     環境変数での起動も残す（急に壊さない）。
     #   【なぜ、2026-08-07】E/scripts/e_viewer.py から run/viewer_tools/e_viewer.py
-    #     へ移設（設計：作業記録（非公開）
-    #     2026-08-07_runSystem移設_統合版.md）。パス参照をここで更新。
+    #     へ移設（設計：作業記録（非公開））。パス参照をここで更新。
     if kind == "edit":
         import subprocess
         t = spec.get("taro") or {}
@@ -336,8 +335,7 @@ def run(spec, *, steps_override=None, verbose=False):
                 envv[name] = str(v)
         # 【なぜ、2026-08-10】taro.actuation（駆動モード）が e_viewer.py に
         #   渡っていなかった。渡さないと e_viewer.py は常に筋肉モードで体を
-        #   作ってしまう（監査：作業記録（非公開）
-        #   2026-08-10_run系システムとViewerの型バグ横断監査.md「中2」）。
+        #   作ってしまう（監査：作業記録（非公開）「中2」）。
         #   既定（未指定）は run/plugins/common/scene.py と同じ "muscle"。
         #   ここで既定値をそのまま明示しても、e_viewer.py 側の分岐で
         #   "muscle" は今までどおり MuscleModel を選ぶだけなので、既存の

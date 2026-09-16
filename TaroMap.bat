@@ -9,8 +9,7 @@ rem static-ish inspector of what mechanisms exist and what's switched on for
 rem a given experiment file, not a playback tool, so the name is deliberately
 rem different.
 rem
-rem Why no "chcp 65001" here (same reasoning as 作業記録（非公開）
-rem see that file's own long comment): switching codepage mid-batch-file has a
+rem Why no "chcp 65001" here: switching codepage mid-batch-file has a
 rem known read-ahead buffering bug. This file's own command line is entirely
 rem ASCII (run.viewer_tools.wiring_viewer.app), so the risk is low, but the
 rem existing convention (no chcp, just PYTHONIOENCODING=utf-8) is kept anyway
