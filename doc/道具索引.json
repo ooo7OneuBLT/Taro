@@ -2975,6 +2975,17 @@
   "last_commit": "2026-09-15"
  },
  {
+  "path": "run/plugins/common/run_profile.py",
+  "doc": "測る道具：走行そのものの重さ（速度・メモリ・GPU）を1歩ごとに記録する。",
+  "defs": [
+   "_abs_path",
+   "RunProfile"
+  ],
+  "lines": 187,
+  "goal": "",
+  "last_commit": ""
+ },
+ {
   "path": "run/plugins/common/scene.py",
   "doc": "【転送のみ】中身は `run/world/scene.py` へ移した（2026-09-13・段D）。",
   "defs": [],
