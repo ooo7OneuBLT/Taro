@@ -76,3 +76,114 @@ class Ctx:
     def sim_sec(self):
         """シミュレーション上の経過秒数。"""
         return self.step * self.dt
+
+    # ======================================================================
+    # 導いた事実（2026-09-16）
+    # ======================================================================
+    # 【なぜここに置くか・ユーザー指摘「別々に出してるのがおかしい」】
+    #   Ctx には生の状態（step・model・data）しか無く、そこから導いた事実
+    #   （太郎が喋ったか／親が何を差し出しているか／太郎が何を見ているか）は
+    #   **道具ごとに各自で計算していた**。実測：
+    #     gaze_probe.py:61-62   u._gaze_angle_to("test_object1"/"test_object2")
+    #     word_production.py    同じ計算をもう一度（2026-09-15に8択へ直した）
+    #   同じ事実が2箇所にあり、**片方だけ直した**状態になっていた
+    #   （gaze_probe は2択決め打ちのままで、8択の場面では間違った答えを出す）。
+    #
+    # 【視線は角度ではなく光線で出す】run/world/visibility.py は自分の説明文に
+    #   「①角度だけ gaze_angle() … 遮蔽を見ないので単独では使わないこと」と
+    #   書いている（2026-07-26、柵の向こうの物を「視界内100%」と報告した事故）。
+    #   にもかかわらず測定器31本のうち visibility.py を使っているものは0本だった。
+    #   ここでは②visible_by_ray（遮蔽を見る）を使う。
+    #   ③visible_in_image は**使えない**：対象を指定する引数が無く、赤い画素の
+    #   総数を数えるだけ＝目標Eの「赤い球1個」専用で、8択では物を区別できない。
+    #
+    # 値は1ステップに1度だけ計算して持ち回す（同じ歩で何本の道具が読んでも同じ値）。
+
+    def _事実(self):
+        """このステップの導いた事実をまとめて作る（1歩に1度だけ計算する）。"""
+        c = self.__dict__.get("_事実キャッシュ")
+        if c is not None and c[0] == self.step:
+            return c[1]
+        f = {"親の的": "", "親の状態": "", "スロット": {}, "視線角": {}, "視線の先": ""}
+        u = getattr(self.env, "unwrapped", self.env)
+        pl = getattr(u, "_parent_labeling", None)
+        f["親の的"] = getattr(pl, "_target", None) or ""
+        f["親の状態"] = str(getattr(pl, "_state", "") or "")
+        # スロットの数は場面で決まる（2択のことも8択のこともある）。決め打ちしない。
+        try:
+            for slot, info in (pl._slots(u) or {}).items():
+                body = info.get("body")
+                if body:
+                    f["スロット"][slot] = body
+        except Exception:       # noqa: BLE001  親のいない場面では空のまま
+            pass
+        if f["スロット"]:
+            import sys as _sys
+            import os as _os
+            _w = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "world")
+            if _w not in _sys.path:
+                _sys.path.insert(0, _w)
+            try:
+                import visibility as _vis
+            except Exception:   # noqa: BLE001
+                _vis = None
+            見える = []
+            for slot, body in f["スロット"].items():
+                try:
+                    bid = int(self.model.body(body).id)
+                    ang = round(float(_vis.gaze_angle(self.model, self.data, bid)), 2)
+                except Exception:   # noqa: BLE001
+                    continue
+                f["視線角"][slot] = ang
+                try:
+                    ok, _hit = _vis.visible_by_ray(self.model, self.data, bid)
+                except Exception:   # noqa: BLE001
+                    ok = False
+                if ok:
+                    見える.append((ang, slot))
+            # 見えている（遮られていない）ものの中で、いちばん視線に近いもの。
+            #   1つも見えていなければ空欄＝「何も見ていない」。角度で代用しない。
+            f["視線の先"] = min(見える)[1] if 見える else ""
+        self.__dict__["_事実キャッシュ"] = (self.step, f)
+        return f
+
+    @property
+    def 親の的(self):
+        """親がいま差し出している物のスロット名（例 "toy8"）。無ければ空文字。"""
+        return self._事実()["親の的"]
+
+    @property
+    def 親の状態(self):
+        """親のいまの状態（_PICK/_SHAKE など）。無ければ空文字。"""
+        return self._事実()["親の状態"]
+
+    @property
+    def スロット(self):
+        """この場面にあるスロットと物の名前 {"toy8": "test_object8", ...}。"""
+        return self._事実()["スロット"]
+
+    @property
+    def 視線角(self):
+        """スロットごとの視線のずれ[度] {"toy8": 12.3, ...}。**遮蔽は見ていない**。"""
+        return self._事実()["視線角"]
+
+    @property
+    def 視線の先(self):
+        """太郎がいま見ている物のスロット名。遮られているものは選ばない。
+
+        何も見えていなければ空文字（角度が近いだけの物で代用しない）。
+        """
+        return self._事実()["視線の先"]
+
+    @property
+    def 発話した(self):
+        """この歩で太郎が実際に声を出したか。
+
+        【なぜ要るか・2026-09-15に踏んだ間違い】`last_produce` は**黙った歩にも**
+        入っている（`generated_word` が空文字）。それを1発話として数えたため、
+        F2-130b の報告は 95.8%、実際は 86.1% だった。さらに
+        `exact_match = (generated_word == target_word)` が空文字どうしの比較で
+        1（正解）になり、分母と分子の両方が水増しされていた。
+        """
+        ev = getattr(self, "last_produce", None)
+        return bool(ev) and bool((ev or {}).get("generated_word"))

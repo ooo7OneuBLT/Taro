@@ -13,10 +13,13 @@ hold=0.3秒なら9回）。静止した太郎では hold=3.0秒でも成立し�
 別の名前になったか）。このファイルは読むだけの測定器である、という趣旨は変わらない。
 
 【役割】読むだけ（run/plugins/base.py の規約）。太郎も環境も変えない。
-  乱数は一切消費しない。読むのは：
-    ctx.env.unwrapped._gaze_angle_to("test_object1"/"test_object2")
-        … 視線と各おもちゃの間の角度[度]（e_toy_env.py。親の判定と同じ関数）
-    ctx.env.unwrapped._parent_labeling … 親の状態（state/target。無ければ空欄）
+  乱数は一切消費しない。読むのは **ctx だけ**（2026-09-16に変えた）：
+    ctx.視線角   … スロットごとの視線のずれ[度]。**場面のスロット数に自動で合う**
+    ctx.視線の先 … 遮られていないものの中で、いちばん視線に近い物
+    ctx.親の状態 / ctx.親の的
+  以前は `ctx.env.unwrapped._gaze_angle_to("test_object1"/"test_object2")` を
+  直接呼び、**2択を決め打ち**していた。目標Fの8択の場面では存在しない2つを
+  見ていたことになる。事実の作り手は run/context.py の1箇所だけにした。
 
 【出す指標】
   ① 毎判断（0.1秒ごと）の視線角度 … angles_out（1行=1判断）
@@ -57,24 +60,25 @@ class GazeProbe(Plugin):
     def on_step(self, ctx):
         """毎ステップ呼ばれる。環境から test_object1・test_object2 への視線角度と親のラベリング状態・対象を読み、対象への角度（無ければ小さい方）を求めて1行を self.rows に積む。親の状態が「shake」かつ角度がGAZE_DEG以下なら連続注視区間を延ばし、そうでなければ区間を締めて self.runs に記録する。戻り値は無い。
         """
-        u = ctx.env.unwrapped
-        a1 = u._gaze_angle_to("test_object1")
-        a2 = u._gaze_angle_to("test_object2")
-        pl = getattr(u, "_parent_labeling", None)
-        state = getattr(pl, "_state", "") if pl is not None else ""
-        target = getattr(pl, "_target", "") if pl is not None else ""
-        # 的への角度（親が誰も選んでいなければ近い方）
-        at = None
-        if target == "toy1":
-            at = a1
-        elif target == "toy2":
-            at = a2
-        elif a1 is not None and a2 is not None:
-            at = min(a1, a2)
-        self.rows.append((round(ctx.sim_sec, 2),
-                          None if a1 is None else round(a1, 2),
-                          None if a2 is None else round(a2, 2),
-                          state, target))
+        # 【2026-09-16】環境を直接触るのをやめ、ctx の「導いた事実」を読む。
+        #   【何が壊れていたか】ここは test_object1/2 を決め打ちしていた。
+        #   目標Fの場面は8択（test_object5〜11）なので、**存在しない2つを見て
+        #   いた**＝角度も「的への角度」も意味の無い値になっていた。
+        #   同じ決め打ちが word_production にもあり、そちらは 2026-09-15 に
+        #   直したが、ここは残っていた。事実を1箇所（run/context.py）にまとめて
+        #   両方がそこを読む形にすることで、片方だけ直る状態をなくす。
+        視線角 = ctx.視線角                 # {"toy8": 12.3, ...} スロットの数は場面で決まる
+        state = ctx.親の状態
+        target = ctx.親の的
+        # 的への角度（親が誰も選んでいなければ、いちばん近い物への角度）
+        at = 視線角.get(target)
+        if at is None and 視線角:
+            at = min(視線角.values())
+        self.rows.append({"sim_sec": round(ctx.sim_sec, 2),
+                          "親の状態": state, "親の的": target,
+                          "視線角_親の的": "" if at is None else round(at, 2),
+                          "視線の先": ctx.視線の先,     # 遮蔽を見た値（光線）
+                          "視線角": dict(視線角)})
         # 連続区間の集計（親が振っている間だけ数える＝判定と同じ土俵）
         if state == "shake" and at is not None:
             if at <= self.GAZE_DEG:
@@ -98,9 +102,15 @@ class GazeProbe(Plugin):
             os.makedirs(os.path.dirname(p), exist_ok=True)
             with open(p, "w", newline="", encoding="utf-8-sig") as fp:
                 w = csv.writer(fp)
-                w.writerow(["sim_sec", "angle_toy1_deg", "angle_toy2_deg",
-                            "parent_state", "parent_target"])
-                w.writerows(self.rows)
+                # 【2026-09-16】列は場面で決まる（2択なら2列、8択なら8列）。
+                #   決め打ちの angle_toy1_deg / angle_toy2_deg をやめた。
+                スロット = sorted({k for r in self.rows for k in r["視線角"]})
+                w.writerow(["sim_sec", "親の状態", "親の的", "視線角_親の的", "視線の先"]
+                           + ["視線角_%s" % s for s in スロット])
+                for r in self.rows:
+                    w.writerow([r["sim_sec"], r["親の状態"], r["親の的"],
+                                r["視線角_親の的"], r["視線の先"]]
+                               + [r["視線角"].get(s, "") for s in スロット])
         out = {"連続注視の区間数": len(self.runs)}
         if self.runs:
             rs = sorted(self.runs)

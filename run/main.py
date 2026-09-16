@@ -591,7 +591,7 @@ def _check_toy_distance(spec):
     print("")
 
 
-def _前の走行を退避する(out_dir):
+def _前の走行を退避する(out_dir, 残す=()):
     """走行の前に、出力フォルダの直下にあるものを `_前の走行_<日時>/` へ移す。
 
     【なぜ機械でやるか・2026-09-15】同じフォルダに別の走行の成果物が同居できるせいで、
@@ -605,12 +605,25 @@ def _前の走行を退避する(out_dir):
 
     消さずに退避する（前の走行のデータは研究の資産なので捨てない）。
     退避先が既にあれば連番を付ける。何も無ければ何もしない。
+
+    Args:
+        残す: 退避せずその場に置くファイル名（今の走行が既に作ったもの）。
+            【なぜ要るか・2026-09-16に気づいた自分の壊し方】この退避を
+            走行前点検より**先**に呼んでいたため、点検が読むはずの
+            `run.meta.json` を先に動かしてしまい、「他人の実験のフォルダへ
+            書こうとしていないか」という検査（F2-129 で9分＋基準データ1件を
+            失った事故のために作った検査）が**一度も働かなくなっていた**。
+            実測：別名の実験を F2-131 のフォルダへ向けても「問題なし」と出た。
+            ⇒ 呼ぶ順を「記録の用意 → 点検 → 退避」に変え、今の走行が既に
+            開いているログだけはその場に残す。
     """
     import shutil
     import datetime
     if not os.path.isdir(out_dir):
         return None
-    items = [x for x in os.listdir(out_dir) if not x.startswith("_前の走行_")]
+    残す = {os.path.basename(x) for x in (残す or ())}
+    items = [x for x in os.listdir(out_dir)
+             if not x.startswith("_前の走行_") and x not in 残す]
     if not items:
         return None
     stamp = datetime.datetime.now().strftime("%Y-%m-%d_%H%M")
@@ -672,12 +685,6 @@ def main():
     #   この走行のフォルダに エラー.log／走行.log／未実装.log を作る。
     #   画面の一番下にエラー.logの中身を出す（最後に呼ぶ log_tail）ので、
     #   読み忘れが注意力ではなく**位置**で防がれる。詳細は run/log_setup.py
-    # 【2026-09-15】ログを作る**前**に、前の走行の成果物を退避する。
-    #   直下に今の走行のものしか無い状態を作る（理由は関数の説明）。
-    _退避先 = _前の走行を退避する(_out_dir_of(spec))
-    if _退避先:
-        print("  退避     前の走行を %s へ移しました（直下は今の走行だけになります）"
-              % os.path.relpath(_退避先, _ROOT), flush=True)
     from run.log_setup import setup_logging, log_tail
     log_paths = setup_logging(_out_dir_of(spec))
     _check_toy_distance(spec)
@@ -687,6 +694,15 @@ def main():
     if not run_check(spec, a.spec, skip=a.skip_preflight):
         log_tail(log_paths)
         return 1
+    # 【2026-09-16・順番を直した】前の走行の退避は**点検のあと**。
+    #   前はここが点検より先にあり、点検が読む run.meta.json を先に動かして
+    #   しまうため、「他人の実験のフォルダへ書こうとしていないか」の検査が
+    #   一度も働かなかった（実測で確認）。止められた走行では退避もしない＝
+    #   前の走行のデータがそのまま残るので、二重に正しい。
+    _退避先 = _前の走行を退避する(_out_dir_of(spec), 残す=log_paths.values())
+    if _退避先:
+        print("  退避     前の走行を %s へ移しました（直下は今の走行だけになります）"
+              % os.path.relpath(_退避先, _ROOT), flush=True)
     try:
         run(spec, steps_override=a.steps, verbose=a.verbose)
     except KeyboardInterrupt:

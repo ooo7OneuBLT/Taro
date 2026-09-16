@@ -81,21 +81,15 @@ class WordProduction(Plugin):
         #   上の `toy` は word_to_target[target_word] ＝太郎が選んだ語からの逆引きなので、
         #   「正しい語を言えたか」の検証には使えない（循環する）。
         #   ここで読むのは環境の側の事実だけ。太郎も環境も変えない（読むだけの道具）。
-        _u = getattr(ctx.env, "unwrapped", ctx.env)
-        _pl = getattr(_u, "_parent_labeling", None)
-        親の的 = getattr(_pl, "_target", None) or ""
-        親の状態 = str(getattr(_pl, "_state", "") or "")
-        # スロットの数は場面で決まる（2択のことも8択のこともある）。決め打ちしない。
-        視線角 = {}
-        try:
-            for _slot, _info in (_pl._slots(_u) or {}).items():
-                _body = _info.get("body")
-                if _body:
-                    視線角[_slot] = round(float(_u._gaze_angle_to(_body)), 2)
-        except Exception:
-            視線角 = {}
+        # 【2026-09-16】自分で計算せず ctx から読む（run/context.py「導いた事実」）。
+        #   以前はここで環境へ直接触って視線角を出していたが、**同じ計算が
+        #   gaze_probe.py にもあり**、8択への修正が片方にしか入らなかった。
+        #   `ctx.視線の先` は遮蔽を見た値（光線）に変わる。角度だけの値も列に残す。
+        親の的 = ctx.親の的
+        親の状態 = ctx.親の状態
+        視線角 = ctx.視線角
+        視線の先 = ctx.視線の先
         _cand = sorted((v, k) for k, v in 視線角.items())
-        視線の先 = _cand[0][1] if _cand else ""
         視線角_最小 = _cand[0][0] if _cand else ""
         視線角_親の的 = 視線角.get(親の的, "")
         reward = ev.get("reward")
@@ -117,7 +111,13 @@ class WordProduction(Plugin):
             "reward": round(reward, 4) if reward is not None else "",
             "plan_length": plan_length if plan_length is not None else "",
             "known_moras": known_moras if known_moras is not None else "",
-            "exact_match": int(ev["generated_word"] == ev["target_word"]),
+            # 【2026-09-16】「この歩で実際に声を出したか」を列にする。
+            #   数えるのは行の本数ではなくこの列の合計（下の report を参照）。
+            "発話した": int(ctx.発話した),
+            # 【2026-09-16修正】黙った歩は空文字どうしの比較で1（正解）になっていた。
+            #   声を出していない歩は一致とみなさない。
+            "exact_match": int(bool(ev["generated_word"])
+                               and ev["generated_word"] == ev["target_word"]),
             # 【M4・2026-09-06・仕様_M4_消えた物について「○○ないね」と言う(d)】
             #   末尾に追加（既存列順は不変）。run/trainer.py _apply_word_production の
             #   last_produce が常にこの3キーを持つ（vanish_input無効時は
@@ -148,13 +148,17 @@ class WordProduction(Plugin):
 
     def metrics(self, ctx):
         """ctx を受け取り、発話回数・直近の報酬・目標語との完全一致率を辞書で返す。"""
-        out = {"word_production.count": len(self.rows)}
+        # 【2026-09-16】行の本数ではなく「発話した」列の合計を数える。
+        #   行は黙った歩にも積まれる（last_produce が毎歩来るため）。
+        声 = sum(r.get("発話した", 0) for r in self.rows)
+        out = {"word_production.count": 声}
         if self.rows:
             rewards = [r["reward"] for r in self.rows if r["reward"] != ""]
             if rewards:
                 out["word_production.last_reward"] = rewards[-1]
-            out["word_production.exact_match_rate"] = (
-                sum(r["exact_match"] for r in self.rows) / len(self.rows))
+            if 声:
+                out["word_production.exact_match_rate"] = (
+                    sum(r["exact_match"] for r in self.rows) / 声)
         return out
 
     def report(self, ctx):
@@ -175,7 +179,9 @@ class WordProduction(Plugin):
                            "noun", "pred",
                            # 【2026-09-15】末尾に追加（既存の列順は変えない）
                            "親の的", "親の状態", "視線の先", "視線角_最小",
-                           "視線角_親の的"])
+                           "視線角_親の的",
+                           # 【2026-09-16】末尾に追加。数えるのはこの列（行の本数ではない）
+                           "発話した"])
                 for r in self.rows:
                     w.writerow([r["step"], r["sim_sec"], r["toy"], r["target_word"],
                                r["sim"], r["generated_word"], r["reward"],
@@ -186,9 +192,15 @@ class WordProduction(Plugin):
                                r.get("noun", ""), r.get("pred", ""),
                                r.get("親の的", ""), r.get("親の状態", ""),
                                r.get("視線の先", ""), r.get("視線角_最小", ""),
-                               r.get("視線角_親の的", "")])
-        exact = [r for r in self.rows if r["exact_match"]]
+                               r.get("視線角_親の的", ""), r.get("発話した", 0)])
+        # 【2026-09-16】数えるのは列の合計。**行の本数ではない**。
+        #   行は黙った歩にも積まれるので、len(self.rows) は「歩数」であって
+        #   「発話回数」ではなかった（F2-130b 報告95.8% → 実86.1%）。
+        声 = sum(r.get("発話した", 0) for r in self.rows)
+        一致 = sum(r["exact_match"] for r in self.rows)
         return {
-            "発話回数": len(self.rows),
-            "完全一致数": len(exact),
+            "発話回数": 声,
+            "完全一致数": 一致,
+            "完全一致率": round(一致 / 声, 4) if 声 else "",
+            "記録した歩数": len(self.rows),      # 分母の取り違えを防ぐため別名で出す
         }
