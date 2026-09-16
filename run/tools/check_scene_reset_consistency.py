@@ -167,7 +167,7 @@ def print_report(scene_name, rows):
 
 def main():
     scenes = sys.argv[1:] or [
-        "run/scenes/_旧/新生児_仰向け_柵なし_伸展版.json",
+        "新生児_仰向け_柵なし_伸展版",
         "新生児_仰向け_柵なし",
         "リーチング_リクライニング60度",
     ]

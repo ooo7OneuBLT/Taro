@@ -30,7 +30,7 @@ SCRATCH = os.path.join(_R, "run", "tools", "_scratch_babble_probe")
 os.makedirs(SCRATCH, exist_ok=True)
 
 SPEC = {
-    "scene": "run/scenes/_旧/座位_6ヶ月_2おもちゃ_F1-3c_1個提示_2026-08-19.json",
+    "scene": "座位_6ヶ月_2おもちゃ_F1-3c_1個提示_2026-08-19",
     "taro": {
         "actuation": "muscle", "age_months": 6.0,
         "orienting_reflex": True, "hearing": True,

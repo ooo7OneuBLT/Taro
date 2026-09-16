@@ -151,7 +151,15 @@ def check(spec, spec_path=""):
     #   わざわざ `_旧/` と打った＝選んだ意思が実験ファイルに残っている、と見なす。
     scene_は_パス = bool(scene) and (os.path.isfile(str(scene))
                                      or os.path.isfile(_abs(str(scene))))
-    if scene and not scene_は_パス:
+    # 【2026-09-16】書庫（_旧/）はパスで指しても使えない。走る前にここで止める。
+    #   実物の判定は scene_io.load（唯一の入口）。ここは早く知らせるための前哨。
+    if scene and "/_旧/" in str(scene).replace("\\", "/"):
+        errors.append(
+            "場面 %s は**書庫**（run/scenes/_旧/）にあります。\n"
+            "      書庫の場面は名前でもパスでも使えません。\n"
+            "      要るなら run/scenes/ 直下へ戻してから選んでください（戻すのは人の判断）。"
+            % scene)
+    elif scene and not scene_は_パス:
         cur = _abs(os.path.join("run/scenes", str(scene) + ".json"))
         old_p = _abs(os.path.join("run/scenes/_旧", str(scene) + ".json"))
         if not os.path.exists(cur) and not os.path.exists(old_p):
@@ -171,16 +179,14 @@ def check(spec, spec_path=""):
         else:
             # 【2026-09-16・止めるように変えた】`_旧/` ＝ 使い終わった場面の置き場。
             #   以前は「読めるので止めない」＝知らせるだけだった。だが書庫は
-            #   **名前では選べない**ことにした（scene_io.load の説明を参照）ので、
-            #   名前で指した時点で走らせても load で落ちる。ここで先に止める。
-            #   書庫のものを使うこと自体は禁止しない。パスで書けば通る：
-            #     "scene": "run/scenes/_旧/<名前>.json"
-            #   パスなら実験ファイルにも走行の記録にも `_旧/` の字が残る。
+            #   **名前でもパスでも読めない**ことにした（scene_io.load の説明を参照）。
+            #   走らせても load で落ちるので、ここで先に止める。
             if not os.path.exists(cur):
                 errors.append(
-                    "場面 %s は**書庫**（run/scenes/_旧/）にあります。名前では選べません。\n"
-                    "      使うなら実験ファイルにパスで書いてください：\n"
-                    '        "scene": "run/scenes/_旧/%s.json"' % (scene, scene))
+                    "場面 %s は**書庫**（run/scenes/_旧/）にあります。\n"
+                    "      書庫の場面は名前でもパスでも使えません。\n"
+                    "      要るなら run/scenes/ 直下へ戻してから選んでください"
+                    "（戻すのは人の判断）。" % scene)
             # 【なぜ現役の場面でも知らせるか】F2-129（本番）は、改善後の
             #   `_背景あり_2026-09-10` があるのに元の版で走った。元の版は
             #   直近で使われていて `_旧/` には無い＝上の判定では鳴らない。

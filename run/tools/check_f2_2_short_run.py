@@ -33,7 +33,7 @@ print(" F2-2 wordモード：短時間走行での配線・自己検証")
 print("=" * 78)
 
 cfg = Config.from_spec({
-    "scene": "run/scenes/_旧/座位_15ヶ月_2おもちゃ_F2-2_1個提示_fovea_2026-08-23.json",
+    "scene": "座位_15ヶ月_2おもちゃ_F2-2_1個提示_fovea_2026-08-23",
     "taro": {
         "actuation": "muscle", "age_months": 15.0,
         "orienting_reflex": True, "hearing": True,

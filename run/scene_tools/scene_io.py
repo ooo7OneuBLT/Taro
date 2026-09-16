@@ -412,9 +412,12 @@ def load(name):
     「使い終わった」と仕分けた場面が、名前を書くだけで**黙って走った**。
     昔の実験ファイルをコピーすると、書庫の場面のまま走行が始まる。
 
-    ⇒ 名前で選べるのは `run/scenes/` 直下だけ。書庫のものを使うときは
-      パスで書く（`run/scenes/_旧/<名前>.json`）。パスなら実験ファイルにも
-      走行の記録にも `_旧/` の字が残るので、後から見て分かる。
+    ⇒ 使えるのは `run/scenes/` 直下だけ。**書庫は名前でもパスでも読めない**。
+      （一度は「パスなら通す」形にしたが、`_旧/` のパスを書いた実験ファイルを
+      コピーすると書庫のまま走る穴が残るため、同日中にパスも塞いだ。）
+      書庫のものが要るなら `run/scenes/` 直下へ**戻してから**選ぶ。戻すのは人の判断。
+      ただしパス指定そのものは塞いでいない。その場で作った一時的な場面を渡す道として
+      既に使われている（F/scripts/f16_scene_matrix.py）。塞ぐのは `_旧/` の下だけ。
 
     見つからないときは**現役の全部**を並べる（選択肢を示すのはここの仕事）。
     2026-09-12 に「400個以上を並べると画面が埋まる」という理由で候補5件に
@@ -424,15 +427,33 @@ def load(name):
     if not os.path.isfile(path):
         cand = os.path.join(_ROOT, str(name))      # 根からの相対パスも受ける
         path = cand if os.path.isfile(cand) else os.path.join(SCENE_DIR, f"{name}.json")
+    # 【2026-09-16・書庫は読み出し禁止】名前だけでなく**パスで指しても**拒む。
+    #   【なぜパスも塞ぐか】一度は「パスなら通す」形にしたが、それだと
+    #   `_旧/…json` と書いた実験ファイルをコピーしたとき書庫のまま走る穴が残る。
+    #   ユーザー「アーカイブを参照できないようにするっていうのは？」（2026-09-16）。
+    #   使いたければ `run/scenes/` 直下へ**戻す**。戻すのは場面ファイルを動かす
+    #   操作なので、ユーザーの指示があったときだけ人がやる。
+    #   注意：パス指定そのものは塞がない。その場で作った一時的な場面を渡す道として
+    #   既に使われている（F/scripts/f16_scene_matrix.py が100場面を
+    #   F/logs/_scratch/f16_tmp_scenes/ へ書き出してパスで渡す）。塞ぐのは `_旧/` の下だけ。
+    if os.path.isfile(path) and os.path.abspath(path).startswith(
+            os.path.abspath(OLD_DIR) + os.sep):
+        現役 = list_scenes(include_old=False)
+        raise FileNotFoundError(
+            f"場面「{os.path.basename(path)[:-5]}」は**書庫**（run/scenes/_旧/）にあります。\n"
+            f"  書庫の場面は名前でもパスでも使えません。\n"
+            f"  要るなら run/scenes/ 直下へ戻してから選んでください（戻すのは人の判断）。\n"
+            f"  普段の選択肢は次の {len(現役)} 本です：\n  "
+            + "\n  ".join("  " + s for s in 現役))
     if not os.path.isfile(path):
         現役 = list_scenes(include_old=False)
         書庫 = os.path.join(OLD_DIR, f"{name}.json")
         if os.path.isfile(書庫):
             raise FileNotFoundError(
-                f"場面「{name}」は**書庫**にあります（使い終わった置き場）。\n"
-                f"  名前では選べません。使うなら実験ファイルにパスで書いてください：\n"
-                f'    "scene": "run/scenes/_旧/{name}.json"\n'
-                f"  普段の選択肢（{len(現役)}本）から選ぶなら下のどれかです：\n  "
+                f"場面「{name}」は**書庫**（run/scenes/_旧/）にあります。\n"
+                f"  書庫の場面は名前でもパスでも使えません。\n"
+                f"  要るなら run/scenes/ 直下へ戻してから選んでください（戻すのは人の判断）。\n"
+                f"  普段の選択肢は次の {len(現役)} 本です：\n  "
                 + "\n  ".join("  " + s for s in 現役))
         import difflib
         near = difflib.get_close_matches(str(name), list_scenes(), n=3, cutoff=0.4)
@@ -442,7 +463,7 @@ def load(name):
             f"  普段の選択肢は次の {len(現役)} 本です：\n  "
             + "\n  ".join("  " + s for s in 現役)
             + "\n  ここに無いものは書庫にあります。パスで書けば使えます："
-              '  "scene": "run/scenes/_旧/<名前>.json"')
+              '  "scene": "<名前>"')
     with open(path, encoding="utf-8") as fp:
         raw = json.load(fp)
     scene = _merge(default_scene(), raw)

@@ -49,7 +49,7 @@ PATH_PASSTHROUGH = os.path.join(_SCRATCH, "check_pc_passthrough.pt")
 PATH_BASELINE_IN = os.path.join(_SCRATCH, "check_pc_baseline_in.pt")
 PATH_BASELINE_OUT = os.path.join(_SCRATCH, "check_pc_baseline_out.pt")
 
-SCENE = "run/scenes/_旧/座位_6ヶ月_2おもちゃ_F1-3c_1個提示_2026-08-19.json"
+SCENE = "座位_6ヶ月_2おもちゃ_F1-3c_1個提示_2026-08-19"
 
 print("=" * 78)
 print(" 作業A：produce_cerebellum のフェーズ跨ぎ保存 検証")
