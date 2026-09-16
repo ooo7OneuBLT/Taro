@@ -70,6 +70,11 @@ class RunProfile(Plugin):
             self._torch = torch if torch.cuda.is_available() else None
         except Exception:       # noqa: BLE001
             self._torch = None
+        # 【2026-09-16】最初の1回はここで取る。取らないと、次の重い読み取りが
+        #   来るまで（既定20歩）メモリ・GPUの列が空欄になる（試し走行で
+        #   181/200行しか埋まらなかった）。走り出しの値は「学習前の基準」として
+        #   一番知りたい行でもある。
+        self._重い = self._重い値を取る()
 
     def _重い値を取る(self):
         """OSやGPUへの問い合わせ。N歩に1回だけ呼ぶ。"""

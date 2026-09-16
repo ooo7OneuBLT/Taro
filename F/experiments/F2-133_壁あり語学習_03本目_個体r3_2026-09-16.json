@@ -1,0 +1,84 @@
+{
+  "name": "F2-133_壁あり語学習_03本目_個体r3_2026-09-16",
+  "note": "2026-09-16。壁ありで語の学習をやり直す（3/10本目・個体r3・seed93）。P2(F2-77 8本)とP3(F2-84 2本)を統合し、最初から chunk_level を ON にする（P3は chunk_level を後から足しただけの再走行だったため）。場面は土台1本＋world.xml で個体を切り替える＝場面ファイルは増やさない。消失発話は切る（P4で入れる）。lr は既定 0.005。出発は前の本のモデル（1本目だけ喃語モデル）。",
+  "scene": "土台_座位12ヶ月_壁あり_胡坐_8択_消失発話_2026-09-15",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 12.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32,
+      "eye": "left",
+      "source": "wide"
+    },
+    "save": "F/models/F2-133_壁あり語学習_03本目_個体r3_2026-09-16.pt",
+    "model": "F/models/F2-133_壁あり語学習_02本目_個体r2_2026-09-16.pt",
+    "produce": {
+      "mode": "word",
+      "threshold": 0.5,
+      "cooldown_sec": 2.0,
+      "max_length": 8,
+      "develop_from_age": true,
+      "vocal_tract_decoupled": true,
+      "context": true,
+      "listen_learn": true,
+      "context_lambda": 0.0,
+      "vision_context": true,
+      "listen_lr": 0.001,
+      "hippocampus": {
+        "capacity": 512,
+        "decay": 0.5,
+        "replay_passes": 1,
+        "recent_ratio": 0.7,
+        "sleep_lr": 0.005
+      },
+      "word_choice": "gru_hippo",
+      "hippo_gain": 1.0,
+      "listen_self": false,
+      "listen_eos": true,
+      "segment_mode": "end_prob",
+      "chunk_level": true
+    }
+  },
+  "run": {
+    "type": "train",
+    "steps": 3000,
+    "seed": 93,
+    "K": 10,
+    "checkpoint": 500,
+    "csv": "F/logs/F2-133_壁あり語学習_03本目_個体r3_2026-09-16/run.csv"
+  },
+  "plugins": {
+    "word_learning": {
+      "events_out": "F/logs/F2-133_壁あり語学習_03本目_個体r3_2026-09-16/発話イベント.csv"
+    },
+    "model_snapshots": {
+      "out_dir": "F/logs/F2-133_壁あり語学習_03本目_個体r3_2026-09-16/snapshots"
+    },
+    "word_production": {
+      "events_out": "F/logs/F2-133_壁あり語学習_03本目_個体r3_2026-09-16/太郎の発話.csv"
+    },
+    "run_profile": {
+      "out": "F/logs/F2-133_壁あり語学習_03本目_個体r3_2026-09-16/走行の負荷.csv",
+      "every": 20
+    }
+  },
+  "world": {
+    "xml": "MIMo/mimoEnv/assets/f49_8way_r3.xml",
+    "parent_labeling": {
+      "vanish_utterance": false
+    }
+  },
+  "expect": {
+    "発話イベント.csv": [
+      "text",
+      "target"
+    ],
+    "走行の負荷.csv": [
+      "1歩の秒",
+      "メモリMB"
+    ]
+  }
+}
