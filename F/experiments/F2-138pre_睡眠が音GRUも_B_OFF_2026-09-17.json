@@ -1,6 +1,6 @@
 {
-  "name": "F2-133_壁あり語学習_09本目_個体r7_2026-09-16",
-  "note": "2026-09-16。壁ありで語の学習をやり直す（9/10本目・個体r7・seed97）。P2(F2-77 8本)とP3(F2-84 2本)を統合し、最初から chunk_level を ON にする（P3は chunk_level を後から足しただけの再走行だったため）。場面は土台1本＋world.xml で個体を切り替える＝場面ファイルは増やさない。消失発話は切る（P4で入れる）。lr は既定 0.005。出発は前の本のモデル（1本目だけ喃語モデル）。",
+  "name": "F2-138pre_睡眠が音GRUも_B_OFF_2026-09-17",
+  "note": "2026-09-17 捨て実験。同上で replay_mora: false（旧挙動）。500歩の途中保存の brain が F2-133 1本目の step000500.pt と完全一致するか（直しがOFFなら1ビットも変わらない）。",
   "scene": "土台_座位12ヶ月_壁あり_胡坐_8択_消失発話_2026-09-15",
   "taro": {
     "actuation": "muscle",
@@ -13,8 +13,8 @@
       "eye": "left",
       "source": "wide"
     },
-    "save": "F/models/F2-133_壁あり語学習_09本目_個体r7_2026-09-16.pt",
-    "model": "F/models/F2-133_壁あり語学習_08本目_個体r8_2026-09-16.pt",
+    "save": "F/logs/F2-138pre_睡眠が音GRUも_B_OFF_2026-09-17/model.pt",
+    "model": "F/models/F2-6_P1_喃語900s_12ヶ月_seed10_2026-08-24.pt",
     "produce": {
       "mode": "word",
       "threshold": 0.5,
@@ -32,7 +32,8 @@
         "decay": 0.5,
         "replay_passes": 1,
         "recent_ratio": 0.7,
-        "sleep_lr": 0.005
+        "sleep_lr": 0.005,
+        "replay_mora": false
       },
       "word_choice": "gru_hippo",
       "hippo_gain": 1.0,
@@ -44,34 +45,34 @@
   },
   "run": {
     "type": "train",
-    "steps": 3000,
-    "seed": 97,
+    "steps": 500,
+    "seed": 91,
     "K": 10,
     "checkpoint": 500,
-    "csv": "F/logs/F2-133_壁あり語学習_09本目_個体r7_2026-09-16/run.csv"
+    "csv": "F/logs/F2-138pre_睡眠が音GRUも_B_OFF_2026-09-17/run.csv"
   },
   "plugins": {
     "word_learning": {
-      "events_out": "F/logs/F2-133_壁あり語学習_09本目_個体r7_2026-09-16/発話イベント.csv"
+      "events_out": "F/logs/F2-138pre_睡眠が音GRUも_B_OFF_2026-09-17/発話イベント.csv"
     },
     "model_snapshots": {
-      "out_dir": "F/logs/F2-133_壁あり語学習_09本目_個体r7_2026-09-16/snapshots"
+      "out_dir": "F/logs/F2-138pre_睡眠が音GRUも_B_OFF_2026-09-17/snapshots"
     },
     "word_production": {
-      "events_out": "F/logs/F2-133_壁あり語学習_09本目_個体r7_2026-09-16/太郎の発話.csv"
+      "events_out": "F/logs/F2-138pre_睡眠が音GRUも_B_OFF_2026-09-17/太郎の発話.csv"
     },
     "run_profile": {
-      "out": "F/logs/F2-133_壁あり語学習_09本目_個体r7_2026-09-16/走行の負荷.csv",
+      "out": "F/logs/F2-138pre_睡眠が音GRUも_B_OFF_2026-09-17/走行の負荷.csv",
       "every": 20
     },
     "object_files": {
-      "events_out": "F/logs/F2-133_壁あり語学習_09本目_個体r7_2026-09-16/物体ファイル.csv",
+      "events_out": "F/logs/F2-138pre_睡眠が音GRUも_B_OFF_2026-09-17/物体ファイル.csv",
       "points_per_side": 16,
       "points_per_batch": 16,
       "empty_cache_after_detect": true,
       "interval_s": 0.2,
       "attend": true,
-      "attend_out": "F/logs/F2-133_壁あり語学習_09本目_個体r7_2026-09-16/注意.csv",
+      "attend_out": "F/logs/F2-138pre_睡眠が音GRUも_B_OFF_2026-09-17/注意.csv",
       "vanish_misses": 5,
       "attend_surprise_gain": 0.0,
       "cohesion_gap_px": 4,
@@ -118,11 +119,11 @@
       }
     },
     "produce_gates": {
-      "out": "F/logs/F2-133_壁あり語学習_09本目_個体r7_2026-09-16/発話の門.csv"
+      "out": "F/logs/F2-138pre_睡眠が音GRUも_B_OFF_2026-09-17/発話の門.csv"
     }
   },
   "world": {
-    "xml": "MIMo/mimoEnv/assets/f49_8way_r7.xml",
+    "xml": "MIMo/mimoEnv/assets/f49_8way_r1.xml",
     "parent_labeling": {
       "vanish_utterance": false
     }

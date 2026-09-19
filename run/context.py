@@ -54,7 +54,7 @@ class Ctx:
     #   自分（Ctx）に直接置かれた値があればそちらが勝つ＝
     #   `taro.visual_attention` を使わない古い実験（道具が自分で作って
     #   ctx へ置く経路）もそのまま動く。
-    _BRAIN_KEYS = frozenset(['attended_object', 'attention_point', 'attention_switch_t', 'efference', 'goal_point', 'last_babble', 'last_produce', 'last_vision_vec', 'last_world_pred', 'object_files', 'priority_map_result', 'priority_map_result_t', 'salience_map', 'surprise_trace', 'vanish_misses', 'world_pred_by_file', 'world_pred_inputs', 'world_predictor_grad_report'])
+    _BRAIN_KEYS = frozenset(['attended_object', 'gone_object', 'attention_point', 'attention_switch_t', 'efference', 'goal_point', 'last_babble', 'last_produce', 'last_vision_vec', 'last_world_pred', 'object_files', 'priority_map_result', 'priority_map_result_t', 'produce_gate', 'salience_map', 'surprise_trace', 'vanish_misses', 'world_pred_by_file', 'world_pred_inputs', 'world_predictor_grad_report'])
 
     def __getattr__(self, name):
         # 通常の属性探索が失敗したときだけ呼ばれる

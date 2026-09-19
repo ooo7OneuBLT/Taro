@@ -109,11 +109,11 @@ class BrainTickState:
     __slots__ = (
         "_active_assoc", "_last_parent_events", "_wp_last_parent_speak_sec",
         "_wp_parent_chunks", "_wp_prev_action", "_wp_surprise_trace",
-        "_wp_z_max", "attended_object", "attention_point",
+        "_wp_z_max", "attended_object", "gone_object", "attention_point",
         "attention_switch_t", "efference", "goal_point",
         "last_babble", "last_parent_utterance", "last_produce", "last_vision_vec",
         "last_world_pred", "object_files", "priority_map_result",
-        "priority_map_result_t", "salience_map", "surprise_trace",
+        "priority_map_result_t", "produce_gate", "salience_map", "surprise_trace",
         "vanish_misses", "world_pred_by_file", "world_pred_inputs",
         "world_predictor_grad_report",
     )
@@ -1162,6 +1162,12 @@ class TaroBrainTick:
             _here = False
             if bool((self.cfg.produce or {}).get("vanish_input", False)):
                 _att = getattr(self.tick, "attended_object", None)
+                # 【2026-09-17・仕様_消えた物の記憶と注意の順序】消えた物（注意したことが
+                #   あり vanished のファイル）があれば、注意がどこにあろうとそれを優先し
+                #   「消えた印」＋その物の見た目で聞く。無ければ従来どおり注意中の物から。
+                _gob = getattr(self.tick, "gone_object", None)
+                if _gob is not None and _gob.get("last_seen_vec") is not None:
+                    _att = _gob
                 if _att is not None and _att.get("last_seen_vec") is not None:
                     _vv = _att["last_seen_vec"]
                     _gone = bool(_att.get("vanished"))
@@ -1247,6 +1253,12 @@ class TaroBrainTick:
         pd = self.cfg.produce
         self.tick.last_produce = None
         self.tick.last_babble = None
+        # 【2026-09-16・門の通過記録】このtickで発話が**どこで止まったか**の控え。
+        #   読むだけの記録で、判断には一切使わない（下の if 群は元のまま）。
+        #   なぜ要るか：白紙の太郎が3,000歩で一度も喋らない件（研究日誌 2026-09-16）で、
+        #   「言う語が決まらない」のか「じっと見ていない」のかが外から分からなかった。
+        #   run/plugins/common/produce_gates.py がこれを列にしてCSVへ出す。
+        self.tick.produce_gate = None
         # 【M3・2026-09-06・仕様_M3_注意中の物体ファイルと消失信号】このtickで
         #   脳が実際に使った視覚ベクトルの置き場。既定Noneにしておき、下で
         #   _vision_channels(o) を計算した直後に実値を入れる（早期returnした
@@ -1274,6 +1286,7 @@ class TaroBrainTick:
             return          # 耳/分節の配線が無ければ何もしない
         orienting = getattr(self.env.unwrapped, "_orienting", None)
         if orienting is None:
+            self.tick.produce_gate = {"止まった門": "視線誘導反射が無効"}   # 2026-09-16
             return          # 視線誘導反射が無効なら「注視している」を判定できない
         # 【発話の動機・2026-08-31・設計_発話の動機.md】窓が切れた決定を報酬0で
         #   締める（毎ステップ通るここで行う）。social未設定なら sg=None で不実行。
@@ -1303,12 +1316,18 @@ class TaroBrainTick:
         #   従来どおり逆引きへ進む＝1ビットも変わらない。
         _vanish_input = bool(pd.get("vanish_input", False))
         _att = getattr(self.tick, "attended_object", None) if _vanish_input else None
+        # 【2026-09-17・仕様_消えた物の記憶と注意の順序】消えた物があればそれを
+        #   注意中の物より優先する（「ないね」の材料。既定OFFでは gone_object は常に None）。
+        _gob = getattr(self.tick, "gone_object", None) if _vanish_input else None
+        if _gob is not None and _gob.get("last_seen_vec") is not None:
+            _att = _gob
         if _vanish_input and _att is None:
             self.tick.last_produce = {
                 "target_word": "", "sim": 0.0, "generated_word": "",
                 "choice": None, "reward": None, "plan_length": 0, "known_moras": 0,
                 "gate": "no_object", "gone": 0, "here": 0, "attended_id": "",
             }
+            self.tick.produce_gate = {"止まった門": "注意している物が無い"}   # 2026-09-16
             return
         _vanished = bool(_att.get("vanished")) if _att is not None else False
         _attended_id = _att.get("file_id", "") if _att is not None else ""
@@ -1571,7 +1590,22 @@ class TaroBrainTick:
                 chunk = tuple(t.hearing.vocab.encode(_word)) if _word else None
                 self._last_choice = {"gru": [_word_g, round(_conf_g, 3)],
                                      "hippo": [_word_h, round(_conf_h, 3)], "chosen": _src}
+        # 【2026-09-16】ここから下の門を、判断はそのままに**記録だけ**足した。
+        #   `_should_hold()` は読むだけの関数（orienting.py:1545）なので、
+        #   ここで先に呼んでも走行は1ビットも変わらない。
+        _sacc = float(getattr(orienting, "_sacc_remaining", 0.0) or 0.0)
+        _g = {"語が決まった": int(chunk is not None),
+              "sim": round(float(sim or 0.0), 4),
+              "閾値": float(pd.get("threshold", 0.80)),
+              "サッケード残り秒": round(_sacc, 4),
+              "撃った回数": int(getattr(orienting, "n_saccades", 0) or 0),
+              "保持してよい": int(bool(orienting._should_hold())),
+              "前の発話からの秒": ("" if t._last_produce_sec is None
+                                  else round(self.now.sim_sec - t._last_produce_sec, 3)),
+              "止まった門": ""}
+        self.tick.produce_gate = _g
         if chunk is None:
+            _g["止まった門"] = "語が決まらない"
             return
         # 【Tier3・2026-08-22】閾値はorienting_reflexの認識信号REC_THRESHOLD
         #   （e_orienting_v2.py:461＝0.80、F1-3cの保存済み画像で較正）に揃えた。
@@ -1579,12 +1613,14 @@ class TaroBrainTick:
         #   未決」節）。
         threshold = float(pd.get("threshold", 0.80))
         if sim < threshold:
+            _g["止まった門"] = "自信不足"
             return
         # ② 注視が続いている（サッケード実行中でなく、いままさに同じ対象へ
         #   留まっている）。e_orienting_v2.py _update_habituation() が保持判定に
         #   使っているのと同じ2条件をそのまま読む（新しい仕組みは作らない）。
         holding = orienting._sacc_remaining <= 0.0 and orienting._should_hold()
         if not holding:
+            _g["止まった門"] = "注視していない"
             return
         # ③ クールダウン（直前に喋っていない）。
         #   【Tier3・2026-08-22・文献根拠なし】同じ語を連呼し続けないための
@@ -1592,7 +1628,9 @@ class TaroBrainTick:
         cooldown_sec = float(pd.get("cooldown_sec", 2.0))
         now = self.now.sim_sec
         if t._last_produce_sec is not None and (now - t._last_produce_sec) < cooldown_sec:
+            _g["止まった門"] = "クールダウン中"
             return
+        _g["止まった門"] = "通過"
 
         # 【発話の動機・2026-08-31】言うかどうかの門。social未設定なら素通り
         #   ＝従来どおり必ず言う。決定は（言った/言わなかった とも）記録し、
@@ -1823,18 +1861,26 @@ class TaroBrainTick:
                 print("[efference] WARNING ctx.env が無く cam_fovy を読めない。60度で代用")
 
         taro = self
-        lexicon_obj = getattr(taro, "lexicon", None)
         hearing = getattr(taro, "hearing", None)
         vocab_obj = getattr(hearing, "vocab", None) if hearing is not None else None
 
         t = float(_u.data.time) if _u is not None else 0.0
 
+        # 【2026-09-16・直し】ここは `lexicon=lexicon_obj` を渡していて、
+        #   呼んだ瞬間に TypeError で落ちていた。引数 `lexicon` は 2026-09-15 の
+        #   コミット bf7091f（意味の表を削除し、分節を切り出す）で
+        #   VisualAttention.step から廃止されている。そのとき呼び出し側は2か所
+        #   あり、**古い経路（run/plugins/common/object_files.py）だけが直され、
+        #   新しい経路（ここ）が直し忘れられた**。新しい経路は誰も走らせていない
+        #   ので、壊れたまま1日以上気づかれなかった。
+        #   ＝「同じ直しが2か所に要るとき、走っている側だけが直る」型の事故
+        #   （run/plugins/base_取説.md の gaze_probe / word_production と同型）。
         result = va.step(
             obs=obs, orienting=orienting, t=t, step=self.now.step, fovy=fovy,
             surprise_trace=getattr(self.tick, "surprise_trace", None),
             vision_vec=getattr(self.tick, "last_vision_vec", None),
             parent_target=getattr(self.tick, "last_parent_utterance", None),
-            lexicon=lexicon_obj, vocab=vocab_obj)
+            vocab=vocab_obj)
         va.last_result = result
 
         # 段0は毎tick動く（検出コマでなくても）。efference_copy=None なら触らない
@@ -1921,45 +1967,47 @@ class TaroBrainTick:
         if hippo is None or len(hippo) == 0:
             return
         # 【塊レベル層・2026-09-07・仕様_M5_塊レベル層.md §5】chunk_level真なら
-        #   エピソードは塊の列なので、鍛えるのは塊GRU（_chunk_optimizer）。
-        #   音レベルGRUはここでは再生しない（聞く学習・切れ目の発見は_context_feed
-        #   経由で引き続き走る）。偽（既定）ならこれまでどおり音レベルGRUを鍛える。
+        #   エピソードは塊の列なので、塊GRU（_chunk_optimizer）を鍛える。
+        #   偽（既定）ならこれまでどおり音レベルGRUを鍛える。
+        # 【2026-09-17・睡眠は両方の段に】chunk_level真のとき、**音レベルGRU
+        #   （t.brain）が睡眠で一度も復習されなくなっていた**。F2-133（chunk_level
+        #   を最初からON）の10本で音GRUの重みが旧系統（chunk無しでP2を回した
+        #   F2-77）の1/3しか育たず、初見の「な」の直後の終わり確率が走行平均を
+        #   超えて「な｜いね」と切れ、「○○ないね」が0回になった（日誌 2026-09-17・
+        #   落とし穴 項127）。同じエピソードを塊→音に開いて音GRUにも読み上げる
+        #   （chunk無しのときの再生と同じ形＝[話者][印]音…[EOS]）。
+        #   人間側：海馬のリプレイは感覚皮質まで届く（CLS。Rothschild ら 2017 は
+        #   海馬–聴覚野のループ。引用は原文にあたってから）。
+        #   `produce.hippocampus.replay_mora: false` で旧挙動（塊GRUだけ）。
+        #   chunk_level偽の経路は1ビットも変わらない。
         _chunk_level = bool(getattr(t, "chunk_level", False))
         brain = t.chunk_brain if _chunk_level else t.brain
         opt = (getattr(t, "_chunk_optimizer", None) if _chunk_level
                else getattr(t, "_listen_optimizer", None))
         if brain is None or opt is None:
             return
-        import torch.nn.functional as F
-        dev = brain._device()
-        orig_lrs = [g["lr"] for g in opt.param_groups]
-        for g in opt.param_groups:
-            g["lr"] = hippo.sleep_lr
+        _hcfg = ((self.cfg.produce or {}).get("hippocampus") or {})
+        _replay_mora = (_chunk_level and bool(_hcfg.get("replay_mora", True))
+                        and getattr(t, "brain", None) is not None
+                        and getattr(t, "_listen_optimizer", None) is not None)
+        _opts = [opt] + ([t._listen_optimizer] if _replay_mora else [])
+        orig_lrs = [[g["lr"] for g in o.param_groups] for o in _opts]
+        for o in _opts:
+            for g in o.param_groups:
+                g["lr"] = hippo.sleep_lr
+        _sc_replay = bool((self.cfg.produce or {}).get("state_channel", False))
         try:
             for _ in range(hippo.replay_passes):
                 eps = hippo.sample(torch.default_generator, len(hippo))
                 perm = torch.randperm(len(eps)).tolist()
                 eps = [eps[i] for i in perm]
                 for ep in eps:
-                    # 【仕様書§5】塊の列は書き込み時にEOSを省いているので
-                    #   （_chunk_context_feedのwrite呼び出し参照）、ここで戻す。
-                    #   音レベル（既定）はEOSの有無を書き込み時の値のまま使う
-                    #   （従来どおり）。
                     if _chunk_level:
                         ids = [ep["speaker"]] + list(ep["tokens"]) + [2]
                     else:
                         ids = [ep["speaker"]] + list(ep["tokens"])
                     if len(ids) < 2:
                         continue
-                    xin = torch.tensor([ids[:-1]], dtype=torch.long, device=dev)
-                    tgt = torch.tensor([ids[1:]], dtype=torch.long, device=dev)
-                    pfx = torch.tensor(ep["key_vis"], dtype=torch.float32, device=dev)
-                    # 【M4e・2026-09-07・仕様_M4e_状態の線と驚きの書き込み】
-                    #   tokens[0]がgone/hereの印なら、再生でも同じ状態の線を
-                    #   立てたまま学習する。既定False（state_channel無し）ではNone。
-                    #   塊レベルではgone/hereのidは chunk_vocab.specials 側の空間
-                    #   （音の名簿の_gone_id/_here_idとは別空間）を見る。
-                    _sc_replay = bool((self.cfg.produce or {}).get("state_channel", False))
                     _st_replay = None
                     if _sc_replay and ep["tokens"]:
                         _tok0 = ep["tokens"][0]
@@ -1973,20 +2021,87 @@ class TaroBrainTick:
                             _st_replay = 2
                         elif _tok0 == _here_ref:
                             _st_replay = 1
-                    out, _ = brain.forward_hidden(xin, hidden=None, prefix_vec=pfx,
-                                                  state_id=_st_replay)
-                    out = out[:, 1:, :]      # 先頭＝視覚トークン位置は損失に使わない
-                    loss = F.cross_entropy(brain.perception_head(out)[0], tgt[0])
-                    opt.zero_grad()
-                    loss.backward()
-                    torch.nn.utils.clip_grad_norm_(
-                        (p_ for grp in opt.param_groups for p_ in grp["params"]),
-                        t._listen_grad_clip)
-                    opt.step()
+                    self._replay_one(brain, opt, ids, ep["key_vis"], _st_replay)
+                    if _replay_mora:
+                        _mids = self._chunk_episode_to_mora_ids(ep)
+                        if _mids is not None and len(_mids) >= 2:
+                            self._replay_one(t.brain, t._listen_optimizer, _mids,
+                                             ep["key_vis"], _st_replay)
         finally:
-            for g, lr in zip(opt.param_groups, orig_lrs):
-                g["lr"] = lr
+            for o, lrs in zip(_opts, orig_lrs):
+                for g, lr in zip(o.param_groups, lrs):
+                    g["lr"] = lr
         hippo.decay()
+
+    def _replay_one(self, brain, opt, ids, key_vis, state_id):
+        """睡眠の復習1回分：ids（[話者]…）を1つずらして次を当てる（聞く学習と同じ損失）。
+
+        2026-09-17 に _consolidate_language の内側から切り出した（塊GRUと音GRUの
+        両方で同じ手順を使うため）。戻り値は無い。brain の重みを1回更新する。
+        """
+        import torch.nn.functional as F
+        dev = brain._device()
+        xin = torch.tensor([ids[:-1]], dtype=torch.long, device=dev)
+        tgt = torch.tensor([ids[1:]], dtype=torch.long, device=dev)
+        pfx = torch.tensor(key_vis, dtype=torch.float32, device=dev)
+        out, _ = brain.forward_hidden(xin, hidden=None, prefix_vec=pfx, state_id=state_id)
+        out = out[:, 1:, :]      # 先頭＝視覚トークン位置は損失に使わない
+        loss = F.cross_entropy(brain.perception_head(out)[0], tgt[0])
+        opt.zero_grad()
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(
+            (p_ for grp in opt.param_groups for p_ in grp["params"]),
+            self._listen_grad_clip)
+        opt.step()
+
+    def _chunk_episode_to_mora_ids(self, ep):
+        """塊の列のエピソードを、音レベルGRUが読める列に開く（2026-09-17）。
+
+        返すのは [話者][印]音…[EOS]（chunk_level無しのときに _context_feed が海馬へ
+        書いていた形と同じ）。話者は塊の名簿の <PARENT>/<SELF> を脳の語彙の
+        話者トークンへ、<GONE>/<HERE> は t._gone_id / t._here_id へ写す。
+        塊は名簿（chunk_vocab.idx2chunk）で音のID列に戻し、耳の名簿で文字にして
+        脳の語彙のIDへ引き直す（耳と脳でID空間が違うため）。
+        脳の語彙に無い文字があれば None（安全側＝その1件は音GRUに読ませない）。
+        EOS は _context_feed と同じく、親の発話かつ _listen_eos のときだけ足す。
+        """
+        t = self
+        cv = getattr(t, "chunk_vocab", None)
+        pv = getattr(t, "produce_vocab", None)
+        hv = getattr(getattr(t, "hearing", None), "vocab", None)
+        sp = getattr(t, "_context_speaker_ids", None) or {}
+        if cv is None or pv is None or hv is None or not sp:
+            return None
+        if ep["speaker"] == cv.specials.get("parent"):
+            speaker, is_parent = sp.get("parent"), True
+        elif ep["speaker"] == cv.specials.get("self"):
+            speaker, is_parent = sp.get("self"), False
+        else:
+            return None
+        if speaker is None:
+            return None
+        _cap = t.brain.embedding.num_embeddings
+        out = [int(speaker)]
+        for tk in ep["tokens"]:
+            if tk == cv.specials.get("gone"):
+                if getattr(t, "_gone_id", None) is not None:
+                    out.append(int(t._gone_id))
+                continue
+            if tk == cv.specials.get("here"):
+                if getattr(t, "_here_id", None) is not None:
+                    out.append(int(t._here_id))
+                continue
+            val = cv.idx2chunk.get(int(tk))
+            if not isinstance(val, tuple):
+                continue
+            for ch in hv.decode(list(val)):
+                mid = pv.char2idx.get(ch)
+                if mid is None or mid >= _cap:
+                    return None
+                out.append(int(mid))
+        if is_parent and getattr(t, "_listen_eos", False):
+            out.append(2)
+        return out
 
     # ------------------------------------------------------------ 睡眠
     def consolidate(self, n_batches=200, bs=128):

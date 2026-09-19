@@ -78,6 +78,9 @@ def _register():
     from run.plugins.common.world_predictor_log import WorldPredictorLog
     from run.plugins.common.world_predictor_record import WorldPredictorRecord
     from run.plugins.common.run_profile import RunProfile
+    from run.plugins.common.produce_gates import ProduceGates
+    from run.plugins.common.eye_motion import EyeMotion
+    from run.plugins.common.eye_command import EyeCommand
     PLUGINS["toy_touch"] = ToyTouch
     PLUGINS["toy_in_view"] = ToyInView   # おもちゃが視界に入っている割合（幾何・脳不要＝measure可）
     PLUGINS["hand_in_view"] = HandInView
@@ -102,6 +105,9 @@ def _register():
     PLUGINS["object_files"] = ObjectFiles   # MobileSAM+物体ファイルを本番の走行で動かす（F2-67）
     PLUGINS["world_predictor_log"] = WorldPredictorLog   # 世界の予測器（M7a）の誤差をCSVに書く（測るだけ・2026-09-08）
     PLUGINS["run_profile"] = RunProfile   # 走行そのものの重さ（速度・メモリ・GPU）を列に出す（測るだけ・2026-09-16）
+    PLUGINS["produce_gates"] = ProduceGates   # 発話がどの門で止まったかを列に出す（測るだけ・2026-09-16）
+    PLUGINS["eye_motion"] = EyeMotion   # 眼球と頭が実際に何度動いたかを列に出す（測るだけ・2026-09-16）
+    PLUGINS["eye_command"] = EyeCommand   # 眼球への命令が どの段階で入ったかを列に出す（測るだけ・2026-09-16）
     PLUGINS["world_predictor_record"] = WorldPredictorRecord   # 世界の予測器の入力を1回記録（切り分け実験用・2026-09-10）
     # 注意：self_model / trace / reach_success / double_touch は太郎の脳が要る
     #   （run.type=train のみ）。measure（脳を通さず環境だけ進める）では使えない。
@@ -502,7 +508,13 @@ def _check_learning_happened(spec, out):
             scene = json.load(fp)
     except Exception:
         return   # シーンが読めないときは黙って通す（この検査のために止めない）
-    pl = ((scene.get("world") or {}).get("parent_labeling")) or {}
+    pl = dict(((scene.get("world") or {}).get("parent_labeling")) or {})
+    # 【2026-09-16・直し】ここは**生の場面ファイルだけ**を読んでいた。設定は3層
+    #   （コード既定 → 場面 → 実験ファイルの上書き）で合成されるので、
+    #   実験ファイルで `world.parent_labeling.respond_prob: 0` と書いても
+    #   この検査には届かず、**親が黙る実験（般化テストなど）を毎回殺していた**。
+    #   走行が読む値と検査が読む値がずれていた＝今日4回目の同型の事故。
+    pl.update(((spec.get("world") or {}).get("parent_labeling")) or {})
     if not pl.get("enabled", True):
         return
     if float(pl.get("respond_prob", 1.0)) <= 0.0:

@@ -107,6 +107,21 @@ class ObjectFile:
         self.budget = 1.0
         self.explained = 0.0        # 見失った瞬間に1度だけ決める（0〜1）
         self.area_hist = deque([float(area)], maxlen=max(int(budget_look_back), 2))
+        # 【2026-09-17・仕様_消えた物の記憶と注意の順序】「消えた」はファイルの側の
+        #   出来事。一度でも注意した（ever_attended）ファイルは、注意がどこにあろうと
+        #   自分の misses で vanished になり、gone_keep_s のあいだ捨てられない。
+        #   last_seen_vec は注意されて見えていた瞬間の視覚ベクトル（言語側が使う）。
+        #   既定（gone_keep_s=None・vanish_any_attended=False）では読まれない＝不変。
+        self.ever_attended = False
+        # 【2026-09-17・追記】関わった物＝注意して見えていたコマが engage_frames 以上。
+        #   壁の升のように1〜3コマだけ注意が触れた物は「消えた物」にしない（人間の
+        #   「ないない」は関わっていた物について）。判定は VisualAttention 側で更新する。
+        self.attended_frames = 0
+        self.engaged = False
+        self.vanished = False
+        self.vanished_t = None
+        self.last_seen_vec = None
+        self.last_seen_vision_t = None
 
     @property
     def pos(self):
@@ -245,6 +260,8 @@ class ObjectFile:
         self.area_hist.append(float(area))
         self.budget = 1.0
         self.explained = 0.0
+        self.vanished = False        # 【2026-09-17】対応がついたら「消えた」は取り消す
+        self.vanished_t = None
         if t is not None:
             # 【2026-09-09・重複をなくす「後半」1節】実際に一致した＝見えた時刻。
             self.last_seen_t = t
@@ -326,7 +343,7 @@ class ObjectFileSystem:
                  coast_max_s=None, uncertainty_penalty=0.0, exclusive_dist_px=None,
                  exclusive_cos=0.7, pos_gate="mahal", exclusive_scale_by_size=False,
                  coast_min_speed_px_s=None, frame_dt_s=1.0, appearance_gate_cos=None,
-                 vanish_budget=None):
+                 vanish_budget=None, gone_keep_s=None):
         # 【2026-09-10・仕様_消え方で持ち時間を決める】vanish_budget が None
         #   （既定）なら、budget は一度も読まれず max_missed で消す従来どおり
         #   ＝既定不変。辞書 {"abrupt_frames": 5, "occluded_frames": 50,
@@ -361,6 +378,11 @@ class ObjectFileSystem:
         self.appearance_weight = float(appearance_weight)
         self.mahal_gate = float(mahal_gate)
         self.max_missed = int(max_missed)
+        # 【2026-09-17・仕様_消えた物の記憶と注意の順序】None（既定）なら従来どおり。
+        #   秒数を渡すと、ever_attended のファイルは vanished になるまで捨てず、
+        #   vanished になってから gone_keep_s 秒残す（親の「ないね」はその間に来る。
+        #   人間側：期待の受動的な保持は8か月児で30〜70 s、Baillargeon & Graber 1988）。
+        self.gone_keep_s = None if gone_keep_s is None else float(gone_keep_s)
         self.reappear_gap = int(reappear_gap)
         self.process_noise = float(process_noise)
         self.meas_noise = float(meas_noise)
@@ -401,7 +423,9 @@ class ObjectFileSystem:
             # 【2026-09-10】押し出さない。席は残量が尽きて自分で抜けたときだけ
             #   空く。呼び出し元は「席が無ければ作らない」を守ること。
             return None
-        candidates = [f for f in self.files if f.id != protect_id]
+        candidates = [f for f in self.files if f.id != protect_id
+                      # 【2026-09-17】消えた物として残す約束のファイルは押し出さない
+                      and not (self.gone_keep_s is not None and f.engaged)]
         if not candidates:
             # 【仕様に無かった判断】全ファイルがprotect_id（1枚しか無くそれが
             # 注意中）なら押し出せない。この稀なケースでは上限を一時的に超える。
@@ -692,6 +716,18 @@ class ObjectFileSystem:
             lost = [f.id for f in self.files if f.budget <= 0.0]
         else:
             lost = [f.id for f in self.files if f.misses > self.max_missed]
+        if self.gone_keep_s is not None and lost:
+            # 【2026-09-17】注意したことのあるファイルは、判定より先に忘れない。
+            _keep = set()
+            for f in self.files:
+                if not f.engaged:
+                    continue
+                if not f.vanished:
+                    _keep.add(f.id)
+                elif (t is not None and f.vanished_t is not None
+                      and (t - f.vanished_t) <= self.gone_keep_s):
+                    _keep.add(f.id)
+            lost = [i for i in lost if i not in _keep]
         if lost:
             lost_set = set(lost)
             if self.revive_window_s is not None and t is not None:

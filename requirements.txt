@@ -1,0 +1,132 @@
+# 太郎（目標E・F）が使う Python の部品一覧
+#
+# 【なぜ要るか・2026-09-16】git worktree をジャンクションごと消した事故
+# （落とし穴 項118）で `.venv` が空になり、作り直したときに **`mobile_sam` が
+# 戻らなかった**。それに気づいたのは、太郎が物を見なくなって3時間追いかけたあと。
+# さらに `timm`・CUDA版 `torchvision` も足りず、**3段掘って**やっと動いた。
+# 一覧が無かったので「何が入っていたか」を思い出す手段が無かったのが原因。
+#
+# 目標A・B・C には requirements.txt があるのに、**いちばん使っている目標E・Fの
+# ぶんだけ無かった**（C のものは torch==2.6.0 で、この環境の 2.14.0+cu130 とは別物）。
+#
+# 【置き場所がここである理由】`.venv` はプロジェクト直下にあり、目標E・F と
+# 共通コード `run/` `taro_core/` の全部がこれを使う。目標フォルダの下に置くと
+# 「どっちの目標のものか」で迷う。
+#
+# ======================================================================
+#  **`pip install -r requirements.txt` だけでは環境は再現できない**
+# ======================================================================
+#
+#  ① torch / torchvision は **CUDA版**が要る（既定のPyPIはCPU版で、
+#     CPU版だと MobileSAM が `torchvision::nms` で落ちる。2026-09-16に実際に踏んだ）
+#
+#       pip install torch==2.14.0+cu130 torchvision==0.29.0+cu130 #           --index-url https://download.pytorch.org/whl/cu130
+#
+#  ② MIMo（身体シミュレータ）は**この場所にある実体を editable で入れる**
+#     （リポジトリ内の MIMo/ フォルダ。GitHub版と差分がある場合はそちらが正）
+#
+#       pip install -e ./MIMo
+#
+#  ③ mobile_sam は PyPI に無い。GitHub から直接
+#
+#       pip install git+https://github.com/ChaoningZhang/MobileSAM.git
+#
+#  ④ **重みファイル2つは pip では入らない**（`.models_cache/` の中身。
+#     ここも事故で空になった）
+#
+#       .models_cache/checkpoints/mobile_sam.pt            38.8MB
+#         https://raw.githubusercontent.com/ChaoningZhang/MobileSAM/master/weights/mobile_sam.pt
+#
+#       .models_cache/checkpoints/dinov2_vits14_pretrain.pth  88MB
+#         torch.hub が初回に自動で落とす（taro_core/src/senses/vision_backends.py:192 が
+#         torch.hub.set_dir(.models_cache) してから torch.hub.load する）。
+#         ネットが無いときは手で置く。
+#
+#  ⑤ 確かめ方（全部そろっているか）
+#
+#       python -c "import torch,torchvision,mobile_sam,timm,mujoco,mimoEnv; #           from torchvision.ops import nms; print(torch.cuda.is_available())"
+#
+# ======================================================================
+# 以下は 2026-09-16 時点の `pip freeze`（71件）。
+# 更新するときは `.venv/Scripts/python.exe -m pip freeze` を取り直して、
+# 上の①〜⑤の注記は**消さずに**残すこと。
+# ======================================================================
+
+# --- ①CUDA版が要る（上の注記を読むこと。素の pip では CPU版が入る）---
+torch==2.14.0+cu130
+torchvision==0.29.0+cu130
+
+# --- ②リポジトリ内の実体を editable で（pip install -e ./MIMo）---
+# git+https://github.com/trieschlab/MIMo.git@040b0ae4914cbfb26afdf830aa81775b90922f3f#egg=MIMo
+
+# --- ③PyPIに無い。GitHubから直接 ---
+mobile_sam @ git+https://github.com/ChaoningZhang/MobileSAM.git@f706ad9c4eb7f219c00d9050e46328518ffb65d2
+
+# --- 以下は普通に pip で入るもの ---
+absl-py==2.5.0
+anyio==4.15.1
+cachetools==5.5.1
+CacheToolsUtils==6.0
+certifi==2026.7.22
+charset-normalizer==3.5.1
+click==8.5.0
+cloudpickle==3.1.2
+colorama==0.4.6
+contourpy==1.4.0
+cycler==0.12.1
+etils==1.14.0
+Farama-Notifications==0.0.6
+filelock==3.32.3
+fonttools==4.65.0
+fsspec==2026.7.0
+glfw==2.10.2
+grpcio==1.84.0
+gymnasium==1.2.3
+h11==0.16.0
+hf-xet==1.6.0
+httpcore==1.0.9
+httpx==0.28.1
+huggingface_hub==1.31.0
+idna==3.19
+imageio==2.37.0
+Jinja2==3.1.6
+kiwisolver==1.5.1
+lazy-loader==0.5
+Markdown==3.10.3
+MarkupSafe==3.0.3
+matplotlib==3.9.4
+mpmath==1.3.0
+mujoco==3.3.0
+networkx==3.2.1
+numpy==2.0.2
+opencv-python-headless==4.11.0.86
+packaging==26.3
+pandas==3.0.5
+pillow==12.3.0
+protobuf==7.36.1
+psutil==7.2.2
+PyOpenGL==3.1.10
+pyparsing==3.3.2
+python-dateutil==2.9.0.post0
+PyYAML==6.0.2
+requests==2.32.5
+Rtree==1.3.0
+safetensors==0.8.0
+scikit-image==0.24.0
+scipy==1.13.1
+setuptools==78.1.0
+six==1.17.0
+stable_baselines3==2.7.1
+sympy==1.14.0
+tensorboard==2.19.0
+tensorboard-data-server==0.7.2
+tifffile==2026.4.11
+timm==1.0.29
+tqdm==4.70.1
+trimesh==4.6.2
+typing_extensions==4.16.0
+tzdata==2026.4
+urllib3==2.8.0
+Werkzeug==3.1.8
+wheel==0.48.0
+zipp==4.1.0

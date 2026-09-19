@@ -55,6 +55,10 @@ import os
 # E_VOR_SUPPRESS=0 で従来（抑制なし）に戻せる。
 # 抑制の強さ E_VOR_SUPPRESS_GAIN は [Tier3・ARBITRARY]：人間の抑制の
 #   定量値（何%まで下がるか・何ms か）は文献で未確認。0.0＝完全に止める、で測った。
+# 【2026-09-16・既定ON】体を留めた直後に、速度から導かれる量を計算し直す。
+#   切らないと VOR が「捨てたはずの速度」を頭の回転として読む（下の _pin_root 参照）。
+#   E_PIN_RECOMPUTE_VEL=0 で 2026-09-16 以前の挙動に戻せる（比較用）。
+_PIN_RECOMPUTE_VEL = os.environ.get("E_PIN_RECOMPUTE_VEL", "1") == "1"
 _VOR_SUPPRESS = os.environ.get("E_VOR_SUPPRESS", "1") == "1"
 _VOR_SUPPRESS_GAIN = float(os.environ.get("E_VOR_SUPPRESS_GAIN", "0.0"))
 import sys
@@ -2260,6 +2264,71 @@ class ToySupineEnv(SupineMimoEnv):
         self._posture_fall_since = None
         return self._get_obs()
 
+    # 【2026-09-16・眼球への命令の控え】読むだけ。action にも物理にも触らない。
+    _EYE_ACT = [("左目_水平", "act:left_eye_horizontal"),
+                ("左目_垂直", "act:left_eye_vertical"),
+                ("右目_水平", "act:right_eye_horizontal"),
+                ("右目_垂直", "act:right_eye_vertical")]
+
+    def _eye_act_idx(self):
+        """眼球の {表示名: (actionの番号, アクチュエータのid)}。一度引いたら憶えておく。
+
+        【筋モデルのとき・2026-09-16】`actuation="muscle"` では action が
+        **1アクチュエータにつき2要素**（前半＝縮む側・後半＝伸びる側。
+        MIMo/mimoActuation/muscle.py:445）。さらに `data.ctrl` は**常に1の
+        ダミー**で、実際のトルクは `model.actuator_gear[id,0]` に書かれる
+        （同 _apply_torque の説明文）。だから actuator の id をそのまま
+        action の添字に使ってはいけない。
+        """
+        d = getattr(self, "_eye_act_idx_cache", None)
+        if d is None:
+            d = {}
+            am = getattr(self, "actuation_model", None)
+            acts = getattr(am, "actuators", None)
+            for 名, a in self._EYE_ACT:
+                try:
+                    aid = int(self.model.actuator(a).id)
+                    k = aid
+                    if acts is not None:
+                        w = [i for i, x in enumerate(list(acts)) if int(x) == aid]
+                        k = w[0] if w else None
+                    d[名] = (k, aid)
+                except Exception:       # noqa: BLE001  眼が無い体でも走行は止めない
+                    d[名] = (None, None)
+            self._eye_act_idx_cache = d
+        return d
+
+    def _eye_cmd_snap(self, 段, vec):
+        """その段階での眼球への命令を控える（action の値）。"""
+        if vec is None:
+            return
+        try:
+            am = getattr(self, "actuation_model", None)
+            n = int(getattr(am, "n_actuators", 0) or 0)
+            for 名, (k, _aid) in self._eye_act_idx().items():
+                if k is None or k >= len(vec):
+                    continue
+                if n and len(vec) >= 2 * n and k + n < len(vec):
+                    # 筋モデル：縮む側と伸びる側の差を「正味の命令」として控える
+                    縮 = float(vec[k])
+                    伸 = float(vec[k + n])
+                    self._eye_cmd["%s_%s" % (段, 名)] = 伸 - 縮
+                    self._eye_cmd["%s_%s_縮" % (段, 名)] = 縮
+                    self._eye_cmd["%s_%s_伸" % (段, 名)] = 伸
+                else:
+                    self._eye_cmd["%s_%s" % (段, 名)] = float(vec[k])
+        except Exception:       # noqa: BLE001  控えの失敗で走行を止めない
+            pass
+
+    def _eye_torque_snap(self):
+        """物理を進めたあと、眼球へ実際にかかったトルクを控える（筋モデルの実値）。"""
+        try:
+            for 名, (_k, aid) in self._eye_act_idx().items():
+                if aid is not None:
+                    self._eye_cmd["実トルク_%s" % 名] = float(self.model.actuator_gear[aid, 0])
+        except Exception:       # noqa: BLE001
+            pass
+
     def step(self, action):
         # 【2026-08-16】座り直しの復帰先(_posture_seated_qpos)を、このstep()が
         #   物理を1歩も進める前・qposを誰も書き換えていない時点で確定させる。
@@ -2277,6 +2346,13 @@ class ToySupineEnv(SupineMimoEnv):
         # 旧実装の「離れたら瞬間移動で置き直す(respawn)」は**廃止**。目視でワープが
         # 見えたうえ、随伴性（自分の行為→結果）を壊すため。代わりに吊り紐で留める。
         self.respawned_this_step = False
+        # 【2026-09-16・眼球への命令の控え】眼球が100%の歩で動き続けている
+        #   （中央値117度/秒・F2-134e）のに、視線誘導反射のサッケードは0発だった。
+        #   **誰が眼球を動かしているのか**を切り分けるため、action が上書きされて
+        #   いく各段階で、左目の水平・垂直の命令をそのまま控える。
+        #   読むだけ（action は変えない）。run/plugins/common/eye_command.py が列に出す。
+        self._eye_cmd = {}
+        self._eye_cmd_snap("方策", action)
         self._parent_intervene()   # 見失ったら親が差し出し直す
         self._carry_toy()          # 親がおもちゃを運んでくる（登場を遅らせる仕組み）
         self._apply_tether()
@@ -2317,16 +2393,19 @@ class ToySupineEnv(SupineMimoEnv):
                     _sup = 1.0
             action = self._vor.override(action, self.model, self.data, self.dt,
                                         suppress=_sup)
+        self._eye_cmd_snap("VORのあと", action)          # 2026-09-16・控えるだけ
         # 【段A・2026-09-13・撤去】ここで視覚と注意を毎tick呼んでいた（第2段）が、
         #   撤去した。理由は __init__ の同じ日付のコメント参照。
         #   呼ぶのは run/trainer.py の `_visual_attention_step`（元と同じ位置）。
         if self._orienting is not None:
             # 前回描画された画像から計算済みの方向を、首・（VOR後の）目に加算する
             action = self._orienting.apply(action)
+        self._eye_cmd_snap("定位反射のあと", action)      # 2026-09-16・控えるだけ
         if self._vergence is not None:
             # F2-15：輻輳反射（設計「1. 全体の構成」）。定位反射の共同運動成分を
             #   上書きせず、左右差だけを加算する（additive）。
             action = self._vergence.apply(action)
+        self._eye_cmd_snap("輻輳のあと", action)          # 2026-09-16・控えるだけ
         # 【2026-08-15・座位保持の学習】層1（姿勢制御反射）・層2（立ち直り反射）。
         #   env.taro は run/taro_setup.py の _setup_postural_gate/_setup_righting_damper
         #   がposture_reflex/righting_reflexのどちらかTrueのときだけ配線する
@@ -2339,6 +2418,7 @@ class ToySupineEnv(SupineMimoEnv):
         if taro is not None and getattr(taro, "righting_damper", None) is not None:
             action = self._apply_righting_damper(action, taro)
         out = super().step(action)
+        self._eye_torque_snap()                           # 2026-09-16・控えるだけ
         self._pin_root()           # 椅子とベルトが体を留める（実験の測定条件）
         # 倒れ判定と座り直し（ユーザーの確定事項：エピソード継続。env.reset()も
         #   reset_model()も呼ばない。terminated/truncatedもいじらない）。
@@ -2580,6 +2660,21 @@ class ToySupineEnv(SupineMimoEnv):
         for qadr, dof, val in (getattr(self, "_pin_j", None) or ()):
             self.data.qpos[qadr] = val
             self.data.qvel[dof] = 0.0
+        # 【2026-09-16・ここが眼球が暴れていた原因だった】
+        #   上で qvel を0にしても、そこから導かれる `data.cvel` は**更新されない**。
+        #   VOR（vor.py:_head_omega_world）は次の歩で `cvel` を読むので、
+        #   **捨てたはずの速度**を「頭が回っている」と受け取り、それを打ち消そうとして
+        #   眼球を振り回していた。実測（F2-134c・600歩）：
+        #     頭の向きを決める自由度（根の回転3＋腰6＋首3）の速さ  0.000000 度/秒（全歩）
+        #     そこから導かれるはずの cvel                        中央 36.0 度/秒
+        #     → 元が全部0なのに導かれた値だけ36度/秒＝計算し直されていない
+        #   計算し直すと：眼球の速さ 117度/秒 → 0.035度/秒、1度以上動いた歩 595/599 → 2/599。
+        #   【なぜ2026-07-26の検証で見つからなかったか】当時 cvel は姿勢の数値微分と
+        #   突き合わせて「正しい」と確認されている（相関0.9891・E/研究日誌 2026-07）。
+        #   正しかった。ただしその**3日後**に体を留める仕組み（この関数）が入り、
+        #   確認したときの前提が消えた。確認済みの入力ほど、足元を変えたら測り直す。
+        if _PIN_RECOMPUTE_VEL and (q is not None or getattr(self, "_pin_j", None)):
+            mujoco.mj_comVel(self.model, self.data)
 
     def get_vision_obs(self):
         """MIMoの壊れたgym描画を迂回し、眼球カメラを生APIで直接描画する（D側と同じ）。

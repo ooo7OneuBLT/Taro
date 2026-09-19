@@ -1,0 +1,85 @@
+{
+  "name": "F2-134_発話の門しらべ",
+  "note": "2026-09-16 白紙の太郎が3,000歩で発話0だった件（研究日誌 2026-09-16）。喋ろうとしてどの門で止まっているかを600歩ぶん記録するだけの走行。学習の結果は使わない（モデルは使い捨て）。土台は F2-133 01本目と同じ。",
+  "scene": "土台_座位12ヶ月_壁あり_胡坐_8択_消失発話_2026-09-15",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 12.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32,
+      "eye": "left",
+      "source": "wide"
+    },
+    "save": "F/models/_F2-134_使い捨て.pt",
+    "model": "F/models/F2-6_P1_喃語900s_12ヶ月_seed10_2026-08-24.pt",
+    "produce": {
+      "mode": "word",
+      "threshold": 0.5,
+      "cooldown_sec": 2.0,
+      "max_length": 8,
+      "develop_from_age": true,
+      "vocal_tract_decoupled": true,
+      "context": true,
+      "listen_learn": true,
+      "context_lambda": 0.0,
+      "vision_context": true,
+      "listen_lr": 0.001,
+      "hippocampus": {
+        "capacity": 512,
+        "decay": 0.5,
+        "replay_passes": 1,
+        "recent_ratio": 0.7,
+        "sleep_lr": 0.005
+      },
+      "word_choice": "gru_hippo",
+      "hippo_gain": 1.0,
+      "listen_self": false,
+      "listen_eos": true,
+      "segment_mode": "end_prob",
+      "chunk_level": true
+    }
+  },
+  "run": {
+    "type": "train",
+    "steps": 600,
+    "seed": 91,
+    "K": 10,
+    "checkpoint": 600,
+    "csv": "F/logs/F2-134_発話の門しらべ/run.csv"
+  },
+  "plugins": {
+    "produce_gates": {
+      "out": "F/logs/F2-134_発話の門しらべ/発話の門.csv"
+    },
+    "word_production": {
+      "events_out": "F/logs/F2-134_発話の門しらべ/太郎の発話.csv"
+    },
+    "word_learning": {
+      "events_out": "F/logs/F2-134_発話の門しらべ/発話イベント.csv"
+    },
+    "run_profile": {
+      "out": "F/logs/F2-134_発話の門しらべ/走行の負荷.csv",
+      "every": 20
+    }
+  },
+  "world": {
+    "xml": "MIMo/mimoEnv/assets/f49_8way_r1.xml",
+    "parent_labeling": {
+      "vanish_utterance": false
+    }
+  },
+  "expect": {
+    "発話の門.csv": [
+      "止まった門",
+      "サッケード残り秒",
+      "撃った回数"
+    ],
+    "発話イベント.csv": [
+      "text",
+      "target"
+    ]
+  }
+}

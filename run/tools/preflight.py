@@ -197,7 +197,59 @@ def check(spec, spec_path=""):
                 warns.append("場面 %s には派生がある（選び直したか確かめる）：\n      %s"
                              % (scene, "\n      ".join(sibs)))
 
-    # --- 5. 既にあるものを上書きするか（同じ実験名なら意図的なことが多い）------
+    # --- 5. 場面が名指ししている世界XMLが実在するか ---------------------------
+    #   【2026-09-16・落とし穴 項118】git worktree をジャンクションごと消したとき
+    #   `MIMo/mimoEnv/assets/` の自作XMLが108種類すべて消えた。場面のJSONは git 追跡下
+    #   なので無事に残り、一覧にも出る。**だから気づけない**：選べてしまい、走らせて
+    #   初めて MuJoCo が落ちる。ここで先に止めて、作り直す手段まで出す。
+    #   XMLは実験ファイルの `world.xml` で上書きできるので、上書き後の値を見る。
+    xml = (spec.get("world") or {}).get("xml")
+    if not xml and scene:
+        sp = (str(scene) if scene_は_パス
+              else os.path.join("run/scenes", str(scene) + ".json"))
+        try:
+            with open(_abs(sp), encoding="utf-8") as f:
+                xml = (json.load(f).get("world") or {}).get("xml")
+        except Exception:       # noqa: BLE001  場面が読めない件は上の検査の仕事
+            xml = None
+    if xml and not os.path.exists(_abs(str(xml))):
+        直し方 = ""
+        if "f49_8way" in str(xml):
+            直し方 = ("\n      作り直せます（素材と作り方は残っています）：\n"
+                     "        .venv/Scripts/python.exe F/scripts/f49_8択の世界を作り直す.py")
+        errors.append(
+            "世界のXMLがありません: %s\n"
+            "      場面（%s）はこのファイルを名指ししていますが、実物がありません。\n"
+            "      走らせても MuJoCo が読み込みで落ちます。%s" % (xml, scene or "?", 直し方))
+
+    # --- 6. 太郎が「物を見る」経路があるか -------------------------------------
+    #   【2026-09-16・これで丸一日を失った】視覚注意（どこが目立つかの地図を作り、
+    #   注意点を決め、眼球へサッケードを出す）を動かす経路は**2つしか無い**：
+    #       ① 実験ファイルの `taro.visual_attention`（新しい・正しい置き場所）
+    #       ② `plugins.object_files`（後方互換。名前は測る道具だが中核機能を動かす）
+    #   どちらも無いと、`orienting.n_saccades` が0のままになり、太郎は
+    #   一度も物を注視できず、**一言も喋らない**。実測（600歩・同じ場面・同じ種）：
+    #       道具あり サッケード175発・発話23回 ／ 道具なし 0発・0回
+    #   `object_files.py` の説明文には長らく「消しても能力は落ちない（確認済み）」と
+    #   書いてあったが嘘で、2026-09-13 の確認（門2）は落ちていた。
+    #   **説明文では防げなかったので機械で止める**（CLAUDE.md「同じミスが2回
+    #   起きたら文書ではなく機械で防ぐ」）。
+    #   喃語だけの走行など、そもそも物を見なくてよい実験は produce.mode が
+    #   "word" でないので、その場合は鳴らさない。
+    _pd = (spec.get("taro") or {}).get("produce") or {}
+    _見る経路 = (bool((spec.get("taro") or {}).get("visual_attention"))
+                 or "object_files" in (spec.get("plugins") or {}))
+    if _pd and _pd.get("mode", "word") == "word" and not _見る経路:
+        errors.append(
+            "太郎が「物を見る」経路がありません（視覚注意を動かすものが何も無い）。\n"
+            "      このまま走らせると サッケードが0発のままで、**一言も喋りません**\n"
+            "      （2026-09-16 実測：道具あり175発・発話23回 ／ 無し 0発・0回）。\n"
+            "      どちらかを実験ファイルに足してください：\n"
+            "        taro.visual_attention      … 新しい置き場所\n"
+            "        plugins.object_files       … 後方互換（いまはこちらが確実）\n"
+            "      設定の写し元：F/experiments/F2-129_K1_記憶からの山_学習_2026-09-11.json")
+
+    # --- 7. 既にあるものを上書きするか（同じ実験名なら意図的なことが多い）------
     #   1件1行にすると再走行のたびに10行出てうるさいので、まとめて1行にする。
     exist = [p for _w, p in outs if os.path.exists(_abs(p))]
     if exist:

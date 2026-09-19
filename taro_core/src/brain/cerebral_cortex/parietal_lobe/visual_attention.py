@@ -65,6 +65,18 @@ class VisualAttention:
         self.max_files = None if max_files is None else int(max_files)
         max_missed = c.get("max_missed")
         self.max_missed = None if max_missed is None else int(max_missed)
+        # 【2026-09-17・仕様_消えた物の記憶と注意の順序】3つとも既定OFF＝不変。
+        #   vanish_any_attended: 「消えた」判定を注意したことのある全ファイルにかける
+        #   hold_until_vanished : 注意中の物が見当たらなくなっても判定が済むまで注意を保持
+        #   gone_keep_s         : 消えた物のファイルを残す秒数（ObjectFileSystem へ渡す）
+        gone_keep_s = c.get("gone_keep_s")
+        self.gone_keep_s = None if gone_keep_s is None else float(gone_keep_s)
+        self.vanish_any_attended = bool(c.get("vanish_any_attended", False))
+        self.hold_until_vanished = bool(c.get("hold_until_vanished", False))
+        #   engage_frames: 「関わった物」とみなす、注意して見えていたコマ数（既定5＝1 s）
+        self.engage_frames = int(c.get("engage_frames", 5))
+        self._hold_active = False
+        self._gone_object = None
         # 【2026-09-09・仕様_物体ファイルの重複をなくす「後半」4節】既定は全て
         #   ObjectFileSystemの既定値と同じ（coast_max_s=None・uncertainty_penalty=0.0・
         #   exclusive_dist_px=None・exclusive_cos=0.7）＝既定不変。
@@ -204,6 +216,8 @@ class VisualAttention:
         self.vanish_budget = c.get("vanish_budget")
         if self.vanish_budget is not None:
             ofs_kwargs["vanish_budget"] = self.vanish_budget
+        if self.gone_keep_s is not None:
+            ofs_kwargs["gone_keep_s"] = self.gone_keep_s
         self.ofs = self._ObjectFileSystem(**ofs_kwargs)
 
         # 【M3・2026-09-06】既定Falseでは以下のattend関連の状態・処理は一切使われない。
@@ -388,6 +402,7 @@ class VisualAttention:
             "efference": self.efference,
             "attended_id": self._attended_id,
             "attended_object": self._attended_object,
+            "gone_object": self._gone_object,   # 【2026-09-17】
             "priority_map_result": self._priority_map_result,
             "priority_map_result_t": self._priority_map_result_t,
             "goal_point": self.goal_point,
@@ -628,7 +643,8 @@ class VisualAttention:
             #   瞬間だけ、その場所を目標として渡す。自前で見つける道は残したまま
             #   （人間も上丘が自分で撃つ道は無くならない）、2つが同じ筋へつながる形。
             #   gaze=False（既定）なら1行も通らない。
-            if self.gaze_from_attention and attn_res["switched"]:
+            # 【2026-09-17】判定が済むまで注意を保持している間は視線も動かさない。
+            if self.gaze_from_attention and attn_res["switched"] and not self._hold_active:
                 if orienting is not None and hasattr(orienting, "set_map_target"):
                     wx, wy = attn_res["winner_px"]
                     # 視野の方向（[-1,1]、右・上が正）へ。画像の y は下向きなので反転。
@@ -822,6 +838,14 @@ class VisualAttention:
 
         CENTER_X, CENTER_Y = 112.0, 112.0
         cur_by_id = {f.id: f for f in self.ofs.files}
+        # 【2026-09-17・仕様_消えた物の記憶と注意の順序】注意中の物が見当たらなく
+        #   なってから「消えた」の判定が済むまでは、注意をその物に留める（順序は
+        #   「気づく→他を見る」。IOR は判定後に従来どおり働く）。既定OFFでは _hold は常に偽。
+        _prev_f = cur_by_id.get(self._attended_id) if self._attended_id is not None else None
+        _hold = bool(self.hold_until_vanished and _prev_f is not None and _prev_f.engaged
+                     and 0 < _prev_f.misses < self.vanish_misses and not _prev_f.vanished)
+        self._hold_active = _hold
+        _hold_id = self._attended_id
 
         # ---- 決めたこと1：どの物体ファイルに注意しているか --------------------
         visible = [f for f in self.ofs.files if f.misses == 0]
@@ -867,6 +891,8 @@ class VisualAttention:
                 candidates,
                 key=lambda f: f.area + gain * _trace.get(f.id, 0.0)).id
         # 無ければ前回のattendedを保持（消えた物を追い続ける）。
+        if _hold:
+            self._attended_id = _hold_id      # 【2026-09-17】判定が済むまで留まる
         lost_ids = set(res["lost"])
         if self._attended_id is not None and self._attended_id in lost_ids:
             # attendedがlostで削除された＝これ以上追い続ける物が無い。
@@ -881,6 +907,12 @@ class VisualAttention:
         #   毎tick呼び出し）が使う「直近の検出コマで可視だったか」をここで
         #   確定させる。
         self._attended_visible = attended_f is not None and attended_f.misses == 0
+        if attended_f is not None:
+            attended_f.ever_attended = True   # 【2026-09-17】
+            if attended_f.misses == 0:
+                attended_f.attended_frames += 1
+                if attended_f.attended_frames >= self.engage_frames:
+                    attended_f.engaged = True
 
         # ---- 決めたこと2：「消えた物の見た目」の控え ---------------------------
         # 【M4b：検出コマで一致した瞬間だけ控える（毎tickだと引っ込め中に
@@ -894,10 +926,27 @@ class VisualAttention:
             if self._attended_object is not None:
                 self._attended_object["last_seen_vec"] = self._attended_last_seen_vec
                 self._attended_object["last_seen_time"] = self._attended_last_seen_time
+            # 【2026-09-17】そのファイル自身にも控える（消えた後に注意が他へ移っても
+            #   「消えた物の見た目」を言語側へ渡せるように）。
+            attended_f.last_seen_vec = self._attended_last_seen_vec
+            attended_f.last_seen_vision_t = t
 
         # ---- 決めたこと3の前段：消失信号 -------------------------------------
         _prev_vanished = self._last_vanished
-        vanished = attended_f is not None and attended_f.misses >= self.vanish_misses
+        _new_gone = False
+        if self.vanish_any_attended:
+            # 【2026-09-17】「消えた」はファイルの側の出来事：注意したことのある全ファイルで判定。
+            for _f in self.ofs.files:
+                if not _f.engaged:
+                    continue
+                _v = _f.misses >= self.vanish_misses
+                if _v and not _f.vanished:
+                    _f.vanished_t = t
+                    _new_gone = True
+                _f.vanished = bool(_v)
+            vanished = attended_f is not None and bool(attended_f.vanished)
+        else:
+            vanished = attended_f is not None and attended_f.misses >= self.vanish_misses
         self._last_vanished = bool(vanished)
         # 【M4c・2026-09-06】vanished が偽→真に変わった瞬間だけ、世界（親）へ
         #   合図する。声の合図（run/trainer.py:934 _taro_voice_signal）と同じ
@@ -907,7 +956,7 @@ class VisualAttention:
         #   【2026-09-13・設計_視覚を脳へ戻す】この合図（環境への書き込み）は
         #   今回の移設範囲外（別件・触らない）。呼び出し側が`noticed_gone`を
         #   見て、元と同じ場所（env.unwrapped._taro_noticed_gone_time）へ書く。
-        self.noticed_gone = bool(vanished and not _prev_vanished)
+        self.noticed_gone = bool((vanished and not _prev_vanished) or _new_gone)
 
         # ---- nearest_word（描画・CSV両方で使うのでここで一度だけ計算） --------
         # 【2026-09-15】意味の表の削除に伴い常に空（上のコメント参照）。
@@ -941,6 +990,26 @@ class VisualAttention:
                 self._attended_object["switch_signal"] = switch_signal
                 self._attended_object["priority"] = priority_result.get("priority", {})
 
+        # ---- gone_object【2026-09-17】消えた物（注意したことがあり vanished）のうち最新 ----
+        self._gone_object = None
+        if self.vanish_any_attended:
+            _g = [f for f in self.ofs.files if f.engaged and f.vanished]
+            # 新しい物に関わり始めたら（注意中の物が engaged で見えている）、消えた物は
+            #   言語側へ出さない（記憶は残る）。関わっていない物（壁の升）を見ている間は出す。
+            if attended_f is not None and attended_f.engaged and not attended_f.vanished:
+                _g = []
+            if _g:
+                _gf = max(_g, key=lambda f: (f.vanished_t if f.vanished_t is not None else -1.0))
+                _lsv = _gf.last_seen_vec
+                if _lsv is None and _gf.id == self._attended_id:
+                    _lsv = self._attended_last_seen_vec
+                self._gone_object = {
+                    "file_id": _gf.id, "visible": False, "misses": _gf.misses,
+                    "since_seen": _gf.since_seen, "pos": _gf.pos, "area": _gf.area,
+                    "vanished": True, "last_seen_vec": _lsv,
+                    "last_seen_time": _gf.last_seen_vision_t,
+                    "vanished_t": _gf.vanished_t, "t": t,
+                }
         if self.attend_out is None:
             return
 
@@ -989,4 +1058,9 @@ class VisualAttention:
             "priority": priority_v, "switch": switch_v,
             "explore_x": explore_x_v, "explore_y": explore_y_v, "ior": ior_v,
             "switch_decided": switch_decided_v,
+            # 【2026-09-17】消えた物と保持の記録（既定OFFでは空／0）
+            "gone_id": (self._gone_object["file_id"] if self._gone_object else ""),
+            "gone_vanished_t": (round(self._gone_object["vanished_t"], 3)
+                                if self._gone_object and self._gone_object["vanished_t"] is not None else ""),
+            "hold": int(_hold),
         })

@@ -1,0 +1,77 @@
+{
+  "name": "F2-134e_眼球が実際に動いているか",
+  "note": "2026-09-16 produce_gates で「サッケード0発」と出たのを「目が動いていない」と報告したが、ユーザーが動画を見て「目は動いている」と指摘。撃った回数は反射の命令の回数であって眼球の動きではない。関節の角度そのものを測る。",
+  "scene": "土台_座位12ヶ月_壁あり_胡坐_8択_消失発話_2026-09-15",
+  "taro": {
+    "actuation": "muscle",
+    "age_months": 12.0,
+    "orienting_reflex": true,
+    "hearing": true,
+    "lexicon_vision": {
+      "backend": "dinov2_vits14",
+      "fovea_px": 32,
+      "eye": "left",
+      "source": "wide"
+    },
+    "save": "F/models/_F2-134e_使い捨て.pt",
+    "model": "F/models/F2-6_P1_喃語900s_12ヶ月_seed10_2026-08-24.pt",
+    "produce": {
+      "mode": "word",
+      "threshold": 0.5,
+      "cooldown_sec": 2.0,
+      "max_length": 8,
+      "develop_from_age": true,
+      "vocal_tract_decoupled": true,
+      "context": true,
+      "listen_learn": true,
+      "context_lambda": 0.0,
+      "vision_context": true,
+      "listen_lr": 0.001,
+      "hippocampus": {
+        "capacity": 512,
+        "decay": 0.5,
+        "replay_passes": 1,
+        "recent_ratio": 0.7,
+        "sleep_lr": 0.005
+      },
+      "word_choice": "gru_hippo",
+      "hippo_gain": 1.0,
+      "listen_self": false,
+      "listen_eos": true,
+      "segment_mode": "end_prob",
+      "chunk_level": true
+    }
+  },
+  "run": {
+    "type": "train",
+    "steps": 600,
+    "seed": 91,
+    "K": 10,
+    "checkpoint": 600,
+    "csv": "F/logs/F2-134e_眼球の動き/run.csv"
+  },
+  "plugins": {
+    "eye_motion": {
+      "out": "F/logs/F2-134e_眼球の動き/眼球の動き.csv"
+    },
+    "produce_gates": {
+      "out": "F/logs/F2-134e_眼球の動き/発話の門.csv"
+    }
+  },
+  "world": {
+    "xml": "MIMo/mimoEnv/assets/f49_8way_r1.xml",
+    "parent_labeling": {
+      "vanish_utterance": false
+    }
+  },
+  "expect": {
+    "眼球の動き.csv": [
+      "左目_水平度",
+      "左目_動いた度",
+      "撃った回数"
+    ],
+    "発話の門.csv": [
+      "止まった門"
+    ]
+  }
+}

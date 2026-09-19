@@ -225,6 +225,11 @@ class VOR:
         #   通さないと「回り続けても永久に感じ続ける」＝眼球が回りきって張り付く。
         if self.canals is not None:
             w_world = self.canals.update(w_world, float(dt))
+        # 【2026-09-16・控えるだけ】眼球が100%の歩で動いている原因を切り分けるため、
+        #   VORが「頭がこれだけ回っている」と思っている値をそのまま残す。
+        #   読むだけ（計算には一切使わない）。run/plugins/common/eye_command.py が読む。
+        self.last_w_world = np.array(w_world, dtype=float).copy()
+        self.last_unit = {}
 
         # ②耳石器を通す：頭が傾いたまま静止したときの「着地点」を決める。
         #   比力（重力＋運動加速度）から重力方向を推定し、傾き角 × 0.15 を目標にする。
@@ -281,6 +286,10 @@ class VOR:
             #   向き（負方向）に眼を動かした＝**眼は下にしか動けなかった**。
             #   実測：VOR ON で左目の上下角が1秒で下限 −47度に張り付き戻らない。
             #   共通の写像 write_joint_command を通す（眼球は相反神経支配なので共収縮は0）。
+            try:        # 2026-09-16・控えるだけ
+                self.last_unit[model.actuator(u["aid"]).name] = (w_axis, w_des, torque_ratio)
+            except Exception:       # noqa: BLE001
+                pass
             self._write(out, u["aid"], torque_ratio, self.n_actuator,
                         co_activation=0.0)
         return out

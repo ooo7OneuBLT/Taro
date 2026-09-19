@@ -8,9 +8,29 @@
 毎tick呼ぶのは `run/trainer.py: _visual_attention_step`）。
 **このファイルは、その最後の結果を読んでCSV・PNGに残すだけ**。
 
-  ⇒ **この道具を実験ファイルから消しても、太郎の能力は落ちない。**
-     （確かめ方：`plugins.object_files` を消した走行で `太郎の発話.csv`・
-       `世界の予測器.csv` が残した走行と完全一致することを確認済み）
+  ⇒ **【訂正・2026-09-16】この行にはこう書いてあった：**
+       「この道具を実験ファイルから消しても、太郎の能力は落ちない。
+         （確かめ方：plugins.object_files を消した走行で 太郎の発話.csv・
+           世界の予測器.csv が残した走行と完全一致することを確認済み）」
+     **これは嘘だった。** 2026-09-13 の門2（`_段A_道具なし_2026-09-13`）は
+     **合格していない**。そのログには次が残っている：
+
+         中止：親が一度も名前を言っていません（学習が成立していない）
+         語彙イベント 0件（label_count_toy1=0 / toy2=0）
+
+     ＝道具を外した瞬間、太郎が物を見られなくなり、親が名前を言う条件が
+     満たせず、安全装置が1歩で走行を止めた。**落ちたのに「確認済み」と書いた。**
+
+  ⇒ **いまの本当のこと：この道具を外すと太郎は物を見なくなる。**
+     `taro.visual_attention` を書いた実験でも同じ（門2がそれで落ちている）。
+     外してよいのは、門2を**本当に通してから**。
+     2026-09-16 の実測（600歩・同じ場面・同じ種）：
+
+         道具あり  サッケード 175発 ／ 発話 23回
+         道具なし  サッケード   0発 ／ 発話  0回
+
+     走行前点検（`run/tools/preflight.py`）が、この道具も
+     `taro.visual_attention` も無い実験を**止める**ようにした。
 
   1. 太郎の `VisualAttention` の最後の結果を読む（setup / on_step）
   2. CSV・PNGへ書く（_save_detection_frame ほか）
@@ -199,6 +219,7 @@ class ObjectFiles(Plugin):
             ctx.object_files = self.ofs
             ctx.vanish_misses = self.attn.vanish_misses
             ctx.attended_object = None
+            ctx.gone_object = None   # 【2026-09-17】
 
         self.attend = self.attn.attend
         self.attend_out = self.attn.attend_out
@@ -303,6 +324,7 @@ class ObjectFiles(Plugin):
             if self.attend:
                 # 【M3】検出・対応づけ結果を読むだけ。
                 ctx.attended_object = result["attended_object"]
+                ctx.gone_object = result.get("gone_object")   # 【2026-09-17】消えた物
                 # 【M4c・2026-09-06】vanished が偽→真に変わった瞬間だけ、世界（親）へ
                 #   合図する（別件・台帳「その45」に登録済み。今回の移設範囲外で
                 #   触っていない。書く場所も値もタイミングも元のまま）。
@@ -653,14 +675,17 @@ class ObjectFiles(Plugin):
                            "priority", "switch", "explore_x", "explore_y", "ior",
                            # 【2026-09-09・追記2「直し」3】決めたコマ（実際に移った
                            #   コマは従来どおりswitch列）。
-                           "switch_decided"])
+                           "switch_decided",
+                           # 【2026-09-17】消えた物と保持（既定OFFでは空）
+                           "gone_id", "gone_vanished_t", "hold"])
                 for r in self.attend_rows:
                     w.writerow([r["step"], r["sim_time"], r["attended_id"], r["visible"],
                                r["misses"], r["vanished"], r["dist_center"], r["area"],
                                r["nearest_word"], r["nearest_cos"], r["target_word"],
                                r["target_cos"], r.get("priority", ""), r.get("switch", ""),
                                r.get("explore_x", ""), r.get("explore_y", ""), r.get("ior", ""),
-                               r.get("switch_decided", "")])
+                               r.get("switch_decided", ""),
+                               r.get("gone_id", ""), r.get("gone_vanished_t", ""), r.get("hold", "")])
         return {
             "検出回数": self._detect_n,
             "処理ms_平均": (round(self._detect_ms_sum / self._detect_n, 2)

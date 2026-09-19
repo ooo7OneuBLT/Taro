@@ -1,0 +1,46 @@
+{
+ "個体4": {
+  "xml": "MIMo/mimoEnv/assets/f49_8way_test4.xml",
+  "素材": {
+   "くつ": "Mens_Gold_Cup_ASV_Capetown_Penny_Loafer_in_Black_GkQBKqABeQN",
+   "コップ": "ACE_Coffee_Mug_Kristen_16_oz_cup",
+   "おさら": "Room_Essentials_Salad_Plate_Turquoise",
+   "おわん": "Now_Designs_Bowl_Akita_Black",
+   "かばん": "Olive_Kids_Birdie_Sidekick_Backpack",
+   "がおー": "Dino_4",
+   "バス": "Sonny_School_Bus",
+   "ボール": "056_tennis_ball"
+  },
+  "初見の語": [
+   "くつ",
+   "コップ",
+   "おさら",
+   "おわん",
+   "かばん",
+   "がおー",
+   "ボール"
+  ]
+ },
+ "個体5": {
+  "xml": "MIMo/mimoEnv/assets/f49_8way_test5.xml",
+  "素材": {
+   "くつ": "ASICS_GEL1140V_WhiteRoyalSilver",
+   "コップ": "Ecoforms_Cup_B4_SAN",
+   "おさら": "Ecoforms_Plate_S20Avocado",
+   "おわん": "Cole_Hardware_Bowl_Scirocco_YellowBlue",
+   "かばん": "US_Army_Stash_Lunch_Bag",
+   "がおー": "Dino_5",
+   "バス": "Sonny_School_Bus",
+   "ボール": "057_racquetball"
+  },
+  "初見の語": [
+   "くつ",
+   "コップ",
+   "おさら",
+   "おわん",
+   "かばん",
+   "がおー",
+   "ボール"
+  ]
+ }
+}
