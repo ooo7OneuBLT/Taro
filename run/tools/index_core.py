@@ -1,5 +1,11 @@
 # -*- coding: utf-8 -*-
-"""太郎の本体（taro_core/src）の構造を、コードから自動で書き起こす。
+"""太郎の構造を、コードから自動で書き起こす。
+
+収録するのは `taro_core/src`（太郎の本体）と `run`（太郎を動かす側）。
+`run/tools` `run/viewer_tools` `run/scene_tools` `run/scenes` は除く（SCAN_EXCLUDE）。
+【2026-09-19】長いあいだ「taro_core/src のみ。run/ は未収録」と書いていたが誤り。
+SCAN_DIRS は最初から run を含んでいて、README がその誤った説明文を信じて
+「太郎本体は147ファイル」と書いていた（本体だけなら97ファイル）。
 
 【なぜ・2026-09-15】ユーザーの指摘：
     「あなたは太郎のすべての構造を把握できていなくて、一部のもの
@@ -243,7 +249,8 @@ def render_struct(entries):
     L.append("手で書いてよいのは下の印で囲まれた節だけです。")
     L.append("")
     L.append("**%d ファイル・%d 行・公開関数 %d 個**"
-             "（`taro_core/src` のみ。`run/` は未収録）"
+             "（`taro_core/src` と `run/`。"
+             "`run/tools` `run/viewer_tools` `run/scene_tools` `run/scenes` は除く）"
              % (len(entries), sum(e["lines"] for e in entries), _n_funcs(entries)))
     L.append("")
     L.append("- 呼称の決まり … `doc/脳の地図.md` §0（**これ以外の呼び方をしない**）")

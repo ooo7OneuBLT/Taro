@@ -2784,6 +2784,26 @@
   "last_commit": ""
  },
  {
+  "path": "F/scripts/f49_8択の世界を作り直す.py",
+  "doc": "消えた8択の世界 `MIMo/mimoEnv/assets/f49_8way_r1〜r8.xml` を作り直す（2026-09-16）。",
+  "defs": [
+   "mesh_files",
+   "prep",
+   "asset_and_geom",
+   "replace_body",
+   "remove_body",
+   "根を作る",
+   "個体名",
+   "build_xml",
+   "build_test_xml",
+   "素材を確かめる",
+   "main"
+  ],
+  "lines": 258,
+  "goal": "F",
+  "last_commit": ""
+ },
+ {
   "path": "F/scripts/正しい名前を言えたか.py",
   "doc": "走行を1つ渡すと「親が差し出している物の、正しい名前を言えたか」を数える。",
   "defs": [
@@ -2795,6 +2815,20 @@
    "main"
   ],
   "lines": 195,
+  "goal": "F",
+  "last_commit": ""
+ },
+ {
+  "path": "F/scripts/語ごとの正答率.py",
+  "doc": "走行フォルダを渡すと「どの語をどれだけ言えたか」を語ごとに数える。",
+  "defs": [
+   "正解表を読む",
+   "走行フォルダを見る",
+   "数える",
+   "棒",
+   "main"
+  ],
+  "lines": 178,
   "goal": "F",
   "last_commit": ""
  },
@@ -2874,6 +2908,28 @@
   "last_commit": "2026-09-15"
  },
  {
+  "path": "run/plugins/common/eye_command.py",
+  "doc": "測る道具：眼球への命令が、どの段階で・どれだけ入ったかを1歩ごとに記録する。",
+  "defs": [
+   "_abs_path",
+   "EyeCommand"
+  ],
+  "lines": 126,
+  "goal": "",
+  "last_commit": ""
+ },
+ {
+  "path": "run/plugins/common/eye_motion.py",
+  "doc": "測る道具：眼球と頭が実際に何度動いたかを1歩ごとに記録する。",
+  "defs": [
+   "_abs_path",
+   "EyeMotion"
+  ],
+  "lines": 216,
+  "goal": "",
+  "last_commit": ""
+ },
+ {
   "path": "run/plugins/common/gaze_probe.py",
   "doc": "測る道具：太郎の視線が的（おもちゃ）にどれだけ・どう留まるかを記録する。",
   "defs": [
@@ -2921,7 +2977,7 @@
    "_abs_path",
    "ObjectFiles"
   ],
-  "lines": 670,
+  "lines": 695,
   "goal": "",
   "last_commit": "2026-09-15"
  },
@@ -2952,6 +3008,17 @@
   "lines": 35,
   "goal": "",
   "last_commit": "2026-08-11"
+ },
+ {
+  "path": "run/plugins/common/produce_gates.py",
+  "doc": "測る道具：太郎が喋ろうとして**どこで止まったか**を1歩ごとに記録する。",
+  "defs": [
+   "_abs_path",
+   "ProduceGates"
+  ],
+  "lines": 109,
+  "goal": "",
+  "last_commit": ""
  },
  {
   "path": "run/plugins/common/produce_snapshot.py",
@@ -3086,7 +3153,7 @@
   ],
   "lines": 155,
   "goal": "",
-  "last_commit": "2026-09-15"
+  "last_commit": "2026-09-16"
  },
  {
   "path": "run/plugins/common/world_predictor_record.py",
@@ -3124,7 +3191,7 @@
   ],
   "lines": 354,
   "goal": "",
-  "last_commit": "2026-09-15"
+  "last_commit": "2026-09-16"
  },
  {
   "path": "run/scene_tools/scene_io.py",
@@ -3871,7 +3938,7 @@
    "_write",
    "main"
   ],
-  "lines": 779,
+  "lines": 780,
   "goal": "",
   "last_commit": "2026-09-15"
  },
@@ -3927,7 +3994,7 @@
    "run_check",
    "main"
   ],
-  "lines": 526,
+  "lines": 578,
   "goal": "",
   "last_commit": "2026-09-16"
  },
@@ -3939,7 +4006,7 @@
   ],
   "lines": 96,
   "goal": "",
-  "last_commit": "2026-08-11"
+  "last_commit": "2026-09-16"
  },
  {
   "path": "run/tools/record_learned_posture_clip.py",
@@ -4007,7 +4074,7 @@
   ],
   "lines": 337,
   "goal": "",
-  "last_commit": "2026-09-14"
+  "last_commit": "2026-09-16"
  },
  {
   "path": "run/tools/smoke.py",
@@ -4030,7 +4097,7 @@
   ],
   "lines": 47,
   "goal": "",
-  "last_commit": "2026-08-17"
+  "last_commit": "2026-09-16"
  },
  {
   "path": "run/tools/wiring.py",
@@ -4102,7 +4169,7 @@
   ],
   "lines": 3252,
   "goal": "",
-  "last_commit": "2026-09-14"
+  "last_commit": "2026-09-16"
  },
  {
   "path": "run/viewer_tools/e_viewer_qt.py",
@@ -4118,7 +4185,7 @@
   ],
   "lines": 1899,
   "goal": "",
-  "last_commit": "2026-09-14"
+  "last_commit": "2026-09-16"
  },
  {
   "path": "run/viewer_tools/e_viewer_qt_drive.py",
@@ -4141,7 +4208,7 @@
   ],
   "lines": 845,
   "goal": "",
-  "last_commit": "2026-08-17"
+  "last_commit": "2026-09-16"
  },
  {
   "path": "run/viewer_tools/e_viewer_qt_measure.py",
@@ -4179,7 +4246,7 @@
   ],
   "lines": 393,
   "goal": "",
-  "last_commit": "2026-08-13"
+  "last_commit": "2026-09-16"
  },
  {
   "path": "run/viewer_tools/e_viewer_qt_touch.py",
@@ -4193,7 +4260,7 @@
   ],
   "lines": 228,
   "goal": "",
-  "last_commit": "2026-08-13"
+  "last_commit": "2026-09-16"
  },
  {
   "path": "run/viewer_tools/e_viewer_qt_widgets.py",
@@ -4204,7 +4271,7 @@
   ],
   "lines": 163,
   "goal": "",
-  "last_commit": "2026-08-13"
+  "last_commit": "2026-09-16"
  },
  {
   "path": "run/viewer_tools/test_pose_slider_roundtrip.py",
@@ -4267,7 +4334,7 @@
   ],
   "lines": 245,
   "goal": "",
-  "last_commit": "2026-08-17"
+  "last_commit": "2026-09-16"
  },
  {
   "path": "run/viewer_tools/wiring_viewer/main_window.py",
@@ -4447,7 +4514,7 @@
   ],
   "lines": 299,
   "goal": "",
-  "last_commit": "2026-08-17"
+  "last_commit": "2026-09-16"
  },
  {
   "path": "run/viewer_tools/wiring_viewer/scan_taro_setup.py",
@@ -4460,7 +4527,7 @@
   ],
   "lines": 133,
   "goal": "",
-  "last_commit": "2026-08-17"
+  "last_commit": "2026-09-16"
  },
  {
   "path": "run/viewer_tools/wiring_viewer/search_deviation_list.py",
@@ -4481,7 +4548,7 @@
   ],
   "lines": 97,
   "goal": "",
-  "last_commit": "2026-08-17"
+  "last_commit": "2026-09-16"
  },
  {
   "path": "taro_core/src/body/adenosine.py",
@@ -4569,7 +4636,7 @@
   ],
   "lines": 704,
   "goal": "",
-  "last_commit": "2026-09-15"
+  "last_commit": "2026-09-16"
  },
  {
   "path": "taro_core/src/body/infant_neck.py",
@@ -4610,7 +4677,7 @@
   ],
   "lines": 460,
   "goal": "",
-  "last_commit": "2026-09-15"
+  "last_commit": "2026-09-16"
  },
  {
   "path": "taro_core/src/body/smooth_actuation.py",
@@ -4659,9 +4726,9 @@
    "BrainTickState",
    "TaroBrainTick"
   ],
-  "lines": 2017,
+  "lines": 2132,
   "goal": "",
-  "last_commit": "2026-09-15"
+  "last_commit": "2026-09-16"
  },
  {
   "path": "taro_core/src/brain/brainstem/atnr.py",
@@ -4704,7 +4771,7 @@
   "defs": [
    "VOR"
   ],
-  "lines": 292,
+  "lines": 301,
   "goal": "",
   "last_commit": "2026-09-15"
  },
@@ -4792,7 +4859,7 @@
    "ObjectFile",
    "ObjectFileSystem"
   ],
-  "lines": 714,
+  "lines": 750,
   "goal": "",
   "last_commit": "2026-09-15"
  },
@@ -4823,7 +4890,7 @@
    "_abs_path",
    "VisualAttention"
   ],
-  "lines": 993,
+  "lines": 1067,
   "goal": "",
   "last_commit": "2026-09-15"
  },
@@ -4890,7 +4957,7 @@
   ],
   "lines": 1450,
   "goal": "",
-  "last_commit": "2026-09-15"
+  "last_commit": "2026-09-16"
  },
  {
   "path": "taro_core/src/brain/corticospinal.py",
@@ -5256,7 +5323,7 @@
   ],
   "lines": 372,
   "goal": "",
-  "last_commit": "2026-09-15"
+  "last_commit": "2026-09-16"
  },
  {
   "path": "taro_core/src/brain/spinal_cord/grasp_reflex.py",
