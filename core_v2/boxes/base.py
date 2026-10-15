@@ -1,0 +1,46 @@
+"""係の箱の共通の形。
+
+各係は step(inbox) -> outbox だけを持つ。
+* inbox  : {出した係のid: 前の回にその矢印で届いた値}。入口の係には ENV キーで環境からの入力も入る
+* outbox : {受ける係のid: 次に渡す値}。出ていく矢印すべてに1つずつ。
+           出口の係は ENV キーで環境への指令を返してよい（Brain.tick の戻り値になる）
+
+係どうしは inbox/outbox 以外で値をやり取りしない（ほかの係の中身を直接読まない）。
+これが崩れると「全員同時に動く」が成り立たず、実行順で結果が変わる。
+inbox の Tensor は他の係と共有しているので、その場で書き換えない。
+
+既定の step は素通し：出ていく矢印それぞれに、その書式のゼロを渡す。
+中身を入れるときはサブクラスで step を上書きする（配線は触らない）。
+NN に置き換えるとき学習する重みは nn.Module として持てば、保存（save.py）に自動で入る。
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from torch import nn
+
+from .. import wiring
+from ..formats import zero
+
+ENV = "env"  # 環境とのやり取りに使う特別なキー（係の id とぶつからない）
+
+
+class Box(nn.Module):
+    BOX_ID: str = ""
+
+    def __init__(self) -> None:
+        super().__init__()
+        if self.BOX_ID not in wiring.BOX_IDS:
+            raise ValueError(f"{type(self).__name__}: 配線表に無い係 id {self.BOX_ID!r}")
+        self.inputs = wiring.incoming(self.BOX_ID)
+        self.outputs = wiring.outgoing(self.BOX_ID)
+
+    def step(self, inbox: dict[str, Any]) -> dict[str, Any]:
+        return self.passthrough()
+
+    def passthrough(self) -> dict[str, Any]:
+        return {e.dst: zero(e.fmt, e.size) for e in self.outputs}
+
+    def reset(self) -> None:
+        """場面の切り替わりで中の状態を空にする。素通しの係は何もしない。"""
