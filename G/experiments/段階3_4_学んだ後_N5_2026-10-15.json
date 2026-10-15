@@ -1,0 +1,38 @@
+{
+  "name": "段階3_4_学んだ後_N5_2026-10-15",
+  "about": "段階3の合格の線④。親の名づけで各語5回覚えた辞書（core_v2/tools/learn_names.py 5）。合格＝条件Bが両方の語で18/20以上。言われていない方の物も数えて並べる",
+  "scenes": [
+    "段階2b_3物体_ボール左_2026-10-15",
+    "段階2b_3物体_ボール右_2026-10-15"
+  ],
+  "seeds": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9
+  ],
+  "word_t": 4.0,
+  "duration_s": 10.0,
+  "look_deg": 10.0,
+  "b_within_s": 3.0,
+  "b_hold_s": 1.0,
+  "pass_count": 18,
+  "words": {
+    "ボールはどこ？": "ball",
+    "コップはどこ？": "cup"
+  },
+  "control": {
+    "ボールはどこ？": "cup",
+    "コップはどこ？": "ball"
+  },
+  "semantic_learned": "G/models/semantic_learned_N5.pt",
+  "use_ior": true,
+  "brain_out": "段階3_4_brain.pt",
+  "out": "G/logs/段階3_4_学んだ後_N5_2026-10-15"
+}

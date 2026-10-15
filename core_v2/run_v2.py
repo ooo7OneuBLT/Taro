@@ -40,12 +40,20 @@ def seed_all(seed: int) -> None:
     random.seed(seed)
 
 
-def build_env(scene: str, word: str | None, seed: int = 0, word_t: float = 4.0):
-    """段階2の場面を作る。word を渡すと、word_t 秒に親がそれを言う（場面の既定を上書き）。"""
+def build_env(scene: str, word: str | None, seed: int = 0, word_t: float = 4.0,
+              silent: bool = False, world_extra: dict | None = None):
+    """段階2の場面を作る。word を渡すと、word_t 秒に親がそれを言う（場面の既定を上書き）。
+    silent=True なら親は何も言わない（段階3の「自由に見る」テスト。場面の既定の発話も消す）。
+    world_extra は場面の world に重ねる（段階3の名づけの場面）。"""
     from run.world import scene as scene_mod
+    from scene_io import _merge
     world = {}
     if word is not None:
         world["word_test"] = {"schedule": [{"t": float(word_t), "word": word}]}
+    elif silent:
+        world["word_test"] = {"schedule": []}
+    if world_extra:
+        world = _merge(world, world_extra)
     env, sc, hands = scene_mod.build(scene, taro={"orienting_reflex": True, "vision": True},
                                      seed=seed, world=world or None)
     u = env.unwrapped
@@ -122,7 +130,13 @@ def path_record(brain) -> dict[str, Any]:
     goal = brain.boxes["goal"]
     rec["goal.age"] = goal.age if goal.held is not None else ""
     rec["goal.cleared_by"] = goal.cleared_by
-    rec["orienteye.reason"] = brain.boxes["orienteye"].last_reason
+    oe = brain.boxes["orienteye"]
+    rec["orienteye.reason"] = oe.last_reason
+    rec["orienteye.ior_max"] = round(float(oe.ior.max()), 3)
+    rec["orienteye.ior_at_peak"] = round(oe.last_ior_at_peak, 3)
+    sem = brain.boxes["semantic"]
+    rec["semantic.event"] = sem.last_event
+    rec["semantic.recall_norm"] = round(sem.last_recall_norm, 3)
     return rec
 
 
