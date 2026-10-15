@@ -153,6 +153,11 @@ def default_scene(name="無題"):
             #   v2は従来どおり馴化無し（1ビット不変）。実体は
             #   e_orienting_v2.OrientingReflexV2 の habituation 引数。
             "orienting_habituation": False,
+            # 【2026-10-15新設・段階2】視線誘導反射を「外から渡された目標でだけ撃つ」
+            #   にする（画像の動きで勝手に撃たない）。既定False＝従来どおり（1ビット不変）。
+            #   実体は OrientingReflexV2 の external_only 引数。core_v2 が目を動かす係を
+            #   持つときに True にする。
+            "orienting_external_only": False,
             # 【2026-08-22新設・F1-7】中心窩カメラ（視野15度・解像度は月齢から自動計算）
             #   のON/OFF。既定False＝従来どおり周辺カメラ(eye_left/eye_right)のみ
             #   （1ビットも変わらない）。実体は e_toy_env.infant_vision_params の
@@ -284,6 +289,15 @@ def default_scene(name="無題"):
                 "dist": 0.086,
                 "angle_deg": 0.0,        # toy1/toy2と同じ左右振り分け角。既定0=正面
                 "elev_deg": 0.0,         # 上下方向の角度（toy1/toy2のelev_degと同じ意味）
+                # 【2026-10-15新設・段階2】光らせて動かす（妨害物）。None＝静止（既定・
+                #   1ビット不変）。{"amp_m": 0.03, "hz": 0.5, "blink_hz": 2.0} の形で
+                #   左右への正弦運動の振幅[m]・周波数と、点滅の周波数を指定する。
+                "flash_move": None,
+                # 【2026-10-15新設・段階2】True なら、シーン読込（apply_state）で
+                #   toy3 の定位置を**保存した姿勢での位置**に直す（toy2 で 2026-08-20 に
+                #   直したのと同じ不具合：リセット直後の仮の姿勢で定位置が計算され、
+                #   保存姿勢を入れたあともそこへ毎step書き戻される）。既定False＝従来どおり。
+                "rest_from_state": False,
             },
             "toy4": {
                 "enabled": False,
@@ -786,6 +800,7 @@ def build(scene, orient=None, vor=True, seed=0, verbose=False, actuation_model=N
             toy3_dist=float(toy3["dist"]),
             toy3_angle_deg=float(toy3["angle_deg"]),
             toy3_elev_deg=float(toy3["elev_deg"]),
+            toy3_flash_move=(dict(toy3["flash_move"]) if toy3.get("flash_move") else None),
             toy4=bool(toy4["enabled"]),
             toy4_shape=str(toy4["shape"]),
             toy4_radius=float(toy4["radius"]),
@@ -830,10 +845,13 @@ def build(scene, orient=None, vor=True, seed=0, verbose=False, actuation_model=N
             orienting_static=bool(b.get("orienting_static", False)),
             orienting_ior=bool(b.get("orienting_ior", False)),
             orienting_habituation=bool(b.get("orienting_habituation", False)),
+            orienting_external_only=bool(b.get("orienting_external_only", False)),
             eye_rest_vertical_deg=float(b["eye_rest_vertical_deg"]),
             eye_centering=bool(b.get("eye_centering", False)),
             **kw)
         env.reset(seed=seed)
+        # 【2026-10-15・段階2】apply_state が読む印（toy3.rest_from_state の説明参照）
+        env.unwrapped._toy3_rest_from_state = bool(toy3.get("rest_from_state", False))
 
         # 【2026-08-21新設・F1-4h】影スイッチ。物理には無関係（描画設定のみ）なので
         #   reset直後・姿勢を作り込む前のこの位置でよい。既定False（従来どおり）なら
@@ -1276,6 +1294,10 @@ def apply_state(env, state):
     #   経緯：F/logs/F1-4d_視線探索_2026-08-20/想定外_toy2視界外問題.md
     if getattr(u, "_toy2", False):
         u._rest_pos2 = d.qpos[u._obj2_qadr:u._obj2_qadr + 3].copy()
+    # 【2026-10-15・段階2】toy3 にも同じ直し。toy3.rest_from_state=True の場面だけ
+    #   （既定False＝既存の toy3 場面は1ビットも変わらない）。
+    if getattr(u, "_toy3_rest_from_state", False) and getattr(u, "_obj3_qadr", None) is not None:
+        u._rest_pos3 = d.qpos[u._obj3_qadr:u._obj3_qadr + 3].copy()
     mujoco.mj_forward(m, d)
 
 
