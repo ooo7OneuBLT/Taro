@@ -676,6 +676,9 @@ class ToySupineEnv(SupineMimoEnv):
                  #   {"amp_m": 振幅[m], "hz": 往復の周波数, "blink_hz": 点滅の周波数}。
                  #   実体は _flash_move_toy3（step()で _hold_toy3 の直後）。
                  toy3_flash_move=None,
+                 # 【2026-10-15・段階2】リセットでおもちゃを置く前に、体を留める姿勢へ
+                 #   戻すか。既定None→False＝従来どおり（1ビット不変）。reset_model参照。
+                 pin_before_spawn=None,
                  toy4=None, toy4_shape=None, toy4_radius=None, toy4_rgba=None,
                  toy4_dist=None, toy4_angle_deg=None, toy4_elev_deg=None,
                  # 【2026-08-21新設・F1-4h】おもちゃの垂直方向の角度[度]。既定None→0.0。
@@ -861,6 +864,7 @@ class ToySupineEnv(SupineMimoEnv):
         self._orienting_habituation = (None if orienting_habituation is None
                                        else bool(orienting_habituation))
         self._orienting_external_only = bool(orienting_external_only)
+        self._pin_before_spawn = bool(pin_before_spawn)
         self._fence_half_x = float(fence_half_x)
         self._fence_half_y = float(fence_half_y)
         self._fence_post_w = float(fence_post_w)
@@ -2255,6 +2259,16 @@ class ToySupineEnv(SupineMimoEnv):
         apply_eye_centering_spring(self.model, self.data,
                                    vertical_deg=self._eye_rest_vertical_deg,
                                    enabled=self._eye_centering)
+        # 【2026-10-15・段階2】体を留める場面では、上の settle のあいだ体が自由に
+        #   傾き（座位12ヶ月の場面で根が約10度後ろへ）、おもちゃはその傾いた視線を
+        #   基準に置かれ、次の step() の _pin_root で体だけ元へ戻る＝物が視線から
+        #   約10度ずれた所に残っていた（実測：リセット直後とstep1で頭の向きが10.4度違う、
+        #   目の関節は1度未満しか動かない）。2026-08-20 に scene_io.apply_state で直した
+        #   toy2 の件と同じ仲間で、こちらは**リセットのたび**に起きる。
+        #   pin_before_spawn=True のときだけ、置く前に体を留める姿勢へ戻す（既定False＝従来どおり）。
+        if self._pin_before_spawn:
+            self._pin_root()
+            mujoco.mj_forward(self.model, self.data)
         mujoco.mj_forward(self.model, self.data)   # 眼のカメラ姿勢を更新してから配置
         self._spawn_toy()                  # 落ち着いた後の肩位置を見て配置
         self._glow_until = -1e9            # 点灯の余韻を持ち越さない

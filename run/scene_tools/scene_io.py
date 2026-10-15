@@ -234,6 +234,10 @@ def default_scene(name="無題"):
             #   実体は E/scripts/parent_labeling.WordSchedule。
             #   設計：F/docs/設計_F1-4h_....md 技術付録3・4節。
             "word_test": None,
+            # 【2026-10-15新設・段階2】リセットでおもちゃを置く前に、体を留める姿勢へ
+            #   戻す。既定False＝従来どおり（1ビット不変）。実体は toy_env.reset_model の
+            #   pin_before_spawn。体を留める場面でだけ意味がある。
+            "pin_before_spawn": False,
             # 床の物理。注意体の滑り方が変わるので実験条件として効く
             "floor_roll": None,          # None なら環境の既定
             "floor_condim": None,
@@ -837,6 +841,7 @@ def build(scene, orient=None, vor=True, seed=0, verbose=False, actuation_model=N
             #   WordSchedule(schedule=None)相当になり1ビットも変わらない
             #   （parent_labelingと同じkwargs直渡しの流儀）。
             word_test=(dict(w["word_test"]) if w["word_test"] else None),
+            pin_before_spawn=bool(w.get("pin_before_spawn", False)),
             plain=bool(w["plain"]),
             static_tex=bool(w["static_tex"]),
             backdrop=w.get("backdrop"),
