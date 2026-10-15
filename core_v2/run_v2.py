@@ -70,6 +70,62 @@ def gaze_angles(env) -> dict[str, float]:
     return {k: u._gaze_angle_to(body) for k, body in OBJECTS.items()}
 
 
+def frame_at(env) -> np.ndarray:
+    """今の左目のカメラの向き（列＝右・上・後ろ）。試行の頭で控え、視線の軌跡の基準にする。"""
+    u = env.unwrapped
+    cid = int(u.model.camera("eye_left").id)
+    return np.array(u.data.cam_xmat[cid], dtype=float).reshape(3, 3).copy()
+
+
+def directions(env, R0: np.ndarray) -> dict[str, float]:
+    """視線と3つの物の方向を、基準の向き R0 の右・上の角度（度）で表す（絵の軌跡用）。"""
+    u = env.unwrapped
+    cid = int(u.model.camera("eye_left").id)
+    eye = np.array(u.data.cam_xpos[cid], dtype=float)
+    vecs = {"gaze": u._gaze_dir()}
+    for k, body in OBJECTS.items():
+        v = np.array(u.data.body(body).xpos, dtype=float) - eye
+        vecs[k] = v / np.linalg.norm(v)
+    out = {}
+    for k, v in vecs.items():
+        out[f"x_{k}"] = float(np.degrees(np.arcsin(np.clip(v @ R0[:, 0], -1, 1))))
+        out[f"y_{k}"] = float(np.degrees(np.arcsin(np.clip(v @ R0[:, 1], -1, 1))))
+    return out
+
+
+def path_record(brain) -> dict[str, Any]:
+    """通り道の矢印（wiring.PATH_FORMATS）の今の中身を、CSV に書ける数へ要約する。
+    brain.buffer は「この回に各係が出した物」＝「次の回に各係へ届く物」。
+    荷札＝長さ（0なら空）、地図＝最大値と最大のマス、数1つ＝値、筋への指令＝値、
+    物ごとの組＝個数、文字＝そのまま。係の中の状態も少し足す。"""
+    from .formats import Fmt, GRID
+    from .wiring import PATH_FORMATS
+    rec: dict[str, Any] = {}
+    for (src, dst), (fmt, _size) in PATH_FORMATS.items():
+        v = brain.buffer[(src, dst)]
+        k = f"{src}>{dst}"
+        if fmt is Fmt.TAG:
+            rec[k] = round(float(torch.linalg.vector_norm(v)), 3)
+        elif fmt is Fmt.MAP:
+            mx = float(v.max())
+            r, c = divmod(int(torch.argmax(v)), GRID)
+            rec[k] = round(mx, 3)
+            rec[k + "@"] = f"{r},{c}" if mx > 0 else ""
+        elif fmt is Fmt.AMOUNT:
+            rec[k] = round(float(v), 3)
+        elif fmt is Fmt.MOTOR:
+            rec[k] = "" if float(torch.linalg.vector_norm(v)) == 0 else f"{float(v[0]):.3f},{float(v[1]):.3f}"
+        elif fmt is Fmt.TAG_AND_MAP:
+            rec[k] = len(v)
+        else:
+            rec[k] = v
+    goal = brain.boxes["goal"]
+    rec["goal.age"] = goal.age if goal.held is not None else ""
+    rec["goal.cleared_by"] = goal.cleared_by
+    rec["orienteye.reason"] = brain.boxes["orienteye"].last_reason
+    return rec
+
+
 def run_trial(brain, env, *, seed: int, duration_s: float = 10.0,
               on_tick: Callable[[dict[str, Any]], None] | None = None,
               manual_eye: Callable[[int], tuple[float, float] | None] | None = None,
@@ -83,6 +139,7 @@ def run_trial(brain, env, *, seed: int, duration_s: float = 10.0,
     obs, _ = env.reset(seed=seed)
     u = env.unwrapped
     brain.reset()
+    R0 = frame_at(env)
     act = zero_action(env)
     rows = []
     n_ticks = int(round(duration_s / (K * DT)))
@@ -109,6 +166,7 @@ def run_trial(brain, env, *, seed: int, duration_s: float = 10.0,
                "cmd_h": None if cmd is None else float(cmd[0]),
                "cmd_v": None if cmd is None else float(cmd[1])}
         row.update({f"ang_{k}": v for k, v in gaze_angles(env).items()})
+        row.update(directions(env, R0))
         if on_tick is not None:
             on_tick(row)
         rows.append(row)
