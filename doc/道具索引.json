@@ -2916,7 +2916,7 @@
   ],
   "lines": 126,
   "goal": "",
-  "last_commit": ""
+  "last_commit": "2026-09-19"
  },
  {
   "path": "run/plugins/common/eye_motion.py",
@@ -2927,7 +2927,7 @@
   ],
   "lines": 216,
   "goal": "",
-  "last_commit": ""
+  "last_commit": "2026-09-19"
  },
  {
   "path": "run/plugins/common/gaze_probe.py",
@@ -2979,7 +2979,7 @@
   ],
   "lines": 695,
   "goal": "",
-  "last_commit": "2026-09-15"
+  "last_commit": "2026-09-19"
  },
  {
   "path": "run/plugins/common/plateau_stop.py",
@@ -3018,7 +3018,7 @@
   ],
   "lines": 109,
   "goal": "",
-  "last_commit": ""
+  "last_commit": "2026-09-19"
  },
  {
   "path": "run/plugins/common/produce_snapshot.py",
@@ -3194,6 +3194,27 @@
   "last_commit": "2026-09-16"
  },
  {
+  "path": "run/scene_tools/make_f4toys_xml.py",
+  "doc": "benchmarkv2_scene_f4toys.xml（test_object3/4 入りの舞台）を作り直す。",
+  "defs": [
+   "main"
+  ],
+  "lines": 55,
+  "goal": "",
+  "last_commit": ""
+ },
+ {
+  "path": "run/scene_tools/make_stage2_scene.py",
+  "doc": "段階2の合格テスト用の場面（ボール・コップ・光って動く物）を作る。",
+  "defs": [
+   "_qpos_by_joint",
+   "make_scene"
+  ],
+  "lines": 128,
+  "goal": "",
+  "last_commit": ""
+ },
+ {
   "path": "run/scene_tools/scene_io.py",
   "doc": "シーン方式 — 実験環境を「1つのファイル」で決める唯一の入口。",
   "defs": [
@@ -3230,7 +3251,7 @@
    "from_env_var",
    "open_scene"
   ],
-  "lines": 1803,
+  "lines": 1825,
   "goal": "",
   "last_commit": "2026-09-16"
  },
@@ -3912,7 +3933,7 @@
  },
  {
   "path": "run/tools/index_core.py",
-  "doc": "太郎の本体（taro_core/src）の構造を、コードから自動で書き起こす。",
+  "doc": "太郎の構造を、コードから自動で書き起こす。",
   "defs": [
    "_iter_py",
    "_region",
@@ -3938,9 +3959,9 @@
    "_write",
    "main"
   ],
-  "lines": 780,
+  "lines": 786,
   "goal": "",
-  "last_commit": "2026-09-15"
+  "last_commit": "2026-09-19"
  },
  {
   "path": "run/tools/index_tools.py",
@@ -3996,7 +4017,7 @@
   ],
   "lines": 578,
   "goal": "",
-  "last_commit": "2026-09-16"
+  "last_commit": "2026-09-19"
  },
  {
   "path": "run/tools/queue_train.py",
@@ -4728,7 +4749,7 @@
   ],
   "lines": 2132,
   "goal": "",
-  "last_commit": "2026-09-16"
+  "last_commit": "2026-09-19"
  },
  {
   "path": "taro_core/src/brain/brainstem/atnr.py",
@@ -4773,7 +4794,7 @@
   ],
   "lines": 301,
   "goal": "",
-  "last_commit": "2026-09-15"
+  "last_commit": "2026-09-19"
  },
  {
   "path": "taro_core/src/brain/cerebellum.py",
@@ -4861,7 +4882,7 @@
   ],
   "lines": 750,
   "goal": "",
-  "last_commit": "2026-09-15"
+  "last_commit": "2026-09-19"
  },
  {
   "path": "taro_core/src/brain/cerebral_cortex/parietal_lobe/priority_map.py",
@@ -4892,7 +4913,7 @@
   ],
   "lines": 1067,
   "goal": "",
-  "last_commit": "2026-09-15"
+  "last_commit": "2026-09-19"
  },
  {
   "path": "taro_core/src/brain/cerebral_cortex/recurrent_core.py",
@@ -5167,7 +5188,7 @@
    "_qposadr_of",
    "OrientingReflexV2"
   ],
-  "lines": 1872,
+  "lines": 1881,
   "goal": "",
   "last_commit": "2026-09-15"
  },

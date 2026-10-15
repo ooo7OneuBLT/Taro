@@ -784,7 +784,7 @@ class OrientingReflexV2:
 
     def __init__(self, model, data=None, time_scales=TIME_SCALES, noise=LI_NOISE,
                  seed=None, dt=DEFAULT_DT, hold=None, static_salience=None,
-                 ior=None, habituation=None):
+                 ior=None, habituation=None, external_only=False):
         # 2026-07-27：seed が None だと神経ノイズが毎回変わり、**同じ設定でも
         #   結果がばらつく**（同一条件3回で 0.319 / 0.215 / 0.189）。
         #   高速化の前後を1回ずつ比べて「悪化した」と誤判定した。
@@ -809,6 +809,14 @@ class OrientingReflexV2:
         # 馴化（固視対象へのスカラー順応）。既定OFF＝v2は従来のまま1ビット不変。
         self.habituation = bool(USE_HABITUATION if habituation is None else habituation)
         self._habituation = 0.0       # 0=未馴化 〜 1=最大馴化
+        # 【2026-10-15・段階2】外から渡された目標（set_map_target）でだけ撃つ。
+        #   True のとき「自前で見つける方」（画像の動きから決めた h_dir/v_dir）では
+        #   撃たない。core_v2 は目を動かす係（orienteye）を脳の側に持つので、
+        #   環境の反射が光って動く物へ勝手に目を向けると、語を聞いて探す合格
+        #   テストが成り立たない（仕様書 2026-10-15_段階2_仕様書.md §2-3）。
+        #   既定False＝従来どおり（判定に `and not False` が足されるだけ＝1ビット不変）。
+        #   動き検出（update）・保持・地図の経路はそのまま動く。
+        self.external_only = bool(external_only)
         # 改訂3（2026-08-20）：疲労場 H（上丘格子と同形）。使うまでNoneのまま。
         self._fatigue_map = None
         # F1-4f（2026-08-20）：remapping用・各升の視野座標キャッシュ。
@@ -1211,7 +1219,7 @@ class OrientingReflexV2:
                                  co_activation=0.0, additive=True)
 
     def apply(self, action, dt=None):
-        """関節指令の配列action と、経過時間dt（Noneならself.dtを使う）を受け取り、階段状に発射するサッケード（目標角度への位置フィードバック）を足し込んだ配列を返す。まず連射の続き・外部から指定された地図の目標(set_map_targetで渡されたもの)・自前の方向信号(h_dir/v_dir/strength)のいずれかで今回発射するかを判定し、発射しないときは保持(hold)条件を満たす場合に限り_hold_command() の結果をそのまま返す。発射する場合は新しい目標角度(self._tgt)を定め、以後は目標との角度差に応じた指令を目に（NECK_SHAREが0でなければ首にも）additiveに書き込み続け、目標に十分近づいて一定時間経つとサッケードを終え、サッケード適応倍率・連射の続行判定・IOR記録（それぞれ有効時のみ）を更新する。
+        """関節指令の配列action と、経過時間dt（Noneならself.dtを使う）を受け取り、階段状に発射するサッケード（目標角度への位置フィードバック）を足し込んだ配列を返す。まず連射の続き・外部から指定された地図の目標(set_map_targetで渡されたもの)・自前の方向信号(h_dir/v_dir/strength。external_only=True のときは使わない)のいずれかで今回発射するかを判定し、発射しないときは保持(hold)条件を満たす場合に限り_hold_command() の結果をそのまま返す。発射する場合は新しい目標角度(self._tgt)を定め、以後は目標との角度差に応じた指令を目に（NECK_SHAREが0でなければ首にも）additiveに書き込み続け、目標に十分近づいて一定時間経つとサッケードを終え、サッケード適応倍率・連射の続行判定・IOR記録（それぞれ有効時のみ）を更新する。
         """
         if self.data is not None and len(self.angle_trace) < 60000:
             _hw = self._head_omega_deg()      # 1行で2回呼ばない（毎ステップ走る）
@@ -1309,7 +1317,8 @@ class OrientingReflexV2:
                 #   ここで落ちる。対象があるときは向きが大きく偏るので通る。
                 far_enough = (abs(self.h_dir) >= SACCADE_MIN_DIR
                               or abs(self.v_dir) >= SACCADE_MIN_DIR)
-                if (not fire) and ready and self.strength >= SACCADE_MIN_STRENGTH and far_enough:
+                if ((not fire) and ready and self.strength >= SACCADE_MIN_STRENGTH and far_enough
+                        and not self.external_only):
                     self._sacc_h = self.h_dir
                     self._sacc_v = self.v_dir
                     self.own_fired += 1
