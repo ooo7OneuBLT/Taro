@@ -671,6 +671,14 @@ class ToySupineEnv(SupineMimoEnv):
                  #   リスト「設定が静かに無視される」対策）。
                  toy3=None, toy3_shape=None, toy3_radius=None, toy3_rgba=None,
                  toy3_dist=None, toy3_angle_deg=None, toy3_elev_deg=None,
+                 # 【2026-10-15・段階2】toy3を光らせて動かす（妨害物）。既定None＝
+                 #   従来どおり定位置に静止（1ビット不変）。値は辞書
+                 #   {"amp_m": 振幅[m], "hz": 往復の周波数, "blink_hz": 点滅の周波数}。
+                 #   実体は _flash_move_toy3（step()で _hold_toy3 の直後）。
+                 toy3_flash_move=None,
+                 # 【2026-10-15・段階2】リセットでおもちゃを置く前に、体を留める姿勢へ
+                 #   戻すか。既定None→False＝従来どおり（1ビット不変）。reset_model参照。
+                 pin_before_spawn=None,
                  toy4=None, toy4_shape=None, toy4_radius=None, toy4_rgba=None,
                  toy4_dist=None, toy4_angle_deg=None, toy4_elev_deg=None,
                  # 【2026-08-21新設・F1-4h】おもちゃの垂直方向の角度[度]。既定None→0.0。
@@ -687,6 +695,10 @@ class ToySupineEnv(SupineMimoEnv):
                  plain=None, static_tex=None, backdrop=None,
                  orient_v=None, orienting_hold=None,
                  orienting_static=None, orienting_ior=None, orienting_habituation=None,
+                 # 【2026-10-15・段階2】視線誘導反射を「外から渡された目標でだけ撃つ」
+                 #   にする。既定None→False＝従来どおり（1ビット不変）。
+                 #   実体は OrientingReflexV2 の external_only 引数。v1 では使えない。
+                 orienting_external_only=None,
                  # 【2026-08-18新設・F1-3】親のfollow-in labeling。既定None→
                  #   ParentLabeling(enabled=False)相当になり1ビットも挙動が変わらない。
                  #   `world.parent_labeling`（辞書）をkwargs直渡しする（環境変数は新設しない）。
@@ -851,6 +863,8 @@ class ToySupineEnv(SupineMimoEnv):
                                else bool(orienting_ior))
         self._orienting_habituation = (None if orienting_habituation is None
                                        else bool(orienting_habituation))
+        self._orienting_external_only = bool(orienting_external_only)
+        self._pin_before_spawn = bool(pin_before_spawn)
         self._fence_half_x = float(fence_half_x)
         self._fence_half_y = float(fence_half_y)
         self._fence_post_w = float(fence_post_w)
@@ -907,6 +921,13 @@ class ToySupineEnv(SupineMimoEnv):
         self._toy3_angle_deg = float(
             TOY34_ANGLE_DEG_DEFAULT if toy3_angle_deg is None else toy3_angle_deg)
         self._toy3_elev_deg = float(0.0 if toy3_elev_deg is None else toy3_elev_deg)
+        self._toy3_flash_move = (None if not toy3_flash_move
+                                 else {"amp_m": float(toy3_flash_move.get("amp_m", 0.03)),
+                                       "hz": float(toy3_flash_move.get("hz", 0.5)),
+                                       "blink_hz": float(toy3_flash_move.get("blink_hz", 2.0))})
+        if self._toy3_flash_move is not None and not self._toy3:
+            raise ValueError("toy3.flash_move を指定しましたが toy3.enabled が False です"
+                             "（設定が静かに無視されるのを防ぐため止める）。")
         self._toy4 = bool(toy4)
         self._toy4_shape = str("sphere" if toy4_shape is None else toy4_shape)
         self._toy4_radius = float(TOY_RADIUS if toy4_radius is None else toy4_radius)
@@ -1111,12 +1132,14 @@ class ToySupineEnv(SupineMimoEnv):
         self._obj3_bid = _find_body_id("test_object3")
         self._obj3_qadr = None
         self._obj3_dadr = None
+        self._obj3_gadr = None
         if self._obj3_bid is not None:
             jadr3 = self.model.body("test_object3").jntadr[0]
             self._obj3_qadr = self.model.jnt_qposadr[jadr3]
             self._obj3_dadr = self.model.jnt_dofadr[jadr3]
             if self._toy3:
                 obj3_gadr = self.model.body("test_object3").geomadr[0]
+                self._obj3_gadr = int(obj3_gadr)   # 点滅（_flash_move_toy3）が色を書くため
                 self._configure_toy_geom(self._obj3_bid, obj3_gadr,
                                          self._toy3_shape, self._toy3_radius,
                                          self._toy3_rgba)
@@ -1200,8 +1223,12 @@ class ToySupineEnv(SupineMimoEnv):
                                                     hold=self._orienting_hold,
                                                     static_salience=self._orienting_static,
                                                     ior=self._orienting_ior,
-                                                    habituation=self._orienting_habituation)
+                                                    habituation=self._orienting_habituation,
+                                                    external_only=self._orienting_external_only)
             else:
+                if self._orienting_external_only:
+                    raise ValueError("orienting_external_only は視線誘導反射v2専用です"
+                                     "（orienting_version=2 にしてください）。")
                 from e_orienting import OrientingReflex
                 self._orienting = OrientingReflex(self.model)
             print(f"[orient] enabled: v{ver} ({type(self._orienting).__name__}) "
@@ -1209,7 +1236,8 @@ class ToySupineEnv(SupineMimoEnv):
                   f"eye_h={len(self._orienting.eye_idx['h'])} eye_v={len(self._orienting.eye_idx['v'])} "
                   f"hold={self._orienting_hold} static_salience={getattr(self._orienting, 'static_salience', None)} "
                   f"ior={getattr(self._orienting, 'ior', None)} "
-                  f"habituation={getattr(self._orienting, 'habituation', None)}")
+                  f"habituation={getattr(self._orienting, 'habituation', None)} "
+                  f"external_only={getattr(self._orienting, 'external_only', None)}")
         if self._use_vergence:
             from e_vergence import VergenceReflex
             self._vergence = VergenceReflex(self.model, self.data)
@@ -2089,6 +2117,33 @@ class ToySupineEnv(SupineMimoEnv):
         self.data.qvel[self._obj3_dadr:self._obj3_dadr + 6] = 0.0
         self.data.xfrc_applied[self._obj3_bid, :3] = 0.0
 
+    def _flash_move_toy3(self):
+        """toy3（妨害物）を左右に正弦運動させ、色を点滅させる（段階2の合格テスト用）。
+
+        【2026-10-15新設】_hold_toy3 が毎step定位置へ置き直した直後に、
+        その定位置から「右」方向へ amp_m*sin(2π·hz·t) だけずらして置き直す。
+        点滅は blink_hz の矩形波で、元の色と明るい黄（TOY_RGBA_ON）を交互に書く。
+        時計は env.data.time（エピソード開始=0）。toy3_flash_move=None（既定）なら
+        何もしない＝1ビット不変。
+        """
+        fm = self._toy3_flash_move
+        if fm is None or self._rest_pos3 is None or self._obj3_qadr is None:
+            return
+        t = float(self.data.time)
+        # 揺らす向き＝「目→toy3」に直交する水平方向（太郎から見て左右）。
+        #   _set_anchor のカメラ軸はリセット直後の仮の姿勢で計算されることがあるので
+        #   使わず、毎step定位置から計算し直す（外積1回で軽い）。
+        cid = int(self.model.camera("eye_left").id)
+        look = self._rest_pos3 - np.array(self.data.cam_xpos[cid], dtype=float)
+        ax = np.cross(look, np.array([0.0, 0.0, 1.0]))
+        n = float(np.linalg.norm(ax))
+        axis = ax / n if n > 1e-9 else np.array([0.0, 1.0, 0.0])
+        off = fm["amp_m"] * np.sin(2.0 * np.pi * fm["hz"] * t)
+        self._place(self._obj3_qadr, self._rest_pos3 + off * axis)
+        if self._obj3_gadr is not None and fm["blink_hz"] > 0.0:
+            on = (int(np.floor(2.0 * fm["blink_hz"] * t)) % 2) == 0
+            self.model.geom_rgba[self._obj3_gadr] = TOY_RGBA_ON if on else self._toy3_rgba
+
     def _hold_toy4(self):
         """4個目のおもちゃ(toy4)を定位置に固定する（_hold_toy2と同じ流儀）。"""
         if not self._toy4 or self._rest_pos4 is None or self._obj4_qadr is None:
@@ -2204,6 +2259,16 @@ class ToySupineEnv(SupineMimoEnv):
         apply_eye_centering_spring(self.model, self.data,
                                    vertical_deg=self._eye_rest_vertical_deg,
                                    enabled=self._eye_centering)
+        # 【2026-10-15・段階2】体を留める場面では、上の settle のあいだ体が自由に
+        #   傾き（座位12ヶ月の場面で根が約10度後ろへ）、おもちゃはその傾いた視線を
+        #   基準に置かれ、次の step() の _pin_root で体だけ元へ戻る＝物が視線から
+        #   約10度ずれた所に残っていた（実測：リセット直後とstep1で頭の向きが10.4度違う、
+        #   目の関節は1度未満しか動かない）。2026-08-20 に scene_io.apply_state で直した
+        #   toy2 の件と同じ仲間で、こちらは**リセットのたび**に起きる。
+        #   pin_before_spawn=True のときだけ、置く前に体を留める姿勢へ戻す（既定False＝従来どおり）。
+        if self._pin_before_spawn:
+            self._pin_root()
+            mujoco.mj_forward(self.model, self.data)
         mujoco.mj_forward(self.model, self.data)   # 眼のカメラ姿勢を更新してから配置
         self._spawn_toy()                  # 落ち着いた後の肩位置を見て配置
         self._glow_until = -1e9            # 点灯の余韻を持ち越さない
@@ -2336,7 +2401,7 @@ class ToySupineEnv(SupineMimoEnv):
         #   qposを座位へ書き換えるのは「env.reset()の呼び出しが終わったあと・
         #   最初のstep()が呼ばれる前」なので、ここが「シーンの最終姿勢」を
         #   確実に捉えられる最初のタイミングになる（reset_model()のdocstring参照）。
-        """方策が出した action を受け取る。親の介入判定・おもちゃの運搬や保持・親の発話更新・おもちゃの発光更新を行ったあと、VOR・視線誘導反射・輻輳反射・姿勢制御反射の順で action を上書きし、親クラスの step で物理を1歩進める。体幹の姿勢を留め直して倒れ判定を行い、親の発話があれば info に parent_utterance を追加して、(観測, 報酬, terminated, truncated, info) の5要素タプルを返す。
+        """方策が出した action を受け取る。親の介入判定・おもちゃの運搬や保持（toy3_flash_move 指定時は toy3 の揺れと点滅も）・親の発話更新・おもちゃの発光更新を行ったあと、VOR・視線誘導反射・輻輳反射・姿勢制御反射の順で action を上書きし、親クラスの step で物理を1歩進める。体幹の姿勢を留め直して倒れ判定を行い、親の発話があれば info に parent_utterance を追加して、(観測, 報酬, terminated, truncated, info) の5要素タプルを返す。
         """
         if getattr(self, "_posture_baseline_pending", False):
             self._posture_seated_qpos = self.data.qpos.copy()
@@ -2359,6 +2424,7 @@ class ToySupineEnv(SupineMimoEnv):
         self._hold_toy2()          # 2個目のおもちゃ（toy2=False なら何もしない）
         self._hold_present_slots()  # 【10択】差し出しスロット（無ければ何もしない）
         self._hold_toy3()          # 3個目のおもちゃ（2026-08-25新設・toy3=False/無しなら何もしない）
+        self._flash_move_toy3()    # 【2026-10-15・段階2】toy3を光らせて動かす（flash_move無しなら何もしない）
         self._hold_toy4()          # 4個目のおもちゃ（同上）
         # 【2026-08-18新設・F1-3】親のfollow-in labeling。_hold_toy2の直後に呼ぶ
         #   ＝振っている間はここでtoy1/toy2の位置を上乗せで揺らす（_apply_shake）。

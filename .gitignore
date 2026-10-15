@@ -50,6 +50,9 @@ E/models/
 # 目標F（2026-08-27追加：F だけ除外されておらず models が284MBに達していた）
 F/logs/
 F/models/
+# 目標G（2026-10-15追加：core_v2 段階2。F と同じ扱い）
+G/logs/
+G/models/
 MIMo/
 
 # MuJoCoの実行時ログ（生成物）
