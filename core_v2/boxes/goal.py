@@ -3,7 +3,14 @@
 段階2・工程3の仮部品（設計書 付録E・仕様書 §3）：棚1つ。
 * 意味の辞書から新しい荷札が来て、門番の「入れてよい」が 0.5 を超えていれば棚に置く
 * 目を向ける先を選ぶ係（gaze）の「見つけた」が FOUND_THRESHOLD を FOUND_STREAK 回続けて
-  超えるか、HOLD_TICKS 回（5秒）たったら棚を空にする
+  超えたら、そこから FOUND_HOLD_TICKS 回（2秒）は持ち続けてから棚を空にする。
+  棚に置いてから HOLD_TICKS 回（5秒）たったら、見つけたかどうかに関係なく空にする
+
+FOUND_HOLD_TICKS（2026-10-15、スレッドの責任者の決定）：人間の乳児も、探していた物を見つけたら
+しばらくそれを見続ける。最初は見つけた瞬間に棚を空にしていたが、合格テストの本番（818eef8）で、
+発話の時点で既にボールを見ていた試行では 0.3〜0.6秒で目的が消え、反射が自由になって妨害物へ
+目が跳んだ（ボールの条件B 11/20、失敗9回すべてがこの形）。見つけた後も2秒は目的を持ち続け、
+その間は門番を通して反射を抑え続ける。
 渡す物：gaze へ探している物の荷札（空ならゼロ）、門番へ持っている強さ（持っていれば1、空なら0）。
 
 FOUND_THRESHOLD（仮部品のルール、2026-10-15 実測で決めた）：仕様書の仮の値は 0.8 だったが、探し物を
@@ -23,6 +30,7 @@ from .base import Box
 FOUND_THRESHOLD = 0.45
 FOUND_STREAK = 2
 HOLD_TICKS = 50
+FOUND_HOLD_TICKS = 20
 SAME_COS = 0.95      # これより似ていれば「同じ探し物がもう一度来た」とみなし、置き換えない
 
 
@@ -37,6 +45,7 @@ class Goal(Box):
         self.held = None
         self.age = 0
         self.streak = 0
+        self.found_age = None    # 見つけた回からの回数（見つけていなければ None）
         self.cleared_by = ""     # 記録用："found" か "timeout"
 
     def step(self, inbox):
@@ -47,10 +56,16 @@ class Goal(Box):
         is_new = new is not None and float(torch.linalg.vector_norm(new)) > 0.0
         if is_new and permit > 0.5 and (self.held is None or float(new @ self.held) < SAME_COS):
             self.held, self.age, self.streak, self.cleared_by = new, 0, 0, ""
+            self.found_age = None
         elif self.held is not None:
             self.age += 1
-            self.streak = self.streak + 1 if found > FOUND_THRESHOLD else 0
-            if self.streak >= FOUND_STREAK:
+            if self.found_age is None:
+                self.streak = self.streak + 1 if found > FOUND_THRESHOLD else 0
+                if self.streak >= FOUND_STREAK:
+                    self.found_age = 0
+            else:
+                self.found_age += 1
+            if self.found_age is not None and self.found_age >= FOUND_HOLD_TICKS:
                 self.held, self.cleared_by = None, "found"
             elif self.age >= HOLD_TICKS:
                 self.held, self.cleared_by = None, "timeout"

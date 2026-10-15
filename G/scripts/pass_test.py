@@ -69,6 +69,16 @@ def judge(rows, target, cfg):
         else:
             i += 1
     res["dwell_s"] = round(best * dt, 2)
+    # 探し物に着いてから見続けた長さ：発話から b_within_s 以内に始まった最初の「探し物を見ている」続き
+    #   （発話の時点で既に見ていたら、発話の回から数える）
+    res["dwell_first_s"] = None
+    for i in range(i0, min(len(rows), i0 + within + 1)):
+        if look[i] == target:
+            j = i
+            while j < len(rows) and look[j] == target:
+                j += 1
+            res["dwell_first_s"] = round((j - i) * dt, 2)
+            break
     return res
 
 
@@ -216,6 +226,13 @@ def main(cfg_path, quick=False, plot_only=False):
         summary["per_word"][word] = {
             "n": len(sel), "A": sum(t["res"]["A"] for t in sel), "B": sum(t["res"]["B"] for t in sel),
             "already_on_target": sum(t["res"]["already_on_target"] for t in sel),
+            # 発話の時点で探し物を見ていなかった試行だけの条件B（見ていた試行の B は語を聞いた証拠にならない）
+            "n_not_already": sum(not t["res"]["already_on_target"] for t in sel),
+            "B_not_already": sum(t["res"]["B"] for t in sel if not t["res"]["already_on_target"]),
+            "dwell_first_s_median": (float(np.median(d)) if (d := [t["res"]["dwell_first_s"] for t in sel
+                                                                     if t["res"]["dwell_first_s"] is not None]) else None),
+            "dwell_first_s_min": (min(d) if d else None),
+            "n_reached": len(d),
             "dwell_s_median": float(np.median([t["res"]["dwell_s"] for t in sel])),
             "pass": sum(t["res"]["B"] for t in sel) >= cfg["pass_count"] and not quick}
     for t in trials:
@@ -223,7 +240,7 @@ def main(cfg_path, quick=False, plot_only=False):
     with open(os.path.join(out, "summary.json"), "w", encoding="utf-8") as f:
         json.dump(summary, f, ensure_ascii=False, indent=1)
     with open(os.path.join(out, "summary.csv"), "w", newline="", encoding="utf-8") as f:
-        keys = ["scene", "word", "seed", "A", "B", "onset_s", "dwell_s", "already_on_target",
+        keys = ["scene", "word", "seed", "A", "B", "onset_s", "dwell_first_s", "dwell_s", "already_on_target",
                 "n_saccades", "n_saccades_after", "heard_t", "pre_counts"]
         w = csv.DictWriter(f, fieldnames=keys, extrasaction="ignore")
         w.writeheader()
