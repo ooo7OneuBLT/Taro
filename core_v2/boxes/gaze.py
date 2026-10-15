@@ -15,6 +15,11 @@ cos の直し方：cos が MATCH_COS（0.7）未満の物は 0、それ以上は
 違う物は 0.5 前後になる。最初は max(cos, 0) にしたが、探し物が視野の外にあるとき、違う物（0.5〜0.6）が
 地図の山になって、そこへ目が跳んだ（工程3の確かめ、「コップはどこ？」でコップが 33度＝視野の外）。
 (cos+1)/2 はさらに差が縮むので使わない。
+
+目的を持っている間は、地図の全マスに SEEK_FLOOR（0.001）を敷く。prio は配線上「目的を持っている
+強さ」を受け取れず、地図が空かどうかで重み w を決めているため（prio.py）。床が無いと、探し物の
+切り出しが1コマ抜けただけで地図が空→ w=0 →目立ちだけの地図になり、orienteye の抑えをすり抜けて
+目立つ所へ跳んだ（2026-10-15、妨害物から「コップはどこ？」：コップを1.1秒見たあと、7.2秒にボールへ）。
 """
 
 import torch
@@ -23,6 +28,7 @@ from ..formats import GRID, DTYPE, Fmt, zero
 from .base import Box
 
 MATCH_COS = 0.7
+SEEK_FLOOR = 1e-3
 C0, C1 = GRID // 2 - 2, GRID // 2 + 2     # 真ん中 4×4 マス（行・列 12〜15。中心は 13.5）
 
 
@@ -35,7 +41,7 @@ class Gaze(Box):
         objs = inbox.get("eyein") or []
         if want is None or float(torch.linalg.vector_norm(want)) == 0.0 or not objs:
             return out
-        seek = zero(Fmt.MAP)
+        seek = zero(Fmt.MAP) + SEEK_FLOOR
         for tag, where in objs:
             c = float(tag @ want)
             if c >= MATCH_COS:

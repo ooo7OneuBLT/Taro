@@ -128,11 +128,12 @@ def path_record(brain) -> dict[str, Any]:
 
 def run_trial(brain, env, *, seed: int, duration_s: float = 10.0,
               on_tick: Callable[[dict[str, Any]], None] | None = None,
-              manual_eye: Callable[[int], tuple[float, float] | None] | None = None,
+              manual_eye: Callable[[int, Any], tuple[float, float] | None] | None = None,
               use_brain: bool = True) -> list[dict[str, Any]]:
     """1試行を回し、脳1回ごとの記録（辞書）の列を返す。
 
-    manual_eye : 確かめ用。tick 番号を受けて方向を返すと、脳の代わりにそれを目へ入れる
+    manual_eye : 確かめ用。(tick 番号, 脳が出した方向 or None) を受けて、目へ入れる方向（None なら入れない）を返す。
+                 脳の方向を握りつぶす・差し替える・そのまま通すのどれもできる
     use_brain  : False なら脳を回さない（環境だけ・確かめ用）
     """
     seed_all(seed)
@@ -159,7 +160,7 @@ def run_trial(brain, env, *, seed: int, duration_s: float = 10.0,
             to_env = brain.tick({"eyein": obs["eye_left"], "earin": text})
             cmd = to_env.get("eyeout")
         if manual_eye is not None:
-            cmd = manual_eye(i)
+            cmd = manual_eye(i, cmd)
         if cmd is not None:
             u._orienting.set_map_target(float(cmd[0]), float(cmd[1]))
         row = {"tick": i, "t": float(u.data.time), "heard": text,

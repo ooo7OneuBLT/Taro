@@ -43,7 +43,7 @@ def main():
     eyeout = brain.boxes["eyeout"]
     kicks = {100: (0.5, 0.0), 200: (0.0, 0.5)}
 
-    def manual(i):
+    def manual(i, _brain_cmd=None):   # 脳の方向は使わない（手で入れた方向だけ）
         if i in kicks:
             r = eyeout.step({"orienteye": torch.tensor(kicks[i], dtype=torch.float32)})
             return r.get("env")
