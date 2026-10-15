@@ -3201,7 +3201,7 @@
   ],
   "lines": 55,
   "goal": "",
-  "last_commit": ""
+  "last_commit": "2026-10-15"
  },
  {
   "path": "run/scene_tools/make_stage2_scene.py",
@@ -3210,9 +3210,9 @@
    "_qpos_by_joint",
    "make_scene"
   ],
-  "lines": 128,
+  "lines": 143,
   "goal": "",
-  "last_commit": ""
+  "last_commit": "2026-10-15"
  },
  {
   "path": "run/scene_tools/scene_io.py",
@@ -3251,9 +3251,9 @@
    "from_env_var",
    "open_scene"
   ],
-  "lines": 1825,
+  "lines": 1830,
   "goal": "",
-  "last_commit": "2026-09-16"
+  "last_commit": "2026-10-15"
  },
  {
   "path": "run/tools/_旧/check_12mo_scene_posture.py",
@@ -5190,7 +5190,7 @@
   ],
   "lines": 1881,
   "goal": "",
-  "last_commit": "2026-09-15"
+  "last_commit": "2026-10-15"
  },
  {
   "path": "taro_core/src/brain/midbrain/orienting_v1.py",

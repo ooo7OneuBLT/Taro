@@ -5,6 +5,14 @@
 * 目を向ける先を選ぶ係（gaze）の「見つけた」が FOUND_THRESHOLD を FOUND_STREAK 回続けて
   超えるか、HOLD_TICKS 回（5秒）たったら棚を空にする
 渡す物：gaze へ探している物の荷札（空ならゼロ）、門番へ持っている強さ（持っていれば1、空なら0）。
+
+FOUND_THRESHOLD（仮部品のルール、2026-10-15 実測で決めた）：仕様書の仮の値は 0.8 だったが、探し物を
+見ていても「見つけた」は 0.60〜0.85 で、0.8 を超えるのはまれ（目的が毎回5秒の時間切れで空になっていた）。
+目的を持たせたまま目を手で各物へ向けて測った分布（G/scripts/measure_found.py、2つの置き方×2語×2種、
+G/logs/見つけた/found_summary.json・found.png）：
+  探し物を見ている回 136回：下から5% 0.64・中央 0.73・最大 0.85（切り出しが抜けた4回だけ 0.001）
+  探し物以外を見ている回 160回：中央 0.001・最大 0.22
+2つの分布の間（0.22 と 0.64 の真ん中あたり）の 0.45 にした。
 """
 
 import torch
@@ -12,7 +20,7 @@ import torch
 from ..formats import DTYPE
 from .base import Box
 
-FOUND_THRESHOLD = 0.8
+FOUND_THRESHOLD = 0.45
 FOUND_STREAK = 2
 HOLD_TICKS = 50
 SAME_COS = 0.95      # これより似ていれば「同じ探し物がもう一度来た」とみなし、置き換えない

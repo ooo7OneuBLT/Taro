@@ -147,7 +147,7 @@ def plot(trials, cfg, out):
                 ax.plot([np.mean(xs)], [np.mean(ys)], "o", color=COLORS[k], ms=10, label=OBJ_JA[k])
             ax.plot([r0["x_gaze"]], [r0["y_gaze"]], "k+", ms=12, label="最初の視線")
             ax.set_aspect("equal")
-            ax.set_title(scene.replace("段階2_3物体_", "").replace("_2026-10-15", ""))
+            ax.set_title(scene.replace("段階2b_3物体_", "").replace("段階2_3物体_", "").replace("_2026-10-15", ""))
             ax.set_xlabel("右へ（度）")
             ax.set_ylabel("上へ（度）")
             ax.grid(alpha=0.3)

@@ -16,6 +16,9 @@ qpos の並びが変わる（8択用の test_object5〜11 が消え、3・4 が�
   実験ファイルで world.word_test を上書きする。
 
 使い方:  python run/scene_tools/make_stage2_scene.py
+【2026-10-15追加】make_scene() に角度・上下の角度・ボールの色・妨害物の揺れ・場面名を引数で渡せる
+（省けば上の最初の版）。段階2bの場面（物を寄せ、ボールをくすませ、点滅を速くした版）は
+G/scripts/stage2b_scenes.py がこの引数で作る。
 """
 import copy
 import os
@@ -56,11 +59,21 @@ def _qpos_by_joint(env):
     return out
 
 
-def make_scene(side):
+BALL_RGBA = [0.85, 0.15, 0.15, 1.0]
+
+
+def make_scene(side, *, angle_deg=ANGLE_DEG, toy3_up_deg=TOY3_UP_DEG, ball_rgba=None,
+               flash=None, names=None, toy1_elev_deg=0.0, toy2_elev_deg=0.0):
+    """side=+1 でボール左、-1 でボール右。キーワード引数を省けば最初の版（2026-10-15）と同じ場面。
+    【2026-10-15追加・統合担当】段階2bの場面（物を寄せる・ボールの赤をくすませる）を同じ道具で作るため、
+    角度・ボールの色・妨害物の揺れ・場面名を引数にした（既定値は元の定数のまま）。"""
+    ball_rgba = list(BALL_RGBA if ball_rgba is None else ball_rgba)
+    flash = dict(FLASH if flash is None else flash)
+    names = NAMES if names is None else names
     base = scene_io.load(BASE)
     sc = copy.deepcopy(base)
     sc.pop("_path", None)
-    sc["name"] = NAMES[side]
+    sc["name"] = names[side]
     sc["note"] = ("段階2の合格テスト（語を聞いて物を探す）。ボール=toy1・コップ=toy2・"
                   "光って動く妨害物=toy3。土台: " + BASE + "。"
                   "作り方: run/scene_tools/make_stage2_scene.py")
@@ -68,15 +81,15 @@ def make_scene(side):
     w["xml"] = XML
     w.pop("present_slots", None)              # 8択用の差し出しスロット（新XMLには無い）
     w["toy"] = dict(w["toy"], shape="sphere", radius=0.03, dist=DIST,
-                    rgba=[0.85, 0.15, 0.15, 1.0])
+                    rgba=ball_rgba, elev_deg=float(toy1_elev_deg))
     w["toy"].pop("vanish_gap_before_sec", None)
     w["toy2"] = {"enabled": True, "shape": "cylinder", "radius": 0.03,
                  "rgba": [0.95, 0.95, 0.95, 1.0], "dist": DIST,
-                 "angle_deg": ANGLE_DEG * side, "elev_deg": 0.0}
+                 "angle_deg": angle_deg * side, "elev_deg": float(toy2_elev_deg)}
     w["toy3"] = {"enabled": True, "shape": "box", "radius": 0.025,
                  "rgba": [0.2, 0.4, 0.9, 1.0], "dist": DIST,
-                 "angle_deg": TOY3_UP_DEG, "elev_deg": 0.0,
-                 "flash_move": dict(FLASH), "rest_from_state": True}
+                 "angle_deg": toy3_up_deg, "elev_deg": 0.0,
+                 "flash_move": flash, "rest_from_state": True}
     w["parent_labeling"] = dict(w["parent_labeling"], enabled=False)
     w["pin_before_spawn"] = True              # 物を本当の視線を基準に置く（上の注）
     w["parent_intervene"] = False             # 見失っても親が差し出し直さない（物が視線へ寄ってくると測れない）

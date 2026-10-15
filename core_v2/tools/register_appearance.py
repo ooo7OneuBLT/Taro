@@ -6,9 +6,14 @@
 重なるもの**（カメラの投影で求めた位置から15画素以内）を FRAMES コマぶん集めて平均し、
 固定の行列で荷札にする（雑音は足さない。雑音は意味の辞書が引くたびに足す）。
 
+場面を複数渡すと、全部の場面の見た目を平均して1件にする（2026-10-15追加）。段階2bでは
+ボール左の場面だけで登録すると、ボール右の場面のコップ（左上に置かれ、下から見上げる形）との cos が
+雑音なしでも 0.75〜0.83 にしか届かず、雑音が乗ると探し物らしさの足切り 0.7 を下回って、コップを
+見ていても「見つけた」がほぼ0になった（34回中26回）。物を2つの向きから見て覚える形にした。
+
 使い方：
-  python -m core_v2.tools.register_appearance [場面名] [出力先]
-既定：場面＝段階2_3物体_ボール左_2026-10-15、出力＝G/models/semantic_table.pt
+  python -m core_v2.tools.register_appearance [場面名,場面名,...] [出力先]
+既定：場面＝段階2b_3物体_ボール左・ボール右、出力＝G/models/semantic_table.pt
 """
 
 from __future__ import annotations
@@ -61,20 +66,29 @@ def collect(eyein, env, frames=FRAMES, seed=0):
     return got, others
 
 
-def main(scene="段階2_3物体_ボール左_2026-10-15", out=None):
+DEFAULT_SCENES = "段階2b_3物体_ボール左_2026-10-15,段階2b_3物体_ボール右_2026-10-15"
+
+
+def main(scenes=DEFAULT_SCENES, out=None):
     from ..boxes.eyein import Eyein
     out = out or os.path.join(run_v2.REPO, "G", "models", "semantic_table.pt")
     run_v2.seed_all(0)
     eyein = Eyein()
     eyein.setup()
-    env = run_v2.build_env(scene, None, seed=0)
-    try:
-        got, others = collect(eyein, env)
-    finally:
-        run_v2.close_env(env)
+    scene_list = [x for x in scenes.split(",") if x]
+    got, others = {b: [] for b in run_v2.OBJECTS.values()}, []
+    for scene in scene_list:
+        env = run_v2.build_env(scene, None, seed=0)
+        try:
+            g, o = collect(eyein, env)
+        finally:
+            run_v2.close_env(env)
+        for b in got:
+            got[b] += g[b]
+        others += o
     table, counts = {}, {}
     for w, body in WORDS.items():
-        if len(got[body]) < FRAMES // 2:
+        if len(got[body]) < len(scene_list) * FRAMES // 2:
             raise RuntimeError(f"{w}（{body}）が {len(got[body])} コマしか切り出せなかった")
         table[w] = appearance_tag(np.mean(got[body], axis=0))
         counts[w] = len(got[body])
@@ -85,7 +99,7 @@ def main(scene="段階2_3物体_ボール左_2026-10-15", out=None):
                for k, b in run_v2.OBJECTS.items() if got[b]}
         row["その他"] = round(float(np.mean([float(appearance_tag(a) @ tag) for a in others])), 3) if others else None
         print(f"  {w}: {row}")
-    meta = {"scene": scene, "frames": counts, "projection_seed": PROJECTION_SEED,
+    meta = {"scenes": scene_list, "frames": counts, "projection_seed": PROJECTION_SEED,
             "code": None}
     try:
         from ..save import code_version
