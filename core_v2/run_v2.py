@@ -31,6 +31,7 @@ for _p in (REPO, os.path.join(REPO, "run"), os.path.join(REPO, "run", "world"),
 
 K = 10                 # 脳1回あたりの環境の歩数（trainer.py:49）
 DT = 0.01              # 環境1歩の秒数（run/config.py:424-427）
+START_JITTER = 0.15     # 試行の頭の目のずれ：±0.15＝視野の片側30度の15%＝約±4.5度
 OBJECTS = {"ball": "test_object1", "cup": "test_object2", "distractor": "test_object3"}
 
 
@@ -40,12 +41,20 @@ def seed_all(seed: int) -> None:
     random.seed(seed)
 
 
-def build_env(scene: str, word: str | None, seed: int = 0, word_t: float = 4.0):
-    """段階2の場面を作る。word を渡すと、word_t 秒に親がそれを言う（場面の既定を上書き）。"""
+def build_env(scene: str, word: str | None, seed: int = 0, word_t: float = 4.0,
+              silent: bool = False, world_extra: dict | None = None):
+    """段階2の場面を作る。word を渡すと、word_t 秒に親がそれを言う（場面の既定を上書き）。
+    silent=True なら親は何も言わない（段階3の「自由に見る」テスト。場面の既定の発話も消す）。
+    world_extra は場面の world に重ねる（段階3の名づけの場面）。"""
     from run.world import scene as scene_mod
+    from scene_io import _merge
     world = {}
     if word is not None:
         world["word_test"] = {"schedule": [{"t": float(word_t), "word": word}]}
+    elif silent:
+        world["word_test"] = {"schedule": []}
+    if world_extra:
+        world = _merge(world, world_extra)
     env, sc, hands = scene_mod.build(scene, taro={"orienting_reflex": True, "vision": True},
                                      seed=seed, world=world or None)
     u = env.unwrapped
@@ -122,23 +131,46 @@ def path_record(brain) -> dict[str, Any]:
     goal = brain.boxes["goal"]
     rec["goal.age"] = goal.age if goal.held is not None else ""
     rec["goal.cleared_by"] = goal.cleared_by
-    rec["orienteye.reason"] = brain.boxes["orienteye"].last_reason
+    oe = brain.boxes["orienteye"]
+    rec["orienteye.reason"] = oe.last_reason
+    rec["orienteye.ior_max"] = round(float(oe.ior.max()), 3)
+    rec["orienteye.ior_at_peak"] = round(oe.last_ior_at_peak, 3)
+    rec["orienteye.n_dishab"] = oe.n_dishab
+    rec["orienteye.shift"] = f"{oe.last_shift[0]:.2f},{oe.last_shift[1]:.2f}"   # 印をずらした分（行,列）
+    sem = brain.boxes["semantic"]
+    rec["semantic.event"] = sem.last_event
+    rec["semantic.recall_norm"] = round(sem.last_recall_norm, 3)
     return rec
 
 
 def run_trial(brain, env, *, seed: int, duration_s: float = 10.0,
               on_tick: Callable[[dict[str, Any]], None] | None = None,
               manual_eye: Callable[[int, Any], tuple[float, float] | None] | None = None,
-              use_brain: bool = True) -> list[dict[str, Any]]:
+              use_brain: bool = True, start_jitter: float = START_JITTER) -> list[dict[str, Any]]:
     """1試行を回し、脳1回ごとの記録（辞書）の列を返す。
 
     manual_eye : 確かめ用。(tick 番号, 脳が出した方向 or None) を受けて、目へ入れる方向（None なら入れない）を返す。
                  脳の方向を握りつぶす・差し替える・そのまま通すのどれもできる
     use_brain  : False なら脳を回さない（環境だけ・確かめ用）
+    start_jitter : 試行の頭で、目を種ごとに決まった少しずれた向きへ1回跳ばす大きさ（[-1,1]の方向の幅）。
+                 0 なら跳ばさない
+
+    **段階3の確かめで見つけた不具合（2026-10-16）**：前の試行の最後に出した目の指令が、反応の遅れの
+    ぶん実行されないまま、目の仕組みの控え（_orienting._map_target）に残り、次の試行の頭で撃たれて
+    いた（env.reset が控えを消さない。taro_core/src/brain/midbrain/orienting.py:1003 の reset()）。
+    そのうえ種は荷札の雑音にしか効かず、試行はほぼ「前の試行の終わり方」で決まっていた
+    （段階2の合格テスト・段階3の①で、1つの場面あたり1〜3通りの試行しか無かった）。
+    直し：試行の頭で控えを消し、種から決めた少しずれた向きへ目を1回跳ばしてから始める
+    （乳児も毎回同じ所を見て始めるわけではない）。taro_core は触らない。
     """
     seed_all(seed)
     obs, _ = env.reset(seed=seed)
     u = env.unwrapped
+    u._orienting._map_target = None
+    if start_jitter > 0:
+        g = np.random.default_rng(10_000 + int(seed))
+        h, v = g.uniform(-start_jitter, start_jitter, size=2)
+        u._orienting.set_map_target(float(h), float(v))
     brain.reset()
     R0 = frame_at(env)
     act = zero_action(env)

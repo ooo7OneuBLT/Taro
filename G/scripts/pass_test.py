@@ -8,6 +8,9 @@
 判定（脳1回＝0.1秒ごとの記録から）：
 * 「見ている」＝視線と物の中心のなす角が look_deg（10度）以内。2つ以上入れば角の小さい方
 * 条件A：発話の前（t < word_t）に見ていた回数が、妨害物で一番多い（0回なら不成立）
+* 段階3：実験ファイルの semantic_table（手で登録）／semantic_learned（学んだ表）／どちらも無し（空）、
+  use_ior（復帰抑制、既定あり）、control（語ごとの「言われていない方の物」）と max_diff
+  （書けば「B − B_control がこれ以下で合格」＝③学ぶ前は分からない）
 * 条件B：発話が耳に届いた回から b_within_s（3秒）以内に探し物を見始め、そこから
   b_hold_s（1秒）以上続けて見る（見始めが3秒以内なら、続きは3秒を越えてもよい）
 出力（out フォルダ）：試行ごとの CSV、summary.json、判定の表 summary.csv、絵（角度の時間変化・視線の軌跡）
@@ -79,6 +82,18 @@ def judge(rows, target, cfg):
                 j += 1
             res["dwell_first_s"] = round((j - i) * dt, 2)
             break
+    return res
+
+
+def judge_with_control(rows, word, target, cfg):
+    """段階3の③：control（言われていない方の物）でも同じ判定をして B_control に入れる。
+    探し物が無くても復帰抑制で物を順に見て回るので、たまたま言われた物を見る試行が出る。
+    「分かっていない」は「言われた物を見る数が、言われていない物を見る数と変わらない」で確かめる。"""
+    res = judge(rows, target, cfg)
+    ctrl = (cfg.get("control") or {}).get(word)
+    if ctrl:
+        res["control"] = ctrl
+        res["B_control"] = judge(rows, ctrl, cfg)["B"]
     return res
 
 
@@ -184,7 +199,16 @@ def main(cfg_path, quick=False, plot_only=False):
         from core_v2.save import save
         brain = Brain()
         brain.boxes["eyein"].setup()
-        meta_sem = brain.boxes["semantic"].load_table(os.path.join(REPO, cfg["semantic_table"]))
+        # 段階3：辞書は「手で登録した表」「経験で学んだ表」「空」のどれか。復帰抑制は既定あり
+        sem = brain.boxes["semantic"]
+        if cfg.get("semantic_table"):
+            meta_sem = {"table": sem.load_table(os.path.join(REPO, cfg["semantic_table"]))}
+        elif cfg.get("semantic_learned"):
+            meta_sem = {"learned": sem.load_learned(os.path.join(REPO, cfg["semantic_learned"]))}
+        else:
+            meta_sem = {"empty": True}
+        sem.learning = False
+        brain.boxes["orienteye"].use_ior = bool(cfg.get("use_ior", True))
         t_start = time.time()
         for scene in cfg["scenes"]:
             for word, target in cfg["words"].items():
@@ -199,7 +223,7 @@ def main(cfg_path, quick=False, plot_only=False):
                             w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
                             w.writeheader()
                             w.writerows(rows)
-                        res = judge(rows, target, cfg)
+                        res = judge_with_control(rows, word, target, cfg)
                         trials.append({"scene": scene, "word": word, "seed": seed, "csv": name,
                                        "rows": rows, "res": res})
                         print(f"{scene} {word} seed{seed}: A={res['A']} B={res['B']} "
@@ -208,8 +232,9 @@ def main(cfg_path, quick=False, plot_only=False):
                 finally:
                     run_v2.close_env(env)
         # 脳の保存（段階2の仮部品に学習する重みは無いが、型どおり版と配線の指紋を残す）
-        save(brain, os.path.join(REPO, "G", "models", "段階2_合格テスト_brain.pt"),
-             extra={"experiment": cfg["name"], "semantic_table": meta_sem})
+        save(brain, os.path.join(REPO, "G", "models", cfg.get("brain_out", "段階2_合格テスト_brain.pt")),
+             extra={"experiment": cfg["name"], "semantic": meta_sem,
+                    "use_ior": bool(cfg.get("use_ior", True))})
         print(f"全体 {time.time() - t_start:.0f}秒", flush=True)
     else:
         for scene in cfg["scenes"]:
@@ -218,7 +243,7 @@ def main(cfg_path, quick=False, plot_only=False):
                     name = f"{scene}_{word.rstrip('？?')}_seed{seed}.csv"
                     rows = load_rows(os.path.join(out, name))
                     trials.append({"scene": scene, "word": word, "seed": seed, "csv": name,
-                                   "rows": rows, "res": judge(rows, target, cfg)})
+                                   "rows": rows, "res": judge_with_control(rows, word, target, cfg)})
 
     summary = {"experiment": cfg["name"], "quick": quick, "per_word": {}, "trials": []}
     for word in cfg["words"]:
@@ -234,19 +259,38 @@ def main(cfg_path, quick=False, plot_only=False):
             "dwell_first_s_min": (min(d) if d else None),
             "n_reached": len(d),
             "dwell_s_median": float(np.median([t["res"]["dwell_s"] for t in sel])),
-            "pass": sum(t["res"]["B"] for t in sel) >= cfg["pass_count"] and not quick}
+            "B_control": (sum(t["res"].get("B_control", 0) for t in sel) if cfg.get("control") else None),
+            # 段階3の③（学ぶ前は分からない）は「B − B_control が max_diff 以下」で合格
+            "pass": ((sum(t["res"]["B"] for t in sel) - sum(t["res"].get("B_control", 0) for t in sel)
+                      <= cfg["max_diff"]) if "max_diff" in cfg
+                     else sum(t["res"]["B"] for t in sel) >= cfg["pass_count"]) and not quick}
+    # 同じ物を見た数を、言葉どうしで比べる（2026-10-16）：物 X について「X を指す言葉のとき X を見た数」
+    # − 「ほかの言葉（X を control に持つ）のとき X を見た数」。B − B_control（同じ言葉で物どうし）は物の
+    # 目立ちの差を拾うので（③の空の辞書でボール 11・コップ 1）、言葉の効果だけを見るためにこちらも並べる
+    if cfg.get("control"):
+        cross = {}
+        for word, obj in cfg["words"].items():
+            others = [w for w, c in cfg["control"].items() if c == obj and w != word]
+            hit = sum(t["res"]["B"] for t in trials if t["word"] == word)
+            base = sum(t["res"].get("B_control", 0) for t in trials if t["word"] in others)
+            cross[obj] = {"言われた言葉": word, "その言葉のとき見た": hit,
+                          "ほかの言葉のとき見た": base, "差": hit - base}
+        summary["same_object_across_words"] = cross
     for t in trials:
         summary["trials"].append({k: t[k] for k in ("scene", "word", "seed", "csv")} | t["res"])
     with open(os.path.join(out, "summary.json"), "w", encoding="utf-8") as f:
         json.dump(summary, f, ensure_ascii=False, indent=1)
     with open(os.path.join(out, "summary.csv"), "w", newline="", encoding="utf-8") as f:
-        keys = ["scene", "word", "seed", "A", "B", "onset_s", "dwell_first_s", "dwell_s", "already_on_target",
+        keys = ["scene", "word", "seed", "A", "B", "B_control", "onset_s", "dwell_first_s", "dwell_s", "already_on_target",
                 "n_saccades", "n_saccades_after", "heard_t", "pre_counts"]
         w = csv.DictWriter(f, fieldnames=keys, extrasaction="ignore")
         w.writeheader()
         w.writerows(summary["trials"])
     paths = plot(trials, cfg, out)
     print(json.dumps(summary["per_word"], ensure_ascii=False, indent=1))
+    if "same_object_across_words" in summary:
+        print("同じ物を見た数の、言葉どうしの差:")
+        print(json.dumps(summary["same_object_across_words"], ensure_ascii=False, indent=1))
     print("絵:", *paths, sep="\n  ")
 
 
