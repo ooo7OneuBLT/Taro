@@ -78,9 +78,9 @@ def main() -> None:
     if diag:
         orig_new, orig_match = Objfile._new_row, Objfile._match
 
-        def new_row(self, part):
+        def new_row(self, part, **kw):
             before = list(self.rows)
-            row = orig_new(self, part)
+            row = orig_new(self, part, **kw)
             cls = classify(part.r, part.c)
             D["new_by_class"][cls] += 1
             if row is None:
