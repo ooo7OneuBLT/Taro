@@ -18,10 +18,20 @@ from .formats import GRID, MAX_OBJECTS, TAG_DIM, Fmt
 from .wiring_table import BOXES as _TABLE_BOXES
 from .wiring_table import EDGES as _TABLE_EDGES
 
+# 図に無いが足した係: (id, 名前, 段)。段階4（2026-10-16、ユーザー承認）：物の名簿（頭頂葉）
+ADDED_BOXES = [
+    ("objfile", "物の名簿（頭頂葉）", "入口（感覚）"),
+]
+
 # 図に無いが足した矢印: (出す係, 受ける係, 理由)
 ADDED_EDGES = [
     ("listen", "semantic",
      "聞いた語から物の見た目を引くため。人間でも聞いた語は側頭葉で意味と結び付く（図の書き漏れ、2026-10-15決定）"),
+    ("eyein", "objfile", "段階4：見つけた物を名簿に書く（物ごとの荷札と地図、目の動きの地図）"),
+    ("prio", "objfile", "段階4：脱馴化で、行の位置の目立ちの「ふだん」と比べる"),
+    ("orienteye", "objfile", "段階4：撃った指令の写し。撃った先の物に注意を移す"),
+    ("objfile", "orienteye", "段階4：行ごとの「もう見た」の山と、今見ている行（慣れ）"),
+    ("objfile", "semantic", "段階4：名前を結び付ける行の荷札（見た目の平均）"),
 ]
 
 # 通り道の矢印の書式（設計書 技術付録D）。(書式, MOTOR のときの筋の数)
@@ -42,6 +52,11 @@ PATH_FORMATS: dict[tuple[str, str], tuple[Fmt, int | None]] = {
     ("gaze", "goal"): (Fmt.AMOUNT, None),           # 見つけた度合い
     ("prio", "orienteye"): (Fmt.MAP, None),         # 合わせた地図
     ("orienteye", "eyeout"): (Fmt.MOTOR, 2),        # 目を向ける方向 (h, v)、[-1,1]、右・上が正
+    ("eyein", "objfile"): (Fmt.TAG_AND_MAP, None),  # 段階4
+    ("prio", "objfile"): (Fmt.MAP, None),
+    ("orienteye", "objfile"): (Fmt.MOTOR, 2),       # 撃った指令の写し
+    ("objfile", "orienteye"): (Fmt.TAG_AND_MAP, None),
+    ("objfile", "semantic"): (Fmt.TAG, None),
 }
 
 
@@ -65,7 +80,7 @@ class BoxInfo:
     group: str
 
 
-BOXES: list[BoxInfo] = [BoxInfo(*b) for b in _TABLE_BOXES]
+BOXES: list[BoxInfo] = [BoxInfo(*b) for b in list(_TABLE_BOXES) + ADDED_BOXES]
 BOX_IDS: list[str] = [b.id for b in BOXES]
 
 

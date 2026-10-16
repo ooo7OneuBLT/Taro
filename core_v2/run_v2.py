@@ -135,8 +135,12 @@ def path_record(brain) -> dict[str, Any]:
     rec["orienteye.reason"] = oe.last_reason
     rec["orienteye.ior_max"] = round(float(oe.ior.max()), 3)
     rec["orienteye.ior_at_peak"] = round(oe.last_ior_at_peak, 3)
-    rec["orienteye.n_dishab"] = oe.n_dishab
-    rec["orienteye.shift"] = f"{oe.last_shift[0]:.2f},{oe.last_shift[1]:.2f}"   # 印をずらした分（行,列）
+    of = brain.boxes["objfile"]
+    rec["objfile.rows"] = of.summary()          # 番号:かけら数:強さ@行,列（*＝今見ている行）
+    rec["objfile.named"] = of.named.number if of.named is not None and of.named in of.rows else ""
+    rec["objfile.n_merge"] = of.n_merge
+    rec["objfile.n_dishab"] = of.n_dishab
+    rec["objfile.shift"] = f"{of.last_shift[0]:.2f},{of.last_shift[1]:.2f}"   # 行をずらした分（行,列）
     sem = brain.boxes["semantic"]
     rec["semantic.event"] = sem.last_event
     rec["semantic.recall_norm"] = round(sem.last_recall_norm, 3)
