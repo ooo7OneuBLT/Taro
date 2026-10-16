@@ -40,7 +40,12 @@ w=0.9×抑える強さ から、探し物らしさの下限 (m−(1−w))/w（�
 * 印が物に付いていける1回の距離 TRACK_CELLS は 1.5 マス（目の動きを別に引いたので、物そのものの
   動きだけ追えばよい）
 * どこを見るか決める前に、合わせた地図から「印の地図」（印ごとに高さ＝強さ・σ=IOR_SIGMA_CELLS の
-  山、重なりは大きい方）× IOR_GAIN を引く（負は0）
+  山、重なりは大きい方）× IOR_GAIN ×(1 − GOAL_RELIEF×抑える強さ) を引く（負は0）
+* **目的を持って探している間は、さっき見た物への復帰抑制を弱める（2026-10-16）**：上丘の反射は、
+  前頭眼野などの目的で上書きされる。抑える強さ（門番 gate3、0〜1）が高いほど印を弱く引く。
+  印を8秒持たせたため、言われる前に見たボールに印が約0.5残り、「ボールはどこ？」で探し物へ向かう
+  跳びが門番の足切りに落ちていた（②ボール 17/20、ボール左 seed9 は t51〜t68 撃てず）。
+  乳児・成人の文献は未確認［Tier3・GOAL_RELIEF=0.7 は仮置き］
 use_ior=False で段階2と1ビットも変わらない。
 """
 
@@ -65,6 +70,7 @@ IOR_DECAY_S = 8.0        # 旧太郎 orienting.py:703 は3秒（成人）。①�
                          # 6.4秒以上が要る。8秒にした［Tier3・仮置き］
 IOR_SIGMA_CELLS = 2.0    # 旧太郎 spatial_priority_map.py の「注意の半径の半分」≒2.3マス［仮置き］
 IOR_GAIN = 1.0           # 旧太郎と同じ［仮置き］
+GOAL_RELIEF = 0.7        # 目的を持って探している間に印を弱める割合［Tier3・仮置き］
 TRACK_CELLS = 1.5        # 印が物に付いていける1回の距離。妨害物は横に約12度/秒＝約0.6マス/回［仮置き］
 MERGE_CELLS = 1.0        # これより近い印は1つにまとめる（強い方を残す）
 MAX_MARKS = 8
@@ -198,7 +204,8 @@ class Orienteye(Box):
             if m is not None:
                 raw_peak = int(torch.argmax(m))
                 self.last_ior_at_peak = float(self.ior.reshape(-1)[raw_peak])
-                m = (m - IOR_GAIN * self.ior).clamp(min=0.0)
+                gain = IOR_GAIN * (1.0 - GOAL_RELIEF * min(max(inhibit, 0.0), 1.0))
+                m = (m - gain * self.ior).clamp(min=0.0)
         if m is None or float(m.max()) <= 0.0:
             self.last_reason = "empty"
             return out

@@ -155,3 +155,28 @@ def test_ego_map_shifts_marks_by_the_real_eye_motion():
     box.marks = [[13.0, 13.0, 1.0]]
     box._track([(torch.zeros(64), ego_map(-40.0, 16.0))])   # 中身が左へ5マス・下へ2マス
     assert abs(box.marks[0][0] - 15.0) < 0.6 and abs(box.marks[0][1] - 8.0) < 0.6
+
+
+def test_goal_weakens_ior_on_a_seen_object():
+    """目的を持って探している間（抑える強さ1）は、さっき見た物の印を弱く引くので、
+    印が残っていても探し物（合わせた地図の山）へ撃てる。目的が無ければ印で止まる。"""
+    from core_v2.boxes.orienteye import bump_at
+    prio = 0.7 * bump_at(9.0, 6.0, sigma=1.0)
+
+    def fresh():
+        box = Orienteye(use_ior=True)
+        box.marks = [[9.0, 6.0, 0.5]]
+        box._ego_seen = True
+        return box
+    calm = fresh().step({"prio": prio, "gate3": torch.zeros(())})
+    assert float(torch.linalg.vector_norm(calm["eyeout"])) > 0        # 目的なし：0.7−0.5=0.2 でも撃つ
+    seek = fresh().step({"prio": prio, "gate3": torch.ones(())})
+    assert float(torch.linalg.vector_norm(seek["eyeout"])) > 0        # 目的あり：印を弱めて撃てる
+    old = fresh()
+    import core_v2.boxes.orienteye as oe
+    keep, oe.GOAL_RELIEF = oe.GOAL_RELIEF, 0.0
+    try:
+        blocked = old.step({"prio": prio, "gate3": torch.ones(())})
+    finally:
+        oe.GOAL_RELIEF = keep
+    assert float(torch.linalg.vector_norm(blocked["eyeout"])) == 0    # 弱めなければ足切りで止まる
