@@ -5,7 +5,8 @@
 目が跳んだ直後のコマ（指令の次の回）も含める（jump_age=1）。
 
 使い方：
-  python G/scripts/make_eye_dataset.py [--seeds 5] [--ticks 20] [--out G/data/目のテスト]
+  python G/scripts/make_eye_dataset.py [--seeds 5] [--seed-start 0] [--ticks 20] [--out G/data/目のテスト]
+  別の問題集（決めすぎの確かめ用）：--seed-start 5 --ticks 10 --out G/data/目のテスト_確かめ
 出力：<out>/<場面>_seed<種>_t<回>.npz（img_l, img_r, masks[3,224,224], jump_age, ang）と index.json
 """
 
@@ -54,6 +55,7 @@ def main() -> None:
     def opt(name, default):
         return type(default)(args[args.index(name) + 1]) if name in args else default
     n_seeds, n_ticks = opt("--seeds", 5), opt("--ticks", 20)
+    seed0 = opt("--seed-start", 0)
     out = os.path.join(REPO, opt("--out", "G/data/目のテスト"))
     os.makedirs(out, exist_ok=True)
     index = []
@@ -62,7 +64,7 @@ def main() -> None:
         u = env.unwrapped
         act = run_v2.zero_action(env)
         try:
-            for seed in range(n_seeds):
+            for seed in range(seed0, seed0 + n_seeds):
                 rng = np.random.default_rng(1000 + seed)
                 env.reset(seed=seed)
                 u._orienting._map_target = None

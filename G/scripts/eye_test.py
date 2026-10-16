@@ -91,6 +91,9 @@ DETECTORS = {
     # 試作①：DINOv2 の床らしさ＋床の典型色からの差（eye_dino_floor.py。値は掃引 2026-10-16 の上位）
     "dino_floor_nosplit": make_dino_floor_variant(floor_cos=0.1, min_patches=4, scale=2, k=2, color_w=1.0),
     "dino_floor": make_dino_floor_variant(floor_cos=0.1, min_patches=4, scale=2, k=2, color_w=1.0, split_cos=0.7),
+    # 試作①a：床の典型色を画面全体の多数派から取る（掃引2 の上位。奥行きは視差が荒れて悪化したので入れない）
+    "dino_floor_a": make_dino_floor_variant(floor_cos=0.0, min_patches=4, scale=2, k=2, color_w=1.5,
+                                            split_cos=0.7, color_src="all"),
     "dino_floor_224": make_dino_floor_variant(floor_cos=0.3, min_patches=2, scale=1, k=2, color_w=0.5),
 }
 
@@ -160,7 +163,8 @@ def main() -> None:
     det_name = opt("--det", "sam")
     data = os.path.join(REPO, opt("--data", "G/data/目のテスト"))
     max_n = opt("--max", 0)
-    out_dir = os.path.join(REPO, "G/logs/目のテスト", det_name)
+    out_dir = os.path.join(REPO, "G/logs/目のテスト", det_name + ("" if "--data" not in args
+                                                                else "_" + os.path.basename(data)))
     os.makedirs(out_dir, exist_ok=True)
     with open(os.path.join(data, "index.json"), encoding="utf-8") as f:
         index = json.load(f)
@@ -179,7 +183,7 @@ def main() -> None:
         img, masks = d["img_l"], d["masks"]
         run.sync()
         t0 = time.perf_counter()
-        dets = run(img)
+        dets = run(img, d["img_r"]) if getattr(run, "stereo", False) else run(img)
         run.sync()
         ms = (time.perf_counter() - t0) * 1000.0
         res, false = score_frame(dets, masks)

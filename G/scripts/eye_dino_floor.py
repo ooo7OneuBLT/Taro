@@ -80,11 +80,25 @@ def floor_score(f: np.ndarray, k: int = 2) -> np.ndarray:
     return np.max(np.einsum("ijd,kd->ijk", f, g), axis=-1)
 
 
-def color_offness(img: np.ndarray, n: int, k: int = 2) -> np.ndarray:
-    """マスごとの平均色と、外周マスの色の k 平均（床の典型色）との最小距離（0〜1 に縮める）。"""
-    cell = 224 // n if 224 % n == 0 else None
-    small = np.array(__import__("PIL.Image", fromlist=["Image"]).fromarray(img).resize(
-        (n, n), __import__("PIL.Image", fromlist=["Image"]).BOX), dtype=np.float32)
+def color_offness(img: np.ndarray, n: int, k: int = 2, src: str = "border") -> np.ndarray:
+    """マスごとの平均色と、床の典型色（k 平均）との最小距離（0〜1 に縮める）。
+    src="border"：外周マスの色から取る。src="all"：画面全体のマスを k+2 個に分け、
+    マスの15%以上を占める群（多数派）だけを床の色とする（端で切れた物が外周に混ざっても汚れない）。"""
+    from PIL import Image
+    small = np.array(Image.fromarray(img).resize((n, n), Image.BOX), dtype=np.float32)
+    if src == "all":
+        cols = small.reshape(-1, 3)
+        kk = k + 2
+        cents = cols[np.random.default_rng(0).choice(len(cols), size=kk, replace=False)]
+        for _ in range(15):
+            lab = np.argmin(((cols[:, None] - cents[None]) ** 2).sum(-1), axis=1)
+            for j in range(kk):
+                if (lab == j).any():
+                    cents[j] = np.median(cols[lab == j], axis=0)
+        share = np.bincount(lab, minlength=kk) / len(lab)
+        cents = cents[share >= 0.15]
+        d = np.sqrt(((small[:, :, None] - cents[None, None]) ** 2).sum(-1)).min(-1)
+        return np.clip(d / 100.0, 0.0, 1.0)
     cols = small[border_mask(n)]
     cents = cols[np.random.default_rng(0).choice(len(cols), size=k, replace=False)]
     for _ in range(10):
@@ -94,6 +108,42 @@ def color_offness(img: np.ndarray, n: int, k: int = 2) -> np.ndarray:
                 cents[j] = np.median(cols[lab == j], axis=0)
     d = np.sqrt(((small[:, :, None] - cents[None, None]) ** 2).sum(-1)).min(-1)
     return np.clip(d / 100.0, 0.0, 1.0)
+
+
+def stereo_offness(img_l: np.ndarray, img_r: np.ndarray, n: int, scale_px: float = 6.0) -> np.ndarray:
+    """両目のずれ（視差）から「床の面から浮いている度合い」をマスごとに出す（0〜1）。
+    視差は半大域ブロック照合（OpenCV StereoSGBM、左目基準）。床は平らなので、マスごとの視差に
+    平面 d = a·x + b·y + c を外れ値を除きながら当てはめ、平面より手前（視差が大きい）ぶんを
+    scale_px 画素で割って 0〜1 にする。人間の両眼視差（V1 から）にあたる。"""
+    import cv2
+    gl = cv2.cvtColor(img_l, cv2.COLOR_RGB2GRAY)
+    gr = cv2.cvtColor(img_r, cv2.COLOR_RGB2GRAY)
+    sgbm = cv2.StereoSGBM_create(minDisparity=0, numDisparities=64, blockSize=7,
+                                 P1=8 * 49, P2=32 * 49, uniquenessRatio=5,
+                                 speckleWindowSize=50, speckleRange=2)
+    disp = sgbm.compute(gl, gr).astype(np.float32) / 16.0
+    disp[disp <= 0] = np.nan
+    c = 224 // n if 224 % n == 0 else 224 / n
+    cells = np.full((n, n), np.nan, dtype=np.float32)
+    step = 224.0 / n
+    for i in range(n):
+        for j in range(n):
+            blk = disp[int(i * step):int((i + 1) * step), int(j * step):int((j + 1) * step)]
+            if np.isfinite(blk).sum() >= 3:
+                cells[i, j] = np.nanmedian(blk)
+    ys, xs = np.mgrid[0:n, 0:n]
+    ok = np.isfinite(cells)
+    A = np.stack([xs[ok], ys[ok], np.ones(ok.sum())], 1).astype(np.float64)
+    y = cells[ok].astype(np.float64)
+    keep = np.ones(len(y), dtype=bool)
+    for _ in range(5):
+        coef, *_ = np.linalg.lstsq(A[keep], y[keep], rcond=None)
+        r = y - A @ coef
+        mad = np.median(np.abs(r[keep])) + 1e-3
+        keep = np.abs(r) < 3 * mad
+    plane = coef[0] * xs + coef[1] * ys + coef[2]
+    res = np.nan_to_num(cells - plane, nan=0.0)
+    return np.clip(res / scale_px, 0.0, 1.0)
 
 
 def split_by_look(lab: np.ndarray, k: int, f: np.ndarray, split_cos: float) -> tuple[np.ndarray, int]:
@@ -148,15 +198,18 @@ def blobs(s: np.ndarray, floor_cos: float, min_patches: int, img_px: int = 224,
 
 
 def make_detector(floor_cos: float = 0.5, min_patches: int = 2, scale: int = 1, k: int = 2,
-                  color_w: float = 0.0, split_cos: float = -1.0):
+                  color_w: float = 0.0, split_cos: float = -1.0, color_src: str = "border",
+                  depth_w: float = 0.0):
     import torch
     load_model()
 
-    def run(img):
+    def run(img, img_r=None):
         f, n = features(img, scale)
         s = floor_score(f, k)
         if color_w > 0:
-            s = s - color_w * color_offness(img, n, k)
+            s = s - color_w * color_offness(img, n, k, color_src)
+        if depth_w > 0 and img_r is not None:
+            s = s - depth_w * stereo_offness(img, img_r, n)
         return blobs(s, floor_cos, min_patches, f=f, split_cos=split_cos)
     run.sync = torch.cuda.synchronize if torch.cuda.is_available() else (lambda: None)
     return run
@@ -168,45 +221,44 @@ def sweep() -> None:
     index = json.load(open(os.path.join(data, "index.json"), encoding="utf-8"))
     frames = [np.load(os.path.join(data, e["file"])) for e in index]
     rows = []
-    for scale in (2,):
-        for k in (2, 3):
-            cache = []
-            for d in frames:
-                f, n = features(d["img_l"], scale)
-                cache.append((floor_score(f, k), color_offness(d["img_l"], n, k), f))
-            for color_w, split_cos in ((1.0, -1.0), (1.0, 0.3), (1.0, 0.5), (1.0, 0.7), (1.5, 0.5)):
+    scale, k = 2, 2
+    cache = []
+    for d in frames:
+        f, n = features(d["img_l"], scale)
+        cache.append((floor_score(f, k), color_offness(d["img_l"], n, k, "border"),
+                      color_offness(d["img_l"], n, k, "all"), stereo_offness(d["img_l"], d["img_r"], n), f))
+    for color_src in ("border", "all"):
+        for color_w in (0.5, 1.0, 1.5):
+            for depth_w in (0.0, 0.5, 1.0, 2.0):
                 for floor_cos in (0.0, 0.1, 0.2):
                     for min_patches in (4, 8):
                         tot = {nm: [0, 0, 0, 0] for nm in et.NAMES}
                         false = 0
-                        for (s, co, f), d in zip(cache, frames):
-                            dets = blobs(s - color_w * co, floor_cos, min_patches, f=f, split_cos=split_cos)
+                        for (s, cb, ca, so, f), d in zip(cache, frames):
+                            co = cb if color_src == "border" else ca
+                            dets = blobs(s - color_w * co - depth_w * so, floor_cos, min_patches,
+                                         f=f, split_cos=0.7)
                             res, fa = et.score_frame(dets, d["masks"])
                             false += fa
                             for nm in et.NAMES:
                                 r = res[nm]
                                 if r is None:
                                     continue
-                                j = 2 if r["edge"] else 0
-                                tot[nm][j] += 1
-                                tot[nm][j + 1] += int(r["found"])
-                        row = {"scale": scale, "k": k, "color_w": color_w, "split_cos": split_cos,
-                               "floor_cos": floor_cos,
-                               "min_patches": min_patches,
+                                jj = 2 if r["edge"] else 0
+                                tot[nm][jj] += 1
+                                tot[nm][jj + 1] += int(r["found"])
+                        row = {"color_src": color_src, "color_w": color_w, "depth_w": depth_w,
+                               "floor_cos": floor_cos, "min_patches": min_patches,
                                "false": round(false / len(frames), 2)}
                         for nm, (a, b, c, e) in tot.items():
                             row[f"{nm}_in"] = round(b / a, 3) if a else None
                             row[f"{nm}_edge"] = round(e / c, 3) if c else None
                         rows.append(row)
-    out = os.path.join(REPO, "G/logs/目のテスト/dino_floor_掃引.json")
-    os.makedirs(os.path.dirname(out), exist_ok=True)
+    out = os.path.join(REPO, "G/logs/目のテスト/dino_floor_掃引2.json")
     json.dump(rows, open(out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
-    ok = [r for r in rows if r["false"] <= 1.0]
-    key = lambda r: (min(r[f"{nm}_in"] for nm in et.NAMES), min(r[f"{nm}_edge"] for nm in et.NAMES))
-    for r in sorted(ok, key=key, reverse=True)[:12]:
-        print(r)
-    print("物でない所≦1 を外した上位:")
-    for r in sorted(rows, key=key, reverse=True)[:5]:
+    ok = [r for r in rows if r["false"] <= 1.0 and min(r[f"{nm}_in"] for nm in et.NAMES) >= 0.95]
+    key = lambda r: (min(r[f"{nm}_edge"] for nm in et.NAMES), -r["false"])
+    for r in sorted(ok, key=key, reverse=True)[:10]:
         print(r)
 
 
