@@ -9,7 +9,8 @@
 を出す。
 
 使い方：
-  python G/scripts/objfile_test.py [--data G/data/目のテスト] [--out G/logs/段階4_A_名簿だけ]
+  python G/scripts/objfile_test.py [--data G/data/目のテスト] [--out G/logs/段階4_A_名簿だけ] [--diag]
+  --diag … 行が作られた・追い出された理由を数えて diag.json に書き、短くまとめて表示する
 """
 
 from __future__ import annotations
@@ -62,6 +63,51 @@ def main() -> None:
     eye = Eyein()
     eye.setup()
     of = Objfile()
+    diag = "--diag" in args
+    cur = {"masks": None, "seq": ""}
+    D = {"dets_by_class": defaultdict(int), "new_by_class": defaultdict(int),
+         "victim_by_class": defaultdict(int), "refused": 0, "unmatched_dist": defaultdict(int),
+         "frames_with_ndets": defaultdict(int), "examples": []}
+
+    def classify(r, c):
+        if cur["masks"] is None:
+            return "?"
+        hits = [NAMES[k] for k in range(len(NAMES)) if near_mask(cur["masks"][k], r, c)]
+        return hits[0] if hits else "junk"
+
+    if diag:
+        orig_new, orig_match = Objfile._new_row, Objfile._match
+
+        def new_row(self, part):
+            before = list(self.rows)
+            row = orig_new(self, part)
+            cls = classify(part.r, part.c)
+            D["new_by_class"][cls] += 1
+            if row is None:
+                D["refused"] += 1
+            gone = [rw for rw in before if rw not in self.rows]
+            for v in gone:
+                vc = classify(*v.pos)
+                D["victim_by_class"][vc] += 1
+                if len(D["examples"]) < 15:
+                    D["examples"].append(f"{cur['seq'][-12:]} t{self.t}: 新 {cls}@{part.r:.0f},{part.c:.0f} が "
+                                         f"{vc}@{v.pos[0]:.0f},{v.pos[1]:.0f}(n_seen={sum(p.n_seen for p in v.parts)},"
+                                         f"最後に見えた{self.t - v.last_seen}回前) を追い出した")
+            return row
+
+        def match(self, things, ego_moving):
+            parts = [p for _, p in self._parts()]
+            for tag, m in things:
+                if float(torch.linalg.vector_norm(tag)) == 0.0 or float(m.max()) <= 0.0:
+                    continue
+                r, c = object_center(m)
+                D["dets_by_class"][classify(r, c)] += 1
+                dmin = min((((p.r - r) ** 2 + (p.c - c) ** 2) ** 0.5 for p in parts), default=99.0)
+                b = "<1.5" if dmin <= 1.5 else "1.5-3" if dmin <= 3 else "3-6" if dmin <= 6 else ">6"
+                D["unmatched_dist"][f"{classify(r, c)} {b}{' 跳び' if ego_moving else ''}"] += 1
+            return orig_match(self, things, ego_moving)
+
+        Objfile._new_row, Objfile._match = new_row, match
     zero2 = torch.zeros(2)
     stats = {k: {"present": 0, "listed": 0, "pairs": 0, "same": 0, "kept_when_missed": 0,
                  "missed_by_eye": 0, "split": 0} for k in NAMES}
@@ -70,8 +116,10 @@ def main() -> None:
         eye.reset()
         of.reset()
         prev = {}
+        cur["seq"] = name
         for _, f in sorted(frames):
             d = np.load(f)
+            cur["masks"] = d["masks"]
             eo = eye.step({ENV: d["img_l"]})
             of.step({"eyein": eo["objfile"], "orienteye": zero2})
             rows_per_frame.append(len(of.rows))
@@ -116,6 +164,15 @@ def main() -> None:
         json.dump(summary, fp, ensure_ascii=False, indent=1)
     for k, v in summary.items():
         print(k, v)
+    if diag:
+        with open(os.path.join(out, "diag.json"), "w", encoding="utf-8") as fp:
+            json.dump(D, fp, ensure_ascii=False, indent=1)
+        print("目の入口が出した物（本当の物／床などの余分）:", dict(D["dets_by_class"]))
+        print("新しい行を作った物:", dict(D["new_by_class"]), " 入れなかった:", D["refused"])
+        print("追い出された行:", dict(D["victim_by_class"]))
+        print("物ごとの、一番近いかけらまでの距離（マス）:", dict(sorted(D["unmatched_dist"].items())))
+        for e in D["examples"]:
+            print(" ", e)
 
 
 if __name__ == "__main__":
