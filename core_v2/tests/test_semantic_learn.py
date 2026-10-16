@@ -99,3 +99,15 @@ def test_recalled_tag_goes_to_goal():
     box.learning = False
     out = box.step({"listen": BALL, "eyein": []})
     assert float(out["goal"] @ ball) > 0.85   # 出すときにも雑音を足す and box.last_recall_norm >= RECALL_MIN
+
+
+def test_learns_an_object_a_little_off_center():
+    """跳びが足りず物が真ん中から約6度（2マス＝16画素）ずれていても、親の条件（10度以内）に合わせて覚える。
+    5マス（40画素）ずれた物は覚えない（2026-10-16、真ん中の窓を半径3マスに広げた）。"""
+    a = appearance(41)
+    box = Semantic(learning=True)
+    name(box, BALL, [(noisy(a), bump(112.0 + 16.0, 112.0 - 8.0))])
+    assert int(box.n_learn) == 1
+    far = Semantic(learning=True)
+    name(far, BALL, [(noisy(a), bump(112.0 + 40.0, 112.0))])
+    assert int(far.n_learn) == 0

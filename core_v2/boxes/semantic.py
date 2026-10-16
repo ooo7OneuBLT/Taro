@@ -3,7 +3,7 @@
 **段階3（2026-10-15）：経験から学ぶ形に替えた（初めてのNN化、仕様書 付録B）。**
 中身は 64×64 の結び付きの表 W（見た目×語）＝1層の線形のNN。重みはヘッブ則で足し込む。
 * 覚える（learning=True のときだけ）：語の荷札 q が届いた回に、目の入口から前の回に届いた
-  物のうち、山の頂点が視野の真ん中 4×4 マス（行・列 12〜15、gaze.py と同じ窓）にある物の
+  物のうち、山の頂点が視野の真ん中から LEARN_RADIUS（3マス≒8度。2026-10-16 に 4×4 マスから広げた）以内にある物の
   荷札 a を探し、W += ETA × a qᵀ。真ん中に物が無ければ覚えない。1つの発話で1回だけ
   （q は発話のあった1回だけ届く。続けて届いたら最初の回だけ覚える）
 * 思い出す：r = W q。‖r‖ ≥ RECALL_MIN なら目的の係へ noisy(r/‖r‖) を出す。未満ならゼロ
@@ -15,6 +15,8 @@ W の中身だけが経験で変わる。W は buffer なので save.py の保�
 表に1件でも登録してあれば、段階2と同じく表を引く（段階3の合格テスト②で使う）。
 """
 
+import math
+
 import torch
 
 from ..formats import GRID, TAG_DIM, DTYPE, make_tag
@@ -24,18 +26,24 @@ from .base import Box
 MATCH_COS = 0.9          # 段階2の表引き
 ETA = 1.0                # 1回に足す強さ［仮置き］
 RECALL_MIN = 2.5         # 同じ組み合わせ3回で ‖r‖≈3、2回では出ない［仮置き・合格テスト③④で確かめる］
-C0, C1 = GRID // 2 - 2, GRID // 2 + 2     # 真ん中 4×4 マス（行・列 12〜15）
+C0, C1 = GRID // 2 - 2, GRID // 2 + 2     # 真ん中 4×4 マス（行・列 12〜15）。今は使わない（下の LEARN_RADIUS）
+CENTER = (GRID - 1) / 2.0
+LEARN_RADIUS = 3.0   # 覚えるとき「見ている物」とみなす、山の頂点の真ん中からの距離（マス、≒8度）。
+                     # 2026-10-16：4×4 マス（約±5度）だと、太郎の目は跳びが足りず4〜8度ずれて止まることが多く、
+                     # 親が名前を言っても（10度以内を3秒）、名づけ1回分で6回中5回見送った。親の条件に合わせて広げた
 
 
 def centered_tag(objs):
-    """物ごとの (荷札, 地図) から、山の頂点が真ん中 4×4 マスにある物の荷札を1つ返す。
-    2つ以上あれば、真ん中の窓の中の山がいちばん高い物。無ければ None。"""
+    """物ごとの (荷札, 地図) から、山の頂点が真ん中から LEARN_RADIUS マス以内にある物の荷札を1つ返す。
+    2つ以上あれば、山がいちばん高い物。荷札ゼロの組（目の動きの地図）は除く。無ければ None。"""
     best, best_v = None, 0.0
     for tag, m in objs or []:
+        if float(torch.linalg.vector_norm(tag)) == 0:
+            continue
         r, c = divmod(int(torch.argmax(m)), GRID)
-        if C0 <= r <= C1 - 1 and C0 <= c <= C1 - 1:
-            v = float(m[C0:C1, C0:C1].max())
-            if v > best_v and float(torch.linalg.vector_norm(tag)) > 0:
+        if math.hypot(r - CENTER, c - CENTER) <= LEARN_RADIUS:
+            v = float(m.max())
+            if v > best_v:
                 best, best_v = tag, v
     return best
 
