@@ -27,14 +27,15 @@ w=0.9×抑える強さ から、探し物らしさの下限 (m−(1−w))/w（�
   - 乳児で「動く物に印が付いて動く」ことを直接確かめた文献は見つけていない（成人は Tipper 1991。
     乳児は場所の復帰抑制が3〜6か月で整い、物の新しさを好む傾向は6か月で出る、Harman ほか 1994）。
     逸脱リスト行き［Tier3・モデル上の選択］
-* **目の動いた分は、画像の中の物の動きから求める（2026-10-16、①の本番の診断から）**：最初の版は
-  撃った回に「目を動かす指令の分」だけ印をずらしたが、実際の目の跳びは指令の 0.55〜0.95 倍で、
-  印が数マスずれた所に残った。それで印が机のマスなどの近くの別の物へ移り、2回跳ぶと前の物の印は
-  ほぼ消えていた。そこで毎回、前の回と今の回の物の中心の組を見比べ、いちばん多くの物が重なる
-  ずれ（＝目が実際に動いた分。机の上の止まった物の多くは一緒にずれる）を全部の印に足す。
-  重なる物が2つ未満で決められないときは、撃った直後の1回だけ指令の分を使う。物が届かない
-  ときは前と同じく指令の分でずらす。人も目を動かしたあと、見えている物の位置で照合し直すと
-  考えられる［Tier3・モデル上の選択］
+* **目の動いた分は、目の入口の「目の動きの地図」から読む（2026-10-16 作り直し）**：目の入口は毎回、
+  前の画像から今の画像へ画面全体がどれだけずれたか（位相相関。MT の役）を、真ん中からずらした
+  山（荷札ゼロの組、物の列の最後）として送ってくる。それを decode_ego で戻し、全部の印に足す。
+  目を動かす指令の写しではなく実際に目が動いた分なので、跳びが指令より小さくても印は物に残る。
+  目だけのテストの問題集で、このずれの誤差は中央値0.5画素・最大でも10画素未満だった（60画素跳んでも）。
+  前の版（物の中心の組を見比べる estimate_shift と、確かめ待ちの _pending）は、目の入口が3回に1回しか
+  切り出さず、間の回は動いていない位置を流していたため、跳んだ直後に印が取り残された（①の1試行、
+  2026-10-16）。目の動きの地図が届かないとき（環境なしのテスト）だけ、撃った回に指令の分でずらす
+  ［Tier3・モデル上の選択］
 * 印を新しく置くのは「撃った先のマス」（撃った回の座標）。その後、上のずれで目と一緒に動く
 * 印が物に付いていける1回の距離 TRACK_CELLS は 1.5 マス（目の動きを別に引いたので、物そのものの
   動きだけ追えばよい）
@@ -65,8 +66,6 @@ IOR_DECAY_S = 8.0        # 旧太郎 orienting.py:703 は3秒（成人）。①�
 IOR_SIGMA_CELLS = 2.0    # 旧太郎 spatial_priority_map.py の「注意の半径の半分」≒2.3マス［仮置き］
 IOR_GAIN = 1.0           # 旧太郎と同じ［仮置き］
 TRACK_CELLS = 1.5        # 印が物に付いていける1回の距離。妨害物は横に約12度/秒＝約0.6マス/回［仮置き］
-MATCH_CELLS = 1.0        # 目の動いた分を求めるとき、これより近ければ「同じ物が重なった」とみる
-MIN_MATCH = 2            # 重なる物がこれ未満なら、画像からは目の動きを決めない
 MERGE_CELLS = 1.0        # これより近い印は1つにまとめる（強い方を残す）
 MAX_MARKS = 8
 MARK_MIN = 0.02          # これより弱い印は捨てる
@@ -89,44 +88,27 @@ def shift_map(m: torch.Tensor, dr: int, dc: int) -> torch.Tensor:
     return out
 
 
+def split_ego(objs):
+    """目の入口からの組の列を、物の組と「目の動きの地図」（荷札ゼロ、列の最後）に分ける。"""
+    if not objs:
+        return [], None
+    tag, m = objs[-1]
+    if float(torch.linalg.vector_norm(tag)) == 0.0:
+        return list(objs[:-1]), m
+    return list(objs), None
+
+
 def object_centers(objs) -> list[tuple[float, float]]:
-    """目の入口の物ごとの (荷札, 地図) から、山の中心（行・列、小数）を出す。山の 0.5 以上の重心。"""
+    """物ごとの (荷札, 地図) から、山の中心（行・列、小数）を出す。山の 0.5 以上の重心。
+    荷札ゼロの組（目の動きの地図）は物ではないので除く。"""
     out = []
-    for _tag, m in objs or []:
-        if float(m.max()) <= 0.0:
+    for tag, m in objs or []:
+        if float(torch.linalg.vector_norm(tag)) == 0.0 or float(m.max()) <= 0.0:
             continue
         w = (m >= 0.5 * float(m.max())).to(DTYPE) * m
         tot = float(w.sum())
         out.append((float((w * _YS).sum()) / tot, float((w * _XS).sum()) / tot))
     return out
-
-
-def estimate_shift(prev, cur):
-    """前の回と今の回の物の中心の組から、いちばん多くの物が重なるずれ (行, 列) と重なった数を返す。
-    同じ数なら、重なりの距離の合計が小さい方。"""
-    if not prev or not cur:
-        return (0.0, 0.0), 0
-    cands = {(0.0, 0.0)} | {(c[0] - p[0], c[1] - p[1]) for p in prev for c in cur}
-    best, best_key = (0.0, 0.0), (0, 0.0)
-    for dr, dc in cands:
-        n, err = 0, 0.0
-        for p in prev:
-            d = min(math.hypot(p[0] + dr - c[0], p[1] + dc - c[1]) for c in cur)
-            if d <= MATCH_CELLS:
-                n += 1
-                err += d
-        key = (n, -err)
-        if key > best_key:
-            best, best_key = (dr, dc), key
-    if best_key[0] >= MIN_MATCH:
-        # 重なった組の平均でならす
-        pairs = []
-        for p in prev:
-            d, c = min((math.hypot(p[0] + best[0] - c[0], p[1] + best[1] - c[1]), c) for c in cur)
-            if d <= MATCH_CELLS:
-                pairs.append((c[0] - p[0], c[1] - p[1]))
-        best = (sum(x for x, _ in pairs) / len(pairs), sum(y for _, y in pairs) / len(pairs))
-    return best, best_key[0]
 
 
 class Orienteye(Box):
@@ -144,9 +126,8 @@ class Orienteye(Box):
         self.marks: list[list[float]] = []    # [行, 列, 強さ]（網膜の座標）
         self.ior = torch.zeros(GRID, GRID, dtype=DTYPE)
         self.last_ior_at_peak = 0.0   # 記録用：選んだマス（引く前の最大）に乗っていた印
-        self._prev_centers = None     # 前の回の物の中心（目の動いた分を求める）
-        self._pending = None          # 撃った直後：まだ画像で確かめていない指令の分 (行, 列, 残り回数)
-        self.last_shift = (0.0, 0.0)  # 記録用：その回に印をずらした分
+        self._ego_seen = False        # 目の入口から目の動きの地図が届いているか
+        self.last_shift = (0.0, 0.0)  # 記録用：その回に印をずらした分（マス、行・列）
 
     def _render(self) -> None:
         m = torch.zeros(GRID, GRID, dtype=DTYPE)
@@ -174,26 +155,18 @@ class Orienteye(Box):
         self.last_shift = (dr, dc)
 
     def _track(self, objs) -> None:
-        """目の動いた分だけ印をずらし、そのあと印から TRACK_CELLS マス以内の物の中心へ移す。"""
+        """目の動きの地図の分だけ印をずらし、そのあと印から TRACK_CELLS マス以内の物の中心へ移す。"""
         self.last_shift = (0.0, 0.0)
         if objs is None:
             return
-        centers = object_centers(objs)
-        prev, self._prev_centers = self._prev_centers, centers
-        (dr, dc), n = estimate_shift(prev, centers)
-        if n >= MIN_MATCH:
+        from .eyein import decode_ego
+        things, ego = split_ego(objs)
+        self._ego_seen = ego is not None
+        if ego is not None and float(ego.max()) > 0.0:
+            dr, dc = decode_ego(ego)
             if abs(dr) + abs(dc) > 0:
                 self._shift_marks(dr, dc)
-            if self._pending is not None and math.hypot(dr, dc) >= 1.0:
-                self._pending = None          # 目が動いたのを画像で確かめた
-        elif self._pending is not None:
-            self._shift_marks(*self._pending[:2])
-            self._pending = None
-        if self._pending is not None:
-            # 目が動くのは撃った次の回の画像から（脳は1回遅れで受け取る）。3回待って動かなければ忘れる
-            self._pending = (self._pending[0], self._pending[1], self._pending[2] - 1)
-            if self._pending[2] <= 0:
-                self._pending = None
+        centers = object_centers(things)
         for mk in self.marks:
             if not centers:
                 break
@@ -202,14 +175,11 @@ class Orienteye(Box):
                 mk[0], mk[1] = r, c
 
     def _mark_fire(self, r: int, c: int) -> None:
-        """撃った回：撃った先 (r, c) に強さ1の印を置く。目が動いた分は、物が届いていれば
-        次の回から画像で求めて足す（_track）。物が届いていなければ指令の分でずらす。"""
+        """撃った回：撃った先 (r, c) に強さ1の印を置く。目が動いた分は、次の回から目の動きの地図で
+        足す（_track）。目の動きの地図が届いていないとき（環境なしのテスト）だけ、指令の分でずらす。"""
         self.marks.insert(0, [float(r), float(c), 1.0])
-        dr, dc = CENTER - r, CENTER - c
-        if self._prev_centers is None:
-            self._shift_marks(dr, dc)
-        else:
-            self._pending = (dr, dc, 3)
+        if not self._ego_seen:
+            self._shift_marks(CENTER - r, CENTER - c)
         self._merge()
         self._render()
 

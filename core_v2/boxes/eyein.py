@@ -1,5 +1,19 @@
 """目の入口（入口（感覚））。
 
+**段階3 作り直し（2026-10-16、ユーザー了承の設計図）：毎回の切り出しを、MobileSAM から
+「床から浮いて見えるまとまり」（core_v2/floor_objects.py、目だけのテストの dino_floor_a）に替えた。**
+目だけのテスト（G/scripts/eye_test.py、200枚＋別の100枚）で、全身が見えている物 96〜100%、
+画像の端で切れた物 58〜96%（MobileSAM は0%）、床のマスを物と間違える数 1枚0.8〜1.0個（同5.4個）、
+1枚約30ms（同約515ms）。MobileSAM は setup(answer_check=True) のときだけ作る（答え合わせ用、
+detector="sam" で段階2までの切り出しに戻せる）。
+人間の視覚野との対応（粗い対応）：
+* 網膜〜V1：画像（左目）。明るさ・色・向き・動きの目立ちの地図（SalienceMap、上丘・V1 の役）
+* V2：図と地を分ける。床（地）らしくないマスを図としてつなぎ、見た目の違う物どうしは分ける
+* V4〜下側頭葉：DINOv2 のマスの特徴（見た目、何であるか）。物ごとの荷札の元
+* MT：画面全体がどれだけずれたか（位相相関、image_shift）＝目が実際に動いた分。復帰抑制の印を
+  目と一緒に動かすのに使う（目の動きの地図）
+* 頭頂葉（物を1つ1つ追う）はここではなく orienteye の印の側［Tier3・モデル上の選択］
+
 段階2・工程2：旧太郎の物の切り出し（MobileSAM）と見た目（DINOv2）、目立ちの地図
 （SalienceMap）を借りて、書式に包む。
 * eyein→gaze  : 物ごとの (荷札, 地図)。荷札＝見た目384を固定の乱数行列で64へ縮めて
@@ -182,54 +196,90 @@ def track(prev_dets: list[dict], feats: np.ndarray, n: int, prev_feats: np.ndarr
 class Eyein(Box):
     BOX_ID = "eyein"
 
-    def __init__(self, detect_every: int = DETECT_EVERY) -> None:
+    def __init__(self, detect_every: int = DETECT_EVERY, detector: str = "floor") -> None:
         super().__init__()
         self.va = None
+        self.detector = detector          # "floor"（段階3 作り直し）／"sam"（段階2までの MobileSAM）
         self.detect_every = int(detect_every)
+        self._model = None
+        self._sal = None
+        self.device = "cpu"
         self.last_dets: list[dict] = []   # 記録用（その回の切り出し結果）
         self.reset()
 
-    def setup(self, config: dict | None = None) -> None:
-        """旧太郎の VisualAttention を、Taro を作らずに直接作る（DINOv2・MobileSAM を読む）。"""
+    def setup(self, config: dict | None = None, answer_check: bool = False) -> None:
+        """DINOv2 と目立ちの地図を作る。detector="sam" か answer_check=True のときだけ、旧太郎の
+        VisualAttention（MobileSAM を読む）も作る。"""
         core_src = os.path.join(_REPO, "taro_core", "src")
         if core_src not in sys.path:
             sys.path.insert(0, core_src)
-        from brain.cerebral_cortex.parietal_lobe.visual_attention import VisualAttention
         cfg = dict(DEFAULT_CONFIG)
         cfg.update(config or {})
-        self.va = VisualAttention(config=cfg)
         self.cohesion_gap_px = cfg.get("cohesion_gap_px")
+        if self.detector == "sam" or answer_check:
+            from brain.cerebral_cortex.parietal_lobe.visual_attention import VisualAttention
+            self.va = VisualAttention(config=cfg)
+            self._model, self._sal, self.device = self.va._model, self.va._sal, self.va.device
+        else:
+            from brain.midbrain.salience_map import SalienceMap
+            att = cfg["attention"]
+            self._sal = SalienceMap(cell=int(att.get("cell", GRID)),
+                                    weights=tuple(att.get("weights", (1.0, 1.0, 1.0, 1.0))),
+                                    dog_iters=int(att.get("dog_iters", 10)))
+            self.device = os.environ.get("TARO_VISION_DEVICE") or (
+                "cuda" if torch.cuda.is_available() else "cpu")
+            self._model = torch.hub.load("facebookresearch/dinov2", "dinov2_vits14",
+                                         verbose=False).eval().to(self.device)
+        self._ready = True
 
     def reset(self) -> None:
-        if self.va is not None and self.va._sal is not None:
+        if self._sal is not None:
             # 目立ちの地図は前のコマとの差（動き）を持つので、試行の頭で前のコマを捨てる
-            self.va._sal._prev_gray = None
+            self._sal._prev_gray = None
         self.last_dets = []
         self._since_detect = 0
         self._prev_feats = None
         self._prev_gray = None
         self.last_shift_px = (0.0, 0.0)   # 記録用：前の回から画面全体がずれた分（画素）
-        self.last_mode = ""       # 記録用："detect"（全体を切り出した）／"track"（前の物を追った）
+        self.last_mode = ""       # 記録用："floor"／"detect"（MobileSAM で全体を切り出した）／"track"
 
     def see(self, img) -> tuple[list, torch.Tensor]:
-        va = self.va
         img224 = np.asarray(img)
         if img224.shape[:2] != (224, 224):
             from PIL import Image
             img224 = np.array(Image.fromarray(np.clip(img224, 0, 255).astype(np.uint8))
                               .resize((224, 224)))
         img224 = np.clip(img224, 0, 255).astype(np.uint8)
-        sal = va._sal.update(img224, (0.0, 0.0), False)["salience"]
+        sal = self._sal.update(img224, (0.0, 0.0), False)["salience"]
         sal = np.clip(np.nan_to_num(np.asarray(sal, dtype=np.float32)), 0.0, 1.0)
-        p, n = va._patch_features(va._model, img224, va.device)
-        feats = normalize_rows(np.asarray(p, dtype=np.float32))
-        prev_feats = self._prev_feats
         gray = img224.astype(np.float32).mean(axis=2)
         dx, dy = 0.0, 0.0
         if self._prev_gray is not None:
             dx, dy, _peak = image_shift(self._prev_gray, gray)
         self._prev_gray = gray
         self.last_shift_px = (dx, dy)
+        if self.detector == "floor":
+            from .. import floor_objects
+            dets = floor_objects.detect(self._model, self.device, img224)
+            self.last_mode = "floor"
+        else:
+            dets = self._see_sam(img224, dx, dy)
+        step = 224.0 / GRID
+        for d in dets:
+            c = int(min(max(d["pos"][0] // step, 0), GRID - 1))
+            r = int(min(max(d["pos"][1] // step, 0), GRID - 1))
+            d["sal"] = float(sal[r, c])
+        dets = sorted(dets, key=lambda d: -d["sal"])[:MAX_OBJECTS]
+        self.last_dets = dets
+        objs = [(noisy(appearance_tag(d["appearance"])), bump(*d["pos"])) for d in dets]
+        return objs, torch.as_tensor(sal, dtype=DTYPE)
+
+    def _see_sam(self, img224, dx, dy) -> list[dict]:
+        """段階2までの切り出し（MobileSAM。DETECT_EVERY 回に1回、間は前の物を見た目で追う）。"""
+        va = self.va
+        p, n = va._patch_features(va._model, img224, va.device)
+        feats = normalize_rows(np.asarray(p, dtype=np.float32))
+        prev_feats = self._prev_feats
         jumped = (prev_feats is not None
                   and (np.hypot(dx, dy) > JUMP_PX
                        or scene_similarity(feats, prev_feats) < SCENE_SAME_COS))
@@ -244,19 +294,11 @@ class Eyein(Box):
             dets = track(self.last_dets, feats, n, prev_feats, shift_px=(dx, dy))
             self._since_detect += 1
             self.last_mode = "track"
-        step = 224.0 / GRID
-        for d in dets:
-            c = int(min(max(d["pos"][0] // step, 0), GRID - 1))
-            r = int(min(max(d["pos"][1] // step, 0), GRID - 1))
-            d["sal"] = float(sal[r, c])
-        dets = sorted(dets, key=lambda d: -d["sal"])[:MAX_OBJECTS]
-        self.last_dets = dets
-        objs = [(noisy(appearance_tag(d["appearance"])), bump(*d["pos"])) for d in dets]
-        return objs, torch.as_tensor(sal, dtype=DTYPE)
+        return dets
 
     def step(self, inbox):
         out = self.passthrough()
-        if self.va is None or inbox.get(ENV) is None:
+        if not getattr(self, "_ready", False) or inbox.get(ENV) is None:
             return out
         objs, sal = self.see(inbox[ENV])
         out["gaze"] = objs

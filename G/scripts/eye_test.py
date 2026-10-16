@@ -45,7 +45,7 @@ def make_sam():
     object_detector._mask_appearance の呼び出しを横取りして控える（taro_core は変えない）。"""
     import torch
     from core_v2.boxes.eyein import Eyein
-    eye = Eyein(detect_every=1)
+    eye = Eyein(detect_every=1, detector="sam")
     eye.setup()
     od = sys.modules["object_detector"]   # visual_attention.py:273 がこの名前で読み込む
     captured = []
@@ -86,8 +86,25 @@ def make_dino_floor_variant(**kw):
     return factory
 
 
+def make_eyein_floor():
+    """core_v2 に組み込んだ目の入口（detector="floor"）そのもの。試作 dino_floor_a と同じ成績になるかの確かめ。"""
+    import torch
+    from core_v2.boxes.eyein import Eyein
+    from core_v2.floor_objects import cells_to_mask
+    eye = Eyein()
+    eye.setup()
+
+    def run(img):
+        eye.see(img)
+        return [{"pos": d["pos"], "mask": cells_to_mask(d["cells"])} for d in eye.last_dets]
+    run.reset = eye.reset
+    run.sync = torch.cuda.synchronize if torch.cuda.is_available() else (lambda: None)
+    return run
+
+
 DETECTORS = {
     "sam": make_sam,
+    "eyein_floor": make_eyein_floor,
     # 試作①：DINOv2 の床らしさ＋床の典型色からの差（eye_dino_floor.py。値は掃引 2026-10-16 の上位）
     "dino_floor_nosplit": make_dino_floor_variant(floor_cos=0.1, min_patches=4, scale=2, k=2, color_w=1.0),
     "dino_floor": make_dino_floor_variant(floor_cos=0.1, min_patches=4, scale=2, k=2, color_w=1.0, split_cos=0.7),
