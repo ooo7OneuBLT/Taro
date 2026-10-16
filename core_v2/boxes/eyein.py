@@ -26,6 +26,15 @@
 として落とす。画面全体が前の回と大きく変わったとき（目が跳んだとき）は、間の回でも全体を
 切り出し直す。DINOv2 と目立ちの地図は毎回計算する（軽い）。
 
+**目が動いた分を画像から求める（2026-10-16）**：前の回と今の回の画像（灰色）の位相相関で、
+画面全体がどれだけずれたか（画素）を毎回求める（image_shift）。使い道は2つ。
+* 間の回の追跡で、前の物の位置をまずこのずれだけ動かしてから、まわりを探す。ずれが
+  JUMP_PX（28画素）を超えたら、目が跳んだとみて全体を切り出し直す
+* eyein→orienteye の最後に「目の動きの地図」を1つ足す（荷札はゼロ）。前の回の注視点が今どこに
+  見えるかを、真ん中からのずれの半分の所に山として置く（半分にするのは、大きく跳んでも地図の
+  外へ出ないため）。復帰抑制の印をこの分だけずらす。目を動かす指令の写しではなく、実際に目が
+  動いた分なので、跳びが指令より小さくても印は物に残る［Tier3・モデル上の選択］
+
 環境からの入力（inbox[ENV]）：左目の画像（224×224×3、uint8）。
 setup() を呼ぶまでは素通し（骨組みのテストは重い視覚を作らずに回る）。
 """
@@ -38,7 +47,7 @@ import sys
 import numpy as np
 import torch
 
-from ..formats import GRID, MAX_OBJECTS, DTYPE
+from ..formats import GRID, MAX_OBJECTS, TAG_DIM, DTYPE
 from ..tagging import appearance_tag, noisy
 from .base import ENV, Box
 
@@ -62,6 +71,8 @@ DETECT_EVERY = 3          # 全体の切り出しを何回に1回にするか（
 TRACK_PATCHES = 2         # 間の回に物を探す範囲（DINOv2 のマス、±）
 SAME_COS = 0.6            # これ未満なら見失った［仮置き］
 SCENE_SAME_COS = 0.9      # 画面全体の似かたがこれ未満なら目が跳んだとみて切り出し直す［仮置き］
+JUMP_PX = 28.0            # 画面全体のずれがこれを超えたら切り出し直す（DINOv2 の2マス）
+EGO_SCALE = 0.5           # 目の動きの地図：真ん中からのずれ（マス）にこれを掛けた所に山を置く
 
 
 def bump(cx_px: float, cy_px: float, sigma: float = BUMP_SIGMA_CELLS) -> torch.Tensor:
@@ -71,6 +82,43 @@ def bump(cx_px: float, cy_px: float, sigma: float = BUMP_SIGMA_CELLS) -> torch.T
     ys, xs = np.mgrid[0:GRID, 0:GRID]
     m = np.exp(-((xs - gx) ** 2 + (ys - gy) ** 2) / (2.0 * sigma ** 2))
     return torch.as_tensor(m, dtype=DTYPE)
+
+
+_HANN = np.outer(np.hanning(224), np.hanning(224)).astype(np.float32)
+
+
+def image_shift(prev_gray: np.ndarray, gray: np.ndarray) -> tuple[float, float, float]:
+    """前の画像から今の画像へ、中身が (dx, dy) 画素ずれたかを位相相関で求める。
+    3つ目は相関の山の高さ（0〜1、低いほど当てにならない）。"""
+    f1 = np.fft.fft2(prev_gray * _HANN)
+    f2 = np.fft.fft2(gray * _HANN)
+    r = f2 * np.conj(f1)
+    r /= np.abs(r) + 1e-8
+    c = np.fft.ifft2(r).real
+    py, px = np.unravel_index(int(np.argmax(c)), c.shape)
+    h, w = c.shape
+    dy = py - h if py > h // 2 else py
+    dx = px - w if px > w // 2 else px
+    return float(dx), float(dy), float(c[py, px])
+
+
+def ego_map(dx_px: float, dy_px: float) -> torch.Tensor:
+    """目の動きの地図：前の回の注視点が今見えている所（真ん中からのずれ×EGO_SCALE）に山。"""
+    c = 112.0 + EGO_SCALE * dx_px
+    r = 112.0 + EGO_SCALE * dy_px
+    return bump(min(max(c, 0.0), 223.0), min(max(r, 0.0), 223.0))
+
+
+def decode_ego(m: torch.Tensor) -> tuple[float, float]:
+    """ego_map の山から、目の動き（中身のずれ、マス単位の (行, 列)）を戻す。"""
+    w = (m >= 0.5 * float(m.max())).to(m.dtype) * m
+    tot = float(w.sum())
+    ys, xs = torch.meshgrid(torch.arange(GRID, dtype=m.dtype), torch.arange(GRID, dtype=m.dtype),
+                            indexing="ij")
+    r = float((w * ys).sum()) / tot
+    c = float((w * xs).sum()) / tot
+    center = (GRID - 1) / 2.0
+    return (r - center) / EGO_SCALE, (c - center) / EGO_SCALE
 
 
 def normalize_rows(p: np.ndarray) -> np.ndarray:
@@ -96,10 +144,12 @@ def _match_center(a, feats, n, ci, cj, radius):
 
 
 def track(prev_dets: list[dict], feats: np.ndarray, n: int, prev_feats: np.ndarray | None = None,
-          radius: int = TRACK_PATCHES, same_cos: float = SAME_COS) -> list[dict]:
+          radius: int = TRACK_PATCHES, same_cos: float = SAME_COS,
+          shift_px: tuple[float, float] = (0.0, 0.0)) -> list[dict]:
     """前の回の物を、今の DINOv2 のマス（正規化済み、(n*n, 384)）の中で探し直す。
     前の位置のまわり ±radius マスで、物の見た目との cos が最高に近いマスの重心を求め、
     前の回の画像で同じように求めた重心からのずれだけ位置を動かす（止まっている物は動かない）。
+    shift_px（画面全体のずれ、目の動き）があれば、今の画像ではその分ずらした所のまわりを探す。
     最高の cos が same_cos 未満なら見失ったとして落とす。"""
     scale = 224.0 / n
     out = []
@@ -108,15 +158,21 @@ def track(prev_dets: list[dict], feats: np.ndarray, n: int, prev_feats: np.ndarr
         a = a / max(float(np.linalg.norm(a)), 1e-8)
         ci = min(max(int(d["pos"][1] // scale), 0), n - 1)
         cj = min(max(int(d["pos"][0] // scale), 0), n - 1)
-        ni, nj, best = _match_center(a, feats, n, ci, cj, radius)
+        sx, sy = d["pos"][0] + shift_px[0], d["pos"][1] + shift_px[1]
+        if not (0.0 <= sx < 224.0 and 0.0 <= sy < 224.0):
+            continue                                  # 目が動いて視野の外へ出た
+        si = min(max(int(sy // scale), 0), n - 1)
+        sj = min(max(int(sx // scale), 0), n - 1)
+        ni, nj, best = _match_center(a, feats, n, si, sj, radius)
         if best < same_cos:
             continue
         if prev_feats is not None:
             pi, pj, _ = _match_center(a, prev_feats, n, ci, cj, radius)
+            pi, pj = pi + (si - ci), pj + (sj - cj)
         else:
-            pi, pj = d["pos"][1] / scale - 0.5, d["pos"][0] / scale - 0.5
-        cx = float(min(max(d["pos"][0] + (nj - pj) * scale, 0.0), 223.0))
-        cy = float(min(max(d["pos"][1] + (ni - pi) * scale, 0.0), 223.0))
+            pi, pj = sy / scale - 0.5, sx / scale - 0.5
+        cx = float(min(max(sx + (nj - pj) * scale, 0.0), 223.0))
+        cy = float(min(max(sy + (ni - pi) * scale, 0.0), 223.0))
         nd = dict(d)
         nd["pos"] = (cx, cy)
         out.append(nd)
@@ -151,6 +207,8 @@ class Eyein(Box):
         self.last_dets = []
         self._since_detect = 0
         self._prev_feats = None
+        self._prev_gray = None
+        self.last_shift_px = (0.0, 0.0)   # 記録用：前の回から画面全体がずれた分（画素）
         self.last_mode = ""       # 記録用："detect"（全体を切り出した）／"track"（前の物を追った）
 
     def see(self, img) -> tuple[list, torch.Tensor]:
@@ -166,7 +224,15 @@ class Eyein(Box):
         p, n = va._patch_features(va._model, img224, va.device)
         feats = normalize_rows(np.asarray(p, dtype=np.float32))
         prev_feats = self._prev_feats
-        jumped = prev_feats is not None and scene_similarity(feats, prev_feats) < SCENE_SAME_COS
+        gray = img224.astype(np.float32).mean(axis=2)
+        dx, dy = 0.0, 0.0
+        if self._prev_gray is not None:
+            dx, dy, _peak = image_shift(self._prev_gray, gray)
+        self._prev_gray = gray
+        self.last_shift_px = (dx, dy)
+        jumped = (prev_feats is not None
+                  and (np.hypot(dx, dy) > JUMP_PX
+                       or scene_similarity(feats, prev_feats) < SCENE_SAME_COS))
         self._prev_feats = feats
         if (not self.last_dets or jumped or self.detect_every <= 1
                 or self._since_detect + 1 >= self.detect_every):
@@ -175,7 +241,7 @@ class Eyein(Box):
             self._since_detect = 0
             self.last_mode = "detect"
         else:
-            dets = track(self.last_dets, feats, n, prev_feats)
+            dets = track(self.last_dets, feats, n, prev_feats, shift_px=(dx, dy))
             self._since_detect += 1
             self.last_mode = "track"
         step = 224.0 / GRID
@@ -195,6 +261,8 @@ class Eyein(Box):
         objs, sal = self.see(inbox[ENV])
         out["gaze"] = objs
         out["semantic"] = objs      # 段階3：意味の辞書が名前と見ている物を結び付ける
-        out["orienteye"] = objs     # 段階3：復帰抑制の印を物に付けて動かす
+        # 段階3：復帰抑制の印を物に付けて動かす。最後に目の動きの地図（荷札ゼロ）を足す
+        out["orienteye"] = objs[:MAX_OBJECTS - 1] + [(torch.zeros(TAG_DIM, dtype=DTYPE),
+                                                     ego_map(*self.last_shift_px))]
         out["prio"] = sal
         return out
