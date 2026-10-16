@@ -78,7 +78,21 @@ def make_sam():
     return run
 
 
-DETECTORS = {"sam": make_sam}
+def make_dino_floor_variant(**kw):
+    def factory():
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from eye_dino_floor import make_detector
+        return make_detector(**kw)
+    return factory
+
+
+DETECTORS = {
+    "sam": make_sam,
+    # 試作①：DINOv2 の床らしさ＋床の典型色からの差（eye_dino_floor.py。値は掃引 2026-10-16 の上位）
+    "dino_floor_nosplit": make_dino_floor_variant(floor_cos=0.1, min_patches=4, scale=2, k=2, color_w=1.0),
+    "dino_floor": make_dino_floor_variant(floor_cos=0.1, min_patches=4, scale=2, k=2, color_w=1.0, split_cos=0.7),
+    "dino_floor_224": make_dino_floor_variant(floor_cos=0.3, min_patches=2, scale=1, k=2, color_w=0.5),
+}
 
 
 def iou(a, b) -> float:
