@@ -141,6 +141,9 @@ def path_record(brain) -> dict[str, Any]:
     rec["objfile.n_merge"] = of.n_merge
     rec["objfile.n_dishab"] = of.n_dishab
     rec["objfile.shift"] = f"{of.last_shift[0]:.2f},{of.last_shift[1]:.2f}"   # 行をずらした分（行,列）
+    ear = brain.boxes["listen"]
+    rec["listen.chunks"] = " / ".join("|".join(c) for c in ear.last_chunks)   # 切ったかたまり（段階5）
+    rec["listen.word"] = ear.last_word                                          # 意味の辞書へ渡した語
     sem = brain.boxes["semantic"]
     rec["semantic.event"] = sem.last_event
     rec["semantic.recall_norm"] = round(sem.last_recall_norm, 3)

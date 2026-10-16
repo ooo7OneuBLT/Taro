@@ -9,6 +9,7 @@
   python -m core_v2.tools.learn_names [N] [--swap] [--out パス] [--scenes 場面,場面] [--max-s 秒] [--log-dir 名前]
     N       … 各語を何回覚えたら止めるか（既定 5）
     --swap  … 名前を入れ替える（ボールに「こっぷ」と言う）＝合格の線⑤の確かめ用
+    --ear   … 段階5：親の話しかけで育てた耳（hear_parent.py の出力）を聞き分ける係に読む。名づけの間も耳は覚え続ける
 既定の出力：G/models/semantic_learned_N{N}.pt（--swap なら _swap が付く）。記録は G/logs/段階3_名づけ/（--log-dir で G/logs/ の下の名前を変える）
 
 覚えた回ごとに「そのとき実際に見ていた物」（視線と物の角度、10度以内で角の小さい方）を記録し、
@@ -70,7 +71,7 @@ def looking_at(env) -> str:
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     swap = "--swap" in argv
-    opts = {"--out": None, "--scenes": DEFAULT_SCENES, "--max-s": "900", "--log-dir": "段階3_名づけ"}
+    opts = {"--out": None, "--scenes": DEFAULT_SCENES, "--max-s": "900", "--log-dir": "段階3_名づけ", "--ear": None}
     pos = []
     i = 0
     while i < len(argv):
@@ -94,6 +95,10 @@ def main(argv=None):
     brain.boxes["eyein"].setup()
     sem = brain.boxes["semantic"]
     sem.learning = True
+    ear = brain.boxes["listen"]
+    if opts["--ear"]:
+        ear.load_ear(os.path.join(run_v2.REPO, opts["--ear"]))
+        ear.learning = True
 
     counts = {w: 0 for w in OBJ_OF_WORD}
     events = []          # 名前を聞いた回・覚えた回の記録
@@ -166,7 +171,7 @@ def main(argv=None):
     n_heard = sum(1 for e in events if e["event"] == "heard")
     n_learn = sum(1 for e in events if e["event"] == "learn")
     n_mix = sum(1 for e in events if e.get("mixup"))
-    meta = {"n_target": n_target, "swap": swap, "counts": counts, "sim_s": round(sim_s, 1),
+    meta = {"ear": opts["--ear"], "n_target": n_target, "swap": swap, "counts": counts, "sim_s": round(sim_s, 1),
             "n_heard": n_heard, "n_learn": n_learn, "n_skip": sum(1 for e in events if e["event"] == "learn_skip"),
             "n_mixup": n_mix, "scenes": scenes, "seeds_used": seed}
     try:

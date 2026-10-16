@@ -53,6 +53,8 @@ def judge(rows, target, cfg):
         return res
     i0 = heard[0]
     res["heard_t"] = rows[i0]["t"]
+    # 段階5のC：発話のあと目的が置かれたか（知らない語では置かれないはず）
+    res["goal_set"] = any(r.get("goal.age") not in ("", None) for r in rows[i0:])
     res["already_on_target"] = look[i0] == target
     res["n_saccades_after"] = sum(1 for r in rows[i0:] if r["cmd_h"] not in (None, ""))
     need = int(round(cfg["b_hold_s"] / dt))
@@ -208,6 +210,10 @@ def main(cfg_path, quick=False, plot_only=False):
         else:
             meta_sem = {"empty": True}
         sem.learning = False
+        # 段階5：聞き分ける係を親の話しかけで育てた耳（core_v2/tools/hear_parent.py）。無ければ何も聞き取れない
+        if cfg.get("listen_ear"):
+            meta_sem["ear"] = brain.boxes["listen"].load_ear(os.path.join(REPO, cfg["listen_ear"]))
+        brain.boxes["listen"].learning = False
         brain.boxes["orienteye"].use_ior = bool(cfg.get("use_ior", True))
         t_start = time.time()
         for scene in cfg["scenes"]:
@@ -260,9 +266,12 @@ def main(cfg_path, quick=False, plot_only=False):
             "n_reached": len(d),
             "dwell_s_median": float(np.median([t["res"]["dwell_s"] for t in sel])),
             "B_control": (sum(t["res"].get("B_control", 0) for t in sel) if cfg.get("control") else None),
+            "goal_set": sum(bool(t["res"].get("goal_set")) for t in sel),
             # 段階3の③（学ぶ前は分からない）は「B − B_control が max_diff 以下」で合格
-            "pass": ((sum(t["res"]["B"] for t in sel) - sum(t["res"].get("B_control", 0) for t in sel)
-                      <= cfg["max_diff"]) if "max_diff" in cfg
+            # 段階5のC（知らない語）は「目的が置かれた試行が0」で合格
+            "pass": ((sum(bool(t["res"].get("goal_set")) for t in sel) == 0) if cfg.get("expect_no_goal")
+                     else (sum(t["res"]["B"] for t in sel) - sum(t["res"].get("B_control", 0) for t in sel)
+                           <= cfg["max_diff"]) if "max_diff" in cfg
                      else sum(t["res"]["B"] for t in sel) >= cfg["pass_count"]) and not quick}
     # 同じ物を見た数を、言葉どうしで比べる（2026-10-16）：物 X について「X を指す言葉のとき X を見た数」
     # − 「ほかの言葉（X を control に持つ）のとき X を見た数」。B − B_control（同じ言葉で物どうし）は物の
