@@ -1,7 +1,7 @@
 """段階3の合格の線①：探し物が無いとき、物を順に見て回るか（仕様書 §2・付録A）。
 
 使い方：
-  python G/scripts/free_look_test.py G/experiments/段階3_1_自由に見る_2026-10-15.json [--quick] [--plot-only]
+  python G/scripts/free_look_test.py G/experiments/段階3_1_自由に見る_2026-10-15.json [--quick] [--plot-only] [--only ior]
 
 1試行＝親は何も言わない 10秒。段階2の2場面×10種。復帰抑制あり・なしの2回を回して並べる。
 判定（脳1回＝0.1秒ごと、「見ている」は段階2と同じく10度以内で角の小さい方）：
@@ -66,7 +66,7 @@ def plot(summary, out):
     return path
 
 
-def main(cfg_path, quick=False, plot_only=False):
+def main(cfg_path, quick=False, plot_only=False, only=None):
     with open(cfg_path, encoding="utf-8") as f:
         cfg = json.load(f)
     out = os.path.join(REPO, cfg["out"] + ("_quick" if quick else ""))
@@ -81,6 +81,8 @@ def main(cfg_path, quick=False, plot_only=False):
         brain.boxes["eyein"].setup()
     t_start = time.time()
     for cond, use_ior in CONDS.items():
+        if only and cond != only:
+            continue
         if brain is not None:
             brain.boxes["orienteye"].use_ior = use_ior
         for scene in cfg["scenes"]:
@@ -134,5 +136,7 @@ def main(cfg_path, quick=False, plot_only=False):
 
 
 if __name__ == "__main__":
-    args = [a for a in sys.argv[1:] if not a.startswith("--")]
-    main(args[0], quick="--quick" in sys.argv, plot_only="--plot-only" in sys.argv)
+    argv = sys.argv[1:]
+    only = argv[argv.index("--only") + 1] if "--only" in argv else None
+    args = [a for a in argv if not a.startswith("--") and a != only]
+    main(args[0], quick="--quick" in sys.argv, plot_only="--plot-only" in sys.argv, only=only)
