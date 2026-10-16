@@ -51,6 +51,11 @@ w=0.9×抑える強さ から、探し物らしさの下限 (m−(1−w))/w（�
   - 慣れ（馴化）は本来は大脳の働きで、上丘の係に入れるのはモデル上の選択［Tier3］。乳児が1つの物を
     見つめる時間は数秒（記憶ベース・要確認）
   - 目の入口から物が届かないとき（環境なしのテスト）は、真ん中の「場所」に印を付ける
+  - **脱馴化（2026-10-16）**：物の位置の値（合わせた地図、印を引く前）が、その物のふだん（指数移動平均
+    μ・ふだんの揺れ幅 σ）より max(DISHAB_JUMP, DISHAB_Z×σ) 以上急に上がったら、その物の印（慣れも
+    復帰抑制も）を DISHAB_KEEP 倍に下げる。光って動く妨害物は目立ちがいつも大きく揺れるので、揺れ幅で
+    割らないと印が消え続ける。乳児は、慣れた物でも動きや出方が変わると、また見るようになる（脱馴化。
+    記憶ベース・要確認）［Tier3・値は仮置き］
   - **見続ける力（2026-10-16、案D）**：慣れだけでは、撃てない時間（1.2秒）が明けた瞬間に、より目立つ
     動く妨害物（1.0）が見ている物（ボール約0.76−慣れ0.33）を上回り、見続ける時間は中央値1.2秒のまま
     だった。そこで、ほかの山が「今見ている物の値＋FIX_HOLD×(1−慣れ)×(1−GOAL_RELIEF×抑える強さ)」を
@@ -92,6 +97,10 @@ IOR_GAIN = 1.0           # 旧太郎と同じ［仮置き］
 GOAL_RELIEF = 0.7        # 目的を持って探している間に印を弱める割合［Tier3・仮置き］
 HAB_TAU = 6.0            # 見ている間に印が育つ時定数（秒）［Tier3・仮置き、①の見続けた時間で決める］
 FIX_HOLD = 1.0           # 見続ける力（慣れ0のときの上乗せ）［Tier3・仮置き］
+DISHAB_JUMP = 0.3        # 脱馴化：ふだんより何だけ上がったら「急に上がった」とするか（下限）［Tier3・仮置き］
+DISHAB_Z = 3.0           # 脱馴化：ふだんの揺れ幅の何倍上がったら、か［Tier3・仮置き］
+DISHAB_KEEP = 0.5        # 脱馴化：印を何倍に下げるか［Tier3・仮置き］
+DISHAB_ALPHA = 0.2       # ふだんの値・揺れ幅の指数移動平均の重み（1回あたり）
 LEAVE_IOR = 1.0          # 目を離した物の印の強さ（見ていた間の慣れがこれより弱ければ引き上げる）［Tier3・仮置き］
 FIX_CELLS = 3.0          # 中心が真ん中からこれ以内の物を「今見ている物」とする（約3マス≒8度）［仮置き］
 TRACK_CELLS = 1.5        # 印が物に付いていける1回の距離。妨害物は横に約12度/秒＝約0.6マス/回［仮置き］
@@ -159,6 +168,8 @@ class Orienteye(Box):
         self.last_held = False        # 記録用：今見ている物（場所）に慣れの印を育てたか
         self._attended = None         # 今注意を置いている印（次に撃つまで）
         self._held_now = None         # この回に慣れを育てた印（物が届かないときは真ん中の場所の印）
+        self._sal_hist = {}           # 脱馴化：印ごとの (ふだんの値, ふだんの揺れ幅)
+        self.n_dishab = 0             # 記録用：脱馴化が起きた回数
         self._pick_wait = 0           # 撃ったあと、着いた物を選ぶまで待つ回数
         self._aim = None              # 撃った先（網膜の座標。目の動きの地図で印と一緒にずらす）
         self.last_shift = (0.0, 0.0)  # 記録用：その回に印をずらした分（マス、行・列）
@@ -253,6 +264,22 @@ class Orienteye(Box):
         self.last_held = held is not None
         self._held_now = held
 
+    def _dishabituate(self, m: torch.Tensor) -> None:
+        """印ごとに、その位置の値のふだん（μ・σ）と比べ、急に上がったら印を弱める（脱馴化）。"""
+        hist = {}
+        for mk in self.marks:
+            r = min(max(int(round(mk[0])), 0), GRID - 1)
+            c = min(max(int(round(mk[1])), 0), GRID - 1)
+            v = float(m[r, c])
+            mu, dev = self._sal_hist.get(id(mk), (v, 0.0))
+            if v - mu >= max(DISHAB_JUMP, DISHAB_Z * dev) and id(mk) in self._sal_hist:
+                mk[2] *= DISHAB_KEEP
+                self.n_dishab += 1
+            dev = (1 - DISHAB_ALPHA) * dev + DISHAB_ALPHA * abs(v - mu)
+            mu = (1 - DISHAB_ALPHA) * mu + DISHAB_ALPHA * v
+            hist[id(mk)] = (mu, dev)
+        self._sal_hist = hist
+
     def _mark_fire(self, r: int, c: int) -> None:
         """撃った回：新しい印は置かない（着いた物には、見ている間に慣れの印が育つ）。目が動いた分は
         次の回から目の動きの地図で足す。地図が届いていないとき（環境なしのテスト）だけ、指令の分で
@@ -275,6 +302,8 @@ class Orienteye(Box):
         inhibit = float(inbox.get("gate3", 0.0))
         if self.use_ior:
             self._track(inbox.get("eyein"))
+            if m is not None and DISHAB_KEEP < 1.0:
+                self._dishabituate(m)
             self._merge()
             self._render()
             if m is not None:

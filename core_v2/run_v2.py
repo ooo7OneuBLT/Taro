@@ -135,6 +135,7 @@ def path_record(brain) -> dict[str, Any]:
     rec["orienteye.reason"] = oe.last_reason
     rec["orienteye.ior_max"] = round(float(oe.ior.max()), 3)
     rec["orienteye.ior_at_peak"] = round(oe.last_ior_at_peak, 3)
+    rec["orienteye.n_dishab"] = oe.n_dishab
     rec["orienteye.shift"] = f"{oe.last_shift[0]:.2f},{oe.last_shift[1]:.2f}"   # 印をずらした分（行,列）
     sem = brain.boxes["semantic"]
     rec["semantic.event"] = sem.last_event

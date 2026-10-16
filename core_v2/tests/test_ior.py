@@ -190,3 +190,20 @@ def test_goal_weakens_ior_on_a_seen_object():
     finally:
         oe.GOAL_RELIEF = keep
     assert float(torch.linalg.vector_norm(blocked["eyeout"])) == 0    # 弱めなければ足切りで止まる
+
+
+def test_dishabituation_on_a_sudden_rise_but_not_on_usual_flicker():
+    """物の位置の値がふだんより急に上がると印が半分になる（脱馴化）。いつも大きく揺れる物（光る妨害物）は、
+    揺れ幅で割るので印が消え続けない。"""
+    box = Orienteye(use_ior=True)
+    calm, flick = [5.0, 5.0, 0.8], [20.0, 20.0, 0.8]
+    box.marks = [calm, flick]
+    m = torch.zeros(GRID, GRID, dtype=DTYPE)
+    for t in range(30):
+        m[5, 5] = 0.2
+        m[20, 20] = 1.0 if t % 2 else 0.2
+        box._dishabituate(m)
+    assert abs(calm[2] - 0.8) < 1e-6 and abs(flick[2] - 0.8) < 1e-6
+    m[5, 5] = 0.9                       # 静かだった物が急に目立つ（親が振り始めた）
+    box._dishabituate(m)
+    assert abs(calm[2] - 0.4) < 1e-6
