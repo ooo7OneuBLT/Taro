@@ -11,14 +11,24 @@
 w=0.9×抑える強さ から、探し物らしさの下限 (m−(1−w))/w（目立ちが最大の1だった場合）を出し、
 それが 0.2 未満なら撃たない。目立ちだけの山は m ≤ 1−w なので必ず止まる。
 
-**段階3（2026-10-15）：復帰抑制（一度見た所はしばらく見ない）を足した。**生まれつきの部品
+**段階3（2026-10-15〜16）：復帰抑制（一度見た所・物はしばらく見ない）を足した。**生まれつきの部品
 （新生児からある。Valenza 1994 ほか、旧太郎 `doc/文献調査/2026-08-19_乳児のIORと馴化.md`）
-なので手で決め、学習しない。旧太郎の上丘の版（`taro_core/src/brain/midbrain/orienting.py:657-705`、
-既定OFFだった）と同じ形：
-* 「もう見た地図」self.ior（28×28）を持つ。毎回 exp(−0.1/IOR_DECAY_S) 倍に薄れる
-* どこを見るか決める前に、合わせた地図から IOR_GAIN×self.ior を引く（負は0）
-* 撃ったら、地図を目が動く分だけ逆向きにずらし（地図は網膜の座標。目を動かす指令の写しで
-  ずらす）、新しい注視点＝真ん中に高さ1・σ=IOR_SIGMA_CELLS の山を足す（1で頭打ち）
+なので手で決め、学習しない。
+* 「もう見た」の印を、場所の点（網膜の座標、行・列）と強さの組で持つ（self.marks）。強さは毎回
+  exp(−0.1/IOR_DECAY_S) 倍に薄れる。撃ったら全部の印を目が動く分だけ逆向きにずらし（目を動かす
+  指令の写しを使う）、新しい注視点＝真ん中に強さ1の印を置く
+* **印は物に付いて動く（2026-10-16、ユーザー決定）**：毎回、目の入口から届いた物ごとの山の
+  中心を見て、印から TRACK_CELLS マス以内に物があれば、印をその物の中心へ移す。物が無ければ
+  その場に残る（＝場所の印）。最初の版は網膜の場所にだけ印を付けたため、横に動き続ける妨害物が
+  自分の印の外へ逃げ、太郎は妨害物を追いかけ直し続けた（段階3①のボール右の場面 1/10）
+  - 物を見分けるのは見た目ではなく「つながって動いていること」（場所と時間の連続）。乳児は
+    物を個体として追うとき、見た目より場所と時間の連続を使う（Xu & Carey 1996 系）。妨害物は
+    点滅して見た目が変わるので、見た目で照合すると取り違える
+  - 乳児で「動く物に印が付いて動く」ことを直接確かめた文献は見つけていない（成人は Tipper 1991。
+    乳児は場所の復帰抑制が3〜6か月で整い、物の新しさを好む傾向は6か月で出る、Harman ほか 1994）。
+    逸脱リスト行き［Tier3・モデル上の選択］
+* どこを見るか決める前に、合わせた地図から「印の地図」（印ごとに高さ＝強さ・σ=IOR_SIGMA_CELLS の
+  山、重なりは大きい方）× IOR_GAIN を引く（負は0）
 use_ior=False で段階2と1ビットも変わらない。
 """
 
@@ -41,12 +51,17 @@ TICK_S = 0.1
 IOR_DECAY_S = 3.0        # 旧太郎 orienting.py:703（成人の約3秒を出発点）[Tier2〜3]
 IOR_SIGMA_CELLS = 2.0    # 旧太郎 spatial_priority_map.py の「注意の半径の半分」≒2.3マス［仮置き］
 IOR_GAIN = 1.0           # 旧太郎と同じ［仮置き］
+TRACK_CELLS = 3.0        # 印が物に付いていける1回の距離。妨害物は横に約12度/秒＝約0.6マス/回［仮置き］
+MERGE_CELLS = 1.0        # これより近い印は1つにまとめる（強い方を残す）
+MAX_MARKS = 8
+MARK_MIN = 0.02          # これより弱い印は捨てる
+
+_YS, _XS = torch.meshgrid(torch.arange(GRID, dtype=DTYPE), torch.arange(GRID, dtype=DTYPE),
+                          indexing="ij")
 
 
-def _center_bump(sigma: float = IOR_SIGMA_CELLS) -> torch.Tensor:
-    ys, xs = torch.meshgrid(torch.arange(GRID, dtype=DTYPE), torch.arange(GRID, dtype=DTYPE),
-                            indexing="ij")
-    return torch.exp(-((xs - CENTER) ** 2 + (ys - CENTER) ** 2) / (2.0 * sigma ** 2))
+def bump_at(r: float, c: float, sigma: float = IOR_SIGMA_CELLS) -> torch.Tensor:
+    return torch.exp(-((_XS - c) ** 2 + (_YS - r) ** 2) / (2.0 * sigma ** 2))
 
 
 def shift_map(m: torch.Tensor, dr: int, dc: int) -> torch.Tensor:
@@ -59,26 +74,72 @@ def shift_map(m: torch.Tensor, dr: int, dc: int) -> torch.Tensor:
     return out
 
 
+def object_centers(objs) -> list[tuple[float, float]]:
+    """目の入口の物ごとの (荷札, 地図) から、山の中心（行・列、小数）を出す。山の 0.5 以上の重心。"""
+    out = []
+    for _tag, m in objs or []:
+        if float(m.max()) <= 0.0:
+            continue
+        w = (m >= 0.5 * float(m.max())).to(DTYPE) * m
+        tot = float(w.sum())
+        out.append((float((w * _YS).sum()) / tot, float((w * _XS).sum()) / tot))
+    return out
+
+
 class Orienteye(Box):
     BOX_ID = "orienteye"
 
     def __init__(self, use_ior: bool = True) -> None:
         super().__init__()
         self.use_ior = bool(use_ior)
-        self._bump = _center_bump()
         self.reset()
 
     def reset(self) -> None:
         self.t = 0
         self.last_fire = -10 ** 9
         self.last_reason = ""     # 記録用
+        self.marks: list[list[float]] = []    # [行, 列, 強さ]（網膜の座標）
         self.ior = torch.zeros(GRID, GRID, dtype=DTYPE)
         self.last_ior_at_peak = 0.0   # 記録用：選んだマス（引く前の最大）に乗っていた印
 
+    def _render(self) -> None:
+        m = torch.zeros(GRID, GRID, dtype=DTYPE)
+        for r, c, a in self.marks:
+            m = torch.maximum(m, a * bump_at(r, c))
+        self.ior = m
+
+    def _merge(self) -> None:
+        kept: list[list[float]] = []
+        for mk in sorted(self.marks, key=lambda x: -x[2]):
+            if mk[2] < MARK_MIN:
+                continue
+            if any(math.hypot(mk[0] - k[0], mk[1] - k[1]) < MERGE_CELLS for k in kept):
+                continue
+            kept.append(mk)
+        self.marks = kept[:MAX_MARKS]
+
+    def _track(self, objs) -> None:
+        """印から TRACK_CELLS マス以内に物があれば、印をいちばん近い物の中心へ移す。"""
+        centers = object_centers(objs)
+        if not centers:
+            return
+        for mk in self.marks:
+            d, (r, c) = min((math.hypot(r - mk[0], c - mk[1]), (r, c)) for r, c in centers)
+            if d <= TRACK_CELLS:
+                mk[0], mk[1] = r, c
+
     def _mark_fire(self, r: int, c: int) -> None:
-        """撃った回：目が (r, c) へ動くので、地図を逆向きにずらして、真ん中に印を足す。"""
-        dr, dc = int(round(CENTER - r)), int(round(CENTER - c))
-        self.ior = (shift_map(self.ior, dr, dc) + self._bump).clamp(max=1.0)
+        """撃った回：目が (r, c) へ動くので、印を逆向きにずらして、真ん中に強さ1の印を置く。"""
+        dr, dc = CENTER - r, CENTER - c
+        for mk in self.marks:
+            mk[0] += dr
+            mk[1] += dc
+        self.marks = [mk for mk in self.marks
+                      if -3 * IOR_SIGMA_CELLS <= mk[0] <= GRID - 1 + 3 * IOR_SIGMA_CELLS
+                      and -3 * IOR_SIGMA_CELLS <= mk[1] <= GRID - 1 + 3 * IOR_SIGMA_CELLS]
+        self.marks.insert(0, [CENTER, CENTER, 1.0])
+        self._merge()
+        self._render()
 
     def step(self, inbox):
         out = self.passthrough()
@@ -86,7 +147,12 @@ class Orienteye(Box):
         m = inbox.get("prio")
         inhibit = float(inbox.get("gate3", 0.0))
         if self.use_ior:
-            self.ior = self.ior * math.exp(-TICK_S / IOR_DECAY_S)
+            k = math.exp(-TICK_S / IOR_DECAY_S)
+            for mk in self.marks:
+                mk[2] *= k
+            self._track(inbox.get("eyein"))
+            self._merge()
+            self._render()
             if m is not None:
                 raw_peak = int(torch.argmax(m))
                 self.last_ior_at_peak = float(self.ior.reshape(-1)[raw_peak])

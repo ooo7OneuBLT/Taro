@@ -37,6 +37,7 @@ PATH_FORMATS: dict[tuple[str, str], tuple[Fmt, int | None]] = {
     ("eyein", "gaze"): (Fmt.TAG_AND_MAP, None),     # 物ごとの荷札と場所
     ("eyein", "prio"): (Fmt.MAP, None),             # 目立ちの地図
     ("eyein", "semantic"): (Fmt.TAG_AND_MAP, None), # 段階3：名前を聞いた瞬間に見ている物（覚えるとき）
+    ("eyein", "orienteye"): (Fmt.TAG_AND_MAP, None), # 段階3：「もう見た」の印を物に付けて動かす
     ("gaze", "prio"): (Fmt.MAP, None),              # 探し物らしさの地図
     ("gaze", "goal"): (Fmt.AMOUNT, None),           # 見つけた度合い
     ("prio", "orienteye"): (Fmt.MAP, None),         # 合わせた地図

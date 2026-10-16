@@ -72,3 +72,36 @@ def test_shift_map():
     s = shift_map(m, 2, -3)
     assert float(s[7, 2]) == 1.0 and float(s.sum()) == 1.0
     assert float(shift_map(m, 0, -10).sum()) == 0.0
+
+
+def run_moving(box, ticks, speed=0.5):
+    """世界に、動く目立つ物（値1.0、行13を右へ speed マス/回）と、止まった弱い物（値0.4、行13・列6）。
+    物ごとの (荷札, 地図) も目の入口から届く形で渡す。返り値は撃った先の物の名前の列。"""
+    from core_v2.boxes.orienteye import bump_at
+    eye = [13.5, 13.5]
+    fired = []
+    for t in range(ticks):
+        mover = (13.0, 17.0 + speed * t)
+        if mover[1] > 22:                       # 端まで行ったら戻る（往復）
+            mover = (13.0, 22.0 - (mover[1] - 22.0) % 10)
+        still = (13.0, 6.0)
+        to_ret = lambda p: (p[0] - eye[0] + 13.5, p[1] - eye[1] + 13.5)
+        mr, sr = to_ret(mover), to_ret(still)
+        prio = torch.maximum(bump_at(*mr, sigma=1.0), 0.4 * bump_at(*sr, sigma=1.0))
+        objs = [(torch.zeros(64), bump_at(*mr, sigma=1.0)), (torch.zeros(64), bump_at(*sr, sigma=1.0))]
+        out = box.step({"prio": prio, "gate3": torch.zeros(()), "eyein": objs})
+        cmd = out["eyeout"]
+        if float(torch.linalg.vector_norm(cmd)) > 0:
+            dc, dr = float(cmd[0]) * 13.5, -float(cmd[1]) * 13.5
+            eye = [eye[0] + dr, eye[1] + dc]
+            dm = abs(eye[1] - mover[1]) + abs(eye[0] - mover[0])
+            ds = abs(eye[1] - still[1]) + abs(eye[0] - still[0])
+            fired.append("mover" if dm < ds else "still")
+    return fired
+
+
+def test_mark_follows_a_moving_object():
+    """動く物は印の外へ逃げない：見たあとは、止まった弱い物の方へ移る。"""
+    fired = run_moving(Orienteye(use_ior=True), 3 * REFRACTORY_TICKS + 1)
+    assert fired[0] == "mover"
+    assert "still" in fired[1:3]

@@ -5,7 +5,8 @@
 * eyein→gaze  : 物ごとの (荷札, 地図)。荷札＝見た目384を固定の乱数行列で64へ縮めて
                 L2正規化し雑音を足したもの（tagging.py）。地図＝物の中心にガウスの山
 * eyein→prio  : 目立ちの地図（28×28、0〜1）
-* eyein→semantic : gaze と同じ物ごとの (荷札, 地図)（段階3、意味の辞書が覚えるとき）
+* eyein→semantic / orienteye : gaze と同じ物ごとの (荷札, 地図)（段階3。意味の辞書が覚えるとき／
+                復帰抑制の印を物に付けて動かすとき）
 * それ以外    : 素通し（ゼロ）
 
 **仕様書 §2-2 からの変更（2026-10-15、実測による）**：仕様書は旧太郎の「物体ファイル」
@@ -116,5 +117,6 @@ class Eyein(Box):
         objs, sal = self.see(inbox[ENV])
         out["gaze"] = objs
         out["semantic"] = objs      # 段階3：意味の辞書が名前と見ている物を結び付ける
+        out["orienteye"] = objs     # 段階3：復帰抑制の印を物に付けて動かす
         out["prio"] = sal
         return out
