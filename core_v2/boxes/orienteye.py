@@ -27,6 +27,17 @@ w=0.9×抑える強さ から、探し物らしさの下限 (m−(1−w))/w（�
   - 乳児で「動く物に印が付いて動く」ことを直接確かめた文献は見つけていない（成人は Tipper 1991。
     乳児は場所の復帰抑制が3〜6か月で整い、物の新しさを好む傾向は6か月で出る、Harman ほか 1994）。
     逸脱リスト行き［Tier3・モデル上の選択］
+* **目の動いた分は、画像の中の物の動きから求める（2026-10-16、①の本番の診断から）**：最初の版は
+  撃った回に「目を動かす指令の分」だけ印をずらしたが、実際の目の跳びは指令の 0.55〜0.95 倍で、
+  印が数マスずれた所に残った。それで印が机のマスなどの近くの別の物へ移り、2回跳ぶと前の物の印は
+  ほぼ消えていた。そこで毎回、前の回と今の回の物の中心の組を見比べ、いちばん多くの物が重なる
+  ずれ（＝目が実際に動いた分。机の上の止まった物の多くは一緒にずれる）を全部の印に足す。
+  重なる物が2つ未満で決められないときは、撃った直後の1回だけ指令の分を使う。物が届かない
+  ときは前と同じく指令の分でずらす。人も目を動かしたあと、見えている物の位置で照合し直すと
+  考えられる［Tier3・モデル上の選択］
+* 印を新しく置くのは「撃った先のマス」（撃った回の座標）。その後、上のずれで目と一緒に動く
+* 印が物に付いていける1回の距離 TRACK_CELLS は 1.5 マス（目の動きを別に引いたので、物そのものの
+  動きだけ追えばよい）
 * どこを見るか決める前に、合わせた地図から「印の地図」（印ごとに高さ＝強さ・σ=IOR_SIGMA_CELLS の
   山、重なりは大きい方）× IOR_GAIN を引く（負は0）
 use_ior=False で段階2と1ビットも変わらない。
@@ -48,10 +59,14 @@ CENTER = (GRID - 1) / 2.0      # 13.5
 TICK_S = 0.1
 
 # 復帰抑制（段階3・仕様書 付録A）
-IOR_DECAY_S = 3.0        # 旧太郎 orienting.py:703（成人の約3秒を出発点）[Tier2〜3]
+IOR_DECAY_S = 8.0        # 旧太郎 orienting.py:703 は3秒（成人）。①の実測（2026-10-16）で3秒では
+                         # 1.2秒後の妨害物（目立ち1.0）に残る印0.67が、コップ（0.19）より上に残すので、
+                         # 6.4秒以上が要る。8秒にした［Tier3・仮置き］
 IOR_SIGMA_CELLS = 2.0    # 旧太郎 spatial_priority_map.py の「注意の半径の半分」≒2.3マス［仮置き］
 IOR_GAIN = 1.0           # 旧太郎と同じ［仮置き］
-TRACK_CELLS = 3.0        # 印が物に付いていける1回の距離。妨害物は横に約12度/秒＝約0.6マス/回［仮置き］
+TRACK_CELLS = 1.5        # 印が物に付いていける1回の距離。妨害物は横に約12度/秒＝約0.6マス/回［仮置き］
+MATCH_CELLS = 1.0        # 目の動いた分を求めるとき、これより近ければ「同じ物が重なった」とみる
+MIN_MATCH = 2            # 重なる物がこれ未満なら、画像からは目の動きを決めない
 MERGE_CELLS = 1.0        # これより近い印は1つにまとめる（強い方を残す）
 MAX_MARKS = 8
 MARK_MIN = 0.02          # これより弱い印は捨てる
@@ -86,6 +101,34 @@ def object_centers(objs) -> list[tuple[float, float]]:
     return out
 
 
+def estimate_shift(prev, cur):
+    """前の回と今の回の物の中心の組から、いちばん多くの物が重なるずれ (行, 列) と重なった数を返す。
+    同じ数なら、重なりの距離の合計が小さい方。"""
+    if not prev or not cur:
+        return (0.0, 0.0), 0
+    cands = {(0.0, 0.0)} | {(c[0] - p[0], c[1] - p[1]) for p in prev for c in cur}
+    best, best_key = (0.0, 0.0), (0, 0.0)
+    for dr, dc in cands:
+        n, err = 0, 0.0
+        for p in prev:
+            d = min(math.hypot(p[0] + dr - c[0], p[1] + dc - c[1]) for c in cur)
+            if d <= MATCH_CELLS:
+                n += 1
+                err += d
+        key = (n, -err)
+        if key > best_key:
+            best, best_key = (dr, dc), key
+    if best_key[0] >= MIN_MATCH:
+        # 重なった組の平均でならす
+        pairs = []
+        for p in prev:
+            d, c = min((math.hypot(p[0] + best[0] - c[0], p[1] + best[1] - c[1]), c) for c in cur)
+            if d <= MATCH_CELLS:
+                pairs.append((c[0] - p[0], c[1] - p[1]))
+        best = (sum(x for x, _ in pairs) / len(pairs), sum(y for _, y in pairs) / len(pairs))
+    return best, best_key[0]
+
+
 class Orienteye(Box):
     BOX_ID = "orienteye"
 
@@ -101,6 +144,9 @@ class Orienteye(Box):
         self.marks: list[list[float]] = []    # [行, 列, 強さ]（網膜の座標）
         self.ior = torch.zeros(GRID, GRID, dtype=DTYPE)
         self.last_ior_at_peak = 0.0   # 記録用：選んだマス（引く前の最大）に乗っていた印
+        self._prev_centers = None     # 前の回の物の中心（目の動いた分を求める）
+        self._pending = None          # 撃った直後：まだ画像で確かめていない指令の分 (行, 列, 残り回数)
+        self.last_shift = (0.0, 0.0)  # 記録用：その回に印をずらした分
 
     def _render(self) -> None:
         m = torch.zeros(GRID, GRID, dtype=DTYPE)
@@ -118,26 +164,52 @@ class Orienteye(Box):
             kept.append(mk)
         self.marks = kept[:MAX_MARKS]
 
-    def _track(self, objs) -> None:
-        """印から TRACK_CELLS マス以内に物があれば、印をいちばん近い物の中心へ移す。"""
-        centers = object_centers(objs)
-        if not centers:
-            return
+    def _shift_marks(self, dr: float, dc: float) -> None:
+        lim = 3 * IOR_SIGMA_CELLS
         for mk in self.marks:
+            mk[0] += dr
+            mk[1] += dc
+        self.marks = [mk for mk in self.marks
+                      if -lim <= mk[0] <= GRID - 1 + lim and -lim <= mk[1] <= GRID - 1 + lim]
+        self.last_shift = (dr, dc)
+
+    def _track(self, objs) -> None:
+        """目の動いた分だけ印をずらし、そのあと印から TRACK_CELLS マス以内の物の中心へ移す。"""
+        self.last_shift = (0.0, 0.0)
+        if objs is None:
+            return
+        centers = object_centers(objs)
+        prev, self._prev_centers = self._prev_centers, centers
+        (dr, dc), n = estimate_shift(prev, centers)
+        if n >= MIN_MATCH:
+            if abs(dr) + abs(dc) > 0:
+                self._shift_marks(dr, dc)
+            if self._pending is not None and math.hypot(dr, dc) >= 1.0:
+                self._pending = None          # 目が動いたのを画像で確かめた
+        elif self._pending is not None:
+            self._shift_marks(*self._pending[:2])
+            self._pending = None
+        if self._pending is not None:
+            # 目が動くのは撃った次の回の画像から（脳は1回遅れで受け取る）。3回待って動かなければ忘れる
+            self._pending = (self._pending[0], self._pending[1], self._pending[2] - 1)
+            if self._pending[2] <= 0:
+                self._pending = None
+        for mk in self.marks:
+            if not centers:
+                break
             d, (r, c) = min((math.hypot(r - mk[0], c - mk[1]), (r, c)) for r, c in centers)
             if d <= TRACK_CELLS:
                 mk[0], mk[1] = r, c
 
     def _mark_fire(self, r: int, c: int) -> None:
-        """撃った回：目が (r, c) へ動くので、印を逆向きにずらして、真ん中に強さ1の印を置く。"""
+        """撃った回：撃った先 (r, c) に強さ1の印を置く。目が動いた分は、物が届いていれば
+        次の回から画像で求めて足す（_track）。物が届いていなければ指令の分でずらす。"""
+        self.marks.insert(0, [float(r), float(c), 1.0])
         dr, dc = CENTER - r, CENTER - c
-        for mk in self.marks:
-            mk[0] += dr
-            mk[1] += dc
-        self.marks = [mk for mk in self.marks
-                      if -3 * IOR_SIGMA_CELLS <= mk[0] <= GRID - 1 + 3 * IOR_SIGMA_CELLS
-                      and -3 * IOR_SIGMA_CELLS <= mk[1] <= GRID - 1 + 3 * IOR_SIGMA_CELLS]
-        self.marks.insert(0, [CENTER, CENTER, 1.0])
+        if self._prev_centers is None:
+            self._shift_marks(dr, dc)
+        else:
+            self._pending = (dr, dc, 3)
         self._merge()
         self._render()
 
