@@ -19,6 +19,13 @@
 こうすると「今見えている物」だけが出る。20コマで3つの物は毎コマ取れた（points_per_side=12）。
 机のマスなども物として出るので、物が MAX_OBJECTS（8）を超えたら目立ちの高い順に残す。
 
+**軽くする（段階3、2026-10-16、ユーザー承認「両方やる」）**：全体の切り出し（MobileSAM、
+1回 約0.4秒）は DETECT_EVERY（3）回に1回だけ。間の回は、前の回の物ごとに、前の位置の
+まわり ±TRACK_PATCHES マス（DINOv2 の 16×16 マス、1マス14画素）で見た目が一番似たマスを
+探し、前の回からそのマスがずれた分だけ位置を動かす（見た目の荷札はそのまま使う）。見た目が SAME_COS 未満なら見失った
+として落とす。画面全体が前の回と大きく変わったとき（目が跳んだとき）は、間の回でも全体を
+切り出し直す。DINOv2 と目立ちの地図は毎回計算する（軽い）。
+
 環境からの入力（inbox[ENV]）：左目の画像（224×224×3、uint8）。
 setup() を呼ぶまでは素通し（骨組みのテストは重い視覚を作らずに回る）。
 """
@@ -51,6 +58,10 @@ DEFAULT_CONFIG = {
     "gaze_from_attention": False,   # 目を動かすのは orienteye 箱だけ（仕様書 §2-2）
 }
 BUMP_SIGMA_CELLS = 1.0
+DETECT_EVERY = 3          # 全体の切り出しを何回に1回にするか（1＝毎回、段階2と同じ）
+TRACK_PATCHES = 2         # 間の回に物を探す範囲（DINOv2 のマス、±）
+SAME_COS = 0.6            # これ未満なら見失った［仮置き］
+SCENE_SAME_COS = 0.9      # 画面全体の似かたがこれ未満なら目が跳んだとみて切り出し直す［仮置き］
 
 
 def bump(cx_px: float, cy_px: float, sigma: float = BUMP_SIGMA_CELLS) -> torch.Tensor:
@@ -62,13 +73,65 @@ def bump(cx_px: float, cy_px: float, sigma: float = BUMP_SIGMA_CELLS) -> torch.T
     return torch.as_tensor(m, dtype=DTYPE)
 
 
+def normalize_rows(p: np.ndarray) -> np.ndarray:
+    return p / np.maximum(np.linalg.norm(p, axis=1, keepdims=True), 1e-8)
+
+
+def scene_similarity(a: np.ndarray, b: np.ndarray) -> float:
+    """同じ場所のマスどうしの見た目の似かた（cos）の平均。目が跳ぶと下がる。"""
+    return float(np.mean(np.sum(a * b, axis=1)))
+
+
+def _match_center(a, feats, n, ci, cj, radius):
+    """(ci, cj) のまわり ±radius マスで見た目 a に一番近いマス群の重心（マス単位）と最高の cos。"""
+    cells = [(i, j) for i in range(max(ci - radius, 0), min(ci + radius, n - 1) + 1)
+             for j in range(max(cj - radius, 0), min(cj + radius, n - 1) + 1)]
+    cos = np.array([float(feats[i * n + j] @ a) for i, j in cells])
+    best = float(cos.max())
+    keep = cos >= best - 0.05
+    w = cos[keep] - (best - 0.05) + 1e-3
+    ii = np.array([c[0] for c in cells], dtype=np.float64)[keep]
+    jj = np.array([c[1] for c in cells], dtype=np.float64)[keep]
+    return float(np.sum(w * ii) / w.sum()), float(np.sum(w * jj) / w.sum()), best
+
+
+def track(prev_dets: list[dict], feats: np.ndarray, n: int, prev_feats: np.ndarray | None = None,
+          radius: int = TRACK_PATCHES, same_cos: float = SAME_COS) -> list[dict]:
+    """前の回の物を、今の DINOv2 のマス（正規化済み、(n*n, 384)）の中で探し直す。
+    前の位置のまわり ±radius マスで、物の見た目との cos が最高に近いマスの重心を求め、
+    前の回の画像で同じように求めた重心からのずれだけ位置を動かす（止まっている物は動かない）。
+    最高の cos が same_cos 未満なら見失ったとして落とす。"""
+    scale = 224.0 / n
+    out = []
+    for d in prev_dets:
+        a = np.asarray(d["appearance"], dtype=np.float32)
+        a = a / max(float(np.linalg.norm(a)), 1e-8)
+        ci = min(max(int(d["pos"][1] // scale), 0), n - 1)
+        cj = min(max(int(d["pos"][0] // scale), 0), n - 1)
+        ni, nj, best = _match_center(a, feats, n, ci, cj, radius)
+        if best < same_cos:
+            continue
+        if prev_feats is not None:
+            pi, pj, _ = _match_center(a, prev_feats, n, ci, cj, radius)
+        else:
+            pi, pj = d["pos"][1] / scale - 0.5, d["pos"][0] / scale - 0.5
+        cx = float(min(max(d["pos"][0] + (nj - pj) * scale, 0.0), 223.0))
+        cy = float(min(max(d["pos"][1] + (ni - pi) * scale, 0.0), 223.0))
+        nd = dict(d)
+        nd["pos"] = (cx, cy)
+        out.append(nd)
+    return out
+
+
 class Eyein(Box):
     BOX_ID = "eyein"
 
-    def __init__(self) -> None:
+    def __init__(self, detect_every: int = DETECT_EVERY) -> None:
         super().__init__()
         self.va = None
+        self.detect_every = int(detect_every)
         self.last_dets: list[dict] = []   # 記録用（その回の切り出し結果）
+        self.reset()
 
     def setup(self, config: dict | None = None) -> None:
         """旧太郎の VisualAttention を、Taro を作らずに直接作る（DINOv2・MobileSAM を読む）。"""
@@ -86,6 +149,9 @@ class Eyein(Box):
             # 目立ちの地図は前のコマとの差（動き）を持つので、試行の頭で前のコマを捨てる
             self.va._sal._prev_gray = None
         self.last_dets = []
+        self._since_detect = 0
+        self._prev_feats = None
+        self.last_mode = ""       # 記録用："detect"（全体を切り出した）／"track"（前の物を追った）
 
     def see(self, img) -> tuple[list, torch.Tensor]:
         va = self.va
@@ -98,8 +164,20 @@ class Eyein(Box):
         sal = va._sal.update(img224, (0.0, 0.0), False)["salience"]
         sal = np.clip(np.nan_to_num(np.asarray(sal, dtype=np.float32)), 0.0, 1.0)
         p, n = va._patch_features(va._model, img224, va.device)
-        dets = va._detect(p, n, img=img224, mask_generator=va._mgen,
-                          cohesion_gap_px=self.cohesion_gap_px)
+        feats = normalize_rows(np.asarray(p, dtype=np.float32))
+        prev_feats = self._prev_feats
+        jumped = prev_feats is not None and scene_similarity(feats, prev_feats) < SCENE_SAME_COS
+        self._prev_feats = feats
+        if (not self.last_dets or jumped or self.detect_every <= 1
+                or self._since_detect + 1 >= self.detect_every):
+            dets = va._detect(p, n, img=img224, mask_generator=va._mgen,
+                              cohesion_gap_px=self.cohesion_gap_px)
+            self._since_detect = 0
+            self.last_mode = "detect"
+        else:
+            dets = track(self.last_dets, feats, n, prev_feats)
+            self._since_detect += 1
+            self.last_mode = "track"
         step = 224.0 / GRID
         for d in dets:
             c = int(min(max(d["pos"][0] // step, 0), GRID - 1))
