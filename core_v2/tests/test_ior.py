@@ -41,9 +41,9 @@ def test_without_ior_goes_back_to_the_same_peak():
 
 def test_ior_moves_on_to_the_second_peak():
     box = Orienteye(use_ior=True)
-    fired = run(box, two_peaks(), 2 * REFRACTORY_TICKS + 1)
+    fired = run(box, two_peaks(), 4 * REFRACTORY_TICKS)
     cols = [c for _, c in fired]
-    assert cols[:2] == [19, 8]          # 見た所には印があるので、2番目の山へ移る
+    assert cols[:2] == [19, 8]          # 見ているうちに慣れて、2番目の山へ移る
 
 
 def test_ior_fades_and_allows_return():
@@ -55,15 +55,22 @@ def test_ior_fades_and_allows_return():
 
 
 def test_mark_shifts_with_the_eye():
+    """見ている間は真ん中（の場所）に慣れの印が育ち、撃つと（目の動きの地図が無いので指令の分）
+    離れた場所に残る＝復帰抑制。"""
+    from core_v2.boxes.orienteye import HAB_TAU
     box = Orienteye(use_ior=True)
-    box._mark_fire(13, 19)            # 右へ約6マス跳んだ：印は真ん中
+    for _ in range(20):                # 2秒見る
+        box._track(None)
+    box._merge()
+    box._render()
     r, c = divmod(int(torch.argmax(box.ior)), GRID)
     assert (r, c) in {(13, 13), (13, 14), (14, 13), (14, 14)}
-    box._mark_fire(13, 8)             # 左へ約6マス跳んだ：前の印は右へ約6マスずれる
-    right = box.ior.clone()
-    right[:, :18] = 0
-    r, c = divmod(int(torch.argmax(right)), GRID)
-    assert 18 <= c <= 21 and float(right.max()) > 0.9
+    import math
+    assert abs(float(box.ior.max()) - (1 - math.exp(-2.0 / HAB_TAU))) < 0.05
+    box._mark_fire(13, 19)             # 右へ約6マス跳んだ：見ていた所の印は左へ約6マスずれる
+    left = box.ior.clone()
+    r, c = divmod(int(torch.argmax(left)), GRID)
+    assert 7 <= c <= 9 and float(left.max()) > 0.2
 
 
 def test_shift_map():
@@ -102,14 +109,14 @@ def run_moving(box, ticks, speed=0.5):
 
 def test_mark_follows_a_moving_object():
     """動く物は印の外へ逃げない：見たあとは、止まった弱い物の方へ移る。"""
-    fired = run_moving(Orienteye(use_ior=True), 3 * REFRACTORY_TICKS + 1)
+    fired = run_moving(Orienteye(use_ior=True), 20 * REFRACTORY_TICKS, speed=0.1)
     assert fired[0] == "mover"
-    assert "still" in fired[1:3]
+    assert "still" in fired           # 動く物に慣れが育って、やがて止まった弱い物へ移る
 
 
 def test_mark_stays_on_target_when_the_eye_undershoots():
     """目の跳びが指令より小さくても（0.6倍）、目の動きの地図（実際に目が動いた分）で印をずらすので、
-    印は撃った先の物に残る。まわりに机のマスのような小さな物があっても移らない
+    着いた物に慣れの印が育つ（作り直し：撃った先に印を置かず、見ている物に育てる）。まわりに机のマスのような小さな物があっても移らない
     （段階3①の診断と作り直し、2026-10-16）。目の動きの地図は、目の入口と同じく1回遅れで届く。"""
     from core_v2.boxes.eyein import ego_map
     from core_v2.boxes.orienteye import bump_at
@@ -140,12 +147,15 @@ def test_mark_stays_on_target_when_the_eye_undershoots():
     cmd = out["eyeout"]
     assert float(torch.linalg.vector_norm(cmd)) > 0     # 目立つ target へ撃つ
     eye[1] += 0.6 * float(cmd[0]) * 13.5                # 指令の 0.6 倍しか動かない
-    for _ in range(4):
+    box.last_fire = box.t + 100              # しばらく撃たせない（見続ける）
+    for _ in range(12):
         _, ret = step()
     tr, tc = ret["target"]
-    assert float(box.ior[round(tr), round(tc)]) > 0.9   # 着いた物に印が残る
+    r, c = divmod(int(torch.argmax(box.ior)), GRID)
+    assert abs(r - tr) <= 1 and abs(c - tc) <= 1         # 慣れの印は着いた物に育つ
+    assert float(box.ior[round(tr), round(tc)]) > 0.1   # 約1秒見て 1−exp(−1/HAB_TAU)（6秒で≒0.15）
     cr, cc = ret["clutter1"]
-    assert float(box.ior[round(cr), round(cc)]) < 0.5   # 近くの小さな物へは移らない
+    assert float(box.ior[round(cr), round(cc)]) < 0.1   # 近くの小さな物へは移らない
 
 
 def test_ego_map_shifts_marks_by_the_real_eye_motion():
