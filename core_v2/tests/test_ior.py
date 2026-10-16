@@ -194,16 +194,19 @@ def test_goal_weakens_ior_on_a_seen_object():
 
 def test_dishabituation_on_a_sudden_rise_but_not_on_usual_flicker():
     """物の位置の値がふだんより急に上がると印が半分になる（脱馴化）。いつも大きく揺れる物（光る妨害物）は、
-    揺れ幅で割るので印が消え続けない。"""
+    揺れ幅で割るので印が消え続けない（揺れ幅を覚えるまでの最初の数回だけは下がることがある）。"""
     box = Orienteye(use_ior=True)
     calm, flick = [5.0, 5.0, 0.8], [20.0, 20.0, 0.8]
     box.marks = [calm, flick]
     m = torch.zeros(GRID, GRID, dtype=DTYPE)
-    for t in range(30):
+    for t in range(40):
         m[5, 5] = 0.2
         m[20, 20] = 1.0 if t % 2 else 0.2
         box._dishabituate(m)
-    assert abs(calm[2] - 0.8) < 1e-6 and abs(flick[2] - 0.8) < 1e-6
+        if t == 9:
+            after_warmup = flick[2]
+    assert abs(calm[2] - 0.8) < 1e-6
+    assert flick[2] == after_warmup and flick[2] > 0.1
     m[5, 5] = 0.9                       # 静かだった物が急に目立つ（親が振り始めた）
     box._dishabituate(m)
     assert abs(calm[2] - 0.4) < 1e-6
