@@ -31,6 +31,7 @@ for _p in (REPO, os.path.join(REPO, "run"), os.path.join(REPO, "run", "world"),
 
 K = 10                 # 脳1回あたりの環境の歩数（trainer.py:49）
 DT = 0.01              # 環境1歩の秒数（run/config.py:424-427）
+START_JITTER = 0.15     # 試行の頭の目のずれ：±0.15＝視野の片側30度の15%＝約±4.5度
 OBJECTS = {"ball": "test_object1", "cup": "test_object2", "distractor": "test_object3"}
 
 
@@ -143,16 +144,31 @@ def path_record(brain) -> dict[str, Any]:
 def run_trial(brain, env, *, seed: int, duration_s: float = 10.0,
               on_tick: Callable[[dict[str, Any]], None] | None = None,
               manual_eye: Callable[[int, Any], tuple[float, float] | None] | None = None,
-              use_brain: bool = True) -> list[dict[str, Any]]:
+              use_brain: bool = True, start_jitter: float = START_JITTER) -> list[dict[str, Any]]:
     """1試行を回し、脳1回ごとの記録（辞書）の列を返す。
 
     manual_eye : 確かめ用。(tick 番号, 脳が出した方向 or None) を受けて、目へ入れる方向（None なら入れない）を返す。
                  脳の方向を握りつぶす・差し替える・そのまま通すのどれもできる
     use_brain  : False なら脳を回さない（環境だけ・確かめ用）
+    start_jitter : 試行の頭で、目を種ごとに決まった少しずれた向きへ1回跳ばす大きさ（[-1,1]の方向の幅）。
+                 0 なら跳ばさない
+
+    **段階3の確かめで見つけた不具合（2026-10-16）**：前の試行の最後に出した目の指令が、反応の遅れの
+    ぶん実行されないまま、目の仕組みの控え（_orienting._map_target）に残り、次の試行の頭で撃たれて
+    いた（env.reset が控えを消さない。taro_core/src/brain/midbrain/orienting.py:1003 の reset()）。
+    そのうえ種は荷札の雑音にしか効かず、試行はほぼ「前の試行の終わり方」で決まっていた
+    （段階2の合格テスト・段階3の①で、1つの場面あたり1〜3通りの試行しか無かった）。
+    直し：試行の頭で控えを消し、種から決めた少しずれた向きへ目を1回跳ばしてから始める
+    （乳児も毎回同じ所を見て始めるわけではない）。taro_core は触らない。
     """
     seed_all(seed)
     obs, _ = env.reset(seed=seed)
     u = env.unwrapped
+    u._orienting._map_target = None
+    if start_jitter > 0:
+        g = np.random.default_rng(10_000 + int(seed))
+        h, v = g.uniform(-start_jitter, start_jitter, size=2)
+        u._orienting.set_map_target(float(h), float(v))
     brain.reset()
     R0 = frame_at(env)
     act = zero_action(env)

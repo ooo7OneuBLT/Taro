@@ -104,6 +104,7 @@ def main(argv=None):
             run_v2.seed_all(seed)
             obs, _ = env.reset(seed=seed)
             u = env.unwrapped
+            u._orienting._map_target = None    # 前の試行の目の指令を持ち越さない（run_v2.run_trial の説明）
             brain.reset()                      # 意味の辞書の表 W は消えない
             act = run_v2.zero_action(env)
             n_ticks = int(round(TRIAL_S / (run_v2.K * run_v2.DT)))
