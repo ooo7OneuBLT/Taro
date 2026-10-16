@@ -264,6 +264,18 @@ def main(cfg_path, quick=False, plot_only=False):
             "pass": ((sum(t["res"]["B"] for t in sel) - sum(t["res"].get("B_control", 0) for t in sel)
                       <= cfg["max_diff"]) if "max_diff" in cfg
                      else sum(t["res"]["B"] for t in sel) >= cfg["pass_count"]) and not quick}
+    # 同じ物を見た数を、言葉どうしで比べる（2026-10-16）：物 X について「X を指す言葉のとき X を見た数」
+    # − 「ほかの言葉（X を control に持つ）のとき X を見た数」。B − B_control（同じ言葉で物どうし）は物の
+    # 目立ちの差を拾うので（③の空の辞書でボール 11・コップ 1）、言葉の効果だけを見るためにこちらも並べる
+    if cfg.get("control"):
+        cross = {}
+        for word, obj in cfg["words"].items():
+            others = [w for w, c in cfg["control"].items() if c == obj and w != word]
+            hit = sum(t["res"]["B"] for t in trials if t["word"] == word)
+            base = sum(t["res"].get("B_control", 0) for t in trials if t["word"] in others)
+            cross[obj] = {"言われた言葉": word, "その言葉のとき見た": hit,
+                          "ほかの言葉のとき見た": base, "差": hit - base}
+        summary["same_object_across_words"] = cross
     for t in trials:
         summary["trials"].append({k: t[k] for k in ("scene", "word", "seed", "csv")} | t["res"])
     with open(os.path.join(out, "summary.json"), "w", encoding="utf-8") as f:
@@ -276,6 +288,9 @@ def main(cfg_path, quick=False, plot_only=False):
         w.writerows(summary["trials"])
     paths = plot(trials, cfg, out)
     print(json.dumps(summary["per_word"], ensure_ascii=False, indent=1))
+    if "same_object_across_words" in summary:
+        print("同じ物を見た数の、言葉どうしの差:")
+        print(json.dumps(summary["same_object_across_words"], ensure_ascii=False, indent=1))
     print("絵:", *paths, sep="\n  ")
 
 
