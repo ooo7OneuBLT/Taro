@@ -67,6 +67,8 @@ MOVE_WINDOW = 10         # 一緒に動いたかを見る回数（1秒）
 MOVE_MIN = 0.15          # 1回あたりの平均の動き（マス）がこれ以上で「動いた」［Tier3・仮置き］
 COMOVE_COS = 0.7         # 2つのかけらの動きの向きの揃い方（窓の中の内積の正規化）［Tier3・仮置き］
 EGO_STILL = 0.5          # 目の動きがこれ（マス）を超えた回は、物の動きに数えない（サッカード抑制）
+ATTACH_CELLS = 3.0       # 追っている物のかけらからこれ以内に現れたかけらは、その物の一部（約8度）［Tier3・仮置き］
+ABSENT_TICKS = 3         # これだけ見えていない行は、新しい物に席を譲る（目の入口の切り出しは3回に1回）
 MIN_LOOK_S = 1.0         # 名前を結び付けるには、少なくともこれだけ続けて見ていた行［Tier3・仮置き］
 
 _YS, _XS = torch.meshgrid(torch.arange(GRID, dtype=DTYPE), torch.arange(GRID, dtype=DTYPE),
@@ -183,15 +185,18 @@ class Objfile(Box):
         self.last_merges: list[tuple[int, int]] = []
 
     # ---- 行とかけら ----
-    def _new_row(self, part: Part) -> Row | None:
+    def _new_row(self, part: Part, captured: bool = True) -> Row | None:
+        """新しい物に行を作る。席（MAX_ROWS）が埋まっていれば、もう見えなくなった行（ABSENT_TICKS 回以上
+        見えていない行。印の無い行を優先し、その中で一番長く見えていない行）と入れ替える。今見えている物の
+        行は、新しく現れた物に席を譲らない（追っている物は、余分な物が現れても追い続ける）。
+        ただし注意を向けた先（captured＝撃った先・真ん中）の物は、見えている行とも入れ替えて席を取る。"""
         if len(self.rows) >= MAX_ROWS:
-            # 空ける行：まだ見ていない（印の無い）行を優先し、その中で一番長く見えていない行
             cands = [rw for rw in self.rows if rw is not self.attended and rw is not self.named]
+            if not captured:
+                cands = [rw for rw in cands if self.t - rw.last_seen >= ABSENT_TICKS]
             if not cands:
                 return None
             victim = min(cands, key=lambda rw: (rw.strength >= MARK_MIN, rw.last_seen))
-            if victim.strength >= MARK_MIN and victim.last_seen == self.t:
-                return None        # 全部いま見えていて印もある：新しい物は名簿に入らない
             self.rows.remove(victim)
         row = Row(part, self._next_number)
         self._next_number += 1
@@ -241,9 +246,21 @@ class Objfile(Box):
             if j not in used_p:
                 p.moves.append(None)
             del p.moves[:-MOVE_WINDOW]
+        ar, ac = self._aim if self._aim is not None else (CENTER, CENTER)
         for i, ((r, c), tag) in enumerate(dets):
-            if i not in used_d:
-                self._new_row(Part(r, c, tag, self.t))
+            if i in used_d:
+                continue
+            part = Part(r, c, tag, self.t)
+            # 追っている物のすぐそば（ATTACH_CELLS 以内）に現れたかけらは、その物の一部とする
+            # （接している面は1つの物＝まとまりの原則。目が物を割っても、割れたかけらは同じ行に入る）
+            near = [(math.hypot(r - q.r, c - q.c), rw) for rw, q in self._parts()
+                    if not rw.place_only()]
+            d, rw = min(near, key=lambda x: x[0], default=(99.0, None))
+            if rw is not None and d <= ATTACH_CELLS:
+                part.moves = [None] * len(rw.parts[0].moves)
+                rw.parts.append(part)
+                continue
+            self._new_row(part, captured=math.hypot(r - ar, c - ac) <= FIX_CELLS)
 
     def _forget(self) -> None:
         """視野の中で KEEP_S 見えないかけら・視野の外へ出すぎたかけらを消す。かけらの無い行も消す。"""

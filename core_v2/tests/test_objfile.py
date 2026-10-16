@@ -65,9 +65,9 @@ def shaking(of, ticks, parts, others=(), still_parts=False):
 def test_split_pieces_that_move_together_become_one_row():
     """コップが胴と底の線に割れていても、親が振って一緒に動けば1行にまとまる。止まったボールはまとめない。"""
     of = Objfile()
-    shaking(of, 3, [(1, 12, 14), (2, 14.5, 14)], others=[(3, 13, 17)], still_parts=True)
+    shaking(of, 3, [(1, 12, 14), (2, 15.5, 14)], others=[(3, 13, 17)], still_parts=True)
     assert len(of.rows) == 3
-    shaking(of, 20, [(1, 12, 14), (2, 14.5, 14)], others=[(3, 13, 17)])
+    shaking(of, 20, [(1, 12, 14), (2, 15.5, 14)], others=[(3, 13, 17)])
     assert len(of.rows) == 2 and of.n_merge == 1
     cup = [rw for rw in of.rows if len(rw.parts) == 2][0]
     want = torch.nn.functional.normalize(
@@ -75,9 +75,30 @@ def test_split_pieces_that_move_together_become_one_row():
     assert float(cup.tag @ want) > 0.99      # 見た目は2つのかけらの平均
 
 
+def test_touching_pieces_are_one_row_from_the_start():
+    """目が物を2つのかけらに割っても、接している（ATTACH_CELLS 以内）かけらは最初から同じ行（まとまり）。"""
+    of = Objfile()
+    shaking(of, 5, [(1, 12, 14), (2, 14.5, 14)], others=[(3, 13, 20)], still_parts=True)
+    assert len(of.rows) == 2 and max(len(rw.parts) for rw in of.rows) == 2
+
+
+def test_tracked_objects_keep_their_seats():
+    """席が埋まっていると、視野の端に現れた余分な物は、見えている物の席を奪わない。
+    真ん中（注意を向けた先）に現れた物は席を取る。"""
+    of = Objfile()
+    four = [(s, 5 + 6 * (s % 2), 3 + 6 * s) for s in range(4)]
+    for _ in range(3):
+        of.step({"eyein": objs(four), "orienteye": ZERO2})
+    n = numbers(of)
+    of.step({"eyein": objs(four + [(9, 26, 26)]), "orienteye": ZERO2})
+    assert numbers(of) == n
+    of.step({"eyein": objs(four + [(10, 13.5, 13.5)]), "orienteye": ZERO2})
+    assert len(of.rows) == MAX_ROWS and numbers(of) != n
+
+
 def test_still_neighbours_are_not_merged():
     of = Objfile()
-    shaking(of, 30, [(1, 12, 14), (2, 14.5, 14)], still_parts=True)
+    shaking(of, 30, [(1, 12, 14), (2, 15.5, 14)], still_parts=True)
     assert len(of.rows) == 2 and of.n_merge == 0
 
 
@@ -97,7 +118,7 @@ def test_eye_motion_is_not_object_motion():
     for t in range(30):
         d = 3.0 if t % 2 else -3.0                       # 中身が左右へ3マスずつずれる
         col += d
-        of.step({"eyein": objs([(1, 12, col), (2, 14.5, col)], ego=(0.8 * 8.0 * d, 0.0)),
+        of.step({"eyein": objs([(1, 12, col), (2, 15.5, col)], ego=(0.8 * 8.0 * d, 0.0)),
                  "orienteye": ZERO2})
     assert len(of.rows) == 2 and of.n_merge == 0
     import core_v2.boxes.objfile as m
@@ -108,7 +129,7 @@ def test_eye_motion_is_not_object_motion():
         for t in range(30):
             d = 3.0 if t % 2 else -3.0
             col += d
-            of.step({"eyein": objs([(1, 12, col), (2, 14.5, col)], ego=(0.8 * 8.0 * d, 0.0)),
+            of.step({"eyein": objs([(1, 12, col), (2, 15.5, col)], ego=(0.8 * 8.0 * d, 0.0)),
                      "orienteye": ZERO2})
         assert of.n_merge == 1
     finally:
