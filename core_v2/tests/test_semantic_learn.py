@@ -51,9 +51,12 @@ def test_two_words_are_not_mixed_up():
     torch.manual_seed(0)
     ball, cup = appearance(1), appearance(2)
     box = Semantic(learning=True)
+    silent = torch.zeros(TAG_DIM)
     for _ in range(5):
-        name(box, BALL, look(ball))
-        name(box, CUP, look(cup))
+        for g, w in ((ball, BALL), (cup, CUP)):
+            for _ in range(8):                 # 名前の前に1秒ほどその物を見ている
+                box.step({"listen": silent, "eyein": look(g)})
+            name(box, w, look(g))
     assert float(box.recall(BALL) @ ball) > 0.95
     assert float(box.recall(CUP) @ cup) > 0.95
     assert float(box.recall(CUP) @ ball) < 0.5
@@ -111,3 +114,20 @@ def test_learns_an_object_a_little_off_center():
     far = Semantic(learning=True)
     name(far, BALL, [(noisy(a), bump(112.0 + 40.0, 112.0))])
     assert int(far.n_learn) == 0
+
+
+def test_word_binds_to_the_object_attended_just_before():
+    """コップを0.8秒見ていて、名前が届く2回前（語は耳から2回遅れで届く）にボールへ跳んでも、
+    名前は直前に一番長く見ていたコップに結び付く。reset で窓は空になる。"""
+    torch.manual_seed(1)
+    ball, cup = appearance(3), appearance(4)
+    box = Semantic(learning=True)
+    silent = torch.zeros(TAG_DIM)
+    for _ in range(8):
+        box.step({"listen": silent, "eyein": look(cup)})
+    box.step({"listen": silent, "eyein": look(ball)})      # 親が言った回のあと、目はボールへ
+    box.step({"listen": CUP, "eyein": look(ball)})         # 2回遅れで「こっぷ」が届く
+    assert int(box.n_learn) == 1
+    assert float(make_tag(box.W @ CUP) @ cup) > 0.9 and float(make_tag(box.W @ CUP) @ ball) < 0.5
+    box.reset()
+    assert box.attended_tag() is None

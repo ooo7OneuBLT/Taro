@@ -6,6 +6,12 @@
   物のうち、山の頂点が視野の真ん中から LEARN_RADIUS（3マス≒8度。2026-10-16 に 4×4 マスから広げた）以内にある物の
   荷札 a を探し、W += ETA × a qᵀ。真ん中に物が無ければ覚えない。1つの発話で1回だけ
   （q は発話のあった1回だけ届く。続けて届いたら最初の回だけ覚える）
+* **覚える物は「聞く直前に一番長く真ん中にあった物」（2026-10-16）**：毎回、真ん中の物の荷札を
+  直前 LEARN_WINDOW 回分（1秒）覚えておき、語が届いた回に、その中で一番多く真ん中にあった物
+  （同じ物かは荷札の cos ≥ SAME_OBJ_COS でまとめる）の荷札の平均で覚える。親の決まり（3秒見たら言う）と
+  太郎が見続けて離れる時間（約3秒）が重なり、聞いた次の回にはもう別の物へ跳んでいて、「こっぷ」を
+  ボールで2回覚えた（5回中）。語は耳から2回遅れで届くので、窓（10回）はその遅れも含む。
+  名前は、聞いた瞬間ではなく少し前から注意していた物に結び付く（記憶ベース・要確認）［Tier3］
 * 思い出す：r = W q。‖r‖ ≥ RECALL_MIN なら目的の係へ noisy(r/‖r‖) を出す。未満ならゼロ
   （聞いた回数が少ないうちは何も出さない）
 学ぶこと自体のやり方（ヘッブ則・窓・ETA・RECALL_MIN）は生まれつき＝手で決める。
@@ -22,8 +28,12 @@ import torch
 from ..formats import GRID, TAG_DIM, DTYPE, make_tag
 from ..tagging import noisy, word_tag
 from .base import Box
+from collections import deque
 
 MATCH_COS = 0.9          # 段階2の表引き
+LEARN_WINDOW = 10        # 覚えるとき振り返る回数（1秒）［Tier3・仮置き］
+SAME_OBJ_COS = 0.7       # 窓の中で同じ物とみなす荷札の cos。0.9 だと、同じ物でも目の入口の雑音だけで
+                         # cos 平均0.86・最小0.78（実測、200組）になり別の物に分かれる。別の物どうしは0.2〜0.5
 ETA = 1.0                # 1回に足す強さ［仮置き］
 RECALL_MIN = 2.5         # 同じ組み合わせ3回で ‖r‖≈3、2回では出ない［仮置き・合格テスト③④で確かめる］
 C0, C1 = GRID // 2 - 2, GRID // 2 + 2     # 真ん中 4×4 マス（行・列 12〜15）。今は使わない（下の LEARN_RADIUS）
@@ -61,6 +71,7 @@ class Semantic(Box):
 
     def reset(self) -> None:
         self._prev_heard = False
+        self._recent = deque(maxlen=LEARN_WINDOW)   # 直前の回ごとの「真ん中の物の荷札」（無ければ None）
         self.last_event = ""      # 記録用："learn" / "learn_skip"（真ん中に物が無い） / "recall" / ""
         self.last_recall_norm = 0.0
 
@@ -95,9 +106,21 @@ class Semantic(Box):
         self.n_learn.fill_(int(blob.get("n_learn", 0)))
         return blob.get("meta", {})
 
+    def attended_tag(self):
+        """窓の中で一番多く真ん中にあった物の荷札（その物の荷札の平均）。無ければ None。"""
+        tags = [t for t in self._recent if t is not None]
+        if not tags:
+            return None
+        best = max(range(len(tags)),
+                   key=lambda i: (sum(float(tags[i] @ u) >= SAME_OBJ_COS for u in tags), i))
+        group = [u for u in tags if float(tags[best] @ u) >= SAME_OBJ_COS]
+        return make_tag(torch.stack(group).mean(0))
+
     def step(self, inbox):
         out = self.passthrough()
         self.last_event = ""
+        if self.learning:
+            self._recent.append(centered_tag(inbox.get("eyein")))
         q = inbox.get("listen")
         heard = q is not None and float(torch.linalg.vector_norm(q)) > 0.0
         first = heard and not self._prev_heard
@@ -118,7 +141,7 @@ class Semantic(Box):
             out["goal"] = noisy(r)
             self.last_event = "recall"
         if self.learning and first:
-            a = centered_tag(inbox.get("eyein"))
+            a = self.attended_tag()
             if a is None:
                 self.last_event = "learn_skip"
             else:
