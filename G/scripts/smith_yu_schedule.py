@@ -101,6 +101,7 @@ def _test_distractors(n, rng, tries=2000):
 
 
 def make(seed: int = 0, *, t_start: float = 1.0, gap_s: float = 0.0, test_gap_s: float = 2.0,
+         test_iti_s: float = 0.0,
          n_objects: int = 6, train_slide_s: float = TRAIN_SLIDE_S, train_word_t=TRAIN_WORD_T,
          test_trial_s: float = TEST_TRIAL_S, test_word_t=TEST_WORD_T, words=None):
     """予定表を作る。
@@ -109,6 +110,7 @@ def make(seed: int = 0, *, t_start: float = 1.0, gap_s: float = 0.0, test_gap_s:
     gap_s      : 学ぶ画面と画面のあいだに、何も出さない時間（秒）。元の実験は画面が続いて替わる
                  （注意を引く画面19枚は挟む）。既定0＝続けて替える
     test_gap_s : 学ぶ画面の最後からテストの最初までの、何も出さない時間（秒）
+    test_iti_s : テストの試行と試行のあいだに、何も出さない時間（秒）。既定0＝続けて替える
     戻り値（辞書）:
       pairs_schedule : world.pairs.schedule にそのまま入れる [{"t0","t1","left","right"}]
       word_schedule  : world.word_test.schedule にそのまま入れる [{"t","word"}]
@@ -159,7 +161,7 @@ def make(seed: int = 0, *, t_start: float = 1.0, gap_s: float = 0.0, test_gap_s:
         slides.append({"phase": "test", "i": i, "t0": round(t0, 3), "t1": round(t1, 3),
                        "left": int(left), "right": int(right), "words": ws,
                        "target": int(tg), "distractor": int(ds)})
-        t = t1
+        t = t1 + test_iti_s
     for s in slides:
         psched.append({"t0": s["t0"], "t1": s["t1"], "left": s["left"], "right": s["right"]})
         for w in s["words"]:

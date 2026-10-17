@@ -11,7 +11,8 @@
 注：画面と画面のあいだの空白（GAP_S）は論文に無い（元の実験は注意を引く画面を挟む）。物の名簿は物を
 場所で追うので、同じ置き場所で物が続けて替わると、前の物と次の物の見た目が1つの行に混ざる。
 KEEP_S（2秒）より長く何も出さなければ、前の画面の行は消える。
-注2：注意を引く画面の代わりに、空白のあいだは目を最初の向き（2つの置き場所のあいだ）へ戻す（RECENTER）。
+注2：テストの試行のあいだにも同じ空白を入れる（見始めが前の試行の向きに引っぱられないように）。
+注3：注意を引く画面の代わりに、空白のあいだは目を最初の向き（2つの置き場所のあいだ）へ戻す（RECENTER）。
 これまでの試行は10秒ごとに目を戻していたが、ここは約5分の1本で、戻さないと目が端へ寄っていき
 （1回目の確かめ：眼の可動域の外を狙う警告、後半の画面とテストで物を一度も見ない）、物を見に行けなかった。
 太郎がその画面を見て目を向けたのではなく、道具が目を動かす（実験者が真ん中に赤ちゃんの目を引くのと同じ役）。
@@ -32,6 +33,7 @@ import sys
 import time
 
 from .. import run_v2
+from ..boxes.semantic import RECALL_MIN
 from ..tagging import word_tag
 from .parent_speech import make_corpus
 
@@ -68,7 +70,7 @@ def sign_test_p(k: int, n: int) -> float:
 
 def run_one(seed: int, mode: str, *, ear_n: int, gap_s: float, log_dir: str, ticks: bool) -> dict:
     from ..brain import Brain
-    sy = _schedule_tool().make(seed, gap_s=gap_s)
+    sy = _schedule_tool().make(seed, gap_s=gap_s, test_iti_s=gap_s)
     run_v2.seed_all(seed)
     brain = Brain()
     brain.boxes["eyein"].setup()
@@ -153,7 +155,9 @@ def run_one(seed: int, mode: str, *, ear_n: int, gap_s: float, log_dir: str, tic
         "known_new_words": sorted(set(sy["word_of"].values()) & ear.known()),
         "recall_norm": {w: round(float((sem.W @ word_tag(w)).norm()), 2) for w in sy["word_of"].values()},
         "word_of": {w: names[k] for k, w in sy["word_of"].items()},
-        "trials": [{"i": s["i"], "target": names[s["target"]], "distractor": names[s["distractor"]],
+        "trials": [{"i": s["i"], "word": sy["word_of"][s["target"]], "target": names[s["target"]],
+                    "distractor": names[s["distractor"]],
+                    "recalled": float((sem.W @ word_tag(sy["word_of"][s["target"]])).norm()) >= RECALL_MIN,
                     **looks[s["i"]]} for s in slides if s["phase"] == "test"],
         "sim_s": sy["t_end"], "wall_s": round(time.time() - t_wall, 1),
     }
@@ -184,6 +188,10 @@ def summarize(results: list[dict]) -> dict:
                      "mean_share": round(sum(r["target_share"] for r in rs) / len(rs), 3) if rs else None,
                      "pass": sign_test_p(k, n) < 0.05,
                      "human": "55人中46人"}
+        for flag, key in ((True, "trials_recalled"), (False, "trials_not_recalled")):
+            ts = [t for r in rs for t in r["trials"] if t["recalled"] == flag]
+            out[mode][key] = {"n": len(ts), "target_longer": sum(t["target"] > t["distractor"] for t in ts),
+                              "distractor_longer": sum(t["target"] < t["distractor"] for t in ts)}
     return out
 
 
