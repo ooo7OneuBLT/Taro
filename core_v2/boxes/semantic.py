@@ -11,7 +11,11 @@
   名前は、聞いた瞬間ではなく少し前から注意していた物に結び付く（記憶ベース・要確認）［Tier3］
 * 思い出す：r = W q。‖r‖ ≥ RECALL_MIN なら目的の係へ noisy(r/‖r‖) を出す。未満ならゼロ
   （聞いた回数が少ないうちは何も出さない）
-学ぶこと自体のやり方（ヘッブ則・ETA・RECALL_MIN）は生まれつき＝手で決める。
+* **覚え方B（段階6、2026-10-17、ユーザー承認の仕様書）**：名簿の「名前を結び付ける行」1つではなく、
+  名簿に載っている全部の行と結び付ける。強さは、聞く前 LOOK_WINDOW_S（3秒）にその行を見ていた割合 s_i：
+  W += ETA × Σ s_i a_i qᵀ。1回ごとには違う物も混ざるが、いつも一緒に出てくる組だけが積み上がる
+  （場面をまたいだ学習。Smith・Yu 2008）。learn_mode="A" で段階4の覚え方（名前を結び付ける行だけ）に戻せる
+学ぶこと自体のやり方（ヘッブ則・ETA・RECALL_MIN・覚え方）は生まれつき＝手で決める。
 W の中身だけが経験で変わる。W は buffer なので save.py の保存に入り、reset() では消えない。
 
 段階2の手で登録した表（register / load_table、`core_v2/tools/register_appearance.py`）も残す。
@@ -32,12 +36,13 @@ RECALL_MIN = 2.5         # 同じ組み合わせ3回で ‖r‖≈3、2回では
 class Semantic(Box):
     BOX_ID = "semantic"
 
-    def __init__(self, learning: bool = False) -> None:
+    def __init__(self, learning: bool = False, learn_mode: str = "B") -> None:
         super().__init__()
         self.table: dict[str, torch.Tensor] = {}   # 段階2：{語: 見た目の荷札}
         self.register_buffer("W", torch.zeros(TAG_DIM, TAG_DIM, dtype=DTYPE))
         self.register_buffer("n_learn", torch.zeros((), dtype=torch.int64))
         self.learning = bool(learning)
+        self.learn_mode = learn_mode
         self.reset()
 
     def reset(self) -> None:
@@ -56,10 +61,20 @@ class Semantic(Box):
         return blob.get("meta", {})
 
     # ---- 段階3の学習 ----
-    def learn(self, appearance_tag, word_q) -> None:
+    def learn(self, appearance_tag, word_q, strength: float = 1.0) -> None:
         a, q = make_tag(appearance_tag), make_tag(word_q)
-        self.W += ETA * torch.outer(a, q)
-        self.n_learn += 1
+        self.W += ETA * strength * torch.outer(a, q)
+
+    def targets(self, lst) -> list:
+        """名簿の列から、結び付ける (見た目の荷札, 強さ) の組を選ぶ。A：名前を結び付ける行（最後の組）だけ、強さ1。
+        B：最後の組より前の行それぞれ、強さ＝見ていた割合（山の高さ）。"""
+        if not lst:
+            return []
+        if self.learn_mode == "A":
+            a = lst[-1][0]
+            return [(a, 1.0)] if float(torch.linalg.vector_norm(a)) > 0.0 else []
+        return [(a, float(m.max())) for a, m in lst[:-1]
+                if float(m.max()) > 0.0 and float(torch.linalg.vector_norm(a)) > 0.0]
 
     def recall(self, q):
         r = self.W @ q
@@ -99,10 +114,12 @@ class Semantic(Box):
             out["goal"] = noisy(r)
             self.last_event = "recall"
         if self.learning and first:
-            a = inbox.get("objfile")
-            if a is None or float(torch.linalg.vector_norm(a)) == 0.0:
+            pairs = self.targets(inbox.get("objfile"))
+            if not pairs:
                 self.last_event = "learn_skip"
             else:
-                self.learn(a, q)
+                for a, s_i in pairs:
+                    self.learn(a, q, s_i)
+                self.n_learn += 1
                 self.last_event = "learn"
         return out

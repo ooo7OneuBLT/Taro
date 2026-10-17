@@ -42,3 +42,16 @@ def test_not_learning_changes_nothing():
     ear.step({"earin": "ぼおるだね ぼおるだね"})
     assert all(torch.equal(a, b) for a, b in zip(before, ear.parameters()))
     assert not ear.alone
+
+
+def test_new_words_heard_alone_become_words():
+    """段階6：スミスとユーのように新しい語を1語だけで聞くと、2回で語になる。知っている語を含む言い回しは語にしない。"""
+    ear = _grown()
+    ear.learning = True
+    for _ in range(2):
+        for w in ["ぼさ", "これっと"]:
+            ear.step({"earin": w})
+    assert {"ぼさ", "これっと"} <= ear.known()
+    assert ear.segment("これっと") == ["これっと"]
+    assert torch.allclose(ear.step({"earin": "これっと"})["semantic"], word_tag("これっと"))
+    assert not {"おおきいぼおる", "ほらこっぷ", "りんごはどこ"} & ear.known()

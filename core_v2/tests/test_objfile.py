@@ -142,12 +142,15 @@ def test_the_name_goes_to_the_object_looked_at_long_enough():
     for _ in range(round(MIN_LOOK_S / 0.1) + 3):           # 真ん中のコップを見る
         out = of.step({"eyein": objs([(1, 13.5, 13.5), (2, 13.5, 20)]), "orienteye": ZERO2})
     cup_tag = torch.nn.functional.normalize(tag(1), dim=0)
-    assert float(out["semantic"] @ cup_tag) > 0.99
+    assert float(out["semantic"][-1][0] @ cup_tag) > 0.99
     of.step({"eyein": objs([(1, 13.5, 13.5), (2, 13.5, 20)]), "orienteye": torch.tensor([(20 - 13.5) / 13.5, 0.0])})
     for k in range(3):                                      # 目がボールへ（中身が左へ6.5マス）
         ego = (-52.0, 0.0) if k == 0 else (0.0, 0.0)
         out = of.step({"eyein": objs([(1, 13.5, 7), (2, 13.5, 13.5)], ego=ego), "orienteye": ZERO2})
-    assert float(out["semantic"] @ cup_tag) > 0.99
+    assert float(out["semantic"][-1][0] @ cup_tag) > 0.99
+    # 段階6：直前3秒に見ていた割合。コップを約1.4秒・ボールを約0.3秒（1回遅れで注意が移る分を許す）
+    shares = {round(float(t @ cup_tag), 2) > 0.99: float(m.max()) for t, m in out["semantic"][:-1]}
+    assert 0.4 <= shares[True] <= 0.6 and 0.05 <= shares[False] <= 0.15
 
 
 def test_roster_is_limited():

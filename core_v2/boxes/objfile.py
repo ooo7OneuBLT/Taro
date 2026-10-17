@@ -30,7 +30,9 @@
 * orienteye : 行ごとの (荷札, 印の山＝強さ×σ IOR_SIGMA_CELLS の山)。列の最後に必ず
               (荷札ゼロ, 今見ている行の山＝高さは慣れ、下限0.001) を1つ足す。今見ている行が無ければ
               地図はゼロ（目の入口の目の動きの地図と同じ「列の最後の荷札ゼロ＝特別な組」の約束）
-* semantic  : 名前を結び付ける行の荷札（かけらの見た目の平均）。無ければゼロ
+* semantic  : 段階6（2026-10-17）から列。行ごとに (荷札, 山)。山の高さ＝その行を直前 LOOK_WINDOW_S（3秒）の
+              うちに見ていた時間の割合（見ていない行は載せない）。列の最後に必ず (名前を結び付ける行の荷札, ゼロの地図)
+              を1つ足す（無ければ荷札もゼロ）。意味の辞書は覚え方Bで前の組、覚え方Aで最後の組を使う
 """
 
 from __future__ import annotations
@@ -70,6 +72,10 @@ EGO_STILL = 0.5          # 目の動きがこれ（マス）を超えた回は�
 ATTACH_CELLS = 3.0       # 追っている物のかけらからこれ以内に現れたかけらは、その物の一部（約8度）［Tier3・仮置き］
 ABSENT_TICKS = 3         # これだけ見えていない行は、新しい物に席を譲る（目の入口の切り出しは3回に1回）
 MIN_LOOK_S = 1.0         # 名前を結び付けるには、少なくともこれだけ続けて見ていた行［Tier3・仮置き］
+
+# 段階6で新しく決めた数字
+LOOK_WINDOW_S = 3.0      # 名前を聞く前のこの秒数に、どの物をどれだけ見ていたか（子は名づけの約3秒前から
+                         # 見ている物と語を結び付けやすい、Yu・Smith 2012。記憶ベース）［Tier2］
 
 _YS, _XS = torch.meshgrid(torch.arange(GRID, dtype=DTYPE), torch.arange(GRID, dtype=DTYPE),
                           indexing="ij")
@@ -178,6 +184,7 @@ class Objfile(Box):
         self._pick_wait = 0
         self._aim: list[float] | None = None
         self._ego_seen = False
+        self._look_hist: list[Row | None] = []   # 直前 LOOK_WINDOW_S のあいだ、毎回見ていた行
         # 記録用
         self.last_shift = (0.0, 0.0)
         self.n_dishab = 0
@@ -407,6 +414,8 @@ class Objfile(Box):
         if have_objs:
             self._merge()
         held = self._pick_attended(have_objs)
+        self._look_hist.append(held)
+        del self._look_hist[:-int(round(LOOK_WINDOW_S / TICK_S))]
         m = inbox.get("prio")
         if m is not None and DISHAB_KEEP < 1.0:
             self._dishabituate(m)
@@ -421,8 +430,21 @@ class Objfile(Box):
                 att = max(held.strength, 1e-3) * bump_at(*held.pos)
             lst.append((torch.zeros(TAG_DIM, dtype=DTYPE), att))
             out["orienteye"] = lst
-        if "semantic" in out and self.named is not None and self.named in self.rows:
-            out["semantic"] = self.named.tag
+        if "semantic" in out:
+            lst = [(rw.tag, share * bump_at(*rw.pos)) for rw, share in self.look_shares()]
+            named = self.named.tag if self.named is not None and self.named in self.rows else torch.zeros(TAG_DIM, dtype=DTYPE)
+            lst.append((named, torch.zeros(GRID, GRID, dtype=DTYPE)))
+            out["semantic"] = lst
+        return out
+
+    def look_shares(self) -> list[tuple[Row, float]]:
+        """名簿にいる行ごとに、直前 LOOK_WINDOW_S のうち見ていた時間の割合（0より大きい行だけ）。"""
+        n = int(round(LOOK_WINDOW_S / TICK_S))
+        out = []
+        for rw in self.rows:
+            k = sum(1 for h in self._look_hist if h is rw)
+            if k > 0:
+                out.append((rw, k / n))
         return out
 
     # ---- 記録用 ----

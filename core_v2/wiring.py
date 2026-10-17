@@ -31,7 +31,7 @@ ADDED_EDGES = [
     ("prio", "objfile", "段階4：脱馴化で、行の位置の目立ちの「ふだん」と比べる"),
     ("orienteye", "objfile", "段階4：撃った指令の写し。撃った先の物に注意を移す"),
     ("objfile", "orienteye", "段階4：行ごとの「もう見た」の山と、今見ている行（慣れ）"),
-    ("objfile", "semantic", "段階4：名前を結び付ける行の荷札（見た目の平均）"),
+    ("objfile", "semantic", "段階4：名前を結び付ける行の荷札。段階6：行ごとの見ていた割合も"),
 ]
 
 # 通り道の矢印の書式（設計書 技術付録D）。(書式, MOTOR のときの筋の数)
@@ -56,7 +56,7 @@ PATH_FORMATS: dict[tuple[str, str], tuple[Fmt, int | None]] = {
     ("prio", "objfile"): (Fmt.MAP, None),
     ("orienteye", "objfile"): (Fmt.MOTOR, 2),       # 撃った指令の写し
     ("objfile", "orienteye"): (Fmt.TAG_AND_MAP, None),
-    ("objfile", "semantic"): (Fmt.TAG, None),
+    ("objfile", "semantic"): (Fmt.TAG_AND_MAP, None),   # 段階6：行ごとの荷札と見ていた割合＋名前を結び付ける行
 }
 
 

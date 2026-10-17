@@ -10,7 +10,10 @@
   「ぼ→お→る」は続きやすく、「る」のあとは「は」「だ」「を」…とばらつき、発話の終わりにも来やすい
 * **足がかり**：語1つだけで聞いた発話（親の話しかけの約1割、Brent・Siskind 2001。記憶ベース）を
   KNOWN_MIN 回以上聞き、しかもほかの発話の中にも KNOWN_MIN 種類以上で聞いたら「知っている語」にする
-  （「りんごはどこ」のように、まるごと何度も聞くだけの文は語にしない）。文の中にそれがあれば、まずそこで切る
+  （「りんごはどこ」のように、まるごと何度も聞くだけの文は語にしない）。
+  段階6（2026-10-17）：1語だけで KNOWN_MIN 回以上聞き、中に知っている語を含まないかたまりも語にする
+  （スミスとユーの実験のように、新しい語を単独でしか聞かない場合。「おおきいぼおる」「りんごはどこ」は
+  知っている語を含むので語にしない）。発話まるごとが知っている語なら、切らずに1語として聞く。文の中にそれがあれば、まずそこで切る
   （長いもの優先・重ならない。前の太郎の分節第2案と同じ）
 * **意味の辞書へ渡す語**：切ったかたまりのうち、最初の「知っている語」。その荷札は、かなの並びを
   決まった乱数で数にしたもの（tagging.word_tag＝生まれつきの耳の符号）。知っている語が無ければゼロ
@@ -105,8 +108,9 @@ class Listen(Box):
     def known(self) -> set[str]:
         if self._known is None:
             heard = [u for u in self.alone]
-            self._known = {u for u, n in self.alone.items() if n >= KNOWN_MIN
-                           and sum(1 for v in heard if len(v) > len(u) and u in v) >= KNOWN_MIN}
+            rep = [u for u, n in self.alone.items() if n >= KNOWN_MIN]
+            base = {u for u in rep if sum(1 for v in heard if len(v) > len(u) and u in v) >= KNOWN_MIN}
+            self._known = base | {u for u in rep if not any(k in u for k in base)}
         return self._known
 
     def _predict(self, s: str):
@@ -121,6 +125,8 @@ class Listen(Box):
         n = len(s)
         if n == 0:
             return []
+        if s in self.known():
+            return [s]
         endp = self._predict(s)
         cuts, used = {0, n}, [False] * n
         for k in sorted((k for k in self.known() if 2 <= len(k) < n), key=len, reverse=True):
