@@ -29,12 +29,25 @@ import time
 
 from .. import run_v2
 from ..boxes.objfile import MIN_LOOK_S
+from ..boxes.semantic import TRACE_TICKS
 
 DEFAULT_SCENES = "段階2b_3物体_ボール左_2026-10-15,段階2b_3物体_ボール右_2026-10-15"
 WORD_OF = {"toy1": "ぼおる", "toy2": "こっぷ"}       # toy1＝ボール（test_object1）・toy2＝コップ
 OBJ_OF_WORD = {"ぼおる": "ball", "こっぷ": "cup"}
 LOOK_DEG = 10.0
 TRIAL_S = 60.0          # 1つの場面を続けて回す長さ。足りなければ種を変えてもう1回
+PIPE_TICKS = 3          # 語は earin→listen→semantic で2回遅れて届く（幅を1回ぶん持たせる）
+
+
+def learn_lag(sem) -> int:
+    """聞いた回から覚える回までの遅れ。覚え方B（1cfe361 から）は名残りが消える TRACE_TICKS 回あとに覚える。"""
+    return TRACE_TICKS if sem.learn_mode == "B" else 0
+
+
+def word_of_learn(heard_hist, tick: int, lag: int):
+    """覚えた回 tick を、その lag 回前（＋届くまでの遅れ）に聞いた語と、そのとき1秒以上見ていた物に結び付ける。"""
+    lo, hi = tick - lag - PIPE_TICKS, tick - lag
+    return next(((w, obj) for t0, w, obj in reversed(heard_hist) if lo <= t0 <= hi), ("", ""))
 
 
 def labeling_world(swap: bool) -> dict:
@@ -102,7 +115,7 @@ def main(argv=None):
 
     counts = {w: 0 for w in OBJ_OF_WORD}
     events = []          # 名前を聞いた回・覚えた回の記録
-    heard_hist = []      # (tick, 語)：覚えた回を、2回前に聞いた語に結び付けるため
+    heard_hist = []      # (tick, 語, そのとき1秒以上見ていた物)：覚えた回を、聞いた回に結び付けるため
     scenes = [x for x in opts["--scenes"].split(",") if x]
     sim_s, seed = 0.0, 0
     t_start = time.time()
@@ -118,6 +131,7 @@ def main(argv=None):
             act = run_v2.zero_action(env)
             n_ticks = int(round(TRIAL_S / (run_v2.K * run_v2.DT)))
             run_obj, run_len, long_obj = "", 0, ""   # 続けて見ている物とその回数、最後に1秒以上見た物
+            heard_hist = []                    # tick は場面ごとに 0 から。前の場面の語を拾わない（brain.reset で名残りも消える）
             for tick in range(n_ticks):
                 heard = []
                 for _ in range(run_v2.K):
@@ -139,17 +153,18 @@ def main(argv=None):
                     long_obj = run_obj
                 if text:
                     word = next((w for w in OBJ_OF_WORD if w in text), "")
-                    heard_hist.append((tick, word))
+                    heard_hist.append((tick, word, long_obj))
                     events.append({"scene": scene, "seed": seed, "t": round(float(u.data.time), 2),
                                    "event": "heard", "text": text, "word": word, "looking": look})
                 ev = sem.last_event
                 if ev in ("learn", "learn_skip"):
-                    # 語は earin→listen→semantic で2回遅れて届く
-                    word = next((w for t0, w in reversed(heard_hist) if tick - 3 <= t0 <= tick), "")
+                    # 覚え方Bは名残りが消えてから（聞いて TRACE_TICKS 回あと）覚える。名づけの取り違えは、聞いた回に
+                    # 1秒以上見ていた物で数える（意味の辞書が重み1で足すのは聞く前3秒に見ていた物）
+                    word, heard_obj = word_of_learn(heard_hist, tick, learn_lag(sem))
                     named = OBJ_OF_WORD.get(word, "")
                     if swap and named:
                         named = {"ball": "cup", "cup": "ball"}[named]   # 入れ替えた名前が指す物
-                    learned_obj = long_obj
+                    learned_obj = heard_obj
                     events.append({"scene": scene, "seed": seed, "t": round(float(u.data.time), 2),
                                    "event": ev, "text": "", "word": word, "looking": look,
                                    "learned_object": learned_obj, "named_object": named,
