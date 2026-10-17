@@ -19,6 +19,7 @@ KEEP_S（2秒）より長く何も出さなければ、前の画面の行は消�
 
 使い方：
   python -m core_v2.tools.smith_yu [--seeds 0-19] [--modes B,A] [--ear-n 1000] [--gap 2.5] [--log-dir 段階6_スミスとユー] [--ticks]
+    --modes … B（直前3秒の割合）・A（名前を結び付ける1つの物だけ）・none（覚えない太郎、比べる用）
     --ticks … 1回ごとの記録（CSV）も残す（1回だけの確かめ用）
 出力：G/logs/<log-dir>/<覚え方>_seed<種>.json と、まとめ.json
 """
@@ -79,7 +80,7 @@ def run_one(seed: int, mode: str, *, ear_n: int, gap_s: float, log_dir: str, tic
     for s in make_corpus(ear_n, seed=seed):
         ear.step({"earin": s})
     ear.reset()
-    sem.learning, sem.learn_mode = True, mode
+    sem.learning, sem.learn_mode = mode != "none", (mode if mode != "none" else "B")   # none＝覚えない太郎（比べる用）
 
     slides = sy["slides"]
     test_t0 = min(s["t0"] for s in slides if s["phase"] == "test")
@@ -105,8 +106,10 @@ def run_one(seed: int, mode: str, *, ear_n: int, gap_s: float, log_dir: str, tic
     def on_tick(row):
         t = row["t"]
         gaze["x"], gaze["y"] = row["x_gaze"], row["y_gaze"]
-        if t >= test_t0 - 1.0:              # テストの前から覚えるのを止める
-            sem.learning = ear.learning = False
+        if t >= test_t0 - 1.0 or mode == "none":   # テストの前から覚えるのを止める
+            sem.learning = False
+        if t >= test_t0 - 1.0:
+            ear.learning = False
         ev = sem.last_event
         if ev == "learn":
             n_learn["train"] += 1
