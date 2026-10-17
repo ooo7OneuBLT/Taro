@@ -15,7 +15,13 @@
 * **言う順番の箱**（前の太郎のブローカ野 `brocas_area.py`）：言う語を1音ずつ帳面の逆引きで口の指令にし、
   SYLL_TICKS 回に1音ずつ声の出口へ送る。帳面に無い音があれば言わない（大人の正解表で埋めない）
 * **語の選び方**（前の太郎 B6-2、`B/src/environment/core_b.py:520-562`）：喃語を出すたびに、聞いた語を言うか自由な喃語かを選ぶ。
-  語の重み＝聞いた回数、自由な喃語の重み＝K_BABBLE。候補は全部の音が帳面にある語だけ。状態の一致（B6-4）は外した
+  語の重み＝聞いた回数、自由な喃語の重み＝**これまでに自分で出した自由な喃語の回数**。候補は全部の音が帳面にある語だけ。
+  状態の一致（B6-4）は外した。つまり、ある語を言う確率＝その語を聞いた回数 ÷（聞いた語の回数の合計＋自分の喃語の回数）＝
+  「耳に入った声（親の語と自分の喃語）のうち、その語が占める割合」。新しく決めた数は無い。
+  前の太郎 B の自由な喃語の重み 1000（K_BABBLE）は、親が世話のときにしか話さない B に合わせた値で、親が1日約800回話す
+  試験場では数日で語の回数に負け、12か月で喃語が消えた（新しい音が帳面に入らなくなった。2026-10-17 の1回目・2回目の育ち）。
+  割合にすると、喃語をたくさん出してきた口ほど喃語の癖が残り（Vihman の「口に慣れた形」）、親の話す量を変えても
+  釣り合いは聞く量と出す量の比で決まる
 * **つながり M（新）**：親の語 w を聞いてから M_WINDOW_S 秒以内に自分が声 v を出したら、M[w][v] += 似かた(w, v)。
   似かたが SIM_MIN 以下（半分も同じでない）なら数えない。**数えるだけ。ほうびは使わない**
 * **言う**：言う語の係（wordplan）から語の荷札が届き始めたら、M の行のうちその荷札の語（似かた WORD_COS 以上）を選び、
@@ -54,7 +60,6 @@ TICK_S = 0.1
 SYLL_TICKS = 3            # 1音を出す間隔（3回＝0.3秒、1秒に約3音。喃語の音節の速さ・記憶ベース）［Tier2］
 BABBLE_SYLLABLES = (1, 2)  # 喃語1回の音の数（仕様書 §2-2）［Tier3］
 REDUP_BIAS = 2.0          # 2音目が直前と同じ形に戻る傾き（前の太郎 B と同じ）［Tier3・B の値］
-K_BABBLE = 1000.0         # 語の選び方で、自由な喃語の側の重み（前の太郎 B6-2 と同じ）［Tier3・B の値］
 BABBLE_INTERVAL_S = 45.0  # ふだんの喃語の平均の間隔（前の太郎 B の穏やかな時間の喃語）［Tier3・B の値］
 RESP_LATENCY_S = 2.0      # 親が応えたあと、次の声までの平均の待ち（やりとりの間。記憶ベース・要確認）［Tier3］
 M_WINDOW_S = 5 * WORD_TRACE_S   # 親の語のあと、自分の声を結び付ける秒数（聞いた語の名残りが消えるまで＝意味の辞書と同じ）
@@ -82,6 +87,7 @@ class Voice(Box):
         self.notebook: Counter = Counter()     # {(口の指令4つ, 出た音): 回数}
         self.lexicon: Counter = Counter()      # {親の語: 聞いた回数}
         self.M: dict[str, Counter] = {}        # {親の語: {自分の声: 強さ}}
+        self.n_free = 0                        # これまでに出した自由な喃語の回数
         self.learning = bool(learning)
         self.babbling = bool(babbling)
         self.rng = random.Random(seed)
@@ -110,12 +116,14 @@ class Voice(Box):
             "notebook": [[*p, c, n] for (p, c), n in self.notebook.items()],
             "lexicon": dict(self.lexicon),
             "M": {w: dict(r) for w, r in self.M.items()},
+            "n_free": self.n_free,
         }
 
     def set_extra_state(self, state) -> None:
         self.notebook = Counter({(tuple(x[:4]), x[4]): x[5] for x in state.get("notebook", [])})
         self.lexicon = Counter(state.get("lexicon", {}))
         self.M = {w: Counter(r) for w, r in state.get("M", {}).items()}
+        self.n_free = int(state.get("n_free", 0))
         self._rebuild_inverse()
 
     def save_voice(self, path, meta: dict | None = None) -> None:
@@ -182,19 +190,18 @@ class Voice(Box):
         words = [(w, n) for w, n in self.lexicon.items() if self.plan(w) is not None]
         if not words:
             return None
-        r = self.rng.random() * (sum(n for _, n in words) + K_BABBLE)
-        if r < K_BABBLE:
-            return None
-        r -= K_BABBLE
+        r = self.rng.random() * (sum(self.lexicon.values()) + self.n_free)
         for w, n in words:
             if r < n:
                 return w
             r -= n
-        return words[-1][0]
+        return None                                  # 残り（言えない語の分と、自分の喃語の分）は自由な喃語
 
     def babble(self) -> None:
         w = self.pick_word()
         self.queue = self.plan(w) if w else self.free_babble()
+        if not w and self.learning:
+            self.n_free += 1
         self.log.append({"t": self.t, "event": "babble", "word": w or ""})
 
     # ---- M ----

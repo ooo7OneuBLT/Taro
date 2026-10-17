@@ -107,6 +107,22 @@ def test_notebook_follows_the_growing_mouth():
     assert v2.plan("ぼ") == [(1, 2, 1, 4)] and v2.notebook == v.notebook
 
 
+def test_word_choice_is_share_of_heard_and_own_babble():
+    """語を言う確率＝その語を聞いた回数÷（聞いた語の合計＋自分の自由な喃語の回数）。言えない語の分は喃語になる。"""
+    v = taught_voice("まん")
+    v.lexicon.update({"まんま": 300, "ぼおる": 300})   # ぼおる はまだ言えない
+    v.n_free = 400
+    v.rng = random.Random(0)
+    picks = [v.pick_word() for _ in range(20000)]
+    share = picks.count("まんま") / len(picks)
+    assert abs(share - 0.3) < 0.02 and "ぼおる" not in picks
+    v.learning, v.babbling = True, True
+    n0 = v.n_free
+    for _ in range(200):
+        v.babble()
+    assert 0 < v.n_free - n0 < 200                      # 自由な喃語を出した回だけ数える
+
+
 def test_newborn_babble_is_vowels_only():
     v = Voice(learning=True, babbling=True, seed=4)
     ear = Ear(v, month=3.0)

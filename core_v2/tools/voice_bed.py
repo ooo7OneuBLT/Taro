@@ -20,7 +20,9 @@
 * わかる：「〇〇はどこ？」を聞かせ、意味の辞書が思い出した見た目が、いちばんその物に近いか
   （体ありの「見に行ける」の代わり。体なしなので目は動かさない）
 * 言える（合格の線①）：物を PRESENT_S 秒見せ、BLANK_S 秒あける、を N_PRESENT 回。見せている間に太郎が出した声が、
-  親の語のうちいちばんその物の名前に近いか。黙ったら外れ
+  親の語のうちいちばんその物の名前に近く、しかも似かたが SIM_MIN（0.5、M が「似た声」とみなすのと同じ線）を超えるか。
+  黙ったら外れ。「っ」は口から出ないので（ユーザー決定待ち、既定は「言えなくてよい」）、「こぷ」「こた」のような形も当たり
+  （口の表に「っ」を足す案に替えるときは core_v2/mouth.py の TABLE に1行足すだけで、ここは変えない）
 
 使い方：
   python -m core_v2.tools.voice_bed [--seed 0] [--days 730] [--start-day 0] [--probe-days 7]
@@ -44,6 +46,7 @@ import torch
 from .. import mouth, wiring
 from ..boxes import ENV, box_class
 from ..boxes.semantic import TRACE_TICKS
+from ..boxes.voice import SIM_MIN
 from ..formats import GRID, DTYPE, check, make_tag, zero
 from ..tagging import appearance_tag
 from .parent_speech import FRAMES, FILLERS, P_ALONE, P_FILLER, WORDS
@@ -315,7 +318,8 @@ def probe(bed: Bed) -> dict:
                     voice += env.get("voiceout", "")
             if voice:
                 said += 1
-                hits += closest_word(voice)[0] == w
+                cw, sim = closest_word(voice)
+                hits += cw == w and sim > SIM_MIN
             voices.append(voice)
         out[f"say_{w}"] = hits
         out[f"said_{w}"] = said
