@@ -37,6 +37,7 @@ import copy
 import json
 import math
 import os
+import pickle
 import random
 import time
 
@@ -343,6 +344,24 @@ def save_state(bed: Bed, path: str, meta: dict) -> None:
                 "meta": meta}, path)
 
 
+def export_voice(bed_or_boxes, path: str, meta: dict) -> None:
+    """体ありの太郎へ持っていく分だけを JSON で書く：声の係（口の帳面・聞いた語の回数・M・喃語の回数）と
+    言う語の係の語の一覧。意味の辞書は持っていかない（試験場の見た目の荷札は乱数で、体の目の荷札と違う）。"""
+    boxes = bed_or_boxes.boxes if isinstance(bed_or_boxes, Bed) else bed_or_boxes
+    blob = {"meta": meta, "voice": boxes["voice"].get_extra_state(),
+            "wordplan": boxes["wordplan"].get_extra_state()}
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(blob, f, ensure_ascii=False)
+
+
+def _save_ckpt(path: str, state: dict) -> None:
+    tmp = path + ".tmp"
+    with open(tmp, "wb") as f:
+        pickle.dump(state, f)
+    os.replace(tmp, path)
+
+
 def main(argv=None):
     torch.set_num_threads(1)   # 小さい計算ばかりなので1本の方が速い（4本：1日8.3秒→1本：6.2秒）
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
@@ -352,15 +371,29 @@ def main(argv=None):
     ap.add_argument("--probe-days", type=float, default=7)
     ap.add_argument("--log-dir", default="段階7_声の試験場")
     ap.add_argument("--save", default=None)
+    ap.add_argument("--checkpoint", default=None,
+                    help="途中の太郎をここへ保存し（試しのたび）、あれば続きから回す（同じコマンドで再開できる）")
+    ap.add_argument("--export", default=None, help="試しのたびに、体ありへ持っていく分を JSON で書く")
     a = ap.parse_args(argv)
     log_dir = os.path.join(REPO, "G", "logs", a.log_dir)
     os.makedirs(log_dir, exist_ok=True)
-    bed = Bed(a.seed, a.start_day)
-    t0 = time.time()
-    first = {}
     path = os.path.join(log_dir, f"seed{a.seed}.jsonl")
-    with open(path, "w", encoding="utf-8") as f:
-        last_probe = -math.inf
+    ckpt = (a.checkpoint if os.path.isabs(a.checkpoint) else os.path.join(REPO, a.checkpoint)) if a.checkpoint else None
+    if ckpt and os.path.exists(ckpt):
+        with open(ckpt, "rb") as f:
+            st = pickle.load(f)
+        bed, first, last_probe, wall0 = st["bed"], st["first"], st["last_probe"], st["wall_s"]
+        torch.set_rng_state(st["torch_rng"])
+        with open(path, encoding="utf-8") as f:       # 保存より後に書いた試しの行は捨てる（もう一度回るので）
+            kept = [l for l in f if json.loads(l)["day"] <= bed.day]
+        with open(path, "w", encoding="utf-8") as f:
+            f.writelines(kept)
+        print(f"続きから：{bed.month:.2f}か月（{bed.day}日目）", flush=True)
+        mode = "a"
+    else:
+        bed, first, last_probe, wall0, mode = Bed(a.seed, a.start_day), {}, -math.inf, 0.0, "w"
+    t0 = time.time() - wall0
+    with open(path, mode, encoding="utf-8") as f:
         while bed.day < a.start_day + a.days:
             bed.run_day()
             if bed.day - last_probe >= a.probe_days:
@@ -377,6 +410,13 @@ def main(argv=None):
                 print(f"[{p['wall_s']:7.1f}s] {p['month']:5.2f}か月 わかる {[p['know_' + w] for w in TEST_WORDS]} "
                       f"言える {[p['say_' + w] for w in TEST_WORDS]} 帳面 {p['notebook_sounds']}音 "
                       f"足りない音 {p['has_sounds']} M {p['M_ぼおる'][:1]} {p['M_こっぷ'][:1]}", flush=True)
+                if a.export:
+                    export_voice(bed, a.export if os.path.isabs(a.export) else os.path.join(REPO, a.export),
+                                 {"seed": a.seed, "day": bed.day, "month": round(bed.month, 3)})
+                if ckpt:
+                    bed.own_log = bed.own_log[-1000:]
+                    _save_ckpt(ckpt, {"bed": bed, "first": first, "last_probe": last_probe,
+                                      "wall_s": time.time() - t0, "torch_rng": torch.get_rng_state()})
     summary = {"seed": a.seed, "first_month": first, "stats": bed.stats, "wall_s": round(time.time() - t0, 1),
                "own_voices_sample": bed.own_log[-50:]}
     with open(os.path.join(log_dir, f"seed{a.seed}_まとめ.json"), "w", encoding="utf-8") as f:
