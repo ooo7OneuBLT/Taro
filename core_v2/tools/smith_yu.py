@@ -11,6 +11,10 @@
 注：画面と画面のあいだの空白（GAP_S）は論文に無い（元の実験は注意を引く画面を挟む）。物の名簿は物を
 場所で追うので、同じ置き場所で物が続けて替わると、前の物と次の物の見た目が1つの行に混ざる。
 KEEP_S（2秒）より長く何も出さなければ、前の画面の行は消える。
+注2：注意を引く画面の代わりに、空白のあいだは目を最初の向き（2つの置き場所のあいだ）へ戻す（RECENTER）。
+これまでの試行は10秒ごとに目を戻していたが、ここは約5分の1本で、戻さないと目が端へ寄っていき
+（1回目の確かめ：眼の可動域の外を狙う警告、後半の画面とテストで物を一度も見ない）、物を見に行けなかった。
+太郎がその画面を見て目を向けたのではなく、道具が目を動かす（実験者が真ん中に赤ちゃんの目を引くのと同じ役）。
 
 使い方：
   python -m core_v2.tools.smith_yu [--seeds 0-19] [--modes B,A] [--ear-n 1000] [--gap 2.5] [--log-dir 段階6_スミスとユー] [--ticks]
@@ -34,6 +38,8 @@ from .parent_speech import make_corpus
 SCENE = "段階6_スミスとユー_6物体_2026-10-17"
 LOOK_DEG = 10.0
 GAP_S = 2.5
+HALF_VIEW_DEG = 30.0     # 視野の片側（目への方向 ±1 がこの角度。run_v2.START_JITTER の説明）
+RECENTER_DEG = 3.0       # 空白のあいだ、最初の向きからこれ以上ずれていたら戻す
 
 
 def _schedule_tool():
@@ -82,8 +88,21 @@ def run_one(seed: int, mode: str, *, ear_n: int, gap_s: float, log_dir: str, tic
     def slide_at(t):
         return next((s for s in slides if s["t0"] <= t < s["t1"]), None)
 
+    gaze = {"x": 0.0, "y": 0.0, "n_recenter": 0}
+
+    def manual_eye(i, cmd):
+        """空白のあいだ（画面が出ていないとき）は、3回に1回、目を最初の向きへ戻す指令に差し替える。"""
+        t = float(env.unwrapped.data.time)
+        if slide_at(t) is not None or slide_at(t + 0.3) is not None:
+            return cmd
+        if i % 3 or math.hypot(gaze["x"], gaze["y"]) <= RECENTER_DEG:
+            return None
+        gaze["n_recenter"] += 1
+        return (max(-1.0, min(1.0, -gaze["x"] / HALF_VIEW_DEG)), max(-1.0, min(1.0, -gaze["y"] / HALF_VIEW_DEG)))
+
     def on_tick(row):
         t = row["t"]
+        gaze["x"], gaze["y"] = row["x_gaze"], row["y_gaze"]
         if t >= test_t0 - 1.0:              # テストの前から覚えるのを止める
             sem.learning = ear.learning = False
         ev = sem.last_event
@@ -107,7 +126,7 @@ def run_one(seed: int, mode: str, *, ear_n: int, gap_s: float, log_dir: str, tic
             rec = run_v2.path_record(brain)
             rec.update({"t": round(t, 2), "heard": row["heard"], "phase": s["phase"] if s else "",
                         "slide": s["i"] if s else "", "left": s["left"] if s else "",
-                        "right": s["right"] if s else "", "look": look,
+                        "right": s["right"] if s else "", "look": look, "x_gaze": round(row["x_gaze"], 1), "y_gaze": round(row["y_gaze"], 1),
                         "sem.learn_mode": mode, "sem.n_learn": int(sem.n_learn)})
             rows.append(rec)
 
@@ -116,7 +135,8 @@ def run_one(seed: int, mode: str, *, ear_n: int, gap_s: float, log_dir: str, tic
     t_wall = time.time()
     env = run_v2.build_env(SCENE, None, seed=seed, world_extra=world_extra)
     try:
-        run_v2.run_trial(brain, env, seed=seed, duration_s=sy["t_end"] + 0.5, on_tick=on_tick)
+        run_v2.run_trial(brain, env, seed=seed, duration_s=sy["t_end"] + 0.5, on_tick=on_tick,
+                           manual_eye=manual_eye)
     finally:
         run_v2.close_env(env)
 
@@ -129,7 +149,7 @@ def run_one(seed: int, mode: str, *, ear_n: int, gap_s: float, log_dir: str, tic
         "target_share": round(T / (T + D), 3) if T + D else None,
         "trials_target_longer": sum(v["target"] > v["distractor"] for v in looks.values()),
         "trials_distractor_longer": sum(v["target"] < v["distractor"] for v in looks.values()),
-        "n_learn": n_learn,
+        "n_learn": n_learn, "n_recenter": gaze["n_recenter"],
         "known_new_words": sorted(set(sy["word_of"].values()) & ear.known()),
         "recall_norm": {w: round(float((sem.W @ word_tag(w)).norm()), 2) for w in sy["word_of"].values()},
         "word_of": {w: names[k] for k, w in sy["word_of"].items()},
