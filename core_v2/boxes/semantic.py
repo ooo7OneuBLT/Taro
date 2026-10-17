@@ -15,12 +15,21 @@
   名簿に載っている全部の行と結び付ける。強さは、聞く前 LOOK_WINDOW_S（3秒）にその行を見ていた割合 s_i：
   W += ETA × Σ s_i a_i qᵀ。1回ごとには違う物も混ざるが、いつも一緒に出てくる組だけが積み上がる
   （場面をまたいだ学習。Smith・Yu 2008）。learn_mode="A" で段階4の覚え方（名前を結び付ける行だけ）に戻せる
+* **聞いた語の名残り（2026-10-17、ユーザー承認）**：覚え方Bは、語が届いた回にすぐ覚えず、名残りが薄れるまで
+  （5×WORD_TRACE_S）待ってから1回で覚える。名簿から毎回届く「今見ている行」の荷札を自分で覚えておき、
+  届く前 LOOK_WINDOW_S（3秒）に見ていた回は重み1、届いたあとに見ていた回は重み exp(-経過/WORD_TRACE_S)
+  で足し、重みの合計で割る（物を見ていなかった回は数えない。合わせた強さは今までと同じ1）。語が画面の出た直後に来て
+  まだ物を見ていない回も、すぐあとに見た物と結び付く。1歳には頭の中で語を唱え直す力が無く、聞いた音は短く薄れるだけ
+  （名づけのあと0.5〜0.9秒まで結び付く）。段階6の試験場（太郎5人×6語）で、捨てる語 53%→約0%、正しい物が一番の語
+  15→25/30。τ＝0.5〜2秒のどれでも 23〜25/30 で、値のちょうどには頼らない。唱え直す力は後の「目的を持ち続ける係」で足す
 学ぶこと自体のやり方（ヘッブ則・ETA・RECALL_MIN・覚え方）は生まれつき＝手で決める。
 W の中身だけが経験で変わる。W は buffer なので save.py の保存に入り、reset() では消えない。
 
 段階2の手で登録した表（register / load_table、`core_v2/tools/register_appearance.py`）も残す。
 表に1件でも登録してあれば、段階2と同じく表を引く（段階3の合格テスト②で使う）。
 """
+
+import math
 
 import torch
 
@@ -30,6 +39,10 @@ from .base import Box
 
 MATCH_COS = 0.9          # 段階2の表引き
 ETA = 1.0                # 1回に足す強さ［仮置き］
+WORD_TRACE_S = 1.0       # 聞いた語の名残りが薄れる速さ（生まれつき・1歳の値。育つと伸びる。逸脱リスト登録）［Tier2］
+LOOK_WINDOW_S = 3.0      # 語が届く前、見ていた物を数える秒数（物の名簿と同じ。Yu・Smith 2012）［Tier2］
+TICK_S = 0.1
+TRACE_TICKS = int(round(5 * WORD_TRACE_S / TICK_S))   # 名残りがほぼ消える（1%）まで
 RECALL_MIN = 2.5         # 同じ組み合わせ3回で ‖r‖≈3、2回では出ない［仮置き・合格テスト③④で確かめる］
 
 
@@ -47,6 +60,8 @@ class Semantic(Box):
 
     def reset(self) -> None:
         self._prev_heard = False
+        self._held_hist: list = []       # 直前 LOOK_WINDOW_S に毎回見ていた行の荷札（見ていない回は None）
+        self._pending: list[dict] = []   # 名残りの残っている語 {q, 経過回数, 足した見た目, 足した重み}
         self.last_event = ""      # 記録用："learn" / "learn_skip"（名簿に結び付ける行が無い） / "recall" / ""
         self.last_recall_norm = 0.0
 
@@ -73,7 +88,7 @@ class Semantic(Box):
         if self.learn_mode == "A":
             a = lst[-1][0]
             return [(a, 1.0)] if float(torch.linalg.vector_norm(a)) > 0.0 else []
-        return [(a, float(m.max())) for a, m in lst[:-1]
+        return [(a, float(m.max())) for a, m in lst[:-2]
                 if float(m.max()) > 0.0 and float(torch.linalg.vector_norm(a)) > 0.0]
 
     def recall(self, q):
@@ -98,6 +113,8 @@ class Semantic(Box):
         heard = q is not None and float(torch.linalg.vector_norm(q)) > 0.0
         first = heard and not self._prev_heard
         self._prev_heard = heard
+        self._trace_step(inbox.get("objfile"), q if (self.learning and first and self.learn_mode == "B"
+                                                     and not self.table) else None)
         if not heard:
             return out
         if self.table:
@@ -113,7 +130,7 @@ class Semantic(Box):
         if r is not None:
             out["goal"] = noisy(r)
             self.last_event = "recall"
-        if self.learning and first:
+        if self.learning and first and self.learn_mode == "A":
             pairs = self.targets(inbox.get("objfile"))
             if not pairs:
                 self.last_event = "learn_skip"
@@ -123,3 +140,35 @@ class Semantic(Box):
                 self.n_learn += 1
                 self.last_event = "learn"
         return out
+
+    def _trace_step(self, lst, new_q) -> None:
+        """覚え方B：今見ている行を覚えておき、名残りの残っている語ごとに足す。名残りが消えたら覚える。"""
+        held = None
+        if lst and len(lst) >= 2 and float(torch.linalg.vector_norm(lst[-2][0])) > 0.0:
+            held = make_tag(lst[-2][0])
+        self._held_hist.append(held)
+        del self._held_hist[:-int(round(LOOK_WINDOW_S / TICK_S))]
+        keep = []
+        for p in self._pending:
+            p["k"] += 1
+            if held is not None:
+                g = math.exp(-p["k"] * TICK_S / WORD_TRACE_S)
+                p["v"] += g * held
+                p["w"] += g
+            if p["k"] < TRACE_TICKS:
+                keep.append(p)
+            else:
+                self._learn_pending(p)
+        self._pending = keep
+        if new_q is not None:
+            seen = [h for h in self._held_hist if h is not None]
+            v = torch.stack(seen).sum(0) if seen else torch.zeros(TAG_DIM, dtype=DTYPE)
+            self._pending.append({"q": new_q.clone(), "k": 0, "v": v, "w": float(len(seen))})
+
+    def _learn_pending(self, p) -> None:
+        if p["w"] == 0.0:
+            self.last_event = "learn_skip"
+            return
+        self.W += ETA * torch.outer(p["v"] / p["w"], make_tag(p["q"]))
+        self.n_learn += 1
+        self.last_event = "learn"

@@ -31,8 +31,10 @@
               (荷札ゼロ, 今見ている行の山＝高さは慣れ、下限0.001) を1つ足す。今見ている行が無ければ
               地図はゼロ（目の入口の目の動きの地図と同じ「列の最後の荷札ゼロ＝特別な組」の約束）
 * semantic  : 段階6（2026-10-17）から列。行ごとに (荷札, 山)。山の高さ＝直前 LOOK_WINDOW_S（3秒）に名簿の物を
-              見ていた時間のうち、その行を見ていた割合（合わせて1。見ていない行は載せない）。列の最後に必ず (名前を結び付ける行の荷札, ゼロの地図)
-              を1つ足す（無ければ荷札もゼロ）。意味の辞書は覚え方Bで前の組、覚え方Aで最後の組を使う
+              見ていた時間のうち、その行を見ていた割合（合わせて1。見ていない行は載せない）。そのあとに
+              (今見ている行の荷札, ゼロの地図)、列の最後に必ず (名前を結び付ける行の荷札, ゼロの地図) を足す
+              （無ければ荷札もゼロ。今見ている行は2026-10-17から、意味の辞書が聞いた語の名残りのあいだ毎回数えるため）。
+              意味の辞書は覚え方Bで「今見ている行」、覚え方Aで最後の組を使う
 """
 
 from __future__ import annotations
@@ -432,8 +434,10 @@ class Objfile(Box):
             out["orienteye"] = lst
         if "semantic" in out:
             lst = [(rw.tag, share * bump_at(*rw.pos)) for rw, share in self.look_shares()]
-            named = self.named.tag if self.named is not None and self.named in self.rows else torch.zeros(TAG_DIM, dtype=DTYPE)
-            lst.append((named, torch.zeros(GRID, GRID, dtype=DTYPE)))
+            zero_tag, zero_map = torch.zeros(TAG_DIM, dtype=DTYPE), torch.zeros(GRID, GRID, dtype=DTYPE)
+            named = self.named.tag if self.named is not None and self.named in self.rows else zero_tag
+            lst.append((held.tag if held is not None else zero_tag, zero_map))
+            lst.append((named, zero_map))
             out["semantic"] = lst
         return out
 
