@@ -54,24 +54,35 @@ def load(csv_path):
     return looks, held, events, actual
 
 
-def run(looks, events, word_of_obj, before_s=3.0, echo_s=0.0, n_obj=6, tag_seed=0):
+def run(looks, events, word_of_obj, before_s=3.0, echo_s=0.0, n_obj=6, tag_seed=0, tau_s=None):
+    """tau_s を与えると、語が届いたあとは打ち切りではなく「語の残り」exp(−経過/tau) を掛けて数える
+    （届く前は今の覚え方と同じ重み1。届いたあとは 5×tau まで見る）。"""
     from core_v2.tagging import word_tag
     rng = np.random.default_rng(tag_seed)
     A = rng.standard_normal((n_obj + 1, 64))          # 最後の1つ＝物以外（床のかけらなど）
     A /= np.linalg.norm(A, axis=1, keepdims=True)
     W = np.zeros((64, 64))
-    nb, ne = int(round(before_s / TICK_S)), int(round(echo_s / TICK_S))
+    nb = int(round(before_s / TICK_S))
+    ne = int(round((5 * tau_s if tau_s else echo_s) / TICK_S))
     n_learn = n_skip = 0
     for i, w in events:
-        win = [k for k in looks[max(0, i - nb + 1): i + ne + 1] if k is not None]
-        if not win:
+        seg = looks[max(0, i - nb + 1): i + ne + 1]
+        t_rel = [(j - min(i, nb - 1)) * TICK_S for j in range(len(seg))]     # 語が届いた回＝0
+        wts = {}
+        for k, tr in zip(seg, t_rel):
+            if k is None:
+                continue
+            wt = 1.0 if (tau_s is None or tr <= 0) else float(np.exp(-tr / tau_s))
+            wts[k] = wts.get(k, 0.0) + wt
+        tot = sum(wts.values())
+        if tot <= 0:
             n_skip += 1
             continue
         q = word_tag(w).numpy().astype(float)
-        for k in set(win):
-            W += (win.count(k) / len(win)) * np.outer(A[k], q)      # k=-1 は A[-1]＝物以外
+        for k, wt in wts.items():
+            W += (wt / tot) * np.outer(A[k], q)      # k=-1 は A[-1]＝物以外
         n_learn += 1
-    res = {"before_s": before_s, "echo_s": echo_s, "learn": n_learn, "skip": n_skip, "words": {}}
+    res = {"before_s": before_s, "echo_s": echo_s, "tau_s": tau_s, "learn": n_learn, "skip": n_skip, "words": {}}
     correct = recalled_correct = 0
     for k, w in word_of_obj.items():
         r = W @ word_tag(w).numpy().astype(float)
@@ -103,12 +114,14 @@ def main(argv=None):
     for src_name, src in (("視線10度以内（look）", looks), ("名簿の「今見ている行」（本番と同じ）", held)):
       print(f"--- 「見ていた」の決め方：{src_name}")
       for before in (3.0,):
-        for echo in (0.0, 0.5, 1.0, 1.5, 2.0, 3.0):
-            r = run(src, events, word_of_obj, before, echo)
+        for echo, tau in ((0.0, None), (0.5, None), (1.0, None), (1.5, None), (2.0, None), (3.0, None),
+                          (0.0, 0.5), (0.0, 1.0), (0.0, 2.0)):
+            r = run(src, events, word_of_obj, before, echo, tau_s=tau)
             r["source"] = src_name
             out.append(r)
             ws = " ".join(f"{w}:{v['norm']}{'○' if v['best_is_correct'] else '×'}" for w, v in r["words"].items())
-            print(f"前{before}秒・後{echo}秒：覚えた {r['learn']}・捨てた {r['skip']}・正しい物が一番 {r['correct']}/6"
+            lab = f"後は薄れる τ={tau}秒" if tau else f"後{echo}秒"
+            print(f"前{before}秒・{lab}：覚えた {r['learn']}・捨てた {r['skip']}・正しい物が一番 {r['correct']}/6"
                   f"（線を越えて正しい {r['recalled_and_correct']}/6）  {ws}")
     with open(os.path.join(os.path.dirname(csv_path), "試験場_" + os.path.basename(csv_path).replace(".csv", ".json")),
               "w", encoding="utf-8") as f:
