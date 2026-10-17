@@ -30,8 +30,8 @@
 * orienteye : 行ごとの (荷札, 印の山＝強さ×σ IOR_SIGMA_CELLS の山)。列の最後に必ず
               (荷札ゼロ, 今見ている行の山＝高さは慣れ、下限0.001) を1つ足す。今見ている行が無ければ
               地図はゼロ（目の入口の目の動きの地図と同じ「列の最後の荷札ゼロ＝特別な組」の約束）
-* semantic  : 段階6（2026-10-17）から列。行ごとに (荷札, 山)。山の高さ＝その行を直前 LOOK_WINDOW_S（3秒）の
-              うちに見ていた時間の割合（見ていない行は載せない）。列の最後に必ず (名前を結び付ける行の荷札, ゼロの地図)
+* semantic  : 段階6（2026-10-17）から列。行ごとに (荷札, 山)。山の高さ＝直前 LOOK_WINDOW_S（3秒）に名簿の物を
+              見ていた時間のうち、その行を見ていた割合（合わせて1。見ていない行は載せない）。列の最後に必ず (名前を結び付ける行の荷札, ゼロの地図)
               を1つ足す（無ければ荷札もゼロ）。意味の辞書は覚え方Bで前の組、覚え方Aで最後の組を使う
 """
 
@@ -438,13 +438,14 @@ class Objfile(Box):
         return out
 
     def look_shares(self) -> list[tuple[Row, float]]:
-        """名簿にいる行ごとに、直前 LOOK_WINDOW_S のうち見ていた時間の割合（0より大きい行だけ）。"""
-        n = int(round(LOOK_WINDOW_S / TICK_S))
+        """名簿にいる行ごとに、直前 LOOK_WINDOW_S のうち名簿の物を見ていた時間の中で、その行を見ていた割合
+        （0より大きい行だけ。合わせて1）。何も見ていなかった時間（画面と画面のあいだ）で薄めない。"""
+        looked = [h for h in self._look_hist if h is not None and h in self.rows]
         out = []
         for rw in self.rows:
-            k = sum(1 for h in self._look_hist if h is rw)
+            k = sum(1 for h in looked if h is rw)
             if k > 0:
-                out.append((rw, k / n))
+                out.append((rw, k / len(looked)))
         return out
 
     # ---- 記録用 ----

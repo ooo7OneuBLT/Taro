@@ -148,9 +148,9 @@ def test_the_name_goes_to_the_object_looked_at_long_enough():
         ego = (-52.0, 0.0) if k == 0 else (0.0, 0.0)
         out = of.step({"eyein": objs([(1, 13.5, 7), (2, 13.5, 13.5)], ego=ego), "orienteye": ZERO2})
     assert float(out["semantic"][-1][0] @ cup_tag) > 0.99
-    # 段階6：直前3秒に見ていた割合。コップを約1.4秒・ボールを約0.3秒（1回遅れで注意が移る分を許す）
+    # 段階6：直前3秒に見ていた時間の中の割合。コップを約1.4秒・ボールを約0.3秒（1回遅れで注意が移る分を許す）
     shares = {round(float(t @ cup_tag), 2) > 0.99: float(m.max()) for t, m in out["semantic"][:-1]}
-    assert 0.4 <= shares[True] <= 0.6 and 0.05 <= shares[False] <= 0.15
+    assert 0.75 <= shares[True] <= 0.9 and 0.9 <= shares[True] + shares[False] <= 1.0   # 山の頂は升目の間で少し低い
 
 
 def test_roster_is_limited():
