@@ -5,8 +5,10 @@
 
 * **口の帳面**（前の太郎の発話の小脳 `cerebellum_lobe/speech.py`）：「この口の指令で、この音が出た」を数える。
   音は耳から戻ってきた自分の声（聞き分ける係→この係、TEXT）で知る。逆引き（音→口の指令）は、その音が出た回数が
-  いちばん多い指令。前の太郎は指令ごとの回数で比べていたが、ここは（指令, 音）の組ごとに数える（月齢で同じ指令から
-  違う音が出るようになっても、古い組で逆引きしないため）。声道が決まっているので、1回出せば逆引きは正しい
+  いちばん多い指令。前の太郎は指令ごとの回数で比べていたが、ここは（指令, 音）の組ごとに数え、同じ指令で別の音が
+  出たら古い組の数えは消す（順モデルは最新の音で上書き、前の太郎と同じ）。月齢で口が育つと、同じ指令から違う音が
+  出るようになる（6か月までは何を指令しても母音、12か月までは声帯がいつも有声）。1回目の育ち（2026-10-17）では
+  古い組が残り、12か月から「ぼおる」の計画が「ぽおす」になって M が止まった
 * **喃語の出し方**（生まれつき）：1回に1〜2音。口の4つの数は一様にばらばらに選び、2音目は直前と同じ形に戻りやすい
   （前の太郎 B の反復の傾き +2.0。顎の上げ下げがくり返し、舌と唇が据え置かれる＝MacNeilage 1998）。
   出せる形かどうかは声の出口（体）が決める（月齢の段階・連動）。前の太郎の口の選び方の NN（ほうびでしか学ばない）は移さない
@@ -84,6 +86,7 @@ class Voice(Box):
         self.babbling = bool(babbling)
         self.rng = random.Random(seed)
         self._inverse: dict[str, tuple] = {}
+        self._by_cmd: dict[tuple, set] = {}
         self._row_tags: dict[str, torch.Tensor] = {}
         self.reset()
 
@@ -126,11 +129,25 @@ class Voice(Box):
     # ---- 口の帳面 ----
     def _rebuild_inverse(self) -> None:
         self._inverse = {}
+        self._by_cmd = {}
+        for (p, c) in self.notebook:
+            self._by_cmd.setdefault(p, set()).add((p, c))
         for (p, c), n in self.notebook.items():
             if c not in self._inverse or n > self.notebook[(self._inverse[c], c)]:
                 self._inverse[c] = p
 
     def note(self, params, char: str) -> None:
+        """この指令でこの音が出た。同じ指令で前に出ていた別の音の数えは消す（体が育つと、同じ指令から別の音が
+        出るようになる。前の太郎の帳面の順モデル forward_map も最新の音で上書きしていた）。"""
+        stale = [c for (p, c) in self._by_cmd.get(params, ()) if c != char]
+        for c in stale:
+            del self.notebook[(params, c)]
+            if self._inverse.get(c) == params:
+                del self._inverse[c]
+                best = max(((p, n) for (p, cc), n in self.notebook.items() if cc == c), key=lambda x: x[1], default=None)
+                if best is not None:
+                    self._inverse[c] = best[0]
+        self._by_cmd[params] = {(params, char)}
         self.notebook[(params, char)] += 1
         best = self._inverse.get(char)
         if best is None or self.notebook[(params, char)] > self.notebook[(best, char)]:

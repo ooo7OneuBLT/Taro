@@ -92,6 +92,21 @@ def test_notebook_grows_from_babble():
         assert mouth.speak(v.plan(c)[0], 12.0) == c
 
 
+def test_notebook_follows_the_growing_mouth():
+    """同じ口の指令でも、口が育つと別の音が出る。古い音の逆引きは、その指令から外れる。"""
+    v = Voice(learning=True)
+    cmd = (1, 2, 0, 4)                                  # ぽ の指令。12か月までは声帯が有声なので「ぼ」
+    for _ in range(50):
+        v.note(cmd, mouth.speak(cmd, 11.5))
+    v.note((1, 2, 1, 4), "ぼ")
+    assert v.plan("ぼ") == [cmd]
+    v.note(cmd, mouth.speak(cmd, 12.0))                 # 12か月：同じ指令で「ぽ」が出た
+    assert v.plan("ぽ") == [cmd] and v.plan("ぼ") == [(1, 2, 1, 4)]
+    v2 = Voice()
+    v2.set_extra_state(v.get_extra_state())
+    assert v2.plan("ぼ") == [(1, 2, 1, 4)] and v2.notebook == v.notebook
+
+
 def test_newborn_babble_is_vowels_only():
     v = Voice(learning=True, babbling=True, seed=4)
     ear = Ear(v, month=3.0)
