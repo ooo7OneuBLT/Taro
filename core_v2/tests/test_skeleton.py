@@ -47,7 +47,10 @@ def test_path_formats():
     assert fmt[("gaze", "eyeout")] == (Fmt.TAG, None)  # 追従の道は段階2では素通し
     assert fmt[("eyein", "semantic")] == (Fmt.TAG_AND_MAP, None)  # 段階3
     assert fmt[("eyein", "orienteye")] == (Fmt.TAG_AND_MAP, None)  # 段階3
-    assert sum(1 for e in wiring.EDGES if e.key in wiring.PATH_FORMATS) == 21
+    assert fmt[("listen", "voice")] == (Fmt.TEXT, None)   # 段階7
+    assert fmt[("voice", "voiceout")] == (Fmt.MOTOR, 22)
+    assert fmt[("voice", "listen")] == (Fmt.AMOUNT, None)
+    assert sum(1 for e in wiring.EDGES if e.key in wiring.PATH_FORMATS) == 27
 
 
 # ---------------------------------------------------------------- 書式

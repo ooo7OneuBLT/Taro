@@ -22,6 +22,9 @@
   まだ物を見ていない回も、すぐあとに見た物と結び付く。1歳には頭の中で語を唱え直す力が無く、聞いた音は短く薄れるだけ
   （名づけのあと0.5〜0.9秒まで結び付く）。段階6の試験場（太郎5人×6語）で、捨てる語 53%→約0%、正しい物が一番の語
   15→25/30。τ＝0.5〜2秒のどれでも 23〜25/30 で、値のちょうどには頼らない。唱え直す力は後の「目的を持ち続ける係」で足す
+* **逆向きに引く（段階7、2026-10-17、ユーザー承認の仕様書）**：名簿の「今見ている行」の荷札 a から w = Wᵀa を作り、
+  ‖w‖ ≥ RECALL_MIN なら言う語の係（wordplan）へ noisy(w/‖w‖) を出す（見ている物 → 語）。表 W は同じ。
+  思い出す強さの線も、語→物と同じ RECALL_MIN（同じ組み合わせ3回で出る）
 学ぶこと自体のやり方（ヘッブ則・ETA・RECALL_MIN・覚え方）は生まれつき＝手で決める。
 W の中身だけが経験で変わる。W は buffer なので save.py の保存に入り、reset() では消えない。
 
@@ -34,7 +37,7 @@ import math
 import torch
 
 from ..formats import TAG_DIM, DTYPE, make_tag
-from ..tagging import noisy, word_tag
+from ..tagging import NOISE_SIGMA, noisy, word_tag
 from .base import Box
 
 MATCH_COS = 0.9          # 段階2の表引き
@@ -56,6 +59,7 @@ class Semantic(Box):
         self.register_buffer("n_learn", torch.zeros((), dtype=torch.int64))
         self.learning = bool(learning)
         self.learn_mode = learn_mode
+        self._gen = torch.Generator().manual_seed(0)
         self.reset()
 
     def reset(self) -> None:
@@ -64,6 +68,7 @@ class Semantic(Box):
         self._pending: list[dict] = []   # 名残りの残っている語 {q, 経過回数, 足した見た目, 足した重み}
         self.last_event = ""      # 記録用："learn" / "learn_skip"（名簿に結び付ける行が無い） / "recall" / ""
         self.last_recall_norm = 0.0
+        self.last_word_norm = 0.0
 
     # ---- 段階2の表 ----
     def register(self, word: str, appearance_tag) -> None:
@@ -97,6 +102,16 @@ class Semantic(Box):
         self.last_recall_norm = n
         return make_tag(r) if n >= RECALL_MIN else None
 
+    def recall_word(self, lst):
+        """段階7：逆向きに引く。名簿の「今見ている行」の荷札 a から語 Wᵀa を思い出す（同じ表を逆に引くだけ）。"""
+        self.last_word_norm = 0.0
+        if not lst or len(lst) < 2 or float(torch.linalg.vector_norm(lst[-2][0])) == 0.0:
+            return None
+        r = self.W.T @ make_tag(lst[-2][0])
+        n = float(torch.linalg.vector_norm(r))
+        self.last_word_norm = n
+        return make_tag(r) if n >= RECALL_MIN else None
+
     def save_learned(self, path, meta: dict | None = None) -> None:
         torch.save({"W": self.W.clone(), "n_learn": int(self.n_learn), "meta": meta or {}}, path)
 
@@ -115,6 +130,10 @@ class Semantic(Box):
         self._prev_heard = heard
         self._trace_step(inbox.get("objfile"), q if (self.learning and first and self.learn_mode == "B"
                                                      and not self.table) else None)
+        if not self.table:
+            w = self.recall_word(inbox.get("objfile"))
+            if w is not None:   # 雑音は自分専用の乱数で（足したことで段階3〜6の乱数の並び＝結果が変わらないように）
+                out["wordplan"] = make_tag(w + NOISE_SIGMA * torch.randn(TAG_DIM, generator=self._gen))
         if not heard:
             return out
         if self.table:
@@ -140,6 +159,29 @@ class Semantic(Box):
                 self.n_learn += 1
                 self.last_event = "learn"
         return out
+
+    def skip(self, n: int, lst=None) -> None:
+        """何も聞かない n 回を飛ばす（段階7の試験場用）。見ている物（名簿の列 lst）はその間ずっと同じとする。
+        1回ずつ _trace_step を回したのと同じ結果になる（名残りの重みは等比の和でまとめて足す）。"""
+        held = None
+        if lst and len(lst) >= 2 and float(torch.linalg.vector_norm(lst[-2][0])) > 0.0:
+            held = make_tag(lst[-2][0])
+        keep_n = int(round(LOOK_WINDOW_S / TICK_S))
+        self._held_hist = (self._held_hist + [held] * min(n, keep_n))[-keep_n:]
+        self._prev_heard = False
+        keep = []
+        for p in self._pending:
+            m = min(n, TRACE_TICKS - p["k"])
+            if held is not None:
+                g = sum(math.exp(-(p["k"] + j) * TICK_S / WORD_TRACE_S) for j in range(1, m + 1))
+                p["v"] += g * held
+                p["w"] += g
+            p["k"] += m
+            if p["k"] < TRACE_TICKS:
+                keep.append(p)
+            else:
+                self._learn_pending(p)
+        self._pending = keep
 
     def _trace_step(self, lst, new_q) -> None:
         """覚え方B：今見ている行を覚えておき、名残りの残っている語ごとに足す。名残りが消えたら覚える。"""

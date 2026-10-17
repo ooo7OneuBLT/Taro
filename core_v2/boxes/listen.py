@@ -19,6 +19,11 @@
   決まった乱数で数にしたもの（tagging.word_tag＝生まれつきの耳の符号）。知っている語が無ければゼロ
   （「でんしゃはどこ？」では何も探さない）
 
+* **段階7（2026-10-17）**：声の係（voice）から自分の声の写し（AMOUNT）が 1 で来ている間に聞いた音は、自分の声。
+  次の音の当て方も回数も直さず（自分の喃語を親の語として覚えない）、意味の辞書へも送らず、そのかなを声の係へ渡す
+  （口の帳面を作るため。TEXT）。写しが無い間は、聞いた発話の中の知っている語を空白区切りで声の係へ（TEXT）、
+  最初の知っている語の荷札を言う語の係（wordplan）へ渡す（意味の辞書へ渡すものと同じ）
+
 NNの中の状態から語の荷札を作る案は、1試行目で違う語どうしが似すぎた（似かた 平均0.62・最大0.89、
 わんわん／にゃんにゃん）ので、仕様書 §2 の決めどおり生まれつきの耳の符号に替えた。
 
@@ -85,6 +90,7 @@ class Listen(Box):
         self.last_heard: list[str] = []
         self.last_chunks: list[list[str]] = []
         self.last_word = ""
+        self.last_self = ""
 
     # ---- 保存（数え上げは文字列なので extra_state に入れる） ----
     def get_extra_state(self):
@@ -164,22 +170,35 @@ class Listen(Box):
             self.end_mean.fill_(m)
         self.alone[s] += 1
         self.n_heard += 1
-        self._known = None
+        if self.alone[s] in (1, KNOWN_MIN):   # 知っている語の一覧が変わりうるのは、新しい発話か、回数が線に届いたときだけ
+            self._known = None
 
     def step(self, inbox):
         out = self.passthrough()
         self.last_heard, self.last_chunks, self.last_word = [], [], ""
         text = inbox.get("earin") or ""
+        own = inbox.get("voice")
+        if own is not None and float(own) > 0.5:
+            # 段階7：自分の声の写しが来ている間に聞いた音は自分の声。覚えず、意味の辞書へも送らず、声の係へそのまま返す
+            self.last_self = kana_only(text)
+            out["voice"] = self.last_self
+            return out
+        if not text:
+            return out
         known = self.known()
+        found = []
         for u in text.split():               # 1回に2つ届いたら空白で区切られている
             ch = self.segment(u)
             self.last_heard.append(u)
             self.last_chunks.append(ch)
             if not self.last_word:
                 self.last_word = next((c for c in ch if c in known), "")
+            found += [c for c in ch if c in known]
             if self.learning:
                 self.hear(u)
                 self.chunks.update(ch)
         if self.last_word:
             out["semantic"] = word_tag(self.last_word)
+            out["wordplan"] = word_tag(self.last_word)
+        out["voice"] = " ".join(found)
         return out

@@ -57,6 +57,13 @@ PATH_FORMATS: dict[tuple[str, str], tuple[Fmt, int | None]] = {
     ("orienteye", "objfile"): (Fmt.MOTOR, 2),       # 撃った指令の写し
     ("objfile", "orienteye"): (Fmt.TAG_AND_MAP, None),
     ("objfile", "semantic"): (Fmt.TAG_AND_MAP, None),   # 段階6：行ごとの荷札と見ていた割合＋名前を結び付ける行
+    # 段階7（言える、2026-10-17）
+    ("semantic", "wordplan"): (Fmt.TAG, None),      # 見ている物から逆に引いた語 Wᵀa
+    ("listen", "wordplan"): (Fmt.TAG, None),        # 聞いた知っている語
+    ("wordplan", "voice"): (Fmt.TAG, None),         # 言いたい語（言わないときはゼロ）
+    ("listen", "voice"): (Fmt.TEXT, None),          # 2つめの TEXT：親の知っている語（空白区切り）か、耳から戻った自分の声のかな
+    ("voice", "listen"): (Fmt.AMOUNT, None),        # 自分の声の写し（1＝いま自分の声が耳に戻ってくる）
+    ("voice", "voiceout"): (Fmt.MOTOR, 22),         # 1音の口の指令：調音点7・調音法7・声帯2・母音6（core_v2/mouth.py）
 }
 
 

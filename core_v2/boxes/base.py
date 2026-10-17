@@ -36,11 +36,25 @@ class Box(nn.Module):
         self.inputs = wiring.incoming(self.BOX_ID)
         self.outputs = wiring.outgoing(self.BOX_ID)
 
+    def __setattr__(self, name: str, value: Any) -> None:
+        # 速くするため：もう普通の属性としてある名前に、重み・係でない値を入れ直すときは nn.Module の手続きを飛ばす
+        # （毎回の中の状態の書き換えが多い係で、nn.Module.__setattr__ が回の時間の2割を食っていた）
+        if name in self.__dict__ and not isinstance(value, (nn.Parameter, nn.Module)):
+            object.__setattr__(self, name, value)
+        else:
+            super().__setattr__(name, value)
+
     def step(self, inbox: dict[str, Any]) -> dict[str, Any]:
         return self.passthrough()
 
     def passthrough(self) -> dict[str, Any]:
-        return {e.dst: zero(e.fmt, e.size) for e in self.outputs}
+        # ゼロの Tensor は毎回作らず使い回す（受け取った値はその場で書き換えない約束なので安全。段階7の試験場で速くするため）。
+        # 物ごとの組（list）だけは毎回新しく作る
+        zeros = self.__dict__.get("_zeros")
+        if zeros is None:
+            zeros = {e.dst: zero(e.fmt, e.size) for e in self.outputs}
+            self.__dict__["_zeros"] = zeros
+        return {k: ([] if isinstance(v, list) else v) for k, v in zeros.items()}
 
     def reset(self) -> None:
         """場面の切り替わりで中の状態を空にする。素通しの係は何もしない。"""
