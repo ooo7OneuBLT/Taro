@@ -32,6 +32,8 @@ ADDED_EDGES = [
     ("orienteye", "objfile", "段階4：撃った指令の写し。撃った先の物に注意を移す"),
     ("objfile", "orienteye", "段階4：行ごとの「もう見た」の山と、今見ている行（慣れ）"),
     ("objfile", "semantic", "段階4：名前を結び付ける行の荷札。段階6：行ごとの見ていた割合も"),
+    ("objfile", "surprise", "段階8：席ごとの行の荷札と場所・見えたか、最後に目立ちが急に下がった所の地図"),
+    ("surprise", "semantic", "段階8：驚きの強さ。意味の辞書が驚きの荷札を結び付ける相手に足す"),
 ]
 
 # 通り道の矢印の書式（設計書 技術付録D）。(書式, MOTOR のときの筋の数)
@@ -64,6 +66,9 @@ PATH_FORMATS: dict[tuple[str, str], tuple[Fmt, int | None]] = {
     ("listen", "voice"): (Fmt.TEXT, None),          # 2つめの TEXT：親の知っている語（空白区切り）か、耳から戻った自分の声のかな
     ("voice", "listen"): (Fmt.AMOUNT, None),        # 自分の声の写し（1＝いま自分の声が耳に戻ってくる）
     ("voice", "voiceout"): (Fmt.MOTOR, 22),         # 1音の口の指令：調音点7・調音法7・声帯2・母音6（core_v2/mouth.py）
+    # 段階8（ない、2026-10-18）
+    ("objfile", "surprise"): (Fmt.TAG_AND_MAP, None),  # 席1〜7の (行の荷札, 場所の山。高さ1＝見えた・0.5＝見えない) と最後に (ゼロ, 目立ちが急に下がった所)
+    ("surprise", "semantic"): (Fmt.AMOUNT, None),   # 驚きの強さ 0〜1（8b で予測のNNに替えても、この形は変えない）
 }
 
 

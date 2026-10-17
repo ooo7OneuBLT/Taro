@@ -25,11 +25,12 @@ from core_v2.formats import GRID, TAG_DIM, FormatError, Fmt, check, make_tag, ze
 
 def test_wiring_counts():
     assert len(wiring.BOX_IDS) == 42                # 段階4で物の名簿（objfile）を足した
-    assert len(wiring.EDGES) == 123
+    assert len(wiring.EDGES) == 125                 # 段階8で objfile→surprise・surprise→semantic を足した
     added = [e for e in wiring.EDGES if e.added]
     assert [(e.src, e.dst) for e in added] == [("listen", "semantic"), ("eyein", "objfile"), ("prio", "objfile"),
                                                ("orienteye", "objfile"), ("objfile", "orienteye"),
-                                               ("objfile", "semantic")]
+                                               ("objfile", "semantic"), ("objfile", "surprise"),
+                                               ("surprise", "semantic")]
 
 
 def test_every_box_has_its_own_file():
@@ -50,7 +51,9 @@ def test_path_formats():
     assert fmt[("listen", "voice")] == (Fmt.TEXT, None)   # 段階7
     assert fmt[("voice", "voiceout")] == (Fmt.MOTOR, 22)
     assert fmt[("voice", "listen")] == (Fmt.AMOUNT, None)
-    assert sum(1 for e in wiring.EDGES if e.key in wiring.PATH_FORMATS) == 27
+    assert fmt[("objfile", "surprise")] == (Fmt.TAG_AND_MAP, None)   # 段階8
+    assert fmt[("surprise", "semantic")] == (Fmt.AMOUNT, None)
+    assert sum(1 for e in wiring.EDGES if e.key in wiring.PATH_FORMATS) == 29
 
 
 # ---------------------------------------------------------------- 書式

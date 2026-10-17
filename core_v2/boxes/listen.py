@@ -24,6 +24,9 @@
   （口の帳面を作るため。TEXT）。写しが無い間は、聞いた発話の中の知っている語を空白区切りで声の係へ（TEXT）、
   最初の知っている語の荷札を言う語の係（wordplan）へ渡す（意味の辞書へ渡すものと同じ）
 
+* **段階8（2026-10-18）**：発話の中の知っている語を**全部、順に**送る（今までは最初の1つだけ。「ぼおるないね」の「ない」が落ちていた）。
+  聞いた回に1つ目、次の回に2つ目…と1回に1つずつ意味の辞書と言う語の係へ（語ごとに意味の辞書の名残りが1つできる）
+
 NNの中の状態から語の荷札を作る案は、1試行目で違う語どうしが似すぎた（似かた 平均0.62・最大0.89、
 わんわん／にゃんにゃん）ので、仕様書 §2 の決めどおり生まれつきの耳の符号に替えた。
 
@@ -91,6 +94,7 @@ class Listen(Box):
         self.last_chunks: list[list[str]] = []
         self.last_word = ""
         self.last_self = ""
+        self._queue: list[str] = []          # 段階8：まだ意味の辞書へ送っていない知っている語（順に1回1つ）
 
     # ---- 保存（数え上げは文字列なので extra_state に入れる） ----
     def get_extra_state(self):
@@ -182,23 +186,26 @@ class Listen(Box):
             # 段階7：自分の声の写しが来ている間に聞いた音は自分の声。覚えず、意味の辞書へも送らず、声の係へそのまま返す
             self.last_self = kana_only(text)
             out["voice"] = self.last_self
-            return out
+            return self._send_next(out)
         if not text:
-            return out
+            return self._send_next(out)
         known = self.known()
         found = []
         for u in text.split():               # 1回に2つ届いたら空白で区切られている
             ch = self.segment(u)
             self.last_heard.append(u)
             self.last_chunks.append(ch)
-            if not self.last_word:
-                self.last_word = next((c for c in ch if c in known), "")
             found += [c for c in ch if c in known]
             if self.learning:
                 self.hear(u)
                 self.chunks.update(ch)
-        if self.last_word:
+        self._queue += found
+        out["voice"] = " ".join(found)
+        return self._send_next(out)
+
+    def _send_next(self, out):
+        if self._queue:
+            self.last_word = self._queue.pop(0)
             out["semantic"] = word_tag(self.last_word)
             out["wordplan"] = word_tag(self.last_word)
-        out["voice"] = " ".join(found)
         return out

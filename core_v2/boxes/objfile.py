@@ -30,6 +30,12 @@
 * orienteye : 行ごとの (荷札, 印の山＝強さ×σ IOR_SIGMA_CELLS の山)。列の最後に必ず
               (荷札ゼロ, 今見ている行の山＝高さは慣れ、下限0.001) を1つ足す。今見ている行が無ければ
               地図はゼロ（目の入口の目の動きの地図と同じ「列の最後の荷札ゼロ＝特別な組」の約束）
+* surprise  : 段階8（2026-10-18）。席1〜SEATS の順に (行の荷札, 場所の山)。山の高さ＝1：見えている、
+              0.5：視野の中にいるのに ABSENT_TICKS 回（目が跳んだ回は数えない）続けて見えない。視野の外の行は地図ゼロ、
+              空席は荷札も地図もゼロ。列の最後に必ず (荷札ゼロ, 目立ちが急に下がった所の山) を1つ足す
+              （行の位置の目立ちが「ふだん」より急に下がり、そのあと見えていない行。脱馴化と同じ数字で下がりを見る）。
+              席は、新しい行が、空いてからいちばん長い席に座る（行が消えたその回に同じ席へ別の物が座らないので、
+              驚きの係は席ごとに同じ物を追える。行は最大 MAX_ROWS なので、SEATS＝MAX_OBJECTS−1＝7 席のうち3席以上は空いている）
 * semantic  : 段階6（2026-10-17）から列。行ごとに (荷札, 山)。山の高さ＝直前 LOOK_WINDOW_S（3秒）に名簿の物を
               見ていた時間のうち、その行を見ていた割合（合わせて1。見ていない行は載せない）。そのあとに
               (今見ている行の荷札, ゼロの地図)、列の最後に必ず (名前を結び付ける行の荷札, ゼロの地図) を足す
@@ -39,11 +45,12 @@
 
 from __future__ import annotations
 
+import functools
 import math
 
 import torch
 
-from ..formats import DTYPE, GRID, TAG_DIM, make_tag
+from ..formats import DTYPE, GRID, MAX_OBJECTS, TAG_DIM, make_tag
 from .base import Box
 
 TICK_S = 0.1
@@ -79,12 +86,21 @@ MIN_LOOK_S = 1.0         # 名前を結び付けるには、少なくともこ�
 LOOK_WINDOW_S = 3.0      # 名前を聞く前のこの秒数に、どの物をどれだけ見ていたか（子は名づけの約3秒前から
                          # 見ている物と語を結び付けやすい、Yu・Smith 2012。記憶ベース）［Tier2］
 
+# 段階8で新しく決めた数（新しい手合わせの数は無い）
+SEATS = MAX_OBJECTS - 1  # 驚きの係へ渡す席の数（列の最後の1つは目立ちの下がりの地図）
+
 _YS, _XS = torch.meshgrid(torch.arange(GRID, dtype=DTYPE), torch.arange(GRID, dtype=DTYPE),
                           indexing="ij")
 
 
-def bump_at(r: float, c: float, sigma: float = IOR_SIGMA_CELLS) -> torch.Tensor:
+@functools.lru_cache(maxsize=4096)
+def _bump(r: float, c: float, sigma: float) -> torch.Tensor:
     return torch.exp(-((_XS - c) ** 2 + (_YS - r) ** 2) / (2.0 * sigma ** 2))
+
+
+def bump_at(r: float, c: float, sigma: float = IOR_SIGMA_CELLS) -> torch.Tensor:
+    """山の地図。同じ場所の山は作り直さず使い回す（値は同じ。受け取った側はその場で書き換えない約束、base.py）。"""
+    return _bump(float(r), float(c), float(sigma))
 
 
 def split_ego(objs):
@@ -132,6 +148,9 @@ class Row:
         self.strength = 0.0      # 慣れ（見ている間）／もう見た（離れたあと）
         self.look_ticks = 0      # 今回続けて見ている回数
         self.sal = None          # 脱馴化：(ふだんの値, ふだんの揺れ幅)
+        self.seat = -1           # 段階8：驚きの係へ渡す席
+        self.unseen = 0          # 段階8：続けて見えていない回数（目が跳んだ回は数えない）
+        self.dropped = False     # 段階8：最後に見えたあと、行の位置の目立ちが急に下がった
 
     @property
     def pos(self) -> tuple[float, float]:
@@ -192,8 +211,20 @@ class Objfile(Box):
         self.n_dishab = 0
         self.n_merge = 0
         self.last_merges: list[tuple[int, int]] = []
+        self._seat_free_t = [-(10 ** 9) + i for i in range(SEATS)]   # 席が空いた回（はじめは席の番号順）
+        self._ego_moving = False
 
     # ---- 行とかけら ----
+    def _remove_row(self, rw: Row) -> None:
+        self.rows.remove(rw)
+        if rw.seat >= 0:
+            self._seat_free_t[rw.seat] = self.t
+
+    def _take_seat(self, rw: Row) -> None:
+        used = {r.seat for r in self.rows if r is not rw}
+        free = [i for i in range(SEATS) if i not in used]
+        rw.seat = min(free, key=lambda i: self._seat_free_t[i])
+
     def _new_row(self, part: Part, captured: bool = True) -> Row | None:
         """新しい物に行を作る。席（MAX_ROWS）が埋まっていれば、もう見えなくなった行（ABSENT_TICKS 回以上
         見えていない行。印の無い行を優先し、その中で一番長く見えていない行）と入れ替える。今見えている物の
@@ -206,9 +237,10 @@ class Objfile(Box):
             if not cands:
                 return None
             victim = min(cands, key=lambda rw: (rw.strength >= MARK_MIN, rw.last_seen))
-            self.rows.remove(victim)
+            self._remove_row(victim)
         row = Row(part, self._next_number)
         self._next_number += 1
+        self._take_seat(row)
         self.rows.append(row)
         return row
 
@@ -280,7 +312,7 @@ class Objfile(Box):
                         if -lim <= p.r <= GRID - 1 + lim and -lim <= p.c <= GRID - 1 + lim
                         and not (in_view(p.r, p.c) and p.n_seen > 0 and self.t - p.last_seen > keep_ticks)]
             if not rw.parts:
-                self.rows.remove(rw)
+                self._remove_row(rw)
                 for name in ("attended", "named", "_held_now"):
                     if getattr(self, name) is rw:
                         setattr(self, name, None)
@@ -304,7 +336,7 @@ class Objfile(Box):
                         for name in ("attended", "named", "_held_now"):
                             if getattr(self, name) is b:
                                 setattr(self, name, a)
-                        self.rows.remove(b)
+                        self._remove_row(b)
                         self.n_merge += 1
                         self.last_merges.append((a.number, b.number))
                         changed = True
@@ -370,6 +402,9 @@ class Objfile(Box):
             if v - mu >= max(DISHAB_JUMP, DISHAB_Z * dev):
                 rw.strength *= DISHAB_KEEP
                 self.n_dishab += 1
+            # 段階8：同じ線で、急に下がったのも見る（周辺で消えたことを安く知らせる道。目が跳んだ回は見ない）
+            if mu - v >= max(DISHAB_JUMP, DISHAB_Z * dev) and rw.last_seen != self.t and not self._ego_moving:
+                rw.dropped = True
             dev = (1 - DISHAB_ALPHA) * dev + DISHAB_ALPHA * abs(v - mu)
             mu = (1 - DISHAB_ALPHA) * mu + DISHAB_ALPHA * v
             rw.sal = (mu, dev)
@@ -410,6 +445,12 @@ class Objfile(Box):
                     self._shift_all(dr, dc)
                 ego_moving = math.hypot(dr, dc) > EGO_STILL
             self._match(things, ego_moving)
+            self._ego_moving = ego_moving
+            for rw in self.rows:
+                if rw.last_seen == self.t:
+                    rw.unseen, rw.dropped = 0, False
+                elif not ego_moving:
+                    rw.unseen += 1
         if cmd is not None and float(torch.linalg.vector_norm(cmd)) > 0.0:
             self._on_fire(cmd)
         self._forget()
@@ -432,6 +473,8 @@ class Objfile(Box):
                 att = max(held.strength, 1e-3) * bump_at(*held.pos)
             lst.append((torch.zeros(TAG_DIM, dtype=DTYPE), att))
             out["orienteye"] = lst
+        if "surprise" in out:
+            out["surprise"] = self.surprise_list()
         if "semantic" in out:
             lst = [(rw.tag, share * bump_at(*rw.pos)) for rw, share in self.look_shares()]
             zero_tag, zero_map = torch.zeros(TAG_DIM, dtype=DTYPE), torch.zeros(GRID, GRID, dtype=DTYPE)
@@ -451,6 +494,39 @@ class Objfile(Box):
             if k > 0:
                 out.append((rw, k / len(looked)))
         return out
+
+    def surprise_list(self) -> list:
+        """段階8：驚きの係へ渡す列（席の順、最後に目立ちの下がりの地図）。"""
+        zero_tag, zero_map = torch.zeros(TAG_DIM, dtype=DTYPE), torch.zeros(GRID, GRID, dtype=DTYPE)
+        seats = [(zero_tag, zero_map)] * SEATS
+        drop = zero_map
+        for rw in self.rows:
+            if rw.place_only() or rw.seat < 0:
+                continue
+            r, c = rw.pos
+            m = zero_map
+            if 0 < rw.unseen and self._gone_out(rw):
+                pass                             # 動いていた物が、その向きのまま視野の外へ出た（見えなくなったのではない）
+            elif in_view(r, c):
+                m = (1.0 if rw.unseen < ABSENT_TICKS else 0.5) * bump_at(r, c)
+                if rw.dropped and rw.unseen >= ABSENT_TICKS:
+                    drop = torch.maximum(drop, bump_at(r, c))
+            seats[rw.seat] = (rw.tag, m)
+        return seats + [(zero_tag, drop)]
+
+    def _gone_out(self, rw: Row) -> bool:
+        """段階8：見えなくなった行が、見えていた最後に動いていた（1回あたり MOVE_MIN マス以上）なら、同じ速さで
+        動き続けたとして、見えなくなってからの回数ぶん進めた所が視野の外か（動く物は同じ道を進み続けるという
+        生まれつきの見込み、Spelke の連続性。動きの数え方は「一緒に動いた」と同じ：目が跳んだ回は数えない）。"""
+        mv = [m for p in rw.parts for m in p.moves[-MOVE_WINDOW:] if m is not None][-3:]
+        if not mv:
+            return False
+        dr = sum(m[0] for m in mv) / len(mv)
+        dc = sum(m[1] for m in mv) / len(mv)
+        if math.hypot(dr, dc) < MOVE_MIN:
+            return False
+        r, c = rw.pos
+        return not in_view(r + dr * rw.unseen, c + dc * rw.unseen)
 
     # ---- 記録用 ----
     def ior_map(self) -> torch.Tensor:
