@@ -202,6 +202,9 @@ def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     opts = {"--seeds": "0-19", "--modes": "B,A", "--ear-n": "1000", "--gap": str(GAP_S),
             "--log-dir": "段階6_スミスとユー"}
+    if "--help" in argv or "-h" in argv:
+        print(__doc__)
+        return None
     ticks = "--ticks" in argv
     i = 0
     while i < len(argv):
