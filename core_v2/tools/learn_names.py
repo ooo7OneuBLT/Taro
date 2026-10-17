@@ -6,28 +6,29 @@
 各語 N 回覚えたら止めて、学んだ表を保存する。手で登録する道具（register_appearance.py）は使わない。
 
 使い方：
-  python -m core_v2.tools.learn_names [N] [--swap] [--out パス] [--scenes 場面,場面] [--max-s 秒]
+  python -m core_v2.tools.learn_names [N] [--swap] [--out パス] [--scenes 場面,場面] [--max-s 秒] [--log-dir 名前]
     N       … 各語を何回覚えたら止めるか（既定 5）
     --swap  … 名前を入れ替える（ボールに「こっぷ」と言う）＝合格の線⑤の確かめ用
-既定の出力：G/models/semantic_learned_N{N}.pt（--swap なら _swap が付く）。記録は G/logs/段階3_名づけ/
+    --ear   … 段階5：親の話しかけで育てた耳（hear_parent.py の出力）を聞き分ける係に読む。名づけの間も耳は覚え続ける
+既定の出力：G/models/semantic_learned_N{N}.pt（--swap なら _swap が付く）。記録は G/logs/段階3_名づけ/（--log-dir で G/logs/ の下の名前を変える）
 
 覚えた回ごとに「そのとき実際に見ていた物」（視線と物の角度、10度以内で角の小さい方）を記録し、
-名前と食い違った回（取り違え）を数える。2026-10-16：意味の辞書は「聞く直前1秒に一番長く真ん中にあった物」で
-覚えるようになったので、取り違えも同じ窓（直前 LEARN_WINDOW 回で一番多く見ていた物＝learned_object）で数える。
+名前と食い違った回（取り違え）を数える。段階4（2026-10-16）：意味の辞書は、物の名簿の「最後に1秒
+（MIN_LOOK_S）以上続けて見た物」で覚えるので、取り違えも同じ決まり（環境の正解の角度で、最後に1秒以上
+続けて見ていた物＝learned_object）で数える。
 覚えた回にたまたま見ていた物（looking）も並べて残す。
 """
 
 from __future__ import annotations
 
 import csv
-from collections import Counter, deque
 import json
 import os
 import sys
 import time
 
 from .. import run_v2
-from ..boxes.semantic import LEARN_WINDOW
+from ..boxes.objfile import MIN_LOOK_S
 
 DEFAULT_SCENES = "段階2b_3物体_ボール左_2026-10-15,段階2b_3物体_ボール右_2026-10-15"
 WORD_OF = {"toy1": "ぼおる", "toy2": "こっぷ"}       # toy1＝ボール（test_object1）・toy2＝コップ
@@ -70,7 +71,7 @@ def looking_at(env) -> str:
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     swap = "--swap" in argv
-    opts = {"--out": None, "--scenes": DEFAULT_SCENES, "--max-s": "900"}
+    opts = {"--out": None, "--scenes": DEFAULT_SCENES, "--max-s": "900", "--log-dir": "段階3_名づけ", "--ear": None}
     pos = []
     i = 0
     while i < len(argv):
@@ -85,7 +86,7 @@ def main(argv=None):
     n_target = int(pos[0]) if pos else 5
     tag = f"N{n_target}" + ("_swap" if swap else "")
     out = opts["--out"] or os.path.join(run_v2.REPO, "G", "models", f"semantic_learned_{tag}.pt")
-    log_dir = os.path.join(run_v2.REPO, "G", "logs", "段階3_名づけ")
+    log_dir = os.path.join(run_v2.REPO, "G", "logs", opts["--log-dir"])
     os.makedirs(log_dir, exist_ok=True)
     max_s = float(opts["--max-s"])
 
@@ -94,6 +95,10 @@ def main(argv=None):
     brain.boxes["eyein"].setup()
     sem = brain.boxes["semantic"]
     sem.learning = True
+    ear = brain.boxes["listen"]
+    if opts["--ear"]:
+        ear.load_ear(os.path.join(run_v2.REPO, opts["--ear"]))
+        ear.learning = True
 
     counts = {w: 0 for w in OBJ_OF_WORD}
     events = []          # 名前を聞いた回・覚えた回の記録
@@ -112,7 +117,7 @@ def main(argv=None):
             brain.reset()                      # 意味の辞書の表 W は消えない
             act = run_v2.zero_action(env)
             n_ticks = int(round(TRIAL_S / (run_v2.K * run_v2.DT)))
-            recent_looks = deque(maxlen=LEARN_WINDOW + 1)   # 意味の辞書の窓（目の入口は1回遅れで届く）
+            run_obj, run_len, long_obj = "", 0, ""   # 続けて見ている物とその回数、最後に1秒以上見た物
             for tick in range(n_ticks):
                 heard = []
                 for _ in range(run_v2.K):
@@ -128,7 +133,10 @@ def main(argv=None):
                 if cmd is not None:
                     u._orienting.set_map_target(float(cmd[0]), float(cmd[1]))
                 look = looking_at(env)
-                recent_looks.append(look)
+                run_len = run_len + 1 if look and look == run_obj else (1 if look else 0)
+                run_obj = look
+                if run_obj and run_len * run_v2.K * run_v2.DT >= MIN_LOOK_S - 1e-9:
+                    long_obj = run_obj
                 if text:
                     word = next((w for w in OBJ_OF_WORD if w in text), "")
                     heard_hist.append((tick, word))
@@ -141,16 +149,17 @@ def main(argv=None):
                     named = OBJ_OF_WORD.get(word, "")
                     if swap and named:
                         named = {"ball": "cup", "cup": "ball"}[named]   # 入れ替えた名前が指す物
-                    seen = Counter(x for x in list(recent_looks)[:-1] if x)
-                    learned_obj = seen.most_common(1)[0][0] if seen else ""
+                    learned_obj = long_obj
                     events.append({"scene": scene, "seed": seed, "t": round(float(u.data.time), 2),
                                    "event": ev, "text": "", "word": word, "looking": look,
                                    "learned_object": learned_obj, "named_object": named,
-                                   "mixup": ev == "learn" and learned_obj != named})
+                                   "mixup": ev == "learn" and learned_obj != named,
+                                   "rows": brain.boxes["objfile"].summary(),
+                                   "n_merge": brain.boxes["objfile"].n_merge})
                     if ev == "learn" and word in counts:
                         counts[word] += 1
                         print(f"[{scene} seed{seed} t={u.data.time:.1f}] 覚えた「{word}」"
-                              f"（直前1秒に一番見ていた物: {learned_obj or 'なし'}、その回に見ていた物: {look or 'なし'}）"
+                              f"（最後に1秒以上見ていた物: {learned_obj or 'なし'}、その回に見ていた物: {look or 'なし'}）"
                               f" 回数 {counts}", flush=True)
                 sim_s += run_v2.K * run_v2.DT
                 if min(counts.values()) >= n_target or sim_s >= max_s:
@@ -162,7 +171,7 @@ def main(argv=None):
     n_heard = sum(1 for e in events if e["event"] == "heard")
     n_learn = sum(1 for e in events if e["event"] == "learn")
     n_mix = sum(1 for e in events if e.get("mixup"))
-    meta = {"n_target": n_target, "swap": swap, "counts": counts, "sim_s": round(sim_s, 1),
+    meta = {"ear": opts["--ear"], "n_target": n_target, "swap": swap, "counts": counts, "sim_s": round(sim_s, 1),
             "n_heard": n_heard, "n_learn": n_learn, "n_skip": sum(1 for e in events if e["event"] == "learn_skip"),
             "n_mixup": n_mix, "scenes": scenes, "seeds_used": seed}
     try:
@@ -173,7 +182,7 @@ def main(argv=None):
     os.makedirs(os.path.dirname(out), exist_ok=True)
     sem.save_learned(out, meta)
     with open(os.path.join(log_dir, f"名づけ_{tag}.csv"), "w", newline="", encoding="utf-8") as f:
-        keys = ["scene", "seed", "t", "event", "text", "word", "looking", "learned_object", "named_object", "mixup"]
+        keys = ["scene", "seed", "t", "event", "text", "word", "looking", "learned_object", "named_object", "mixup", "rows", "n_merge"]
         w = csv.DictWriter(f, fieldnames=keys, extrasaction="ignore")
         w.writeheader()
         w.writerows(events)

@@ -841,6 +841,10 @@ def build(scene, orient=None, vor=True, seed=0, verbose=False, actuation_model=N
             #   WordSchedule(schedule=None)相当になり1ビットも変わらない
             #   （parent_labelingと同じkwargs直渡しの流儀）。
             word_test=(dict(w["word_test"]) if w["word_test"] else None),
+            # 【2026-10-17新設・段階6】物を2つずつ出す予定表（toy_env._setup_pairs）。
+            #   既定の雛形には足さない（足すと既存の全場面の設定の指紋 config_hash が変わる）。
+            #   書いていない場面は None＝1ビット不変。
+            pairs=(dict(w["pairs"]) if w.get("pairs") else None),
             pin_before_spawn=bool(w.get("pin_before_spawn", False)),
             plain=bool(w["plain"]),
             static_tex=bool(w["static_tex"]),

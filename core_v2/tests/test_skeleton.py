@@ -24,10 +24,12 @@ from core_v2.formats import GRID, TAG_DIM, FormatError, Fmt, check, make_tag, ze
 # ---------------------------------------------------------------- 配線表
 
 def test_wiring_counts():
-    assert len(wiring.BOX_IDS) == 41
-    assert len(wiring.EDGES) == 118
+    assert len(wiring.BOX_IDS) == 42                # 段階4で物の名簿（objfile）を足した
+    assert len(wiring.EDGES) == 123
     added = [e for e in wiring.EDGES if e.added]
-    assert [(e.src, e.dst) for e in added] == [("listen", "semantic")]
+    assert [(e.src, e.dst) for e in added] == [("listen", "semantic"), ("eyein", "objfile"), ("prio", "objfile"),
+                                               ("orienteye", "objfile"), ("objfile", "orienteye"),
+                                               ("objfile", "semantic")]
 
 
 def test_every_box_has_its_own_file():
@@ -45,7 +47,10 @@ def test_path_formats():
     assert fmt[("gaze", "eyeout")] == (Fmt.TAG, None)  # 追従の道は段階2では素通し
     assert fmt[("eyein", "semantic")] == (Fmt.TAG_AND_MAP, None)  # 段階3
     assert fmt[("eyein", "orienteye")] == (Fmt.TAG_AND_MAP, None)  # 段階3
-    assert sum(1 for e in wiring.EDGES if e.key in wiring.PATH_FORMATS) == 16
+    assert fmt[("listen", "voice")] == (Fmt.TEXT, None)   # 段階7
+    assert fmt[("voice", "voiceout")] == (Fmt.MOTOR, 22)
+    assert fmt[("voice", "listen")] == (Fmt.AMOUNT, None)
+    assert sum(1 for e in wiring.EDGES if e.key in wiring.PATH_FORMATS) == 27
 
 
 # ---------------------------------------------------------------- 書式
