@@ -266,3 +266,43 @@ def test_bed_skipping_idle_time_gives_same_result():
     assert res[0][1] == res[1][1]
     assert torch.allclose(res[0][2], res[1][2], atol=1e-4)
     assert res[0][3] == res[1][3]
+
+
+def test_export_and_import_voice_into_full_brain(tmp_path):
+    """試験場で育てた声（帳面・M・聞いた語・言う語の一覧）を、41係の脳へ読める。意味の辞書は持っていかない。"""
+    from core_v2.brain import Brain
+    bed = vb.Bed(seed=1, start_day=340)
+    bed.run_play(600)
+    p = tmp_path / "v.json"
+    vb.export_voice(bed, str(p), {"seed": 1, "month": round(bed.month, 3)})
+    brain = Brain()
+    meta = vb.import_voice(brain.boxes, str(p))
+    assert meta["seed"] == 1
+    assert brain.boxes["voice"].notebook == bed.boxes["voice"].notebook
+    assert brain.boxes["voice"].M == bed.boxes["voice"].M
+    assert len(brain.boxes["wordplan"].words) == len(bed.boxes["wordplan"].words)
+    assert float(brain.boxes["semantic"].W.abs().sum()) == 0.0
+    assert not brain.boxes["voice"].learning and not brain.boxes["voice"].babbling
+    brain.reset()                                       # 試行の切り替わりで、育てた中身は消えない
+    assert brain.boxes["voice"].M == bed.boxes["voice"].M
+
+
+def test_full_brain_voice_is_silent_by_default():
+    """41係の脳：声の係は既定で黙る（段階2〜6の体ありの試行は声を出さない）。"""
+    from core_v2.brain import Brain
+    brain = Brain()
+    for _ in range(300):
+        out = brain.tick({"voiceout": 14.0, "earin": ""})
+        assert out.get("voiceout", "") == ""
+
+
+def test_say_names_scoring():
+    """体ありの確かめ（say_names）の数え方：声を出し始めた回に見ていた物と、1秒以上続けて見た回。"""
+    from core_v2.tools.say_names import score
+
+    def row(t, ball, voice=""):
+        return {"tick": t, "voice": voice, "ang_ball": ball, "ang_cup": 40.0, "ang_distractor": 40.0}
+    rows = [row(t, 3.0) for t in range(12)] + [row(12, 3.0, "ぼ"), row(13, 3.0), row(14, 3.0), row(15, 3.0, "お"),
+                                                 row(18, 3.0, "る")] + [row(t, 30.0) for t in range(19, 40)]
+    s = score(rows)
+    assert s["voices"] == [("ball", "ぼおる")] and s["looks"]["ball"] == 1

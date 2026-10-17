@@ -153,7 +153,8 @@ def path_record(brain) -> dict[str, Any]:
 def run_trial(brain, env, *, seed: int, duration_s: float = 10.0,
               on_tick: Callable[[dict[str, Any]], None] | None = None,
               manual_eye: Callable[[int, Any], tuple[float, float] | None] | None = None,
-              use_brain: bool = True, start_jitter: float = START_JITTER) -> list[dict[str, Any]]:
+              use_brain: bool = True, start_jitter: float = START_JITTER,
+              age_months: float | None = None) -> list[dict[str, Any]]:
     """1試行を回し、脳1回ごとの記録（辞書）の列を返す。
 
     manual_eye : 確かめ用。(tick 番号, 脳が出した方向 or None) を受けて、目へ入れる方向（None なら入れない）を返す。
@@ -161,6 +162,10 @@ def run_trial(brain, env, *, seed: int, duration_s: float = 10.0,
     use_brain  : False なら脳を回さない（環境だけ・確かめ用）
     start_jitter : 試行の頭で、目を種ごとに決まった少しずれた向きへ1回跳ばす大きさ（[-1,1]の方向の幅）。
                  0 なら跳ばさない
+    age_months : 段階7。太郎の月齢（か月）。声の出口へ毎回渡す（口の表が月齢で変わる）。None なら渡さない（0か月＝母音だけ）。
+                 声の出口が出した字は、次の回に親の声と一緒に耳の入口へ入れる（自分の声を聞く。声の係→聞き分けの
+                 「自分の声の写し」は脳の中の矢印なので、ここでは何もしない）。声の係は既定で覚えず喃語も出さないので、
+                 段階2〜6の試行は声を出さず、結果は変わらない。記録の "voice" にその回に出た字
 
     **段階3の確かめで見つけた不具合（2026-10-16）**：前の試行の最後に出した目の指令が、反応の遅れの
     ぶん実行されないまま、目の仕組みの控え（_orienting._map_target）に残り、次の試行の頭で撃たれて
@@ -182,6 +187,7 @@ def run_trial(brain, env, *, seed: int, duration_s: float = 10.0,
     R0 = frame_at(env)
     act = zero_action(env)
     rows = []
+    echo = ""
     n_ticks = int(round(duration_s / (K * DT)))
     for i in range(n_ticks):
         heard = []
@@ -196,13 +202,17 @@ def run_trial(brain, env, *, seed: int, duration_s: float = 10.0,
         cmd = None
         to_env = {}
         if use_brain:
-            to_env = brain.tick({"eyein": obs["eye_left"], "earin": text})
+            ext = {"eyein": obs["eye_left"], "earin": " ".join(x for x in (echo, text) if x)}
+            if age_months is not None:
+                ext["voiceout"] = float(age_months)
+            to_env = brain.tick(ext)
             cmd = to_env.get("eyeout")
+        echo = to_env.get("voiceout", "")
         if manual_eye is not None:
             cmd = manual_eye(i, cmd)
         if cmd is not None:
             u._orienting.set_map_target(float(cmd[0]), float(cmd[1]))
-        row = {"tick": i, "t": float(u.data.time), "heard": text,
+        row = {"tick": i, "t": float(u.data.time), "heard": text, "voice": echo,
                "cmd_h": None if cmd is None else float(cmd[0]),
                "cmd_v": None if cmd is None else float(cmd[1])}
         row.update({f"ang_{k}": v for k, v in gaze_angles(env).items()})

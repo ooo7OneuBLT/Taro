@@ -355,6 +355,16 @@ def export_voice(bed_or_boxes, path: str, meta: dict) -> None:
         json.dump(blob, f, ensure_ascii=False)
 
 
+def import_voice(boxes: dict, path: str) -> dict:
+    """export_voice で書いた JSON を、脳の声の係と言う語の係へ読む（体ありの太郎用。意味の辞書は読まない）。
+    boxes は Brain.boxes でも、係の dict でもよい。返り値は meta（種・日・月齢）。"""
+    with open(path, encoding="utf-8") as f:
+        blob = json.load(f)
+    boxes["voice"].set_extra_state(blob["voice"])
+    boxes["wordplan"].set_extra_state(blob["wordplan"])
+    return blob.get("meta", {})
+
+
 def _save_ckpt(path: str, state: dict) -> None:
     tmp = path + ".tmp"
     with open(tmp, "wb") as f:
