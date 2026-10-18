@@ -85,6 +85,7 @@ class ParentLabeling:
                  vanish_gap_before_sec=1.0, vanish_gap_after_sec=1.5,
                  vanish_wait_notice=False, vanish_notice_delay_sec=0.5,
                  vanish_notice_max_sec=3.0, vanish_silent_targets=(),
+                 vanish_alone_prob=0.0, vanish_alone_text="ない",
                  park_after_sec=None, park_offset_deg=20.0):
         self.enabled = bool(enabled)
         self.shake_amp_m = float(shake_amp_m)
@@ -198,6 +199,11 @@ class ParentLabeling:
         #   代わりにenv.unwrapped._parent_silent_vanishへ(時刻,的)を置く（採点用の
         #   目印。読む側は無い。発話イベント.csvへの記録は無い＝仕様書の指示どおり）。
         self.vanish_silent_targets = set(vanish_silent_targets)
+        # 【core_v2 段階8a・2026-10-18】消えたとき、この割合で「○○ないね」の代わりに
+        #   vanish_alone_text（「ない」）だけを言う（語1つの発話は約1割、Brent・Siskind 2001）。
+        #   既定0.0＝従来どおり（乱数も引かないので1ビットも変わらない）。
+        self.vanish_alone_prob = float(vanish_alone_prob)
+        self.vanish_alone_text = str(vanish_alone_text)
         # 【2026-09-11・K1の場面】差し出して park_after_sec 秒たったら、その時の
         #   視線から park_offset_deg 度だけ横へずらした所に固定する（追従をやめる）。
         #   None（既定）なら1行も通らない＝既定不変。状態は reset() 側。
@@ -413,6 +419,8 @@ class ParentLabeling:
                         return None
                     word = self._single_word(self._target)
                     text = self.vanish_template.format(word=word)
+                    if self.vanish_alone_prob > 0.0 and env.np_random.random() < self.vanish_alone_prob:
+                        text = self.vanish_alone_text
                     return {"text": text, "target": self._target, "cause": cause}
             if self._vanish_spoken and (
                     self._vanish_t >= self._vanish_spoken_t + self.vanish_gap_after_sec):
