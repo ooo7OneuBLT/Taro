@@ -32,7 +32,8 @@
               地図はゼロ（目の入口の目の動きの地図と同じ「列の最後の荷札ゼロ＝特別な組」の約束）
 * surprise  : 段階8（2026-10-18）。席1〜SEATS の順に (行の荷札, 場所の山)。山の高さ＝1：見えている、
               0.5：視野の中にいるのに ABSENT_TICKS 回（目が跳んだ回は数えない）続けて見えない。視野の外の行は地図ゼロ、
-              空席は荷札も地図もゼロ。そのあとに (荷札ゼロ, 今見ている行の山。視野の外なら地図ゼロ) と、
+              空席は荷札も地図もゼロ。そのあとに (荷札ゼロ, 今見ている行の山。高さ1＝MIN_LOOK_S 以上続けて見ている、
+              0.5＝見始めたばかり。視野の外なら地図ゼロ) と、
               列の最後に必ず (荷札ゼロ, 目立ちが急に下がった所の山) を足す
               （行の位置の目立ちが「ふだん」より急に下がり、そのあと見えていない行。脱馴化と同じ数字で下がりを見る）。
               席は、新しい行が、空いてからいちばん長い席に座る（行が消えたその回に同じ席へ別の物が座らないので、
@@ -516,7 +517,9 @@ class Objfile(Box):
         held = self._held_now
         hm = zero_map
         if held is not None and held in self.rows and not held.place_only() and in_view(*held.pos):
-            hm = bump_at(*held.pos)
+            # 高さ1＝MIN_LOOK_S（1秒）以上続けて見ている（名前を結び付けられるのと同じ線）、0.5＝見始めたばかり。
+            # 依頼4：切り出しが出したり消したりする小さなかけらの行が、見始めて1秒たたないうちに見えなくなり、偽の驚きになっていた
+            hm = (1.0 if held.look_ticks * TICK_S >= MIN_LOOK_S else 0.5) * bump_at(*held.pos)
         return seats + [(zero_tag, hm), (zero_tag, drop)]
 
     def _gone_out(self, rw: Row) -> bool:

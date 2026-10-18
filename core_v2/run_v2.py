@@ -154,7 +154,8 @@ def run_trial(brain, env, *, seed: int, duration_s: float = 10.0,
               on_tick: Callable[[dict[str, Any]], None] | None = None,
               manual_eye: Callable[[int, Any], tuple[float, float] | None] | None = None,
               use_brain: bool = True, start_jitter: float = START_JITTER,
-              age_months: float | None = None) -> list[dict[str, Any]]:
+              age_months: float | None = None,
+              on_image: Callable[[int, Any], None] | None = None) -> list[dict[str, Any]]:
     """1試行を回し、脳1回ごとの記録（辞書）の列を返す。
 
     manual_eye : 確かめ用。(tick 番号, 脳が出した方向 or None) を受けて、目へ入れる方向（None なら入れない）を返す。
@@ -162,6 +163,7 @@ def run_trial(brain, env, *, seed: int, duration_s: float = 10.0,
     use_brain  : False なら脳を回さない（環境だけ・確かめ用）
     start_jitter : 試行の頭で、目を種ごとに決まった少しずれた向きへ1回跳ばす大きさ（[-1,1]の方向の幅）。
                  0 なら跳ばさない
+    on_image   : 段階8。(tick 番号, その回に脳へ入れた左目の画像) を毎回受ける（環境を変える道具が、変える前後の画像を残すため）
     age_months : 段階7。太郎の月齢（か月）。声の出口へ毎回渡す（口の表が月齢で変わる）。None なら渡さない（0か月＝母音だけ）。
                  声の出口が出した字は、次の回に親の声と一緒に耳の入口へ入れる（自分の声を聞く。声の係→聞き分けの
                  「自分の声の写し」は脳の中の矢印なので、ここでは何もしない）。声の係は既定で覚えず喃語も出さないので、
@@ -199,6 +201,8 @@ def run_trial(brain, env, *, seed: int, duration_s: float = 10.0,
             if term or trunc:
                 raise RuntimeError(f"試行の途中で環境が終わった（t={u.data.time:.2f}）")
         text = " ".join(heard)
+        if on_image is not None:
+            on_image(i, obs["eye_left"])
         cmd = None
         to_env = {}
         if use_brain:

@@ -166,3 +166,11 @@ def test_bed_trials_pass_line_a_by_construction():
     assert nb.run_trial(b, t, "vanish", 3.0)["u_max"] > 0
     for k in ("stay", "move", "look"):
         assert nb.run_trial(b, t, k, 3.0)["u_max"] == 0.0
+
+
+def test_a_row_looked_at_less_than_a_second_does_not_surprise():
+    """依頼4：見始めて1秒たたない行（切り出しが出したり消したりする小さなかけら）が見えなくなっても、驚かない
+    （目立ちが急に下がった印が無いとき）。1秒以上見た物なら驚く。"""
+    t = tag(10)
+    assert max(run(show(t, 5, prio=False) + blank(15, prio=False))) == 0.0
+    assert max(run(show(t, 15, prio=False) + blank(15, prio=False))) > 0.0

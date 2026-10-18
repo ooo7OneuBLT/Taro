@@ -9,7 +9,9 @@
 いちばん簡単な形にしたもの（調べ：`文献調査/2026-10-18_注意と予測_中心視野.md` の案A）。
 
 * **消えた**（生まれつき）：物の名簿が席ごとに「見えている（山の高さ1）／視野の中にいるのに見えない（0.5）」を出す。
-  - いま目を向けている物（名簿の「今見ている行」。目を向ける反射が撃った先の物）の行が 1→0.5 になったら、消えた＝1
+  - いま目を向けている物（名簿の「今見ている行」。目を向ける反射が撃った先の物）を MIN_LOOK_S（1秒）以上続けて見ていて、
+    その行が 1→0.5 になったら、消えた＝1（1秒は名簿が名前を結び付けてよいとする線と同じ。依頼4：見始めて1秒たたない
+    小さなかけらの行が、切り出しの出し消しで見えなくなり、偽の驚きになっていた。名前を結べるほど見た物でなければ「あるはず」と言えない）
     （1回目の体ありの確かめ（PCへの依頼3）の前は「目の真ん中から FIX_CELLS 以内」で決めていた。体の目が物の少し横に
     止まると、見ている物でも周辺扱いになり覚えが育たない。仕様書の「いま見ている物は1」に合わせて、名簿の今見ている行に直した）
   - 周辺の行は、1→0.5 になり、**しかもその場所の目立ちが急に下がった**（名簿の最後の地図）ときだけ 1
@@ -106,6 +108,7 @@ class Surprise(Box):
         lst = inbox.get("objfile") or []
         rows, held, drop = (lst[:-2], lst[-2][1], lst[-1][1]) if len(lst) >= 2 else ([], None, None)
         held_at = object_center(held) if held is not None and float(held.max()) > 0.0 else None
+        held_long = held_at is not None and float(held.max()) > SEEN_H
         best = 0.0
         for i, seat in enumerate(self.seats):
             tag, m = rows[i] if i < len(rows) else (None, None)
@@ -132,7 +135,7 @@ class Surprise(Box):
                 seat.enc *= _DECAY
                 if seat.state == "seen":             # いま見えなくなった
                     dropped = drop is not None and float(drop[int(round(r)), int(round(c))]) >= 0.5
-                    seat.vanish = 1.0 if (seat.fov or dropped) else 0.0
+                    seat.vanish = 1.0 if ((seat.fov and held_long) or dropped) else 0.0
                     self.n_onset += seat.vanish > 0
                 seat.state = "unseen"
             s = seat.vanish * (seat.enc if self.use_enc else 1.0) * seat.w

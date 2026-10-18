@@ -12,7 +12,8 @@
 
 使い方：
   python -m core_v2.tools.nai_body [--taros 0,1,2] [--trials 10] [--trial-s 30] [--log-dir 段階8_体あり_驚き]
-出力：G/logs/<log-dir>/まとめ.json と、試行ごとの驚きの記録 trials.json
+出力：G/logs/<log-dir>/まとめ.json と、試行ごとの驚きの記録 trials.json、消した試行ごとの消す前後の左目の画像 images/
+  （本番の前に --taros 0 --trials 1 で回し、images/ の画像で物が本当に消えたかを目で確かめる）
 """
 
 from __future__ import annotations
@@ -34,16 +35,27 @@ WINDOW_S = 3.0
 
 
 def hide(env, key: str) -> None:
-    """物を見えなくする。場面の物は親が手に持っている（toy_env の hold：毎歩、定位置へ置き直す）ので、
-    場所を動かしても次の歩で戻る（依頼3の1回目はこれで1度も消えていなかった）。そこで前の太郎の親の
-    消し方（run/world/parent.py の _hide_all）と同じく、物の面の色の透明度を0にし、材質の参照を外す
-    （材質があると色の書き換えが効かない、toy_env の注記）。物はそこにあるが、目には映らない。"""
+    """物を見えなくする（環境の早見表 `太郎/環境の早見表.md` を先に読むこと）。
+    * 場面の物は親が手に持っている（toy_env の hold：毎歩、定位置へ置き直す）ので、場所を動かしても次の歩で戻る
+      （依頼3はこれで1度も消えていなかった）。前の太郎の親の消し方（parent.py の _hide_all）と同じく、物の面の透明度を0にし、
+      材質の参照を外す（材質があると色の書き換えが効かない）。物は手の中にあるが、目には映らない
+    * 妨害物（toy3）は毎歩、点滅で色を書き直す（_flash_move_toy3）ので、透明度0がすぐ戻る（依頼4で妨害物は9回中2回しか驚かなかった）。
+      消すときは揺れと点滅も止める（親が物を持って行ったので、もう揺れない）
+    * ボール（toy1）は体が触れると光り、色を書き直す（_update_glow）。場面では手が届かないので起きない見込み［未確認］"""
     u = env.unwrapped
+    if key == "distractor":
+        u._toy3_flash_move = None
     bid = int(u.model.body(run_v2.OBJECTS[key]).id)
     adr, num = int(u.model.body_geomadr[bid]), int(u.model.body_geomnum[bid])
     for g in range(adr, adr + num):
         u.model.geom_matid[g] = -1
         u.model.geom_rgba[g, 3] = 0.0
+
+
+def save_image(img, path: str) -> None:
+    from PIL import Image
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    Image.fromarray(np.asarray(img, dtype=np.uint8)).save(path)
 
 
 def seat_states(brain) -> str:
@@ -52,10 +64,18 @@ def seat_states(brain) -> str:
                     for i, s in enumerate(sp.seats) if s.state != "empty")
 
 
-def run_one(brain, scene: str, seed: int, trial_s: float, vanish: bool, trace: list | None = None) -> dict:
+def run_one(brain, scene: str, seed: int, trial_s: float, vanish: bool, trace: list | None = None,
+            img_prefix: str | None = None) -> dict:
     env = run_v2.build_env(scene, None, seed=seed, silent=True)
     tick_s = run_v2.K * run_v2.DT
-    st = {"look": "", "run": 0, "hid": None, "hid_obj": "", "level": []}
+    st = {"look": "", "run": 0, "hid": None, "hid_obj": "", "level": [], "img": None, "after": False}
+
+    def on_image(i, img):
+        # 環境を変えた回の前後の左目の画像を残す（前＝変える回に脳が見た画像、後＝変えたあとの次の回の画像）
+        if st["after"] and img_prefix:
+            save_image(img, f"{img_prefix}_after.png")
+            st["after"] = False
+        st["img"] = img
 
     def on_tick(row):
         cands = [(row[f"ang_{k}"], k) for k in run_v2.OBJECTS if row.get(f"ang_{k}") is not None
@@ -73,12 +93,16 @@ def run_one(brain, scene: str, seed: int, trial_s: float, vanish: bool, trace: l
     def manual_eye(i, cmd):
         if (vanish and st["hid"] is None and i * tick_s >= VANISH_AFTER_S and st["look"]
                 and st["run"] * tick_s >= HOLD_S):
+            if img_prefix and st["img"] is not None:
+                save_image(st["img"], f"{img_prefix}_before.png")
             hide(env, st["look"])
             st["hid"], st["hid_obj"] = i, st["look"]
+            st["after"] = True
         return cmd
 
     try:
-        run_v2.run_trial(brain, env, seed=seed, duration_s=trial_s, on_tick=on_tick, manual_eye=manual_eye)
+        run_v2.run_trial(brain, env, seed=seed, duration_s=trial_s, on_tick=on_tick, manual_eye=manual_eye,
+                         on_image=on_image)
     finally:
         run_v2.close_env(env)
     lv = st["level"]
@@ -114,7 +138,8 @@ def main(argv=None):
             for vanish in (True, False):
                 seed = taro * 1000 + k
                 tr = [] if k < a.trace else None
-                r = run_one(brain, scenes[k % len(scenes)], seed, a.trial_s, vanish, tr)
+                img = os.path.join(log_dir, "images", f"taro{taro}_trial{k}") if vanish else None
+                r = run_one(brain, scenes[k % len(scenes)], seed, a.trial_s, vanish, tr, img)
                 if tr is not None:
                     with open(os.path.join(log_dir, f"trace_taro{taro}_trial{k}_{'vanish' if vanish else 'control'}.jsonl"),
                               "w", encoding="utf-8") as f:
