@@ -9,15 +9,17 @@
 いちばん簡単な形にしたもの（調べ：`文献調査/2026-10-18_注意と予測_中心視野.md` の案A）。
 
 * **消えた**（生まれつき）：物の名簿が席ごとに「見えている（山の高さ1）／視野の中にいるのに見えない（0.5）」を出す。
-  - 中心（真ん中から FIX_CELLS 以内＝いま目を向けている物）の行が 1→0.5 になったら、消えた＝1
+  - いま目を向けている物（名簿の「今見ている行」。目を向ける反射が撃った先の物）の行が 1→0.5 になったら、消えた＝1
+    （1回目の体ありの確かめ（PCへの依頼3）の前は「目の真ん中から FIX_CELLS 以内」で決めていた。体の目が物の少し横に
+    止まると、見ている物でも周辺扱いになり覚えが育たない。仕様書の「いま見ている物は1」に合わせて、名簿の今見ている行に直した）
   - 周辺の行は、1→0.5 になり、**しかもその場所の目立ちが急に下がった**（名簿の最後の地図）ときだけ 1
     （周辺の「急に消えた」は上丘の速い道で安く知らせる。消えることは現れることより気づかれにくい：Boot ら 2005）
   - 1 は、その行がまた見えるか、名簿から消える（KEEP_S＝2秒）か、視野の外へ出るまで続く。
     目をそらして物が視野の外へ出たときは、山がゼロ（視野の外）になるので消えたにならない
-* **覚え enc**（形は生まれつき、値は経験）：席の物を中心で見ている間 enc ← 1−(1−enc)·exp(−Δt/ENC_TAU_S) で育ち、
+* **覚え enc**（形は生まれつき、値は経験）：席の物を今見ている行として見ている間 enc ← 1−(1−enc)·exp(−Δt/ENC_TAU_S) で育ち、
   それ以外は exp(−Δt/ENC_DECAY_S) でゆっくり薄れる。席に別の物が座ったら（席が空いた次の物）0 から。
   よく見て覚えた物ほど、無くなったときに強く驚く（慣らしの時間の効果：Hunter・Ames 1988、Richards の持続的注意）
-* **中心の重み**：中心の物は1。周辺は、目の中心からの角度 E での視覚野の拡大率（Horton・Hoyt 1991：M(E)∝1/(E＋0.75°)）
+* **中心の重み**：今見ている物は1。ほかの物は、目の中心からの角度 E での視覚野の拡大率（Horton・Hoyt 1991：M(E)∝1/(E＋0.75°)）
   を、中心の縁を1として比べた値。周辺は小さいがゼロにならない。
   **太郎側の仮の判断：乳児の根拠なし（大人の周辺視の見落としのみ、Boot ら 2005）**。use_centre=False で切れる
 * use_enc=False で enc を1にできる（覚えの掛け算を切る）。enabled=False で驚きを出さない（試験 B の「驚きを止めた太郎」）
@@ -48,13 +50,14 @@ ENC_DECAY_S = 60.0
 DEG_PER_CELL = 60.0 / 28.0
 E2_DEG = 0.75
 SEEN_H = 0.75
+HELD_MATCH_CELLS = 0.5   # 今見ている行の山と同じ場所の席（同じ行から作った山なので中心は同じ。半マスは読み取りの余裕）
 
 _GROW = math.exp(-TICK_S / ENC_TAU_S)
 _DECAY = math.exp(-TICK_S / ENC_DECAY_S)
 
 
 def centre_weight(d_cells: float) -> float:
-    """目の中心からの距離（マス）→ 重み。中心（FIX_CELLS 以内）は1、外は視覚野の拡大率の比。"""
+    """目の中心からの距離（マス）→ 重み。FIX_CELLS 以内は1、外は視覚野の拡大率の比（今見ている物でない行に使う）。"""
     if d_cells <= FIX_CELLS:
         return 1.0
     e_fix = FIX_CELLS * DEG_PER_CELL
@@ -101,7 +104,8 @@ class Surprise(Box):
     def step(self, inbox):
         out = self.passthrough()
         lst = inbox.get("objfile") or []
-        rows, drop = (lst[:-1], lst[-1][1]) if lst else ([], None)
+        rows, held, drop = (lst[:-2], lst[-2][1], lst[-1][1]) if len(lst) >= 2 else ([], None, None)
+        held_at = object_center(held) if held is not None and float(held.max()) > 0.0 else None
         best = 0.0
         for i, seat in enumerate(self.seats):
             tag, m = rows[i] if i < len(rows) else (None, None)
@@ -118,8 +122,8 @@ class Surprise(Box):
                 continue
             r, c = object_center(m)
             d = math.hypot(r - CENTER, c - CENTER)
-            seat.fov = d <= FIX_CELLS
-            seat.w = centre_weight(d) if self.use_centre else 1.0
+            seat.fov = held_at is not None and math.hypot(r - held_at[0], c - held_at[1]) < HELD_MATCH_CELLS
+            seat.w = 1.0 if (seat.fov or not self.use_centre) else centre_weight(d)
             if h > SEEN_H:
                 seat.vanish = 0.0
                 seat.enc = 1.0 - (1.0 - seat.enc) * _GROW if seat.fov else seat.enc * _DECAY

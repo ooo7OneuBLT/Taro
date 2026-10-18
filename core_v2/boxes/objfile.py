@@ -32,10 +32,11 @@
               地図はゼロ（目の入口の目の動きの地図と同じ「列の最後の荷札ゼロ＝特別な組」の約束）
 * surprise  : 段階8（2026-10-18）。席1〜SEATS の順に (行の荷札, 場所の山)。山の高さ＝1：見えている、
               0.5：視野の中にいるのに ABSENT_TICKS 回（目が跳んだ回は数えない）続けて見えない。視野の外の行は地図ゼロ、
-              空席は荷札も地図もゼロ。列の最後に必ず (荷札ゼロ, 目立ちが急に下がった所の山) を1つ足す
+              空席は荷札も地図もゼロ。そのあとに (荷札ゼロ, 今見ている行の山。視野の外なら地図ゼロ) と、
+              列の最後に必ず (荷札ゼロ, 目立ちが急に下がった所の山) を足す
               （行の位置の目立ちが「ふだん」より急に下がり、そのあと見えていない行。脱馴化と同じ数字で下がりを見る）。
               席は、新しい行が、空いてからいちばん長い席に座る（行が消えたその回に同じ席へ別の物が座らないので、
-              驚きの係は席ごとに同じ物を追える。行は最大 MAX_ROWS なので、SEATS＝MAX_OBJECTS−1＝7 席のうち3席以上は空いている）
+              驚きの係は席ごとに同じ物を追える。行は最大 MAX_ROWS なので、SEATS＝MAX_OBJECTS−2＝6 席のうち2席以上は空いている）
 * semantic  : 段階6（2026-10-17）から列。行ごとに (荷札, 山)。山の高さ＝直前 LOOK_WINDOW_S（3秒）に名簿の物を
               見ていた時間のうち、その行を見ていた割合（合わせて1。見ていない行は載せない）。そのあとに
               (今見ている行の荷札, ゼロの地図)、列の最後に必ず (名前を結び付ける行の荷札, ゼロの地図) を足す
@@ -87,7 +88,7 @@ LOOK_WINDOW_S = 3.0      # 名前を聞く前のこの秒数に、どの物を�
                          # 見ている物と語を結び付けやすい、Yu・Smith 2012。記憶ベース）［Tier2］
 
 # 段階8で新しく決めた数（新しい手合わせの数は無い）
-SEATS = MAX_OBJECTS - 1  # 驚きの係へ渡す席の数（列の最後の1つは目立ちの下がりの地図）
+SEATS = MAX_OBJECTS - 2  # 驚きの係へ渡す席の数（列の最後の2つは、今見ている行の山と、目立ちの下がりの地図）
 
 _YS, _XS = torch.meshgrid(torch.arange(GRID, dtype=DTYPE), torch.arange(GRID, dtype=DTYPE),
                           indexing="ij")
@@ -496,7 +497,7 @@ class Objfile(Box):
         return out
 
     def surprise_list(self) -> list:
-        """段階8：驚きの係へ渡す列（席の順、最後に目立ちの下がりの地図）。"""
+        """段階8：驚きの係へ渡す列（席の順、そのあと今見ている行の山、最後に目立ちの下がりの地図）。"""
         zero_tag, zero_map = torch.zeros(TAG_DIM, dtype=DTYPE), torch.zeros(GRID, GRID, dtype=DTYPE)
         seats = [(zero_tag, zero_map)] * SEATS
         drop = zero_map
@@ -512,7 +513,11 @@ class Objfile(Box):
                 if rw.dropped and rw.unseen >= ABSENT_TICKS:
                     drop = torch.maximum(drop, bump_at(r, c))
             seats[rw.seat] = (rw.tag, m)
-        return seats + [(zero_tag, drop)]
+        held = self._held_now
+        hm = zero_map
+        if held is not None and held in self.rows and not held.place_only() and in_view(*held.pos):
+            hm = bump_at(*held.pos)
+        return seats + [(zero_tag, hm), (zero_tag, drop)]
 
     def _gone_out(self, rw: Row) -> bool:
         """段階8：見えなくなった行が、見えていた最後に動いていた（1回あたり MOVE_MIN マス以上）なら、同じ速さで

@@ -26,12 +26,14 @@ def run(steps, sp=None, of=None):
     of = of or Objfile()
     sp = sp or Surprise()
     us = []
-    for things, ego, with_prio in steps:
+    for step in steps:
+        things, ego, with_prio = step[:3]
+        cmd = step[3] if len(step) > 3 else Z2
         eyein = [(t, bump_at(r, c, sigma=1.0)) for t, r, c in things] + [(torch.zeros(TAG_DIM), ego_map(*ego))]
         sal = torch.zeros(28, 28)
         for _, r, c in things:
             sal = torch.maximum(sal, bump_at(r, c))
-        inbox = {"eyein": eyein, "orienteye": Z2}
+        inbox = {"eyein": eyein, "orienteye": cmd}
         if with_prio:
             inbox["prio"] = sal
         out = of.step(inbox)
@@ -75,13 +77,18 @@ def test_longer_look_stronger_surprise():
     assert 0.0 < short < long < 1.0
 
 
+def look_left(t):
+    """目を左の何も無い所へ跳ばす（撃った指令の写しと、中身が右へ8マスずれる目の動き）。見ていた物は周辺に残る。"""
+    return [([], (0.0, 0.0), True, torch.tensor([-8.0 / C, 0.0])), ([(t, C, C + 8)], (64.0, 0.0), True)]
+
+
 def test_peripheral_vanish_is_weak_and_needs_a_salience_drop():
     t = tag(4)
-    # 中心で見たあと、目が動いて物が周辺（8マス右）に。そこで消える
-    seq = show(t, 50) + [([(t, C, C + 8)], (64.0, 0.0), True)] + show(t, 10, c=C + 8)
+    # 中心で見たあと、目が左の何も無い所へ跳び、物は周辺（8マス右）に。そこで消える
+    seq = show(t, 50) + look_left(t) + show(t, 10, c=C + 8)
     centre = max(run(show(t, 50) + blank(10)))
     with_drop = max(run(seq + blank(10)))
-    no_prio = max(run([(a, b, False) for a, b, _ in seq] + blank(10, prio=False)))
+    no_prio = max(run([(x[0], x[1], False) + tuple(x[3:]) for x in seq] + blank(10, prio=False)))
     assert 0.0 < with_drop < centre
     assert no_prio == 0.0
     assert centre_weight(0.0) == 1.0 and 0.0 < centre_weight(20.0) < 0.3
@@ -92,8 +99,17 @@ def test_switches():
     seq = show(t, 30) + blank(10)
     assert max(run(seq, Surprise(use_enc=False))) == 1.0
     assert max(run(seq, Surprise(enabled=False))) == 0.0
-    per = show(t, 50) + [([(t, C, C + 8)], (64.0, 0.0), True)] + show(t, 10, c=C + 8) + blank(10)
+    per = show(t, 50) + look_left(t) + show(t, 10, c=C + 8) + blank(10)
     assert max(run(per, Surprise(use_centre=False))) > max(run(per))
+
+
+def test_held_row_counts_as_fixated_even_off_centre():
+    """今見ている行は、目の真ん中から少しずれていても（4マス＝約9度）中心の重み1で、覚えも育つ（依頼3のあとに直した）。"""
+    t = tag(9)
+    aim = [([(t, C, C + 4)], (0.0, 0.0), True, torch.tensor([4.0 / C, 0.0]))]   # 目を物へ撃ったが、目は動かなかった（届かない）
+    off = max(run(show(t, 3, c=C + 4) + aim + show(t, 46, c=C + 4) + blank(10)))
+    centre = max(run(show(t, 50) + blank(10)))
+    assert off > 0.5 and abs(off - centre) < 0.05
 
 
 def test_a_freed_seat_is_not_reused_at_once():

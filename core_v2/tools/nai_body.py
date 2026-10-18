@@ -33,18 +33,26 @@ HOLD_S = 2.0
 WINDOW_S = 3.0
 
 
-def hide(env, key: str, k: int) -> None:
-    from run.world.toy_env import FAR_AWAY
+def hide(env, key: str) -> None:
+    """物を見えなくする。場面の物は親が手に持っている（toy_env の hold：毎歩、定位置へ置き直す）ので、
+    場所を動かしても次の歩で戻る（依頼3の1回目はこれで1度も消えていなかった）。そこで前の太郎の親の
+    消し方（run/world/parent.py の _hide_all）と同じく、物の面の色の透明度を0にし、材質の参照を外す
+    （材質があると色の書き換えが効かない、toy_env の注記）。物はそこにあるが、目には映らない。"""
     u = env.unwrapped
     bid = int(u.model.body(run_v2.OBJECTS[key]).id)
-    jnt = int(u.model.body_jntadr[bid])
-    qadr, dadr = int(u.model.jnt_qposadr[jnt]), int(u.model.jnt_dofadr[jnt])
-    u.data.qpos[qadr:qadr + 3] = FAR_AWAY + np.array([1.0 + 0.5 * k, 0.0, -2.0])
-    u.data.qpos[qadr + 3:qadr + 7] = [1.0, 0.0, 0.0, 0.0]
-    u.data.qvel[dadr:dadr + 6] = 0.0
+    adr, num = int(u.model.body_geomadr[bid]), int(u.model.body_geomnum[bid])
+    for g in range(adr, adr + num):
+        u.model.geom_matid[g] = -1
+        u.model.geom_rgba[g, 3] = 0.0
 
 
-def run_one(brain, scene: str, seed: int, trial_s: float, vanish: bool) -> dict:
+def seat_states(brain) -> str:
+    sp = brain.boxes["surprise"]
+    return " ".join(f"{i}:{s.state[:2]}:{s.enc:.2f}:{s.vanish:.0f}:{s.w:.2f}{'*' if s.fov else ''}"
+                    for i, s in enumerate(sp.seats) if s.state != "empty")
+
+
+def run_one(brain, scene: str, seed: int, trial_s: float, vanish: bool, trace: list | None = None) -> dict:
     env = run_v2.build_env(scene, None, seed=seed, silent=True)
     tick_s = run_v2.K * run_v2.DT
     st = {"look": "", "run": 0, "hid": None, "hid_obj": "", "level": []}
@@ -56,11 +64,16 @@ def run_one(brain, scene: str, seed: int, trial_s: float, vanish: bool) -> dict:
         st["run"] = st["run"] + 1 if lk and lk == st["look"] else (1 if lk else 0)
         st["look"] = lk
         st["level"].append(round(float(brain.buffer[("surprise", "semantic")]), 4))
+        if trace is not None:
+            trace.append({"tick": row["tick"], "look": lk, "hid": st["hid"] is not None,
+                          "n_eye": len(brain.buffer[("eyein", "objfile")]) - 1,
+                          "objfile": brain.boxes["objfile"].summary(), "seats": seat_states(brain),
+                          "u": st["level"][-1], **{f"ang_{k}": row.get(f"ang_{k}") for k in run_v2.OBJECTS}})
 
     def manual_eye(i, cmd):
         if (vanish and st["hid"] is None and i * tick_s >= VANISH_AFTER_S and st["look"]
                 and st["run"] * tick_s >= HOLD_S):
-            hide(env, st["look"], 0)
+            hide(env, st["look"])
             st["hid"], st["hid_obj"] = i, st["look"]
         return cmd
 
@@ -87,6 +100,7 @@ def main(argv=None):
     ap.add_argument("--trial-s", type=float, default=30.0)
     ap.add_argument("--scenes", default=DEFAULT_SCENES)
     ap.add_argument("--log-dir", default="段階8_体あり_驚き")
+    ap.add_argument("--trace", type=int, default=0, help="最初のこの数の太郎×試行について、1回ごとの記録を trace_*.jsonl に書く")
     a = ap.parse_args(argv)
     log_dir = os.path.join(run_v2.REPO, "G", "logs", a.log_dir)
     os.makedirs(log_dir, exist_ok=True)
@@ -99,7 +113,12 @@ def main(argv=None):
         for k in range(a.trials):
             for vanish in (True, False):
                 seed = taro * 1000 + k
-                r = run_one(brain, scenes[k % len(scenes)], seed, a.trial_s, vanish)
+                tr = [] if k < a.trace else None
+                r = run_one(brain, scenes[k % len(scenes)], seed, a.trial_s, vanish, tr)
+                if tr is not None:
+                    with open(os.path.join(log_dir, f"trace_taro{taro}_trial{k}_{'vanish' if vanish else 'control'}.jsonl"),
+                              "w", encoding="utf-8") as f:
+                        f.writelines(json.dumps(x, ensure_ascii=False) + "\n" for x in tr)
                 r["taro"] = taro
                 trials.append(r)
                 print(f"[{time.time() - t0:6.0f}s] 太郎{taro} 試行{k} {'消える' if vanish else '対照'}："
