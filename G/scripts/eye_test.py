@@ -25,10 +25,10 @@ import os
 import sys
 import time
 
-import numpy as np
-
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir, os.pardir))
 sys.path.insert(0, REPO)
+import core_v2  # noqa: E402,F401  負荷の決まり（core_v2/perf.py：スレッド1本など）を numpy・torch より先に効かせる
+import numpy as np
 os.chdir(REPO)
 
 NAMES = ["ball", "cup", "distractor"]
