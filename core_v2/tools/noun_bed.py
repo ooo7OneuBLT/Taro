@@ -32,6 +32,7 @@
 使い方：
   python -m core_v2.tools.noun_bed [--taros 0-4] [--conds full,kind_off,one_inst,one_inst_kind_off] [--scenes 300]
                                    [--bank 代わり|<表の .pt>] [--log-dir 段階9_名詞]
+                                   [--semantic table|sparse] [--sound mean|time]   （まばら化の試し：sparse_semantic.py）
 出力：G/logs/<log-dir>/まとめ.json と 太郎ごとの json
 """
 
@@ -51,12 +52,13 @@ from ..boxes import box_class
 from ..boxes.eyein import decode_ego, ego_map
 from ..boxes.gaze import MATCH_COS
 from ..boxes.objfile import GRID, bump_at
-from ..boxes.semantic import RECALL_MIN
+from ..boxes.semantic import RECALL_MIN  # noqa: F401  (noun_diag が使う)
 from ..boxes.soundin import sound_tag
 from ..formats import DTYPE, TAG_DIM, make_tag
 from ..tagging import appearance_tag, noisy, word_tag
 from ..world_eye import instances as ins
 from ..world_eye import sounds as snd
+from . import sparse_semantic as sps
 from .voice_bed import SubBrain
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir, os.pardir))
@@ -135,9 +137,13 @@ class Bank:
 
 
 # ---------------------------------------------------------------- 太郎
-def make_boxes(seed: int, kind_learning: bool = True) -> dict:
+def make_boxes(seed: int, kind_learning: bool = True, semantic: str = "table", sound: str = "mean") -> dict:
     b = {bid: box_class(bid)() for bid in BOXES if bid != "kind"}
     b["kind"] = box_class("kind")(learning=kind_learning, seed=seed)
+    if semantic == "sparse":      # 試し：まばらな語の表し方（tools/sparse_semantic.py。本物の太郎の係は替えていない）
+        b["semantic"] = sps.SparseSemantic()
+    if sound == "time":           # 試し：物の音の時間の形を残す入口
+        b["soundin"] = sps.SoundinTime()
     b["semantic"].learning = True
     # 試験場には目を向ける反射・驚きの係が無いので、名簿の→orienteye・→surprise の列は作らない（速くするだけ）
     b["objfile"].outputs = [e for e in b["objfile"].outputs if e.dst in ("semantic", "kind")]
@@ -145,12 +151,14 @@ def make_boxes(seed: int, kind_learning: bool = True) -> dict:
 
 
 class NounBed:
-    def __init__(self, seed: int, bank: Bank, kind_learning: bool = True, one_inst: bool = False) -> None:
+    def __init__(self, seed: int, bank: Bank, kind_learning: bool = True, one_inst: bool = False,
+                 semantic: str = "table", sound: str = "mean") -> None:
         self.seed = seed
         self.rng = random.Random(seed)
         torch.manual_seed(seed)
         self.bank = bank
-        self.boxes = make_boxes(seed, kind_learning)
+        self.sound = sound
+        self.boxes = make_boxes(seed, kind_learning, semantic, sound)
         self.brain = SubBrain(self.boxes)
         self.train_inst = (0,) if one_inst else ins.TRAIN_INST
         self.stats = {"scenes": 0, "names": 0, "sounds": 0, "ticks": 0}
@@ -246,8 +254,8 @@ def view_tags(bed: NounBed, kind, i: int, k: int, rng) -> torch.Tensor:
 def look_trial(bed: NounBed, word: str, cands: list[tuple[int, int]], rng) -> int:
     """語を聞いて LOOK_S のあいだに、いちばん長く見た候補の番号。"""
     sem, kind = bed.boxes["semantic"], bed.boxes["kind"]
-    r = sem.W @ word_tag(word)
-    want = noisy(make_tag(r)) if float(r.norm()) >= RECALL_MIN else None
+    r = sem.recall(word_tag(word))      # 今の表：W q（‖W q‖ ≥ RECALL_MIN で出す）。まばら版：細胞の見た目の予想の平均
+    want = noisy(r) if r is not None else None
     counts = [0] * len(cands)
     for _ in range(int(LOOK_S / TICK_S)):
         tags = [view_tags(bed, kind, i, k, rng) for i, k in cands]
@@ -293,8 +301,9 @@ def probe(bed: NounBed, seed: int) -> dict:
     words = ins.WORDS
     nW = len(words)
     out = {"A": {}, "B4": {}, "B2": {}, "C": {}}
-    recall = {w: float((bed.boxes["semantic"].W @ word_tag(w)).norm()) for w in words}
-    out["recall_norm"] = {w: round(v, 2) for w, v in recall.items()}
+    for w in words:
+        bed.boxes["semantic"].recall(word_tag(w))
+        out.setdefault("recall_norm", {})[w] = round(bed.boxes["semantic"].last_recall_norm, 2)
     for i, w in enumerate(words):
         a = b4 = b2 = 0
         ca = ins.kind_colors(w)[0]
@@ -327,9 +336,10 @@ def probe(bed: NounBed, seed: int) -> dict:
     for w in ins.SOUND_WORDS:
         hit = 0
         for t in range(N_TRIALS):
-            n = sound_tag(snd.synth(ins.KIND_OF[w], rng.randrange(ins.N_INST), seed=10 ** 7 + t))
-            r = sem.W.T @ n
-            hit += words[int(torch.argmax(wt @ r))] == w
+            wave = snd.synth(ins.KIND_OF[w], rng.randrange(ins.N_INST), seed=10 ** 7 + t)
+            n = sps.sound_tag_time(wave) if bed.sound == "time" else sound_tag(wave)
+            score = sem.word_scores(wt, n=n) if hasattr(sem, "word_scores") else wt @ (sem.W.T @ n)
+            hit += words[int(torch.argmax(score))] == w
         out["C"][w] = hit / N_TRIALS
     out["sim_before"] = similarity(bed, rng, use_kind=False)
     out["sim_after"] = similarity(bed, rng, use_kind=True)
@@ -344,9 +354,10 @@ def summarize_one(p: dict) -> dict:
             "C6_mean": round(float(np.mean([C[w] for w in ins.C_WORDS])), 3), "C_spoon": C.get("すぷうん")}
 
 
-def run(seed: int, cond: str, bank: Bank, n_scenes: int) -> dict:
+def run(seed: int, cond: str, bank: Bank, n_scenes: int, semantic: str = "table", sound: str = "mean") -> dict:
     t0 = time.time()
-    bed = NounBed(seed, bank, kind_learning="kind_off" not in cond, one_inst=cond.startswith("one_inst"))
+    bed = NounBed(seed, bank, kind_learning="kind_off" not in cond, one_inst=cond.startswith("one_inst"),
+                  semantic=semantic, sound=sound)
     if cond.endswith("_negall"):      # 比べる用：種類の層の負の組を置き場の見え全部にする（kind.NEGATIVES の説明）
         bed.boxes["kind"].negatives = "all"
     bed.grow(n_scenes)
@@ -355,7 +366,7 @@ def run(seed: int, cond: str, bank: Bank, n_scenes: int) -> dict:
     k.learning = False
     p = probe(bed, seed)
     s = summarize_one(p)
-    return {"seed": seed, "cond": cond, "summary": s, "probe": p, "stats": bed.stats, "kind_train_steps": k.n_train,
+    return {"seed": seed, "cond": cond, "semantic": semantic, "sound": sound, "summary": s, "probe": p, "stats": bed.stats, "kind_train_steps": k.n_train,
             "kind_last_loss": k.last_loss, "n_learn": int(bed.boxes["semantic"].n_learn), "wall_s": round(time.time() - t0, 1)}
 
 
@@ -399,6 +410,10 @@ def main(argv=None):
     ap.add_argument("--scenes", type=int, default=300)
     ap.add_argument("--bank", default="代わり")
     ap.add_argument("--log-dir", default="段階9_名詞")
+    ap.add_argument("--semantic", default="table", choices=["table", "sparse"],
+                    help="table＝今の 64×64 の表 W／sparse＝まばらな語の表し方（試し）")
+    ap.add_argument("--sound", default="mean", choices=["mean", "time"],
+                    help="mean＝今の物の音の荷札（帯の時間平均）／time＝時間の形を残す（試し）")
     a = ap.parse_args(argv)
     bank = Bank(load_bank(a.bank))
     log_dir = os.path.join(REPO, "G", "logs", a.log_dir)
@@ -407,7 +422,7 @@ def main(argv=None):
     results = []
     for cond in a.conds.split(","):
         for seed in parse_seeds(a.taros):
-            r = run(seed, cond, bank, a.scenes)
+            r = run(seed, cond, bank, a.scenes, a.semantic, a.sound)
             results.append(r)
             with open(os.path.join(log_dir, f"{cond}_seed{seed}.json"), "w", encoding="utf-8") as f:
                 json.dump(r, f, ensure_ascii=False, indent=1, default=str)
