@@ -22,8 +22,12 @@
 割合で親が動かして鳴る。場面と場面のあいだは 3秒、何も無い。
 
 **試し**（覚えるのを止めた写しで。語を聞いて2秒＝20回のあいだにいちばん長く見た物で点を付ける）：
-* 目を向ける先は、目を向ける先を選ぶ係（gaze）の決まりそのまま：思い出した荷札と物の荷札の cos が MATCH_COS（0.7）以上の物の中で
-  いちばん似た物を見る。どれも届かなければ（または思い出せなければ）物を1つ乱数で見る（自由に見る＝偶然）。毎回、目の入口の雑音と向きは新しく引く
+* 目を向ける先は、目を向ける先を選ぶ係（gaze）の決まりそのまま（gaze.match）：探し物とした物の中でいちばん似た物を見る。
+  既定（--gaze compete）は「聞いた語の予想に、まちがえそうな物（意味の辞書が一緒に思い出す）のどれよりも似ている物」が探し物。
+  --gaze gate で前の決まり（cos が MATCH_COS 0.7 以上）。どれも当たらなければ（または思い出せなければ）物を1つ乱数で見る
+  （自由に見る＝偶然）。毎回、目の入口の雑音と向きは新しく引く
+* まちがって見る（2026-10-18 から）：語ごとに N_TRIALS 回、正しい物を置かずに別の語の物4つを見せ、20回のうち探し物として見た回の割合
+  （false_look）と、1つの物を半分以上の回、探し物として見続けた試しの割合（false_stare）
 * A：覚えた個体の4択（ほかの3つは別の語の覚えた個体）。語ごとに N_TRIALS 回
 * B4：見せていない個体（個体3）の4択。B2：見せていない個体と「覚えた個体の色（色A）と同じ色の、別の種類の個体」の2択（形を選ぶ割合）
 * C：物を隠して音だけ（見せていない雑音の種、個体は4つから乱数）→ 意味の辞書の word_scores（音だけ）のいちばん強い語が音の主か（20語から、偶然5%）
@@ -32,7 +36,7 @@
 使い方：
   python -m core_v2.tools.noun_bed [--taros 0-4] [--conds full,kind_off,one_inst,one_inst_kind_off] [--scenes 300]
                                    [--bank 代わり|<表の .pt>] [--log-dir 段階9_名詞]
-                                   [--semantic sparse|table] [--sound time|mean]
+                                   [--semantic sparse|table] [--sound time|mean] [--gaze compete|gate]
   （段階9 まばら化：既定は本物の係の既定と同じ sparse・time。table・mean で前の表 W・前の音の荷札（比べる用））
 出力：G/logs/<log-dir>/まとめ.json と 太郎ごとの json
 """
@@ -51,7 +55,7 @@ import torch
 
 from ..boxes import box_class
 from ..boxes.eyein import decode_ego, ego_map
-from ..boxes.gaze import MATCH_COS
+from ..boxes import gaze as gz
 from ..boxes.objfile import GRID, bump_at
 from ..boxes.semantic import RECALL_MIN  # noqa: F401  (noun_diag が使う)
 from ..boxes.soundin import make_sound_tag
@@ -162,6 +166,7 @@ class NounBed:
         self.brain = SubBrain(self.boxes)
         self.train_inst = (0,) if one_inst else ins.TRAIN_INST
         self.stats = {"scenes": 0, "names": 0, "sounds": 0, "ticks": 0}
+        self.gaze_rule = gz.RULE
 
     def _tick(self, objs, ego=_EGO0, fire=None, word=None, sound=None):
         """objs：[{"i","k","v","r","c"}]。1回進める。"""
@@ -251,18 +256,20 @@ def view_tags(bed: NounBed, kind, i: int, k: int, rng) -> torch.Tensor:
     return kind.transform(x)[0]
 
 
-def look_trial(bed: NounBed, word: str, cands: list[tuple[int, int]], rng) -> int:
-    """語を聞いて LOOK_S のあいだに、いちばん長く見た候補の番号。"""
+def look_trial(bed: NounBed, word: str, cands: list[tuple[int, int]], rng, seek: list | None = None) -> int:
+    """語を聞いて LOOK_S のあいだに、いちばん長く見た候補の番号。seek を渡すと、候補ごとに探し物として見た回数を足す。"""
     sem, kind = bed.boxes["semantic"], bed.boxes["kind"]
-    r = sem.recall(word_tag(word))      # まばら版：細胞の見た目の予想の平均。前の表：W q（‖W q‖ ≥ RECALL_MIN で出す）
-    want = noisy(r) if r is not None else None
+    lst = sem.recall_list(word_tag(word))   # 先頭：思い出した見た目に雑音（前と同じ乱数）。続き：まちがえそうな物（まばら版だけ）
+    target, rivals = gz.split_want(lst) if lst is not None else (None, [])
     counts = [0] * len(cands)
     for _ in range(int(LOOK_S / TICK_S)):
         tags = [view_tags(bed, kind, i, k, rng) for i, k in cands]
-        if want is not None:
-            cos = [float(t @ want) for t in tags]
-            ok = [j for j, c in enumerate(cos) if c >= MATCH_COS]
+        if target is not None:
+            cos = gz.match(target, rivals, tags, bed.gaze_rule)
+            ok = [j for j, c in enumerate(cos) if c is not None]
             j = max(ok, key=lambda j: cos[j]) if ok else rng.randrange(len(cands))
+            if seek is not None and ok:
+                seek[j] += 1
         else:
             j = rng.randrange(len(cands))
         counts[j] += 1
@@ -340,6 +347,18 @@ def probe(bed: NounBed, seed: int) -> dict:
             score = sem.word_scores(wt, n=make_sound_tag(wave, bed.sound))
             hit += words[int(torch.argmax(score))] == w
         out["C"][w] = hit / N_TRIALS
+    # まちがって見る：正しい物の無い4択（別の乱数。上の点の乱数の並びは変えない）
+    frng = random.Random(5000 + seed)
+    looks, stares = [], []
+    for i, w in enumerate(words):
+        for _ in range(N_TRIALS):
+            cands = [(j, frng.choice(ins.TRAIN_INST)) for j in frng.sample([j for j in range(nW) if j != i], 4)]
+            seek = [0] * 4
+            look_trial(bed, w, cands, frng, seek)
+            looks.append(sum(seek) / (LOOK_S / TICK_S))
+            stares.append(max(seek) >= (LOOK_S / TICK_S) / 2)
+    out["false_look"] = round(float(np.mean(looks)), 3)
+    out["false_stare"] = round(float(np.mean(stares)), 3)
     out["sim_before"] = similarity(bed, rng, use_kind=False)
     out["sim_after"] = similarity(bed, rng, use_kind=True)
     return out
@@ -350,13 +369,16 @@ def summarize_one(p: dict) -> dict:
     return {"A_words_70": sum(v >= 0.7 for v in A.values()), "A_mean": round(float(np.mean(list(A.values()))), 3),
             "B4_mean": round(float(np.mean(list(B4.values()))), 3), "B2_mean": round(float(np.mean(list(B2.values()))), 3),
             "B2_no_sound": round(float(np.mean([B2[w] for w in B2 if w not in ins.SOUND_WORDS])), 3),
-            "C6_mean": round(float(np.mean([C[w] for w in ins.C_WORDS])), 3), "C_spoon": C.get("すぷうん")}
+            "C6_mean": round(float(np.mean([C[w] for w in ins.C_WORDS])), 3), "C_spoon": C.get("すぷうん"),
+            "false_look": p.get("false_look"), "false_stare": p.get("false_stare")}
 
 
-def run(seed: int, cond: str, bank: Bank, n_scenes: int, semantic: str = "sparse", sound: str = "time") -> dict:
+def run(seed: int, cond: str, bank: Bank, n_scenes: int, semantic: str = "sparse", sound: str = "time",
+        gaze: str = gz.RULE) -> dict:
     t0 = time.time()
     bed = NounBed(seed, bank, kind_learning="kind_off" not in cond, one_inst=cond.startswith("one_inst"),
                   semantic=semantic, sound=sound)
+    bed.gaze_rule = gaze
     if cond.endswith("_negall"):      # 比べる用：種類の層の負の組を置き場の見え全部にする（kind.NEGATIVES の説明）
         bed.boxes["kind"].negatives = "all"
     bed.grow(n_scenes)
@@ -365,7 +387,7 @@ def run(seed: int, cond: str, bank: Bank, n_scenes: int, semantic: str = "sparse
     k.learning = False
     p = probe(bed, seed)
     s = summarize_one(p)
-    return {"seed": seed, "cond": cond, "semantic": semantic, "sound": sound, "summary": s, "probe": p, "stats": bed.stats, "kind_train_steps": k.n_train,
+    return {"seed": seed, "cond": cond, "semantic": semantic, "sound": sound, "gaze": gaze, "summary": s, "probe": p, "stats": bed.stats, "kind_train_steps": k.n_train,
             "kind_last_loss": k.last_loss, "n_learn": int(bed.boxes["semantic"].n_learn), "wall_s": round(time.time() - t0, 1)}
 
 
@@ -378,7 +400,8 @@ def summarize(results: list[dict]) -> dict:
         out[cond] = {"taros": len(rs), "A_words_70": [r["A_words_70"] for r in rs], "A_pass_taros": A_pass_taros,
                      "A_pass": A_pass_taros >= 4, "A_mean": m("A_mean"), "B4_mean": m("B4_mean"), "B4_pass": m("B4_mean") >= 0.6,
                      "B2_mean": m("B2_mean"), "B2_pass": m("B2_mean") >= 0.7, "B2_no_sound": m("B2_no_sound"),
-                     "C6_mean": m("C6_mean"), "C_pass": m("C6_mean") >= 0.6, "C_spoon": m("C_spoon")}
+                     "C6_mean": m("C6_mean"), "C_pass": m("C6_mean") >= 0.6, "C_spoon": m("C_spoon"),
+                     "false_look": m("false_look"), "false_stare": m("false_stare")}
         words = ins.WORDS
         pr = [r["probe"] for r in results if r["cond"] == cond]
         out[cond]["A_by_word"] = {w: round(float(np.mean([p["A"][w] for p in pr])), 2) for w in words}
@@ -413,6 +436,8 @@ def main(argv=None):
                     help="sparse＝まばらな語の表し方（本物の係の既定）／table＝前の 64×64 の表 W（比べる用）")
     ap.add_argument("--sound", default="time", choices=["time", "mean"],
                     help="time＝時間の形を残す（本物の係の既定）／mean＝前の物の音の荷札（帯の時間平均）")
+    ap.add_argument("--gaze", default=gz.RULE, choices=["compete", "gate"],
+                    help="compete＝まちがえそうな物と比べる（目を向ける係の既定）／gate＝前の線 0.7（比べる用）")
     a = ap.parse_args(argv)
     bank = Bank(load_bank(a.bank))
     log_dir = os.path.join(REPO, "G", "logs", a.log_dir)
@@ -421,7 +446,7 @@ def main(argv=None):
     results = []
     for cond in a.conds.split(","):
         for seed in parse_seeds(a.taros):
-            r = run(seed, cond, bank, a.scenes, a.semantic, a.sound)
+            r = run(seed, cond, bank, a.scenes, a.semantic, a.sound, a.gaze)
             results.append(r)
             with open(os.path.join(log_dir, f"{cond}_seed{seed}.json"), "w", encoding="utf-8") as f:
                 json.dump(r, f, ensure_ascii=False, indent=1, default=str)

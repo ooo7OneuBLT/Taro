@@ -45,6 +45,14 @@
   逆に引く（→wordplan）：語の細胞の強さ h ＝ A·(a＋u·S) ＋ Tᵀz_s/K、強い K 個の Q_j の平均（その細胞の覚えた回数の真ん中の値が3以上のとき）。
   細胞（語の細胞・音の細胞）は、3回覚えるまで逆向きには働かない（思い出す線と同じ「3回」）
   memory="table" で前の表 W（1ビットも同じ）に戻せる（比べる用）
+* **まちがえそうな物も一緒に思い出す（段階9、2026-10-18）**：目的の係へは、聞いた語の見た目の予想（先頭）に続けて、
+  「物ふつうの見た目」G（今まで見た物の見た目の平均。まだ語を知らない太郎が思い浮かべる物）と、聞いた語の細胞以外の覚えた細胞の
+  見た目の予想のうち、聞いた語の予想に近い順に N_RIVALS 個（同じ中身の細胞は1つに数える）を、(荷札, ゼロの地図) の列で渡す。
+  目を向ける係は、見えている物が「聞いた語の予想に、まちがえそうな物のどれよりも似ている」ときだけ探し物とする（gaze.py）。
+  本物の物（同じ種類どうしの似かた 0.79）では、決まった線 0.7 に正しい物の半分ほどが届かず、A が 73% に落ちていたため。
+  N_RIVALS は書式の上限（MAX_OBJECTS 8）から、先頭と G の2つを引いた数。手で合わせた数ではない。
+  まちがえそうな物の雑音は自分専用の乱数で（ほかの係の乱数の並びを変えない）。表 W（memory="table"）・段階2の表では先頭だけ
+  （目を向ける係は前の線 0.7 で決める）
 学ぶこと自体のやり方（ヘッブ則・ETA・RECALL_MIN・覚え方）は生まれつき＝手で決める。
 W（まばら版は A・Q・T・c・cs）の中身だけが経験で変わる。どれも buffer なので save.py の保存に入り、reset() では消えない。
 
@@ -56,7 +64,7 @@ import math
 
 import torch
 
-from ..formats import TAG_DIM, DTYPE, make_tag
+from ..formats import GRID, MAX_OBJECTS, TAG_DIM, DTYPE, make_tag
 from ..tagging import NOISE_SIGMA, noisy, state_tag, word_tag
 from .base import Box
 
@@ -75,6 +83,8 @@ N_POOL = 1000            # 語の細胞・音の細胞の数
 K = 10                   # 一度に光る数（log2(1000)≈10：Willshaw の表で一番たくさん覚えられる数のめやす）
 RECALL_N = 3             # 思い出すのに要る、光った細胞の覚えた回数の真ん中の値（表 W の「同じ組み合わせ3回」と同じ）
 WORD_SEED, SOUND_SEED = 31, 32
+N_RIVALS = MAX_OBJECTS - 2   # まちがえそうな物の数（書式の上限 8 − 聞いた語の予想 − 物ふつうの見た目）
+_ZMAP = torch.zeros(GRID, GRID, dtype=DTYPE)
 
 
 def _proj(seed: int, n_in: int, n_out: int) -> torch.Tensor:
@@ -121,12 +131,15 @@ class Semantic(Box):
             self.register_buffer("c", torch.zeros(N_POOL, dtype=DTYPE))             # 語の細胞ごとに見た目と覚えた回数
             self.register_buffer("cq", torch.zeros(N_POOL, dtype=DTYPE))            # 語の細胞ごとに覚えた回数（見た目か音）
             self.register_buffer("cs", torch.zeros(N_POOL, dtype=DTYPE))            # 音の細胞ごとに覚えた回数
+            self.register_buffer("G", torch.zeros(TAG_DIM, dtype=DTYPE))            # 物ふつうの見た目（見た物の平均）
+            self.register_buffer("g_n", torch.zeros((), dtype=DTYPE))               # その回数
         else:
             raise ValueError(f"memory は table か sparse：{memory!r}")
         self.register_buffer("n_learn", torch.zeros((), dtype=torch.int64))
         self.learning = bool(learning)
         self.learn_mode = learn_mode
         self._gen = torch.Generator().manual_seed(0)
+        self._gen_r = torch.Generator().manual_seed(1)     # まちがえそうな物の雑音（言う語の雑音の並びを変えない）
         self.reset()
 
     def reset(self) -> None:
@@ -211,6 +224,47 @@ class Semantic(Box):
         self.last_recall_norm = n
         return make_tag(r) if n >= RECALL_MIN else None
 
+    def rivals(self, q) -> list:
+        """聞いた語のまちがえそうな物の見た目（雑音なし）：[物ふつうの見た目 G] ＋ ほかの語の見た目の予想を、聞いた語の予想に近い順に
+        N_RIVALS 語（まばら版だけ。ほかは空）。ほかの語は、聞いた語の細胞以外の覚えた細胞 j から、その細胞が覚えた語の形 Q_j で
+        思い出す（語の細胞の組 word_code(Q_j) の見た目の予想の平均）。聞いた語や先に選んだ語と細胞の半分より多くが重なる組は同じ語とみなして使わない
+        （ちがう語どうしの重なりは多くて2個。2つの語の細胞に光る細胞の語の形は2つの語の混ざりで、組がそれぞれと半分ほど重なる）。
+        細胞1つずつだと同じ語の細胞が何度も入り、まちがえそうな語が3つほどしか入らなかった（2026-10-18）。"""
+        if not self.sparse:
+            return []
+        idx = word_code(q).nonzero().flatten()
+        mine = set(idx.tolist())
+        r = make_tag(self.A[idx].mean(0))
+        g = getattr(self, "G", None)
+        out = [make_tag(g)] if g is not None and float(torch.linalg.vector_norm(g)) > 0.0 else []
+        ok = self.c >= RECALL_N
+        ok[idx] = False
+        cand = ok.nonzero().flatten()
+        if len(cand) == 0:
+            return out
+        An = self.A[cand] / torch.linalg.vector_norm(self.A[cand], dim=1, keepdim=True).clamp_min(1e-12)
+        used = [mine]
+        for j in torch.argsort(An @ r, descending=True).tolist():
+            if len(used) > N_RIVALS:
+                break
+            z = word_code(self.Q[cand[j]]).nonzero().flatten()
+            key = set(z.tolist())
+            if any(len(key & u) > K // 2 for u in used) or float(self.c[z].median()) < RECALL_N:
+                continue
+            used.append(key)
+            out.append(make_tag(self.A[z].mean(0)))
+        return out
+
+    def recall_list(self, q):
+        """目的の係へ渡す列：[(聞いた語の見た目の予想, ゼロ), (まちがえそうな物, ゼロ)…]。思い出せなければ None。
+        予想には今までと同じ大域の乱数で雑音、まちがえそうな物には自分専用の乱数で雑音。"""
+        r = self.recall(q)
+        if r is None:
+            return None
+        riv = [make_tag(v + NOISE_SIGMA * torch.randn(TAG_DIM, generator=self.__dict__.setdefault(
+            "_gen_r", torch.Generator().manual_seed(1)))) for v in self.rivals(q)]
+        return [(noisy(r), _ZMAP)] + [(v, _ZMAP) for v in riv]
+
     def recall_strength(self, q) -> float:
         """語を思い出す強さ（線 recall_line と比べる）。"""
         self.recall(q)
@@ -287,7 +341,7 @@ class Semantic(Box):
         return make_tag(r) if n >= RECALL_MIN else None
 
     def _learned_names(self) -> tuple:
-        return ("A", "Q", "T", "c", "cq", "cs") if self.sparse else ("W",)
+        return ("A", "Q", "T", "c", "cq", "cs", "G", "g_n") if self.sparse else ("W",)
 
     def save_learned(self, path, meta: dict | None = None) -> None:
         blob = {k: getattr(self, k).clone() for k in self._learned_names()}
@@ -298,7 +352,8 @@ class Semantic(Box):
         if blob.get("memory", "table") != self.memory:
             raise ValueError(f"覚えた中身の形が違う（保存 {blob.get('memory', 'table')}・今 {self.memory}）")
         for k in self._learned_names():
-            getattr(self, k).copy_(blob[k])
+            if k in blob:          # 物ふつうの見た目 G は 2026-10-18 から（前の保存には無い＝ゼロのまま）
+                getattr(self, k).copy_(blob[k])
         self.n_learn.fill_(int(blob.get("n_learn", 0)))
         return blob.get("meta", {})
 
@@ -329,11 +384,11 @@ class Semantic(Box):
                 if c >= best_cos:
                     best, best_cos = w, c
             if best is not None:
-                out["goal"] = noisy(self.table[best])
+                out["goal"] = [(noisy(self.table[best]), _ZMAP)]
             return out
-        r = self.recall(q)
-        if r is not None:
-            out["goal"] = noisy(r)
+        lst = self.recall_list(q)
+        if lst is not None:
+            out["goal"] = lst
             self.last_event = "recall"
         if self.learning and first and self.learn_mode == "A":
             pairs = self.targets(inbox.get("objfile"))
@@ -350,6 +405,7 @@ class Semantic(Box):
         """何も聞かない n 回を飛ばす（段階7の試験場用）。見ている物（名簿の列 lst）はその間ずっと同じとする。
         1回ずつ _trace_step を回したのと同じ結果になる（名残りの重みは等比の和でまとめて足す）。"""
         held = self._seen_vec(lst, 0.0)    # 飛ばすのは驚きの無い間だけ（試験場が決める）
+        self._count_seen(lst, n)
         keep_n = int(round(LOOK_WINDOW_S / TICK_S))
         self._held_hist = (self._held_hist + [held] * min(n, keep_n))[-keep_n:]
         self._prev_heard = False
@@ -368,9 +424,16 @@ class Semantic(Box):
                 self._learn_pending(p)
         self._pending = keep
 
+    def _count_seen(self, lst, n: int) -> None:
+        """物ふつうの見た目 G：見ている物の見た目の平均（数えるだけ。語は要らない）。同じ物を n 回見たとして足す。"""
+        if self.learning and self.sparse and lst and len(lst) >= 2 and float(torch.linalg.vector_norm(lst[-2][0])) > 0.0:
+            self.g_n += float(n)
+            self.G += n * (make_tag(lst[-2][0]) - self.G) / self.g_n
+
     def _trace_step(self, lst, new_q) -> None:
         """覚え方B：今見ている行を覚えておき、名残りの残っている語ごとに足す。名残りが消えたら覚える。"""
         held = self._seen_vec(lst, self._u, self._n)
+        self._count_seen(lst, 1)
         self._held_hist.append(held)
         del self._held_hist[:-int(round(LOOK_WINDOW_S / TICK_S))]
         keep = []

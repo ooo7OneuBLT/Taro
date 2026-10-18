@@ -10,7 +10,15 @@ A（語→物）を、思い出す荷札だけ取り替えて同じ決まり（g
 * 今の W／混ざり無し（P_w だけ）／語ごとに回数で割る（混ざりは残す）／今の W で線なし（いちばん似た物）
 C（音→語）を、表だけ取り替えて試す：今の W／音が窓の全部にあった場合（同じ W）／音→語の別の表（回数で足す・語ごとに平均）
 
+**まばら版（--semantic sparse）**：本物の係の既定（まばらな語の表し方）で育て、A がどこで落ちるかを語ごとに分ける：
+* 語を聞いて見る1回ごとに：正しい物を見た／正しい物が線（MATCH_COS）に届かず、どれも届かないので乱数で見た（線ではねた）／
+  別の物を見た（別の物が線を越えて正しい物より似ていた）
+* 理想（覚えた個体の見えの平均で思い出す）でも落ちる語は「目の力の限り」、理想で通って今の思い出しで落ちる語は「覚え方」
+* 目を向ける決まりを替えて同じ見えで比べる（gaze.choose の決まりを全部）。物が1つも探し物でない回（4つとも別の語）に、
+  探し物として見てしまう割合（まちがって見る）も測る
+
 使い方：python -m core_v2.tools.noun_diag [--taros 0-2] [--cond kind_off] [--scenes 300] [--bank core_v2/data/段階9_見た目の素.pt]
+                                       [--semantic table|sparse]
 出力：G/logs/段階9_名詞_診断/まとめ.json
 """
 
@@ -25,6 +33,7 @@ from collections import Counter
 import numpy as np
 import torch
 
+from ..boxes import gaze as gz
 from ..boxes.gaze import MATCH_COS
 from ..boxes.soundin import sound_tag
 from ..formats import make_tag
@@ -159,6 +168,106 @@ def diagnose(bed: nb.NounBed, log, seed: int) -> dict:
     return out
 
 
+# ---------------------------------------------------------------- まばら版の内訳
+RULES = ("gate", "compete", "base_seen", "base_sem", "nogate")
+
+
+def grow_sparse(seed: int, bank: nb.Bank, cond: str, n_scenes: int):
+    """本物の係の既定（まばら・音 time）で noun_bed と同じに育てる。見えていた物の荷札の平均（一生の平均）も数える。"""
+    bed = nb.NounBed(seed, bank, kind_learning="kind_off" not in cond, one_inst=cond.startswith("one_inst"))
+    acc = {"s": torch.zeros(64, dtype=torch.float64), "n": 0}
+    orig = bed._tick
+
+    def tick(objs, ego=nb._EGO0, fire=None, word=None, sound=None):
+        for o in objs:
+            if 0.0 <= o["c"] <= nb.GRID - 1:
+                acc["s"] += bank.tag(o["i"], o["k"], o["v"]).double()
+                acc["n"] += 1
+        return orig(objs, ego=ego, fire=fire, word=word, sound=sound)
+
+    bed._tick = tick
+    bed.grow(n_scenes)
+    bed.boxes["semantic"].learning = False
+    bed.boxes["kind"].learning = False
+    return bed, _mk(acc["s"] / max(1, acc["n"]))
+
+
+def _pick(cos: list, base: list | None, rule: str, rng) -> int | None:
+    """1回の目を向ける先。None＝探し物として見る物が無い（自由に見る）。compete は base に gaze.match の結果を渡す。"""
+    if rule == "compete":
+        ok = [j for j, c in enumerate(base) if c is not None]
+    elif rule == "nogate":
+        ok = list(range(len(cos)))
+    elif rule == "gate":
+        ok = [j for j, c in enumerate(cos) if c >= MATCH_COS]
+    else:
+        ok = [j for j, c in enumerate(cos) if c > base[j]]
+    return max(ok, key=lambda j: cos[j]) if ok else None
+
+
+def sparse_breakdown(bed: nb.NounBed, seen_mean: torch.Tensor, seed: int, n_trials: int = 20) -> dict:
+    bank, sem = bed.bank, bed.boxes["semantic"]
+    nW = len(WORDS)
+    ok_c = (sem.c >= sem.recall_line).double()
+    sem_mean = _mk((sem.A * (sem.c * ok_c).unsqueeze(1)).sum(0))
+    base_vec = {"base_seen": seen_mean, "base_sem": sem_mean}
+    proto = {i: _mk(torch.stack([bank.tag(i, k, v) for k in ins.TRAIN_INST for v in bank.views(i, k)]).mean(0))
+             for i in range(nW)}
+    rng = random.Random(77 + seed)
+    torch.manual_seed(77 + seed)
+    out = {}
+    for src in ("今の思い出し", "理想"):
+        res = {r: {} for r in RULES}
+        parts = {}
+        false = {r: [] for r in RULES}
+        for i, w in enumerate(WORDS):
+            r0 = sem.recall(word_tag(w)) if src == "今の思い出し" else proto[i]
+            rivals = [noisy(v.float()).double() for v in sem.rivals(word_tag(w))]   # 理想でも、まちがえそうな物は覚えた中身
+            hit = {r: 0 for r in RULES}
+            cat = Counter()
+            for t in range(n_trials):
+                want = noisy(r0.float()).double() if r0 is not None else None
+                others = rng.sample([j for j in range(nW) if j != i], 4)
+                absent = t % 2 == 1      # 半分の回は正しい物を置かない（まちがって見るかを測る。点には入れない）
+                cands = ([(o, rng.choice(ins.TRAIN_INST)) for o in others] if absent else
+                         [(i, rng.choice(ins.TRAIN_INST))] + [(j, rng.choice(ins.TRAIN_INST)) for j in others[:3]])
+                cnt = {r: [0] * 4 for r in RULES}
+                for _ in range(LOOK_TICKS):
+                    tags = [noisy(bank.tag(a, k, rng.choice(bank.views(a, k)))).double() for a, k in cands]
+                    if want is None:
+                        for r in RULES:
+                            cnt[r][rng.randrange(4)] += 1
+                            if absent:
+                                false[r].append(0)
+                        cat["思い出せない"] += not absent
+                        continue
+                    cos = [float(x @ want) for x in tags]
+                    for r in RULES:
+                        base = ([float(x @ base_vec[r]) for x in tags] if r in base_vec else
+                                gz.match(want, rivals, tags, "compete") if r == "compete" else None)
+                        j = _pick(cos, base, r, rng)
+                        if absent:
+                            false[r].append(j is not None)
+                        cnt[r][j if j is not None else rng.randrange(4)] += 1
+                        if r == "gate" and not absent:
+                            cat["正しい" if j == 0 else ("線ではねた" if j is None else "別の物")] += 1
+                if absent:
+                    continue
+                for r in RULES:
+                    best = max(cnt[r])
+                    hit[r] += rng.choice([j for j, c in enumerate(cnt[r]) if c == best]) == 0
+            n_present = n_trials - n_trials // 2
+            for r in RULES:
+                res[r][w] = round(hit[r] / n_present, 2)
+            tot = max(1, sum(cat.values()))
+            parts[w] = {k: round(v / tot, 2) for k, v in cat.items()}
+        out[src] = {"A": {r: round(float(np.mean(list(res[r].values()))), 3) for r in RULES},
+                    "words_70": {r: sum(v >= 0.7 for v in res[r].values()) for r in RULES},
+                    "まちがって見る": {r: round(float(np.mean(false[r])), 3) for r in RULES},
+                    "by_word": res, "内訳（線0.7）": parts}
+    return out
+
+
 def main(argv=None):
     torch.set_num_threads(1)
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
@@ -167,10 +276,25 @@ def main(argv=None):
     ap.add_argument("--scenes", type=int, default=300)
     ap.add_argument("--bank", default="core_v2/data/段階9_見た目の素.pt")
     ap.add_argument("--log-dir", default="段階9_名詞_診断")
+    ap.add_argument("--semantic", default="table", choices=["table", "sparse"])
     a = ap.parse_args(argv)
     bank = nb.Bank(nb.load_bank(a.bank))
     log_dir = os.path.join(nb.REPO, "G", "logs", a.log_dir)
     os.makedirs(log_dir, exist_ok=True)
+    if a.semantic == "sparse":
+        res = []
+        for seed in nb.parse_seeds(a.taros):
+            bed, seen = grow_sparse(seed, bank, a.cond, a.scenes)
+            r = sparse_breakdown(bed, seen, seed)
+            r["seed"] = seed
+            res.append(r)
+            for src in ("今の思い出し", "理想"):
+                print(f"[太郎{seed} {src}] A {r[src]['A']} 70%以上 {r[src]['words_70']} まちがって見る {r[src]['まちがって見る']}",
+                      flush=True)
+            print(f"[太郎{seed}] 内訳 " + json.dumps(r["今の思い出し"]["内訳（線0.7）"], ensure_ascii=False), flush=True)
+        with open(os.path.join(log_dir, "まばら_まとめ.json"), "w", encoding="utf-8") as f:
+            json.dump(res, f, ensure_ascii=False, indent=1, default=str)
+        return res
     res = []
     for seed in nb.parse_seeds(a.taros):
         bed, log = grow_logged(seed, bank, a.cond, a.scenes)

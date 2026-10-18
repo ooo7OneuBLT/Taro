@@ -11,7 +11,8 @@ FOUND_HOLD_TICKS（2026-10-15、スレッドの責任者の決定）：人間の
 発話の時点で既にボールを見ていた試行では 0.3〜0.6秒で目的が消え、反射が自由になって妨害物へ
 目が跳んだ（ボールの条件B 11/20、失敗9回すべてがこの形）。見つけた後も2秒は目的を持ち続け、
 その間は門番を通して反射を抑え続ける。
-渡す物：gaze へ探している物の荷札（空ならゼロ）、門番へ持っている強さ（持っていれば1、空なら0）。
+渡す物：gaze へ探している物の荷札の列（段階9から：先頭が探している物、続きがまちがえそうな物。意味の辞書から届いた列をそのまま
+持つ。荷札1つが届いたら列1つにする。空なら空の列）、門番へ持っている強さ（持っていれば1、空なら0）。
 
 FOUND_THRESHOLD（仮部品のルール、2026-10-15 実測で決めた）：仕様書の仮の値は 0.8 だったが、探し物を
 見ていても「見つけた」は 0.60〜0.85 で、0.8 を超えるのはまれ（目的が毎回5秒の時間切れで空になっていた）。
@@ -24,7 +25,7 @@ G/logs/見つけた/found_summary.json・found.png）：
 
 import torch
 
-from ..formats import DTYPE
+from ..formats import DTYPE, GRID
 from .base import Box
 
 FOUND_THRESHOLD = 0.45
@@ -51,10 +52,12 @@ class Goal(Box):
     def step(self, inbox):
         out = self.passthrough()
         new = inbox.get("semantic")
+        if isinstance(new, torch.Tensor):      # 荷札1つ（前の形）
+            new = [(new, torch.zeros(GRID, GRID, dtype=DTYPE))] if float(torch.linalg.vector_norm(new)) > 0.0 else []
         permit = float(inbox.get("gate3", 0.0))
         found = float(inbox.get("gaze", 0.0))
-        is_new = new is not None and float(torch.linalg.vector_norm(new)) > 0.0
-        if is_new and permit > 0.5 and (self.held is None or float(new @ self.held) < SAME_COS):
+        is_new = bool(new) and float(torch.linalg.vector_norm(new[0][0])) > 0.0
+        if is_new and permit > 0.5 and (self.held is None or float(new[0][0] @ self.held[0][0]) < SAME_COS):
             self.held, self.age, self.streak, self.cleared_by = new, 0, 0, ""
             self.found_age = None
         elif self.held is not None:

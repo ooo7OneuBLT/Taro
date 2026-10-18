@@ -50,8 +50,8 @@ PATH_FORMATS: dict[tuple[str, str], tuple[Fmt, int | None]] = {
     ("earin", "listen"): (Fmt.TEXT, None),          # 入口の例外：normalize_kana 済みの文字列
     ("listen", "semantic"): (Fmt.TAG, None),        # 語の荷札
     ("listen", "goal"): (Fmt.TAG, None),            # 段階2では使わない（ゼロ）
-    ("semantic", "goal"): (Fmt.TAG, None),          # 見た目の荷札
-    ("goal", "gaze"): (Fmt.TAG, None),              # 探している物の荷札
+    ("semantic", "goal"): (Fmt.TAG_AND_MAP, None),  # 見た目の荷札の列（段階9：先頭＝聞いた語の予想、続き＝まちがえそうな物。地図はゼロ）
+    ("goal", "gaze"): (Fmt.TAG_AND_MAP, None),      # 探している物の荷札の列（同じ）
     ("goal", "gate3"): (Fmt.AMOUNT, None),          # 持っている強さ
     ("gate3", "goal"): (Fmt.AMOUNT, None),          # 入れてよい
     ("gate3", "orienteye"): (Fmt.AMOUNT, None),     # 反射を抑える強さ

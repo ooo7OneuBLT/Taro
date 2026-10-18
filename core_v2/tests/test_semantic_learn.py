@@ -40,7 +40,13 @@ def name(box, word_q, tag):
     out = box.step({"listen": word_q, "objfile": tag})
     for _ in range(HOLD):
         box.step({"listen": torch.zeros(TAG_DIM), "objfile": tag})
-    return out["goal"]
+    return goal_tag(out)
+
+
+def goal_tag(out):
+    """目的の係へ渡した列の先頭（聞いた語の見た目の予想）。何も無ければゼロ。"""
+    lst = out["goal"]
+    return lst[0][0] if lst else torch.zeros(TAG_DIM)
 
 
 def appearance(seed):
@@ -59,7 +65,7 @@ def test_default_is_sparse():
 def test_empty_says_nothing(mem):
     box = Semantic(learning=True, memory=mem)
     out = box.step({"listen": BALL, "objfile": NONE})
-    assert float(torch.linalg.vector_norm(out["goal"])) == 0.0
+    assert out["goal"] == []
 
 
 @MEMS
@@ -117,7 +123,7 @@ def test_recalled_tag_goes_to_goal(mem):
         name(box, BALL, noisy(ball))
     box.learning = False
     out = box.step({"listen": BALL, "objfile": NONE})
-    assert float(out["goal"] @ ball) > 0.85 and box.last_recall_norm >= box.recall_line
+    assert float(goal_tag(out) @ ball) > 0.85 and box.last_recall_norm >= box.recall_line
 
 
 @MEMS
