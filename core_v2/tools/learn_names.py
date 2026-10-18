@@ -83,6 +83,8 @@ def looking_at(env) -> str:
 
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
+    from ..world_eye.switch import pop_world_flag, select
+    select(pop_world_flag(argv))          # --world eye|mimo（既定 mimo）
     swap = "--swap" in argv
     opts = {"--out": None, "--scenes": DEFAULT_SCENES, "--max-s": "900", "--log-dir": "段階3_名づけ", "--ear": None}
     pos = []

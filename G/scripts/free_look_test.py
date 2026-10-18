@@ -136,6 +136,8 @@ def main(cfg_path, quick=False, plot_only=False, only=None):
 
 
 if __name__ == "__main__":
+    from core_v2.world_eye.switch import pop_world_flag, select
+    select(pop_world_flag(sys.argv))      # --world eye|mimo（既定 mimo）
     argv = sys.argv[1:]
     only = argv[argv.index("--only") + 1] if "--only" in argv else None
     args = [a for a in argv if not a.startswith("--") and a != only]

@@ -304,5 +304,7 @@ def main(cfg_path, quick=False, plot_only=False):
 
 
 if __name__ == "__main__":
+    from core_v2.world_eye.switch import pop_world_flag, select
+    select(pop_world_flag(sys.argv))      # --world eye|mimo（既定 mimo）
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     main(args[0], quick="--quick" in sys.argv, plot_only="--plot-only" in sys.argv)
