@@ -14,6 +14,9 @@
   python -m core_v2.tools.nai_body [--taros 0,1,2] [--trials 10] [--trial-s 30] [--log-dir 段階8_体あり_驚き]
 出力：G/logs/<log-dir>/まとめ.json と、試行ごとの驚きの記録 trials.json、消した試行ごとの消す前後の左目の画像 images/
   （本番の前に --taros 0 --trials 1 で回し、images/ の画像で物が本当に消えたかを目で確かめる）
+育ちの段（段5、2026-10-18）：--from auto（育ち帳の段4、無ければ段3…のいちばん新しい写し、目だけの場面）か写しの名前で、その太郎から回し、
+終わりに段5の写し（段5_目_種<種>）を残す。--from のときの世界の既定は eye。注意：この道具は確かめだけで、驚きの係は
+仮部品（覚えない）なので、写しの中身は元の写しと同じ（育ち帳の note に書く）
 """
 
 from __future__ import annotations
@@ -129,14 +132,21 @@ def main(argv=None):
     ap.add_argument("--scenes", default=DEFAULT_SCENES)
     ap.add_argument("--log-dir", default="段階8_体あり_驚き")
     ap.add_argument("--trace", type=int, default=0, help="最初のこの数の太郎×試行について、1回ごとの記録を trace_*.jsonl に書く")
-    ap.add_argument("--world", default="mimo", choices=["mimo", "eye"], help="目だけの場面で回すなら eye")
+    ap.add_argument("--world", default=None, choices=["mimo", "eye"], help="目だけの場面で回すなら eye（--from のときの既定）")
+    ap.add_argument("--from", dest="start", default=None, help="育ちの段の写しから始める（auto か写しの名前）")
+    ap.add_argument("--growth-seed", type=int, default=0, help="--from auto で引く写しの種")
     a = ap.parse_args(argv)
+    a.world = a.world or ("eye" if a.start else "mimo")
     from ..world_eye.switch import select, suffix
     select(a.world)
     log_dir = os.path.join(run_v2.REPO, "G", "logs", suffix(a.log_dir))
     os.makedirs(log_dir, exist_ok=True)
     from ..brain import Brain
     brain = Brain()
+    from . import growth
+    row = growth.open_start(brain.boxes, a.start, 5, seed=a.growth_seed)
+    if row is not None:
+        print(f"[段5] 写し {row['name']} を読んだ（段{row['phase']}）", flush=True)
     brain.boxes["eyein"].setup()
     scenes = [x for x in a.scenes.split(",") if x]
     trials, t0 = [], time.time()
@@ -167,6 +177,14 @@ def main(argv=None):
     }
     with open(os.path.join(log_dir, "trials.json"), "w", encoding="utf-8") as f:
         json.dump(trials, f, ensure_ascii=False)
+    if row is not None:
+        snap = growth.save(brain.boxes, 5, growth.free_name(f"段5_{'目' if a.world == 'eye' else a.world}_種{a.growth_seed}"),
+                           end=True, parent=row["name"], month=growth.month_of(row),
+                           conditions={"world": a.world, "eye": "dinov2", "seed": a.growth_seed, "tool": "nai_body",
+                                       "taros": a.taros, "trials": a.trials},
+                           note="nai_body は確かめだけ（驚きの係は仮部品で覚えない）ので、中身は元の写しと同じ")
+        summary["snapshot"] = snap["name"]
+        print(f"[段5] 写し：{snap['name']}", flush=True)
     with open(os.path.join(log_dir, "まとめ.json"), "w", encoding="utf-8") as f:
         json.dump(summary, f, ensure_ascii=False, indent=1)
     print(json.dumps(summary, ensure_ascii=False))

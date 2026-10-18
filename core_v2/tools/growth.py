@@ -33,8 +33,10 @@ import sys
 import torch
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir, os.pardir))
-LEDGER = os.path.join(REPO, "core_v2", "data", "育ち帳.json")
-SNAP_DIR = os.path.join(REPO, "core_v2", "data", "育ち")
+# 環境変数 TARO_GROWTH_DIR を置くと、育ち帳と写しをその下に置く（クラウドの短い確かめで、本物の育ち帳を汚さないため）
+_ROOT = os.environ.get("TARO_GROWTH_DIR")
+LEDGER = os.path.join(_ROOT, "育ち帳.json") if _ROOT else os.path.join(REPO, "core_v2", "data", "育ち帳.json")
+SNAP_DIR = os.path.join(_ROOT, "育ち") if _ROOT else os.path.join(REPO, "core_v2", "data", "育ち")
 
 PHASES = {
     0: "生まれつき（目・反射・物の名簿。育たない）",
@@ -160,9 +162,52 @@ def latest(phase: int, seed: int | None = None, world: str | None = None, fresh_
     return max(rows, key=lambda r: r["created"])
 
 
+def start_point(phase: int, seed: int | None = None, world: str | None = None) -> dict | None:
+    """段 phase を育て始める元：段 phase−1, phase−2, … の終わりの写しのうち、いちばん上の段の、いちばん新しい物
+    （今のコードで古くなっていない物だけ）。world を渡すと、その段が段3以上のときだけ世界も合わせる。無ければ None（生まれたままから）。"""
+    for p in range(phase - 1, 0, -1):
+        try:
+            return latest(p, seed=seed, world=world if p >= 3 else None)
+        except LookupError:
+            continue
+    return None
+
+
+def free_name(base: str) -> str:
+    """育ち帳にまだ無い名前（base、あれば base_2, base_3 …）。"""
+    names = {r["name"] for r in read_ledger()}
+    if base not in names:
+        return base
+    k = 2
+    while f"{base}_{k}" in names:
+        k += 1
+    return f"{base}_{k}"
+
+
+def month_of(row: dict) -> float | None:
+    """写しの月齢（無ければ元にした写しをさかのぼる）。"""
+    while row is not None:
+        if row.get("month") is not None:
+            return float(row["month"])
+        row = find(row["parent"]) if row.get("parent") else None
+    return None
+
+
+def open_start(boxes, spec: str | None, phase: int, seed: int | None = None) -> dict | None:
+    """道具の --from：None なら何もしない。"auto" なら段 phase の元（start_point、世界は eye）、それ以外は写しの名前。
+    読んだ写しの行を返す（無ければ止める）。"""
+    if not spec:
+        return None
+    row = start_point(phase, seed=seed, world="eye") if spec == "auto" else find(spec)
+    if row is None:
+        raise LookupError(f"段{phase}の元にする写しが育ち帳に無い（種={seed}）")
+    load(boxes, row)
+    return row
+
+
 # ---------------------------------------------------------------- 保存と読み込み
 def save(boxes, phase: int, name: str, *, conditions: dict, month: float | None = None, end: bool = False,
-         parent: str | None = None, note: str = "", resume=None, out_dir: str = SNAP_DIR) -> dict:
+         parent: str | None = None, note: str = "", resume=None, out_dir: str | None = None) -> dict:
     """育つ係（boxes にあるものだけ）の中身を写し、育ち帳に1行足す。boxes は Brain.boxes でも係の dict でもよい。
     conditions には少なくとも world（eye|mimo|bed）・eye（目の作り方、例 dinov2 / bed_random_tags）・seed を書く。"""
     for k in ("world", "eye", "seed"):
@@ -173,6 +218,7 @@ def save(boxes, phase: int, name: str, *, conditions: dict, month: float | None 
     from ..save import code_version
     from ..wiring import wiring_hash
     states = {b: boxes[b].state_dict() for b in GROWN_BOXES if b in boxes}
+    out_dir = out_dir or SNAP_DIR
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, f"{name}.pt")
     meta = {"name": name, "phase": phase, "phase_name": PHASES[phase], "month": month, "end": bool(end),

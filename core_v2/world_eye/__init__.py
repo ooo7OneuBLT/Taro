@@ -18,7 +18,8 @@ MIMo は消さない（run/world/ はそのまま）。体が要る段階が来�
 * build.py    … run_v2.build_env と同じ引数で、この世界を作る（同じ場面の JSON を読む）
 * switch.py   … 道具に --world eye|mimo を足すための切り替え
 * eye_backend.py … 目の入口（eyein）の DINOv2 を、PC（GPU）・クラウド（重みが取れたら）で同じように作る。
-                 重みが無いところで世界の配線だけ確かめるための「差し替え品」（DINOv2 ではない）もここ
+                 重みが無いところで世界の配線だけ確かめるための「代わりの目」（TableEye、DINOv2 の表を引く）もここ
+* noun_scene.py … 段階9：部屋3つ・20語の個体の並べ方と、名づけの親（tools/grow_names・noun_body が使う）
 """
 
 import os as _os

@@ -13,6 +13,11 @@
                                     [--taros 0,1,2] [--trials 6] [--trial-s 30] [--age 月齢] [--log-dir 段階7_体あり]
     --taros … 脳の種（試行の乱数）。同じ声の状態で、種ごとに別の太郎として数える
     --age   … 声の出口へ渡す月齢。省略すると JSON の月齢
+  育ちの段（段4、2026-10-18）：
+  python -m core_v2.tools.say_names --from auto [--growth-seed 0] [--taros 0,1,2] …
+    --from auto … 育ち帳の段3（無ければ段2…）のいちばん新しい写し（目だけの場面）を読む（--voice・--semantic は要らない）。写しの名前も書ける
+    終わりに段4の写しを残す（段4_目_種<種>）。注意：段4を「育てる」道具はまだ無い。この道具は確かめだけで、声も意味の辞書も
+    覚えないので、写しの中身は元の写しと同じ（育ち帳の note に書く）。--from のときの世界の既定は eye
 出力：G/logs/<log-dir>/taro<種>.json（声ごとの記録）と まとめ.json
 """
 
@@ -67,16 +72,21 @@ def score(rows) -> dict:
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--voice", required=True)
-    ap.add_argument("--semantic", required=True)
+    ap.add_argument("--voice", default=None)
+    ap.add_argument("--semantic", default=None)
+    ap.add_argument("--from", dest="start", default=None, help="育ちの段の写しから始める（auto か写しの名前）")
+    ap.add_argument("--growth-seed", type=int, default=0, help="--from auto で引く写しの種")
     ap.add_argument("--taros", default="0,1,2")
     ap.add_argument("--trials", type=int, default=6)
     ap.add_argument("--trial-s", type=float, default=30.0)
     ap.add_argument("--age", type=float, default=None)
     ap.add_argument("--scenes", default=DEFAULT_SCENES)
     ap.add_argument("--log-dir", default="段階7_体あり")
-    ap.add_argument("--world", default="mimo", choices=["mimo", "eye"], help="目だけの場面で回すなら eye")
+    ap.add_argument("--world", default=None, choices=["mimo", "eye"], help="目だけの場面で回すなら eye（--from のときの既定）")
     a = ap.parse_args(argv)
+    a.world = a.world or ("eye" if a.start else "mimo")
+    if not a.start and not (a.voice and a.semantic):
+        ap.error("--voice と --semantic、または --from が要る")
     from ..world_eye.switch import select, suffix
     select(a.world)
     path = lambda p: p if os.path.isabs(p) else os.path.join(run_v2.REPO, p)   # noqa: E731
@@ -86,9 +96,15 @@ def main(argv=None):
     from ..brain import Brain
     brain = Brain()
     brain.boxes["eyein"].setup()
-    brain.boxes["semantic"].load_learned(path(a.semantic))
-    meta = import_voice(brain.boxes, path(a.voice))
-    age = a.age if a.age is not None else float(meta["month"])
+    from . import growth
+    row = growth.open_start(brain.boxes, a.start, 4, seed=a.growth_seed)
+    if row is not None:
+        meta = {"snapshot": row["name"], "month": growth.month_of(row)}
+        print(f"[段4] 写し {row['name']} を読んだ（段{row['phase']}、月齢 {meta['month']}）", flush=True)
+    else:
+        brain.boxes["semantic"].load_learned(path(a.semantic))
+        meta = import_voice(brain.boxes, path(a.voice))
+    age = a.age if a.age is not None else float(meta["month"] if meta.get("month") is not None else 24.0)
     scenes = [x for x in a.scenes.split(",") if x]
     summary = {"voice": a.voice, "voice_meta": meta, "semantic": a.semantic, "age": age, "taros": {}}
     t0 = time.time()
@@ -119,6 +135,14 @@ def main(argv=None):
         with open(os.path.join(log_dir, f"taro{taro}.json"), "w", encoding="utf-8") as f:
             json.dump(res, f, ensure_ascii=False, indent=1)
         print(f"太郎{taro}：{per}", flush=True)
+    if row is not None:
+        snap = growth.save(brain.boxes, 4, growth.free_name(f"段4_{'目' if a.world == 'eye' else a.world}_種{a.growth_seed}"),
+                           end=True, parent=row["name"], month=age,
+                           conditions={"world": a.world, "eye": "dinov2", "seed": a.growth_seed, "tool": "say_names",
+                                       "taros": a.taros, "trials": a.trials},
+                           note="段4を育てる道具はまだ無い。say_names は確かめだけ（声も意味の辞書も覚えない）ので、中身は元の写しと同じ")
+        summary["snapshot"] = snap["name"]
+        print(f"[段4] 写し：{snap['name']}", flush=True)
     with open(os.path.join(log_dir, "まとめ.json"), "w", encoding="utf-8") as f:
         json.dump(summary, f, ensure_ascii=False, indent=1)
     print(json.dumps(summary["taros"], ensure_ascii=False))

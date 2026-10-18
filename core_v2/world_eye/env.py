@@ -16,6 +16,9 @@ run_v2（core_v2/run_v2.py）と道具が使う形をそのまま持つ：
 * 段階2の妨害物の揺れと点滅（場面の flash_move）：場面に書いてある決まった動き。毎歩は記録しない
 * 隠すとは、物の形を「描かない組」へ移すこと（影も落とさない）。場所はそのまま。隠した物は見られない
   （_gaze_angle_to は None を返す）
+* 段階9：場面の world.eye_world.stage9 = {"room": 部屋, "objects": made|real, "words": [...], "insts": [...]} で、
+  部屋（rooms.py）と20語の個体（instances.py。体の名前は n9_<種類>_<個体>、本物は n9r_…）を作る（最初は全部隠してある）。
+  並べ方・親は noun_scene.py。object_sound(名前, 波形) で物の音を鳴らす（次の歩の info["object_sound"]、events.csv に1行）
 """
 
 from __future__ import annotations
@@ -129,13 +132,33 @@ class EyeWorldEnv:
             objs.append({"name": o["name"], "kind": o["kind"], "radius": float(o.get("radius", 0.03)),
                          "rgba": o.get("rgba") or catalogue_rgba(o["name"], o["kind"])})
         self.object_names = [o["name"] for o in objs]
+        # 段階9：部屋と20語の個体（world.eye_world.stage9 = {"room", "objects": made|real, "words", "insts"}）。
+        # 個体の体の名前は instances の name（n9_cup_0／本物は n9r_cup_0）。最初は全部隠してある
+        self.n9 = {}                 # 体の名前 → {"word", "i", "k", "size"}
+        self.n9_view = {}            # 体の名前 → 今の向きの番号（見た目の素の表の向き。置く道具が書く）
+        self._pending_sound = []
+        s9 = dict(ew.get("stage9") or {})
+        extra_assets, extra_bodies, room = [], [], None
+        if s9:
+            from . import instances as ins
+            ins.use_objects(s9.get("objects", "made"))
+            room = s9.get("room")
+            for word in (s9.get("words") or ins.WORDS):
+                for k in (s9.get("insts") or range(ins.N_INST)):
+                    inst = ins.instance(word, int(k))
+                    extra_assets += ins.assets_xml(inst)
+                    extra_bodies.append(ins.body_xml(inst))
+                    size = float(inst["size_m"]) if inst.get("src") == "real" else 4.0 * float(inst["r"])
+                    self.n9[inst["name"]] = {"word": word, "i": ins.WORDS.index(word), "k": int(k), "size": size}
+                    self.object_names.append(inst["name"])
 
         # ---- MuJoCo ----
         xml = scene_mod.build_xml({"px": self.px, "fovy": self.fovy, "floor_dim": w.get("floor_dim", 1.0),
                                    "backdrop": w.get("backdrop") or {"enabled": True},
                                    "table": bool(ew.get("table", False)),
                                    "parent_figure": bool(ew.get("parent_figure", False)),
-                                   "objects": objs})
+                                   "objects": objs, "room": room,
+                                   "extra_assets": extra_assets, "extra_bodies": extra_bodies})
         self.xml = xml
         self.model = mujoco.MjModel.from_xml_string(xml)
         self.data = mujoco.MjData(self.model)
@@ -287,6 +310,13 @@ class EyeWorldEnv:
         """道具・台本から親に言わせる（次の歩の info に入る）。"""
         self._pending_say.append({"text": str(text), "target": target, "cause": cause})
 
+    def object_sound(self, name: str, wave, cause: str = "parent") -> None:
+        """段階9：物の音（波形、16kHz）を鳴らす。次の歩の info["object_sound"] に入る（run_v2.run_trial が読む）。
+        絵は変えないので、鳴らした歩の画像を1枚だけ残す（話すのと同じ）。"""
+        self._pending_sound.append(np.asarray(wave, dtype=np.float32))
+        at = self._save_img(self.render_eye(), f"sound_{name}") if self._ep_dir and self.save_images else ""
+        self._log_row("sound", name, cause, text=f"{len(self._pending_sound[-1]) / 16000.0:.2f}s", before=at, after=at)
+
     def taro_said(self, text: str) -> None:
         """太郎の声を親の耳へ（ParentLabeling の respond_to_voice が読む。MIMo では trainer が立てた合図）。"""
         if text:
@@ -304,6 +334,7 @@ class EyeWorldEnv:
         self._orienting.reset()
         self._held = None
         self._pending_say = []
+        self._pending_sound = []
         self._taro_voice_signal = False
         self._taro_voice_text = ""
         self._taro_noticed_gone_time = None
@@ -350,6 +381,8 @@ class EyeWorldEnv:
         self._apply_eye()
         mujoco.mj_forward(self.model, self.data)
         info = {}
+        if self._pending_sound:
+            info["object_sound"] = self._pending_sound.pop(0)
         if utt is not None:
             info["parent_utterance"] = utt
             # 話すことは絵を変えないので、話した歩の画像を1枚だけ残す（前と後の欄に同じ名前）
