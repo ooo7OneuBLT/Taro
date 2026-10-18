@@ -46,6 +46,8 @@ TRAIN_EVERY_S = 1.0
 POS_MIN_S, POS_MAX_S = 0.1, 1.0      # 同じ行の見えを正の組にする時間の差（仕様書）
 LOOK_WINDOW_S = 3.0                  # 語・音の前に見ていた行（意味の辞書・名簿と同じ。Yu・Smith 2012）
 SAME_COS = 0.95                      # 語・音の荷札が「同じ」（goal.SAME_COS と同じ線）
+NEGATIVES = "scene"                  # 負の組：仕様書どおり "scene"（同じ回の別の行）。"all"＝置き場のほかの見え全部（SimCLR・
+                                     # 教師つき対照学習のふつうの形）。試験場で比べるための切り替え（段階9の途中経過を参照）
 MATCH_CELLS = 1.5                    # 名簿の席と物を場所で突き合わせる距離（名簿の TRACK_CELLS と同じ）
 SEATS = MAX_OBJECTS - 2              # objfile.SEATS と同じ
 VISIBLE_MIN = 0.75                   # 席の山の高さ：1＝見えた・0.5＝見えない（マスの間に山の頂があると 0.9 台）の間
@@ -85,6 +87,7 @@ class Kind(Box):
         self.net = KindNet()
         torch.random.set_rng_state(g)
         self.learning = bool(learning)
+        self.negatives = NEGATIVES
         self.opt = None
         self.memory: list[dict] = []                  # 経験の置き場（reset では消さない。約2分で入れ替わる）
         self.t = 0
@@ -213,7 +216,7 @@ class Kind(Box):
                 pos |= ((C @ C.T) >= SAME_COS) & has[:, None] & has[None, :]
         eye = torch.eye(len(mem), dtype=torch.bool)
         pos &= ~eye
-        neg = (dt < 1e-6) & ~same_row
+        neg = ((dt < 1e-6) & ~same_row) if self.negatives == "scene" else ~(pos | eye)
         anchors = pos.any(1) & neg.any(1)
         if not bool(anchors.any()):
             return None
