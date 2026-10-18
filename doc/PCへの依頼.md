@@ -233,3 +233,15 @@ PC は描くのが速く、そのかわり DINOv2 と切り出しが1回 約30�
 1.5秒に届かない見方が多い）。耳が知っている語は最後に20/20。体ありの試し（本物の物・本物の目）は、試験場（A 98%・B4 96%・B2 98%・C 93%）より下がる：
 A 70〜90%（16語以上が70%以上に届くかは半々）、B4 65〜85%、B2 70〜90%、C 80〜95%。名づけの数が試験場（約600回）より少ないのと、
 本物の目が物を拾い損ねる回があるため。say_names は段階7（ボール当たり6〜7）と同じくらい、nai_body は段階8の体ありと同じくらい。
+
+### 依頼11　段階9：目を戻す直し（2b1e15a）のあと、段3から本番を回し直す
+状態：未。依頼10の残りをこちらに置き換える。PCが上げた 段3_目_real_dinov2_種0（名づけ36回）は使わない。
+ブランチ最新（2b1e15a 以降）で git pull してから、順に:
+1. `python -m core_v2.tools.grow_names --check --objects real --eye dinov2 --seed 0`（1場面。場面の始めに目が (0,-20) で、物が写っていることを絵で確かめる）
+2. `python -m core_v2.tools.grow_names --objects real --eye dinov2 --seed 0 --scenes 1000`（見込み 約1時間45分）。まとめ.json の learn_min が5未満なら `--from <できた段3の写しの名前>` で続けて回す。
+3. `python -m core_v2.tools.noun_body --from auto --seed 0 --eye dinov2 --words わんわん,こっぷ --trials 1 --image-trials 8 --log-dir 段階9_体あり_確かめ` → 良ければ `python -m core_v2.tools.noun_body --from auto --seed 0 --eye dinov2 --trials 10`
+4. `python -m core_v2.tools.say_names --from auto --objects real --eye dinov2 --growth-seed 0 --taros 0,1,2 --trials 6 --trial-s 30 --log-dir 段階9_段4_名前を言う`
+5. `python -m core_v2.tools.nai_body --from auto --growth-seed 0 --taros 0,1,2 --trials 10 --trial-s 30 --log-dir 段階9_段5_ない`
+6. `python -m core_v2.tools.smith_yu --world eye --seeds 0`
+7. `python -m core_v2.tools.growth list`
+返してほしいもの: 1の絵を見た一言、2の10場面ごとの行と learn_by_word・learn_min、3〜6の最後の行とまとめ.json、growth list、エラー全文。写しと記録の json はコミット・push してよい（G/assets は入れない）。
