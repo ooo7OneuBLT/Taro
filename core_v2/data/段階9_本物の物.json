@@ -96,15 +96,16 @@
    "license": "CC Attribution",
    "license_slug": "by",
    "author": "Jiří Kuba",
-   "size_m": 0.15,
+   "size_m": 0.18,
    "url": "https://sketchfab.com/3d-models/747a541d6dca4c8c8df2f4ec0f37c00e",
+   "tilt_deg": 60.0,
    "color": "灰",
    "rgb": [
     0.549,
     0.549,
     0.549
    ],
-   "orig_size_m": 8.5732,
+   "orig_size_m": 8.5661,
    "n_parts": 1
   },
   {
@@ -117,15 +118,16 @@
    "license": "CC Attribution",
    "license_slug": "by",
    "author": "Blender3D",
-   "size_m": 0.15,
+   "size_m": 0.18,
    "url": "https://sketchfab.com/3d-models/29677102e1804e72bbb68b408890b77b",
+   "tilt_deg": 60.0,
    "color": "黒",
    "rgb": [
     0.201,
     0.178,
     0.146
    ],
-   "orig_size_m": 10.5436,
+   "orig_size_m": 10.5443,
    "n_parts": 1
   },
   {
@@ -138,8 +140,9 @@
    "license": "CC Attribution",
    "license_slug": "by",
    "author": "BlackCube",
-   "size_m": 0.15,
+   "size_m": 0.18,
    "url": "https://sketchfab.com/3d-models/6112888844dd4e1c8579f0c30059d0f6",
+   "tilt_deg": 60.0,
    "color": "茶",
    "rgb": [
     0.269,
@@ -159,15 +162,16 @@
    "license": "CC Attribution",
    "license_slug": "by",
    "author": "Felipedg",
-   "size_m": 0.15,
+   "size_m": 0.18,
    "url": "https://sketchfab.com/3d-models/15e368152d2b4e469ab6d33732d31994",
+   "tilt_deg": 60.0,
    "color": "灰",
    "rgb": [
     0.639,
     0.639,
     0.639
    ],
-   "orig_size_m": 8.8691,
+   "orig_size_m": 8.8723,
    "n_parts": 1
   },
   {
@@ -322,20 +326,20 @@
    "k": 3,
    "test": true,
    "source": "objaverse",
-   "id": "fbc91465203845f7a42b972b80a9c435",
-   "name": "Slice Of Bread",
+   "id": "ce86584fa4e240239f6325146be7d76f",
+   "name": "Bread",
    "license": "CC Attribution",
    "license_slug": "by",
-   "author": "Liam kendall",
+   "author": "bogdanzloy20280",
    "size_m": 0.15,
-   "url": "https://sketchfab.com/3d-models/fbc91465203845f7a42b972b80a9c435",
+   "url": "https://sketchfab.com/3d-models/ce86584fa4e240239f6325146be7d76f",
    "color": "茶",
    "rgb": [
-    0.215,
-    0.168,
-    0.129
+    0.284,
+    0.17,
+    0.094
    ],
-   "orig_size_m": 63.5942,
+   "orig_size_m": 1.3004,
    "n_parts": 1
   },
   {
@@ -826,21 +830,21 @@
    "k": 3,
    "test": true,
    "source": "objaverse",
-   "id": "00ad7478cf0447f3b3494c00e7037177",
-   "name": "soccer ball",
+   "id": "4b5ae9b70251441a896a90fd14a79f66",
+   "name": "Basketball",
    "license": "CC Attribution",
    "license_slug": "by",
-   "author": "Bernardo  Lucas",
+   "author": "Alihan",
    "size_m": 0.15,
-   "url": "https://sketchfab.com/3d-models/00ad7478cf0447f3b3494c00e7037177",
-   "color": "灰",
+   "url": "https://sketchfab.com/3d-models/4b5ae9b70251441a896a90fd14a79f66",
+   "color": "赤",
    "rgb": [
-    0.581,
-    0.581,
-    0.581
+    0.947,
+    0.193,
+    0.015
    ],
-   "orig_size_m": 1.7215,
-   "n_parts": 3
+   "orig_size_m": 1.6028,
+   "n_parts": 2
   },
   {
    "word": "わんわん",
@@ -852,7 +856,7 @@
    "license": "CC Attribution",
    "license_slug": "by",
    "author": "Michał",
-   "size_m": 0.3,
+   "size_m": 0.2,
    "url": "https://sketchfab.com/3d-models/716a867e38c94d9dad278c1befe1aaeb",
    "color": "黒",
    "rgb": [
@@ -873,7 +877,7 @@
    "license": "CC Attribution",
    "license_slug": "by",
    "author": "SD Designer",
-   "size_m": 0.3,
+   "size_m": 0.2,
    "url": "https://sketchfab.com/3d-models/85229c525ded401ca3a1456e1f238758",
    "color": "茶",
    "rgb": [
@@ -894,7 +898,7 @@
    "license": "CC Attribution",
    "license_slug": "by",
    "author": "ordenmoria",
-   "size_m": 0.3,
+   "size_m": 0.2,
    "url": "https://sketchfab.com/3d-models/f9c8c8ff399948d2bd0203642e4e23a1",
    "color": "茶",
    "rgb": [
@@ -915,7 +919,7 @@
    "license": "CC Attribution",
    "license_slug": "by",
    "author": "69.ash.lucas.69",
-   "size_m": 0.3,
+   "size_m": 0.2,
    "url": "https://sketchfab.com/3d-models/422d16255d984803848e489f3782cacb",
    "color": "黒",
    "rgb": [
@@ -936,7 +940,7 @@
    "license": "CC Attribution",
    "license_slug": "by",
    "author": "Danila Dryga",
-   "size_m": 0.3,
+   "size_m": 0.2,
    "url": "https://sketchfab.com/3d-models/d048f7bd322a491cb270d6312962c2bc",
    "color": "茶",
    "rgb": [
@@ -957,7 +961,7 @@
    "license": "CC Attribution",
    "license_slug": "by",
    "author": "rhcreations",
-   "size_m": 0.3,
+   "size_m": 0.2,
    "url": "https://sketchfab.com/3d-models/7239efeec7104dc3af46a8842a66aec0",
    "color": "黒",
    "rgb": [
@@ -978,7 +982,7 @@
    "license": "CC Attribution",
    "license_slug": "by",
    "author": "sinork123",
-   "size_m": 0.3,
+   "size_m": 0.2,
    "url": "https://sketchfab.com/3d-models/e50773b1d03f49bea7da90f45fa5523b",
    "color": "灰",
    "rgb": [
@@ -999,7 +1003,7 @@
    "license": "CC Attribution",
    "license_slug": "by",
    "author": "FranoW",
-   "size_m": 0.3,
+   "size_m": 0.2,
    "url": "https://sketchfab.com/3d-models/b8a85ace01444026a6218358fb590177",
    "color": "黒",
    "rgb": [
@@ -1272,7 +1276,7 @@
    "license": "CC BY 4.0（Google Scanned Objects）",
    "license_slug": "by",
    "author": "Google",
-   "size_m": 0.3,
+   "size_m": 0.2,
    "url": "https://github.com/kevinzakka/mujoco_scanned_objects",
    "color": "茶",
    "rgb": [
@@ -1293,7 +1297,7 @@
    "license": "CC Attribution",
    "license_slug": "by",
    "author": "Amal Animates",
-   "size_m": 0.3,
+   "size_m": 0.2,
    "url": "https://sketchfab.com/3d-models/cd0ee50902634542891f9131876bec3c",
    "color": "茶",
    "rgb": [
@@ -1314,7 +1318,7 @@
    "license": "CC Attribution",
    "license_slug": "by",
    "author": "Polygon Studios",
-   "size_m": 0.3,
+   "size_m": 0.2,
    "url": "https://sketchfab.com/3d-models/7842a813fedc416884e59bc593a890c1",
    "color": "茶",
    "rgb": [
@@ -1335,7 +1339,7 @@
    "license": "CC Attribution",
    "license_slug": "by",
    "author": "frezer2011",
-   "size_m": 0.3,
+   "size_m": 0.2,
    "url": "https://sketchfab.com/3d-models/ba0de8ab340c4c59842082d3f3fdf2d3",
    "color": "茶",
    "rgb": [
