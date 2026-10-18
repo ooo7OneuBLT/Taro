@@ -6,7 +6,7 @@
 各語 N 回覚えたら止めて、学んだ表を保存する。手で登録する道具（register_appearance.py）は使わない。
 
 使い方：
-  python -m core_v2.tools.learn_names [N] [--swap] [--out パス] [--scenes 場面,場面] [--max-s 秒] [--log-dir 名前]
+  python -m core_v2.tools.learn_names [N] [--swap] [--out パス] [--scenes 場面,場面] [--max-s 秒（既定 3600）] [--log-dir 名前]
     N       … 各語を何回覚えたら止めるか（既定 5）
     --swap  … 名前を入れ替える（ボールに「こっぷ」と言う）＝合格の線⑤の確かめ用
     --ear   … 段階5：親の話しかけで育てた耳（hear_parent.py の出力）を聞き分ける係に読む。名づけの間も耳は覚え続ける
@@ -36,6 +36,9 @@ WORD_OF = {"toy1": "ぼおる", "toy2": "こっぷ"}       # toy1＝ボール（
 OBJ_OF_WORD = {"ぼおる": "ball", "こっぷ": "cup"}
 LOOK_DEG = 10.0
 TRIAL_S = 60.0          # 1つの場面を続けて回す長さ。足りなければ種を変えてもう1回
+MAX_S = 3600.0          # 名づけを待つ長さの上限（場面の秒）。止めるのは「各語 N 回覚えた」で、これは止まらないときの安全の線。
+                        # 900秒だった。目だけの場面では太郎が1つの物を3秒続けて見ることが少なく、900秒で名づけ9回
+                        # （ボール2回）しか無かった（2026-10-18 PC）。覚え方は変えず、待つ長さだけ伸ばした
 PIPE_TICKS = 3          # 語は earin→listen→semantic で2回遅れて届く（幅を1回ぶん持たせる）
 
 
@@ -86,7 +89,7 @@ def main(argv=None):
     from ..world_eye.switch import pop_world_flag, select, suffix
     select(pop_world_flag(argv))          # --world eye|mimo（既定 mimo）
     swap = "--swap" in argv
-    opts = {"--out": None, "--scenes": DEFAULT_SCENES, "--max-s": "900", "--log-dir": "段階3_名づけ", "--ear": None}
+    opts = {"--out": None, "--scenes": DEFAULT_SCENES, "--max-s": str(MAX_S), "--log-dir": "段階3_名づけ", "--ear": None}
     pos = []
     i = 0
     while i < len(argv):

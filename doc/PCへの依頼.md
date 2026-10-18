@@ -208,12 +208,13 @@ python -m core_v2.tools.grow_names --check --objects real --eye dinov2 --seed 0
 python -m core_v2.tools.grow_names --objects real --eye dinov2 --seed 0 --scenes 300
 python -m core_v2.tools.noun_body --from auto --seed 0 --eye dinov2 --words わんわん,こっぷ --trials 1 --image-trials 8 --log-dir 段階9_体あり_確かめ
 python -m core_v2.tools.noun_body --from auto --seed 0 --eye dinov2 --trials 10
-python -m core_v2.tools.say_names --from auto --growth-seed 0 --taros 0,1,2 --trials 6 --trial-s 30 --log-dir 段階9_段4_名前を言う
+python -m core_v2.tools.say_names --from auto --objects real --eye dinov2 --growth-seed 0 --taros 0,1,2 --trials 6 --trial-s 30 --log-dir 段階9_段4_名前を言う
 python -m core_v2.tools.nai_body --from auto --growth-seed 0 --taros 0,1,2 --trials 10 --trial-s 30 --log-dir 段階9_段5_ない
 python -m core_v2.tools.growth list
 ```
 
 （6つめは試しの短い確かめ：試しの絵 `G/logs/段階9_体あり_確かめ_real_dinov2_種0/<部屋>/ep001_seed0/*_show_*_after.png` に4つ・2つの物が写っているか。
+**変更（2026-10-18 夜）**：say_names に `--objects real --eye dinov2` を足した（段階2bの丸と箱は20語の太郎が見たことのない形なので、段階9の部屋で、覚えた ぼおる・こっぷ をほかの2語と並べて数える）。もう前の行で回していたら、この行でもう1回だけ回す。結果は `G/logs/段階9_段4_名前を言う_real_dinov2_種0/まとめ.json`。
 say_names と nai_body は `--from auto` で段3（段4）の写しを読み、終わりに段4・段5の写しを残す。この2つは確かめだけで覚えないので、写しの中身は元と同じ。）
 
 **かかる時間（見込み。クラウドの実測からの推定）**：クラウド（CPU で描く、代わりの目）で段3は1場面 約5〜6.5秒（1回 約40ミリ秒）、試しは1回 約1.6秒。
@@ -225,7 +226,7 @@ PC は描くのが速く、そのかわり DINOv2 と切り出しが1回 約30�
 2. 4つめ（--check）の画像のうち、show の後の絵1枚と say の絵1枚、それを見ての一言（物が写っているか、名前の物が真ん中か）
 3. 5つめの10場面ごとの行（名づけ・音・覚えた・耳が知っている語）と最後の1行、`G/logs/段階9_段3_目_real_dinov2_種0/まとめ.json`
 4. 7つめの最後の1行と `G/logs/段階9_体あり_real_dinov2_種0/まとめ.json`（A・B4・B2・C と語ごと）
-5. say_names・nai_body の最後の行と、それぞれの `まとめ.json`（`G/logs/段階9_段4_名前を言う_目だけ/`・`G/logs/段階9_段5_ない_目だけ/`）
+5. say_names・nai_body の最後の行と、それぞれの `まとめ.json`（`G/logs/段階9_段4_名前を言う_real_dinov2_種0/`・`G/logs/段階9_段5_ない_目だけ/`）
 6. 途中でエラーが出たら、その全文
 
 **クラウドの予想**：段3の300場面で名づけは約150〜350回（クラウドの10場面で 4回、3場面で 2回。太郎の見方は1.2秒前後の短いものと5〜12秒の長いものに分かれ、
