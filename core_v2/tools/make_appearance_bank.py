@@ -40,6 +40,7 @@ PX = 224
 FOVY = 60.0
 GAZE_DOWN_DEG = 20.0
 CENTER_PX = 40.0
+FIT_SIZE_M = 0.18   # これより大きい物は距離を遠ざける（20cm のわんわんが 25cm で収まりきらなかったので少し小さめの切りのよい値）
 VIEWS = [{"yaw": 15.0 * k, "pitch": (-20.0, 0.0, 20.0)[k % 3], "dist": (0.25, 0.35, 0.45)[(k // 3) % 3]}
          for k in range(24)]
 
@@ -69,11 +70,15 @@ class Stage:
         self.qadr = int(self.model.jnt_qposadr[j])
         self.data.qpos[int(self.model.jnt_qposadr[self.model.joint("eye_tilt").id])] = -math.radians(GAZE_DOWN_DEG)
         self.renderer = mujoco.Renderer(self.model, PX, PX)
+        # 大きい本物の物（いちばん長い辺が FIT_SIZE_M を越える物：くま・ぼうし・おさら・つみき）は、距離の段（25・35・45cm）を
+        # 大きさに比例して遠ざける。25cm の向きで画面からはみ出して切り出しが拾えなかったため（依頼8：くま 54/96、ぼうし 63/96）。
+        # 見かけの大きさは FIT_SIZE_M の物と同じになる。自作の物（size_m が無い）は今までどおり
+        self.dist_scale = max(1.0, float(inst.get("size_m", 0.0)) / FIT_SIZE_M)
 
     def render(self, view: dict) -> np.ndarray:
         down = math.radians(GAZE_DOWN_DEG)
         d = np.cos(down) * scene_mod.FORWARD - np.sin(down) * scene_mod.UP
-        self.data.qpos[self.qadr:self.qadr + 3] = scene_mod.EYE_LEFT + view["dist"] * d
+        self.data.qpos[self.qadr:self.qadr + 3] = scene_mod.EYE_LEFT + view["dist"] * self.dist_scale * d
         self.data.qpos[self.qadr + 3:self.qadr + 7] = _quat(view["yaw"], view["pitch"])
         self.mj.mj_forward(self.model, self.data)
         self.renderer.update_scene(self.data, camera="eye_left")

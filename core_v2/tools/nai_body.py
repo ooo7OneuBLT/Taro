@@ -43,6 +43,10 @@ def hide(env, key: str) -> None:
       消すときは揺れと点滅も止める（親が物を持って行ったので、もう揺れない）
     * ボール（toy1）は体が触れると光り、色を書き直す（_update_glow）。場面では手が届かないので起きない見込み［未確認］"""
     u = env.unwrapped
+    if getattr(run_v2, "WORLD", "mimo") == "eye":
+        # 目だけの場面：物を見えない描画の組へ移す（world_eye/env.py の hide。消した前後の画像と記録も env が残す）
+        u.hide(run_v2.OBJECTS[key], cause="nai_body")
+        return
     if key == "distractor":
         u._toy3_flash_move = None
     bid = int(u.model.body(run_v2.OBJECTS[key]).id)
@@ -125,8 +129,11 @@ def main(argv=None):
     ap.add_argument("--scenes", default=DEFAULT_SCENES)
     ap.add_argument("--log-dir", default="段階8_体あり_驚き")
     ap.add_argument("--trace", type=int, default=0, help="最初のこの数の太郎×試行について、1回ごとの記録を trace_*.jsonl に書く")
+    ap.add_argument("--world", default="mimo", choices=["mimo", "eye"], help="目だけの場面で回すなら eye")
     a = ap.parse_args(argv)
-    log_dir = os.path.join(run_v2.REPO, "G", "logs", a.log_dir)
+    from ..world_eye.switch import select, suffix
+    select(a.world)
+    log_dir = os.path.join(run_v2.REPO, "G", "logs", suffix(a.log_dir))
     os.makedirs(log_dir, exist_ok=True)
     from ..brain import Brain
     brain = Brain()

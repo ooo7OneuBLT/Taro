@@ -229,7 +229,11 @@ def fingerprints_at(rev: str) -> dict:
     with tempfile.TemporaryDirectory() as tmp:
         paths = [p for p in ("core_v2", "run/world") if _git("cat-file", "-e", f"{rev}:{p}") is not None]
         arch = subprocess.run(["git", "archive", rev, *paths], cwd=REPO, capture_output=True, check=True).stdout
-        subprocess.run(["tar", "-x", "-C", tmp], input=arch, check=True)
+        # Python の tarfile で開く（Windows の tar は日本語のファイル名を展開できずに止まる。ソースの指紋に要るのは .py だけ）
+        import io
+        import tarfile
+        with tarfile.open(fileobj=io.BytesIO(arch)) as tf:
+            tf.extractall(tmp, members=[m for m in tf.getmembers() if m.isdir() or m.name.endswith(".py")], filter="data")
         shutil.copy(__file__, os.path.join(tmp, "core_v2", "tools", "growth.py"))
         code = "import json; from core_v2.tools import growth; print(json.dumps(growth.fingerprints()))"
         env = {**os.environ, "PYTHONPATH": tmp}
