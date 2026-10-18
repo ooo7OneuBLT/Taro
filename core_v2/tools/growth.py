@@ -17,6 +17,8 @@ _save_ckpt の形で別に置ける（save(..., resume=bed)）。voice_bed の�
 使い方：
   python -m core_v2.tools.growth list            … 育ち帳を表示（どの写しが今のコードで古くなったかも）
   python -m core_v2.tools.growth stale 名前       … その写しのあと、どの段から育て直すか
+  python -m core_v2.tools.growth since 版         … git の版（例 93329a2）で作った写しがあったとしたら、段ごとに使えるか・どの段から育て直すか
+                                                   （育ち帳に写しが無くても、コードの変更がどの段に響くかを見られる）
 """
 
 from __future__ import annotations
@@ -220,6 +222,33 @@ def stale(row) -> dict:
     return {"changed": changed, "regrow_from": min(phases) if phases else None}
 
 
+def fingerprints_at(rev: str) -> dict:
+    """git の版 rev のソースの指紋（今の growth.py の決め方で数える）。rev の core_v2 と run/world を一時の場所へ出して数える。"""
+    import shutil
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        paths = [p for p in ("core_v2", "run/world") if _git("cat-file", "-e", f"{rev}:{p}") is not None]
+        arch = subprocess.run(["git", "archive", rev, *paths], cwd=REPO, capture_output=True, check=True).stdout
+        subprocess.run(["tar", "-x", "-C", tmp], input=arch, check=True)
+        shutil.copy(__file__, os.path.join(tmp, "core_v2", "tools", "growth.py"))
+        code = "import json; from core_v2.tools import growth; print(json.dumps(growth.fingerprints()))"
+        env = {**os.environ, "PYTHONPATH": tmp}
+        r = subprocess.run([sys.executable, "-c", code], cwd=tmp, env=env, capture_output=True, text=True, check=True)
+        return json.loads(r.stdout.strip().splitlines()[-1])
+
+
+def since(rev: str) -> dict:
+    """版 rev で段ごとの写しを作っていたとしたら、今のコードで、段ごとにどこから育て直すか（None＝そのまま使える）。"""
+    old = fingerprints_at(rev)
+    now = fingerprints()
+    changed = sorted(k for k in set(old) | set(now) if old.get(k) != now.get(k))
+    out = {}
+    for p in sorted(PHASES):
+        phases = [source_phase(k) for k in changed if source_phase(k) <= p]
+        out[p] = min(phases) if phases else None
+    return {"rev": rev, "changed": changed, "regrow_from_by_phase": out}
+
+
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     if not argv or argv[0] == "list":
@@ -230,6 +259,11 @@ def main(argv=None):
                   f"{r['conditions']}\t{r.get('git_rev', '')[:8]}\t{flag}")
     elif argv[0] == "stale":
         print(json.dumps(stale(argv[1]), ensure_ascii=False))
+    elif argv[0] == "since":
+        r = since(argv[1])
+        print("変わったソース：", ", ".join(r["changed"]) or "なし")
+        for p, f in r["regrow_from_by_phase"].items():
+            print(f"段{p}（{PHASES[p].split('（')[0]}）の写し：" + ("そのまま使える" if f is None else f"段{f}から育て直す"))
 
 
 if __name__ == "__main__":

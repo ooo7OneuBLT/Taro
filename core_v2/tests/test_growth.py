@@ -54,3 +54,16 @@ def test_wiring_change_regrows_from_the_phase_of_its_boxes(ledger):
     growth._write_ledger(rows)
     assert growth.stale("段2")["regrow_from"] is None
     assert growth.stale("段3")["regrow_from"] == 3
+
+
+def test_semantic_and_sound_change_regrows_from_names_only(ledger):
+    """段階9 まばら化：意味の辞書と物の音の入口が変わったら、段3（名前）から先の写しは育て直し、段1・2の写しはそのまま使える。"""
+    for p in (1, 2, 3, 4, 5):
+        growth.save(make_boxes(0), p, f"段{p}", conditions={"world": "bed", "eye": "bed_random_tags", "seed": 0},
+                    end=True, out_dir=growth.SNAP_DIR)
+    rows = growth.read_ledger()
+    for r in rows:
+        r["fingerprints"]["core_v2/boxes/semantic.py"] = "old"
+        r["fingerprints"]["core_v2/boxes/soundin.py"] = "old"
+    growth._write_ledger(rows)
+    assert [growth.stale(f"段{p}")["regrow_from"] for p in (1, 2, 3, 4, 5)] == [None, None, 3, 3, 3]
