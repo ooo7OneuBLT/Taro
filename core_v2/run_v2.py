@@ -193,8 +193,11 @@ def run_trial(brain, env, *, seed: int, duration_s: float = 10.0,
     n_ticks = int(round(duration_s / (K * DT)))
     for i in range(n_ticks):
         heard = []
+        sound = None
         for _ in range(K):
             obs, _r, term, trunc, info = env.step(act)
+            if info.get("object_sound") is not None:     # 段階9：物の音（波形、16kHz）。環境が鳴らした歩だけ
+                sound = info["object_sound"]
             utt = info.get("parent_utterance")
             if utt and utt.get("text"):
                 heard.append(str(utt["text"]))
@@ -209,6 +212,8 @@ def run_trial(brain, env, *, seed: int, duration_s: float = 10.0,
             ext = {"eyein": obs["eye_left"], "earin": " ".join(x for x in (echo, text) if x)}
             if age_months is not None:
                 ext["voiceout"] = float(age_months)
+            if sound is not None:
+                ext["soundin"] = sound
             to_env = brain.tick(ext)
             cmd = to_env.get("eyeout")
         echo = to_env.get("voiceout", "")

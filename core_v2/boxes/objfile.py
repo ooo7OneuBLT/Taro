@@ -433,7 +433,7 @@ class Objfile(Box):
         out = self.passthrough()
         self.t += 1
         self.last_shift = (0.0, 0.0)
-        objs = inbox.get("eyein")
+        objs = inbox["kind"] if "kind" in inbox else inbox.get("eyein")   # 段階9：種類の層を通した物（kind の無い試験場は目の入口から）
         cmd = inbox.get("orienteye")
         have_objs = objs is not None
         if have_objs:
@@ -477,6 +477,8 @@ class Objfile(Box):
             out["orienteye"] = lst
         if "surprise" in out:
             out["surprise"] = self.surprise_list()
+        if "kind" in out:     # 段階9：種類の層の学び（驚きの係へ渡すのと同じ列）
+            out["kind"] = out["surprise"] if "surprise" in out else self.surprise_list()
         if "semantic" in out:
             lst = [(rw.tag, share * bump_at(*rw.pos)) for rw, share in self.look_shares()]
             zero_tag, zero_map = torch.zeros(TAG_DIM, dtype=DTYPE), torch.zeros(GRID, GRID, dtype=DTYPE)

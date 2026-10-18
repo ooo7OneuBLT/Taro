@@ -39,3 +39,18 @@ def test_stale_points_to_the_phase(ledger):
     assert s["regrow_from"] == 1 and "core_v2/boxes/listen.py" in s["changed"]
     with pytest.raises(LookupError):
         growth.latest(3)
+
+
+def test_wiring_change_regrows_from_the_phase_of_its_boxes(ledger):
+    """段階9：配線の指紋は段ごと。段3の係（種類の層）へ耳から矢印を足しても、段2の写しは古くならず読める。"""
+    growth.save(make_boxes(0), 2, "段2", conditions={"world": "bed", "eye": "bed_random_tags", "seed": 0}, end=True,
+                out_dir=growth.SNAP_DIR)
+    growth.save(make_boxes(0), 3, "段3", conditions={"world": "bed", "eye": "bed_random_tags", "seed": 0}, end=True,
+                out_dir=growth.SNAP_DIR)
+    assert growth.box_phase("kind") == 3 and growth.box_phase("earin") == 1
+    rows = growth.read_ledger()
+    for r in rows:
+        r["fingerprints"]["wiring@3"] = "old"          # 段3の矢印が変わったことにする
+    growth._write_ledger(rows)
+    assert growth.stale("段2")["regrow_from"] is None
+    assert growth.stale("段3")["regrow_from"] == 3

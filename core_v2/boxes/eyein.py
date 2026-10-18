@@ -19,6 +19,8 @@ detector="sam" で段階2までの切り出しに戻せる）。
 * eyein→gaze  : 物ごとの (荷札, 地図)。荷札＝見た目384を固定の乱数行列で64へ縮めて
                 L2正規化し雑音を足したもの（tagging.py）。地図＝物の中心にガウスの山
 * eyein→prio  : 目立ちの地図（28×28、0〜1）
+* eyein→kind  : 段階9から。下の eyein→gaze・eyein→objfile の列は種類の層（boxes/kind.py）を通ってから gaze・名簿へ届く
+                （gaze の分は名簿と同じ最大7個。eyein→gaze・eyein→objfile は空）
 * eyein→objfile: gaze と同じ物ごとの (荷札, 地図)＋最後に目の動きの地図（段階4、物の名簿へ）。
                 段階3の eyein→semantic / orienteye は名簿へ移したので、今はゼロ
 * それ以外    : 素通し（ゼロ）
@@ -301,10 +303,11 @@ class Eyein(Box):
         if not getattr(self, "_ready", False) or inbox.get(ENV) is None:
             return out
         objs, sal = self.see(inbox[ENV])
-        out["gaze"] = objs
         # 段階4：物は物の名簿へ。最後に目の動きの地図（荷札ゼロ）を足す。段階3で意味の辞書・目を向ける
         # 反射へ直接送っていた物の列は、名簿が引き受けたので送らない（矢印は構造図どおり残し、ゼロ）
-        out["objfile"] = objs[:MAX_OBJECTS - 1] + [(torch.zeros(TAG_DIM, dtype=DTYPE),
-                                                   ego_map(*self.last_shift_px))]
+        # 段階9：名簿と gaze へは種類の層（kind）を通して渡す。kind へは段階4〜8の eyein→objfile と同じ列を送る
+        # （gaze の分は kind が同じ列から作る。eyein→gaze の矢印は構造図どおり残し、空）
+        out["kind"] = objs[:MAX_OBJECTS - 1] + [(torch.zeros(TAG_DIM, dtype=DTYPE),
+                                                ego_map(*self.last_shift_px))]
         out["prio"] = sal
         return out

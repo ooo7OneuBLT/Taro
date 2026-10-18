@@ -29,6 +29,9 @@
   届く。覚え方Bで毎回数える見た目に u·S を足す（S＝驚きの荷札 tagging.state_tag("予想外")、生まれつきの符号）。物を見ていない回も
   u＞0 なら数える。逆に引くときも Wᵀ(a＋u·S)。u＝0 なら段階3〜7と1ビットも同じ。
   「ない」と驚きのつながりは手で書かない。親が消える場面で言う「○○ないね」を、場面をまたいで数えるだけで生まれる
+* **物の音の荷札（段階9、2026-10-18、ユーザー承認の仕様書 `2026-10-18_段階9_仕様書_名詞を厚く.md`）**：物の音の入口（soundin）から
+  音の荷札 N が届いている回は、覚え方Bで毎回数える見た目に v·N を足す（v＝1。段階8の u·S と同じ足し方）。逆に引くときも
+  Wᵀ(a＋u·S＋v·N)。物が見えていなくても音だけで語を引ける。音が届かなければ段階8と1ビットも同じ
 * **聞いた語が続けて届く（段階8）**：聞き分ける係は1つの発話の知っている語を1回に1つずつ順に送る。前の回と違う語が届いたら新しい語
 学ぶこと自体のやり方（ヘッブ則・ETA・RECALL_MIN・覚え方）は生まれつき＝手で決める。
 W の中身だけが経験で変わる。W は buffer なので save.py の保存に入り、reset() では消えない。
@@ -72,6 +75,7 @@ class Semantic(Box):
         self._prev_heard = False
         self._prev_q = None
         self._u = 0.0                    # 段階8：前の回に届いた驚きの強さ
+        self._n = None                   # 段階9：届いている物の音の荷札（v＝1。無ければ None）
         self._held_hist: list = []       # 直前 LOOK_WINDOW_S に毎回見ていた行の荷札（見ていない回は None）
         self._pending: list[dict] = []   # 名残りの残っている語 {q, 経過回数, 足した見た目, 足した重み}
         self.last_event = ""      # 記録用："learn" / "learn_skip"（名簿に結び付ける行が無い） / "recall" / ""
@@ -110,20 +114,22 @@ class Semantic(Box):
         self.last_recall_norm = n
         return make_tag(r) if n >= RECALL_MIN else None
 
-    def _seen_vec(self, lst, u: float):
-        """毎回数える見た目：今見ている行の荷札 a（無ければゼロ）＋ u·S（段階8）。何も無ければ None。"""
+    def _seen_vec(self, lst, u: float, n=None):
+        """毎回数える見た目：今見ている行の荷札 a（無ければゼロ）＋ u·S（段階8）＋ v·N（段階9、物の音、v＝1）。何も無ければ None。"""
         a = None
         if lst and len(lst) >= 2 and float(torch.linalg.vector_norm(lst[-2][0])) > 0.0:
             a = make_tag(lst[-2][0])
         if u > 0.0:
-            return (a if a is not None else 0.0) + u * SURPRISE_TAG
+            a = (a if a is not None else 0.0) + u * SURPRISE_TAG
+        if n is not None:
+            a = (a if a is not None else 0.0) + n
         return a
 
-    def recall_word(self, lst, u: float = 0.0):
+    def recall_word(self, lst, u: float = 0.0, n=None):
         """段階7：逆向きに引く。名簿の「今見ている行」の荷札 a から語 Wᵀa を思い出す（同じ表を逆に引くだけ）。
         段階8：驚きの強さ u があれば Wᵀ(a＋u·S)。"""
         self.last_word_norm = 0.0
-        x = self._seen_vec(lst, u)
+        x = self._seen_vec(lst, u, n)
         if x is None:
             return None
         r = self.W.T @ x
@@ -150,10 +156,12 @@ class Semantic(Box):
         self._prev_q = q if heard else None
         u = inbox.get("surprise")
         self._u = float(u) if u is not None else 0.0
+        n = inbox.get("soundin")
+        self._n = n if n is not None and float(torch.linalg.vector_norm(n)) > 0.0 else None
         self._trace_step(inbox.get("objfile"), q if (self.learning and first and self.learn_mode == "B"
                                                      and not self.table) else None)
         if not self.table:
-            w = self.recall_word(inbox.get("objfile"), self._u)
+            w = self.recall_word(inbox.get("objfile"), self._u, self._n)
             if w is not None:   # 雑音は自分専用の乱数で（足したことで段階3〜6の乱数の並び＝結果が変わらないように）
                 out["wordplan"] = make_tag(w + NOISE_SIGMA * torch.randn(TAG_DIM, generator=self._gen))
         if not heard:
@@ -206,7 +214,7 @@ class Semantic(Box):
 
     def _trace_step(self, lst, new_q) -> None:
         """覚え方B：今見ている行を覚えておき、名残りの残っている語ごとに足す。名残りが消えたら覚える。"""
-        held = self._seen_vec(lst, self._u)
+        held = self._seen_vec(lst, self._u, self._n)
         self._held_hist.append(held)
         del self._held_hist[:-int(round(LOOK_WINDOW_S / TICK_S))]
         keep = []

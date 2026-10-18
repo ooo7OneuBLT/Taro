@@ -43,7 +43,7 @@ PHASES = {
     5: "ない（驚きと「ない」）",
 }
 # 育つ係 → その係が最初に育つ段。この係のソースが変わったら、この段から育て直す
-GROWN_BOXES = {"listen": 1, "voice": 2, "wordplan": 2, "semantic": 3, "surprise": 5}
+GROWN_BOXES = {"listen": 1, "voice": 2, "wordplan": 2, "semantic": 3, "kind": 3, "surprise": 5}
 # 係のほかに、変わったら育て直す物 → 段（目と世界は名前の段から使う。口の表は喃語から）
 OTHER_SOURCES = {
     "core_v2/tools/parent_speech.py": 1,
@@ -51,13 +51,36 @@ OTHER_SOURCES = {
     "core_v2/tools/voice_bed.py": 2,
     "core_v2/tagging.py": 1,
     "core_v2/formats.py": 1,
-    "core_v2/wiring.py": 1,
     "core_v2/boxes/eyein.py": 3,
     "core_v2/floor_objects.py": 3,
     "core_v2/boxes/objfile.py": 3,
+    "core_v2/boxes/soundin.py": 3,
     "core_v2/world_eye": 3,
     "run/world": 3,
 }
+
+
+# 配線の指紋は段ごとに分ける（段階9、仕様書 付録「配線の変更は、新しい係が初めて育つ段から」）：矢印1本の段＝両端の係の段の
+# 大きい方。係の段は GROWN_BOXES、それ以外は BOX_PHASE（耳の入口は段1、声の出口は段2、目・名簿・音の入口などは段3）。
+# だから、段3で初めて使う係（種類の層）へ耳から矢印を足しても、段1・2の写しはそのまま使える
+BOX_PHASE_OTHER = {"earin": 1, "voiceout": 2}
+DEFAULT_BOX_PHASE = 3
+
+
+def box_phase(bid: str) -> int:
+    return GROWN_BOXES.get(bid, BOX_PHASE_OTHER.get(bid, DEFAULT_BOX_PHASE))
+
+
+def wiring_fingerprints() -> dict:
+    from ..wiring import EDGES
+    by = {}
+    for e in EDGES:
+        by.setdefault(max(box_phase(e.src), box_phase(e.dst)), []).append([e.src, e.dst, e.fmt.value, e.size])
+    out = {}
+    for p in sorted(PHASES):
+        blob = json.dumps(sorted(by.get(p, [])), ensure_ascii=False).encode("utf-8")
+        out[f"wiring@{p}"] = hashlib.sha1(blob).hexdigest()[:12]
+    return out
 
 
 # ---------------------------------------------------------------- 指紋
@@ -86,10 +109,15 @@ def _hash_path(rel: str) -> str | None:
 def fingerprints() -> dict:
     out = {f"core_v2/boxes/{b}.py": _hash_path(f"core_v2/boxes/{b}.py") for b in GROWN_BOXES}
     out.update({k: _hash_path(k) for k in OTHER_SOURCES})
+    out.update(wiring_fingerprints())
     return out
 
 
 def source_phase(rel: str) -> int:
+    if rel.startswith("wiring@"):
+        return int(rel[len("wiring@"):])
+    if rel == "core_v2/wiring.py":          # 段階9より前の写し（配線を1つの指紋で持っていた）
+        return 1
     if rel.startswith("core_v2/boxes/") and rel[len("core_v2/boxes/"):-3] in GROWN_BOXES:
         return GROWN_BOXES[rel[len("core_v2/boxes/"):-3]]
     return OTHER_SOURCES[rel]
@@ -169,8 +197,14 @@ def load(boxes, name_or_row, only: list[str] | None = None) -> dict:
     from ..wiring import wiring_hash
     row = find(name_or_row) if isinstance(name_or_row, str) else name_or_row
     blob = torch.load(os.path.join(REPO, row["file"]), map_location="cpu", weights_only=False)
-    if blob["meta"]["wiring_hash"] != wiring_hash():
-        raise RuntimeError(f"写し {row['name']} は配線が違うときに作られた（作り直しの判定：stale）")
+    fp = blob["meta"].get("fingerprints", {})
+    if any(k.startswith("wiring@") for k in fp):
+        now = wiring_fingerprints()
+        bad = [k for k, v in fp.items() if k.startswith("wiring@") and source_phase(k) <= row["phase"] and now.get(k) != v]
+    else:
+        bad = [] if blob["meta"]["wiring_hash"] == wiring_hash() else ["wiring_hash"]
+    if bad:
+        raise RuntimeError(f"写し {row['name']} は、その段までの配線が違うときに作られた（{bad}。作り直しの判定：stale）")
     for b, sd in blob["states"].items():
         if b in boxes and (only is None or b in only):
             boxes[b].load_state_dict(sd)

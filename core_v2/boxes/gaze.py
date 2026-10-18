@@ -38,7 +38,7 @@ class Gaze(Box):
     def step(self, inbox):
         out = self.passthrough()
         want = inbox.get("goal")
-        objs = inbox.get("eyein") or []
+        objs = inbox.get("kind", inbox.get("eyein")) or []   # 段階9：種類の層を通した物（kind が無い試験場では目の入口から）
         if want is None or float(torch.linalg.vector_norm(want)) == 0.0 or not objs:
             return out
         seek = zero(Fmt.MAP) + SEEK_FLOOR
