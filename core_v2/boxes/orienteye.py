@@ -171,4 +171,6 @@ class Orienteye(Box):
         out["eyeout"] = cmd
         if "objfile" in out and self.use_ior:
             out["objfile"] = cmd.clone()
+        if "eyein" in out:              # 段階9：指令の写しを目の入口へ（目が動いた分を先に知る）
+            out["eyein"] = cmd.clone()
         return out

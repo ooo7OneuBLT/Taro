@@ -8,7 +8,7 @@ grow_names の段3の育ち（Grower）をそのまま回し、0.1秒ごとに�
 終わりに、見ていた時間の分布と「何が見るのを終わらせたか」の表、名づけが覚えるにつながらなかったわけを出す。
 写しは作らない（育ち帳に書かない）。
 
-使い方：MUJOCO_GL=osmesa python -m core_v2.tools.look_diag [--scenes 30] [--seed 0] [--from 段2_喃語_種0] [--out 置き場]
+使い方：MUJOCO_GL=osmesa python -m core_v2.tools.look_diag [--scenes 30] [--seed 0] [--from 段2_喃語_種0] [--out 置き場] [--ego efference|image]
 """
 
 from __future__ import annotations
@@ -148,7 +148,10 @@ class Diag(gn.Grower):
                "sem": self.brain.boxes["semantic"].last_event, "rows": ob.summary(), "own_voice": int(self._own_voice),
                "true_mv": None if true_mv is None else tuple(round(v, 1) for v in true_mv),
                "est_mv": None if est_mv is None else tuple(round(v, 1) for v in est_mv),
-               "shift_px": tuple(round(v, 1) for v in getattr(eyein, "last_shift_px", (0, 0)))}
+               "shift_px": tuple(round(v, 1) for v in getattr(eyein, "last_shift_px", (0, 0))),
+               "image_shift_px": tuple(round(v, 1) for v in getattr(eyein, "last_image_shift_px", (0, 0))),
+               "pred_px": tuple(round(v, 1) for v in getattr(eyein, "last_pred_px", (0, 0))),
+               "ego_mode": getattr(eyein, "last_ego_mode", ""), "ego_peak": round(getattr(eyein, "last_ego_peak", 0.0), 3)}
         info.pop("peak_rc", None)
         row.update(info)
         self.rows.append(row)
@@ -207,6 +210,8 @@ def main(argv=None):
     ap.add_argument("--eye", default="table", choices=["dinov2", "table"])
     ap.add_argument("--from", dest="start", default="段2_喃語_種0")
     ap.add_argument("--out", default=None)
+    ap.add_argument("--ego", default=None, choices=["efference", "image"],
+                    help="目が動いた分の求め方（既定は eyein の既定＝efference。image は段階9の直し前）")
     a = ap.parse_args(argv)
     out = a.out or os.path.join(gn.growth.REPO, "G", "logs", f"段階9_見る時間_{a.objects}_{a.eye}_種{a.seed}")
     os.makedirs(out, exist_ok=True)
@@ -219,6 +224,8 @@ def main(argv=None):
     gn.growth.find = find
     g = Diag(a.seed, a.objects, a.eye, None, log_root=None, start=a.start, kind="off")
     g.save_images(False)
+    if a.ego is not None:
+        g.brain.boxes["eyein"].ego = a.ego
     print(f"[診断] 始める太郎：{g.start_name()}　場面 {a.scenes}", flush=True)
     t0 = time.time()
     try:
@@ -268,7 +275,12 @@ def main(argv=None):
     ego = {"jumps": len(errs),
            "true_median_cells": round(errs[len(errs) // 2][0], 1) if errs else None,
            "err_median_cells": round(sorted(x[1] for x in errs)[len(errs) // 2], 1) if errs else None,
-           "err_over_3cells": sum(x[1] > 3 for x in errs), "same_direction": sum(x[2] for x in errs)}
+           "err_over_3cells": sum(x[1] > 3 for x in errs), "same_direction": sum(x[2] for x in errs),
+           # 跳びの大きさ（マス）ごとに、見積もりが3マス以内で合った割合
+           "by_jump_cells": {f"{lo}〜{hi}": {"n": len(b), "ok_within_3": round(sum(x[1] <= 3 for x in b) / len(b), 2),
+                                                 "err_median": round(sorted(x[1] for x in b)[len(b) // 2], 1)}
+                             for lo, hi in ((2, 4), (4, 8), (8, 12), (12, 16), (16, 99))
+                             for b in [[x for x in errs if lo <= x[0] < hi]] if b}}
     # 着いてから3回目（撃った指令が名簿に届いたあと）に、「今見ている行」が物の上にあったか
     landed = []
     for sc, wd, st, ln, end in L:

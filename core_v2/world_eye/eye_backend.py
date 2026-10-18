@@ -12,7 +12,7 @@ dinov2_vits14）と目立ちの地図（taro_core の SalienceMap）を作る。
   ためだけの目。物の切り出しの代わりに、場面に出ている段階9の個体の中心をカメラへ写した場所（環境の正解）を使い、
   見た目は見た目の素の表（PC の DINOv2 で作った 384、`core_v2/data/段階9_見た目の素.pt`）から、その個体・その向きの行を引く。
   そのあとは目の入口と同じ（tagging.appearance_tag で 64 に縮め、同じ雑音を足し、物の中心に山、目立ちの地図、画面のずれ）。
-  目立ちの地図は物の山の最大（本物の目の SalienceMap の代わり）。画面のずれは本物と同じく画像の位相相関
+  目立ちの地図は物の山の最大（本物の目の SalienceMap の代わり）。画面のずれは本物と同じ（Eyein.ego_shift：指令の写し＋画像の位相相関）
 使い方：
   python -m core_v2.world_eye.eye_backend        … この機械で目の入口を作れるかを表示
   from core_v2.world_eye.eye_backend import setup_eye; setup_eye(brain)   … 調べてから eyein.setup()
@@ -115,7 +115,7 @@ def _table_see(self, img):
     """Eyein.see の代わり（上の説明）。物の切り出しと DINOv2 と SalienceMap だけを、環境の正解と表に替える。"""
     import numpy as np
     import torch
-    from ..boxes.eyein import bump, image_shift
+    from ..boxes.eyein import bump
     from ..formats import DTYPE, GRID, MAX_OBJECTS
     from ..tagging import appearance_tag, noisy
     img224 = np.asarray(img)
@@ -123,11 +123,7 @@ def _table_see(self, img):
         from PIL import Image
         img224 = np.array(Image.fromarray(np.clip(img224, 0, 255).astype(np.uint8)).resize((224, 224)))
     gray = img224.astype(np.float32).mean(axis=2)
-    dx = dy = 0.0
-    if self._prev_gray is not None:
-        dx, dy, _ = image_shift(self._prev_gray, gray)
-    self._prev_gray = gray
-    self.last_shift_px = (dx, dy)
+    self.ego_shift(gray)            # 目が動いた分（指令の写し＋画像の直し。本物の目の入口と同じ）
     dets = table_dets(self._table_env(), self._table_app, self._table_found)
     sal = torch.zeros(GRID, GRID, dtype=DTYPE)
     for d in dets:

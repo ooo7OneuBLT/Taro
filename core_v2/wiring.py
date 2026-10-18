@@ -39,6 +39,7 @@ ADDED_EDGES = [
     ("soundin", "semantic", "段階9：意味の辞書が物の音の荷札を結び付ける相手に足す（音だけでも語を引ける）"),
     ("prio", "objfile", "段階4：脱馴化で、行の位置の目立ちの「ふだん」と比べる"),
     ("orienteye", "objfile", "段階4：撃った指令の写し。撃った先の物に注意を移す"),
+    ("orienteye", "eyein", "段階9：撃った指令の写し（遠心性コピー）。目が動いた分を画像のずれより先に知る（上丘→視床→前頭眼野）"),
     ("objfile", "orienteye", "段階4：行ごとの「もう見た」の山と、今見ている行（慣れ）"),
     ("objfile", "semantic", "段階4：名前を結び付ける行の荷札。段階6：行ごとの見ていた割合も"),
     ("objfile", "surprise", "段階8：席ごとの行の荷札と場所・見えたか、最後に目立ちが急に下がった所の地図"),
@@ -72,6 +73,7 @@ PATH_FORMATS: dict[tuple[str, str], tuple[Fmt, int | None]] = {
     ("soundin", "semantic"): (Fmt.TAG, None),       # 物の音の荷札（届いている回が強さ1）
     ("prio", "objfile"): (Fmt.MAP, None),
     ("orienteye", "objfile"): (Fmt.MOTOR, 2),       # 撃った指令の写し
+    ("orienteye", "eyein"): (Fmt.MOTOR, 2),         # 段階9：同じ写しを目の入口へ
     ("objfile", "orienteye"): (Fmt.TAG_AND_MAP, None),
     ("objfile", "semantic"): (Fmt.TAG_AND_MAP, None),   # 段階6：行ごとの荷札と見ていた割合＋名前を結び付ける行
     # 段階7（言える、2026-10-17）
