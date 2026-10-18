@@ -87,13 +87,19 @@ def frame_at(env) -> np.ndarray:
 
 
 def directions(env, R0: np.ndarray) -> dict[str, float]:
-    """視線と3つの物の方向を、基準の向き R0 の右・上の角度（度）で表す（絵の軌跡用）。"""
+    """視線と3つの物の方向を、基準の向き R0 の右・上の角度（度）で表す（絵の軌跡用）。
+    場面に無い物は書かない（目だけの場面の段階6は test_object1・2 と sy_obj0〜5 だけで、test_object3 が無い。
+    2026-10-18 smith_yu --world eye が KeyError で止まった）。"""
     u = env.unwrapped
     cid = int(u.model.camera("eye_left").id)
     eye = np.array(u.data.cam_xpos[cid], dtype=float)
     vecs = {"gaze": u._gaze_dir()}
     for k, body in OBJECTS.items():
-        v = np.array(u.data.body(body).xpos, dtype=float) - eye
+        try:
+            pos = u.data.body(body).xpos
+        except KeyError:
+            continue
+        v = np.array(pos, dtype=float) - eye
         vecs[k] = v / np.linalg.norm(v)
     out = {}
     for k, v in vecs.items():
