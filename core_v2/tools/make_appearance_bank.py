@@ -15,6 +15,7 @@
   python -m core_v2.tools.make_appearance_bank --preview [--out G/logs/段階9_見た目の素_確かめ]   … 描くだけ（DINOv2 なし。クラウドでも回る）
   python -m core_v2.tools.make_appearance_bank --check   [--out G/logs/段階9_見た目の素_確かめ]   … 8個体×3向きを切り出しにかけ、拾った所を描いて保存（PC）
   python -m core_v2.tools.make_appearance_bank [--out core_v2/data/段階9_見た目の素.pt]               … 表を作る（PC、約2分の見込み）
+  どれにも --objects real を足すと本物の物（world_eye/real_objects.py）で回す（表は core_v2/data/段階9_見た目の素_本物.pt）
 出力（表）：torch.save の dict
   app[20, 4, 24, 384]（float16、拾えなかった所は 0）・found[20, 4, 24]（bool）・words・instances（個体の作り方）・views・meta
 """
@@ -237,7 +238,8 @@ def build(out_path: str, seed: int = 0) -> dict:
         print(f"[{time.time() - t0:6.1f}s] {w} 拾えた {int(found[i].sum())}/{K * V}", flush=True)
     meta = {"made": time.strftime("%Y-%m-%d %H:%M:%S"), "device": device, "seed": seed, "eye": "dinov2_vits14+floor_objects",
             "px": PX, "fovy": FOVY, "gaze_down_deg": GAZE_DOWN_DEG, "center_px": CENTER_PX,
-            "found_share": round(float(found.mean()), 4), "wall_s": round(time.time() - t0, 1), **code_version()}
+            "found_share": round(float(found.mean()), 4), "wall_s": round(time.time() - t0, 1), "objects": ins.OBJECTS,
+            **code_version()}
     sim = similarity_table(app, found)
     meta["similarity"] = sim
     blob = {"app": torch.from_numpy(app).half(), "found": torch.from_numpy(found), "n_dets": torch.from_numpy(n_dets),
@@ -255,18 +257,22 @@ def main(argv=None):
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--out", default=None)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--objects", default="made", choices=["made", "real"],
+                    help="made＝自作の形（既定）、real＝本物の物（world_eye/real_objects.py。表は *_本物.pt、確かめは *_本物）")
     a = ap.parse_args(argv)
+    ins.use_objects(a.objects)
+    tail = "_本物" if a.objects == "real" else ""
     if a.preview:
-        out = a.out or os.path.join("G", "logs", "段階9_見た目の素_確かめ")
+        out = a.out or os.path.join("G", "logs", "段階9_見た目の素_確かめ" + tail)
         out = out if os.path.isabs(out) else os.path.join(REPO, out)
         for p in preview(out):
             print(p)
         return
     if a.check:
-        out = a.out or os.path.join("G", "logs", "段階9_見た目の素_確かめ")
+        out = a.out or os.path.join("G", "logs", "段階9_見た目の素_確かめ" + tail)
         check(out if os.path.isabs(out) else os.path.join(REPO, out))
         return
-    out = a.out or DEFAULT_OUT
+    out = a.out or (DEFAULT_OUT[:-3] + tail + ".pt")
     build(out if os.path.isabs(out) else os.path.join(REPO, out), a.seed)
 
 

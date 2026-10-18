@@ -113,6 +113,8 @@ def load_bank(spec: str) -> dict:
         return make_standin()
     path = spec if os.path.isabs(spec) else os.path.join(REPO, spec)
     blob = torch.load(path, map_location="cpu", weights_only=False)
+    # 本物の物で作った表なら、試験 B2 の「同じ色の別の種類」も本物の物の色で選ぶ
+    ins.use_objects(blob.get("meta", {}).get("objects", "made"))
     if list(blob["words"]) != list(ins.WORDS):
         raise ValueError("表の語の並びが instances.WORDS と違う")
     return {"app": blob["app"].float().numpy(), "found": blob["found"].numpy(), "kind": "本物の表（DINOv2）",

@@ -10,6 +10,8 @@
   色の数（8）は、20種類×覚える2色で各色がおよそ5種類に出て、試験 B（形と色がぶつかる2択）の「同じ色の別の種類」が
   いつも見つかるように選んだ切りのよい数［Tier3・モデル上の選択］
 * 大きさの基準 BASE_R＝3cm（段階2〜8の物と同じ。30cm 先で 6〜10cm の見かけ）
+* 本物の物（real_objects.py）に替えるには use_objects("real")。同じ20語・4個体・覚える0〜2／試験3の並びで、
+  instance・kind_colors・assets_xml・body_xml がそちらを返す。既定は自作（"made"）のまま
 """
 
 from __future__ import annotations
@@ -54,12 +56,27 @@ PART_NAMES = ("body", "handle", "rim", "width", "height", "length", "stem", "nec
               "leg", "ear", "mane", "cabin", "window", "chimney", "brim", "crown", "block")
 
 
+OBJECTS = "made"   # "made"（自作の形）| "real"（本物の物、real_objects.py）
+
+
+def use_objects(kind: str) -> str:
+    """物の出どころを切り替える（このプロセスの中だけ）。"""
+    global OBJECTS
+    if kind not in ("made", "real"):
+        raise ValueError(f"物は made か real（{kind}）")
+    OBJECTS = kind
+    return kind
+
+
 def _seed(*parts) -> int:
     return int.from_bytes(hashlib.sha256("/".join(map(str, parts)).encode("utf-8")).digest()[:8], "little")
 
 
 def kind_colors(word: str) -> tuple[str, str, str]:
-    """種類ごとの色 A・B・C（重ならない）。"""
+    """種類ごとの色 A・B・C（重ならない）。本物の物では個体0・1・3の色（重なることがある）。"""
+    if OBJECTS == "real":
+        from . import real_objects as ro
+        return tuple(ro.item(word, k)["color"] for k in (0, 1, TEST_INST))
     g = np.random.default_rng(_seed("colors", word))
     names = list(PALETTE)
     a, b, c = g.choice(len(names), size=3, replace=False)
@@ -67,7 +84,14 @@ def kind_colors(word: str) -> tuple[str, str, str]:
 
 
 def instance(word: str, k: int) -> dict:
-    """個体 k の作り方：{word, kind, room, k, name, color, rgb, scale, r, pattern, L, train}。"""
+    """個体 k の作り方：{word, kind, room, k, name, color, rgb, scale, r, pattern, L, train}。
+    本物の物では {word, kind, room, k, name, color, rgb, train, src="real", source, id, license, author, size_m}。"""
+    if OBJECTS == "real":
+        from . import real_objects as ro
+        it = ro.item(word, k)
+        return {"word": word, "kind": KIND_OF[word], "room": ROOM_OF[word], "k": k, "name": f"n9r_{KIND_OF[word]}_{k}",
+                "color": it["color"], "rgb": tuple(it["rgb"]), "train": k in TRAIN_INST, "src": "real",
+                **{key: it[key] for key in ("source", "id", "license", "author", "size_m")}}
     ca, cb, cc = kind_colors(word)
     color = (ca, cb, ca, cc)[k]
     g = np.random.default_rng(_seed("inst", word, k))
@@ -86,6 +110,9 @@ def all_instances() -> list[dict]:
 
 def assets_xml(inst: dict) -> list[str]:
     """模様つきの個体の材質（MuJoCo の組み込みの模様：格子＝checker、点＝flat に random の点）。無地なら空。"""
+    if inst.get("src") == "real":
+        from . import real_objects as ro
+        return ro.assets_xml(inst)
     if inst["pattern"] is None:
         return []
     nm = inst["name"]
@@ -109,6 +136,9 @@ def look_attr(inst: dict) -> str:
 
 def body_xml(inst: dict, name: str | None = None, pos=(0.0, 0.0, -5.0)) -> str:
     """個体の体の XML（自由な関節つき。objects.body_xml と同じ形）。"""
+    if inst.get("src") == "real":
+        from . import real_objects as ro
+        return ro.body_xml(inst, name, pos)
     name = name or inst["name"]
     inner = "\n      ".join(noun_geoms(inst["kind"], inst["r"], look_attr(inst), inst["L"]))
     return (f'    <body name="{name}" pos="{_f(pos)}">\n      <freejoint name="{name}_free"/>\n'
