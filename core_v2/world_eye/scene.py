@@ -51,6 +51,8 @@ def build_xml(cfg: dict) -> str:
       backdrop           : {"enabled", "dist", "height", "z0", "repeat", "rgb1", "rgb2"}（場面の world.backdrop）
       table, parent_figure : bool
       objects            : [{"name", "kind", "radius", "rgba"}, ...]
+      room               : 段階9の部屋（"食事"|"お風呂"|"遊び"、rooms.py）。あれば壁と床をこれに替える
+      extra_assets, extra_bodies : 段階9の個体の材質と体の XML（instances.assets_xml・body_xml）
     """
     px = int(cfg.get("px", 224))
     fovy = float(cfg.get("fovy", 60.0))
@@ -58,8 +60,16 @@ def build_xml(cfg: dict) -> str:
     floor = list(PLAIN_RGBA)
     floor[:3] = [c * fd for c in floor[:3]]
     b = dict(cfg.get("backdrop") or {})
-    parts_asset, parts_world = [], []
-    if b.get("enabled", True):
+    parts_asset, parts_world = list(cfg.get("extra_assets") or []), []
+    floor_xml = f'<geom name="floor" type="plane" size="5 5 0.1" rgba="{_f(floor)}" contype="0" conaffinity="0"/>'
+    if cfg.get("room"):
+        # 段階9：部屋（rooms.py）を、市松模様の壁と無地の床の代わりに作る
+        from .rooms import room_parts
+        ra, rw = room_parts(cfg["room"])
+        parts_asset += ra
+        parts_world += rw
+        floor_xml = ""
+    elif b.get("enabled", True):
         dist = float(b.get("dist", 1.2))
         height = float(b.get("height", 2.0))
         z0 = float(b.get("z0", -0.2))
@@ -106,7 +116,8 @@ def build_xml(cfg: dict) -> str:
             f'<geom name="parent_arm_r" type="capsule" fromto="{px0:.4g} 0.17 0.62 {px0 + 0.25:.4g} 0.2 0.4" '
             f'size="0.045" rgba="0.35 0.5 0.7 1" contype="0" conaffinity="0"/>',
         ]
-    objs = "\n".join(body_xml(o["name"], o["kind"], o["radius"], o["rgba"]) for o in cfg.get("objects", []))
+    objs = "\n".join([body_xml(o["name"], o["kind"], o["radius"], o["rgba"]) for o in cfg.get("objects", [])]
+                     + list(cfg.get("extra_bodies") or []))   # 段階9：個体（instances.body_xml）
     # 目：頭の位置（左目）に、左右の回転（pan、上向きの軸）→上下の回転（tilt、太郎の右向きの軸）の順の関節。
     # カメラは -z を見るので、カメラの z＝太郎の後ろ（+x）、x＝右（+y）、y＝上（+z）
     eye = (f'<body name="eye_head" pos="{_f(EYE_LEFT)}">\n'
@@ -130,7 +141,7 @@ def build_xml(cfg: dict) -> str:
   </asset>
   <worldbody>
     <light name="top" directional="true" pos="0 0 3" dir="0 0 -1" diffuse="{LIGHT_DIFFUSE} {LIGHT_DIFFUSE} {LIGHT_DIFFUSE}" castshadow="true"/>
-    <geom name="floor" type="plane" size="5 5 0.1" rgba="{_f(floor)}" contype="0" conaffinity="0"/>
+    {floor_xml}
     {chr(10).join(parts_world)}
     {eye}
 {objs}

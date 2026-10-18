@@ -28,6 +28,10 @@ import sys as _sys
 # 無ければ osmesa（クラウド。CPU で描く、1枚 約16ミリ秒）。Windows の PC は指定しない（mujoco の既定）
 if _sys.platform.startswith("linux") and not _os.environ.get("MUJOCO_GL"):
     _os.environ["MUJOCO_GL"] = "egl" if _os.path.exists("/dev/dri") else "osmesa"
+# クラウド（osmesa）では、mujoco で1枚描いたあとに torch._dynamo を初めて読むと落ちる（Segmentation fault。
+# torch.optim.Adam を作るときに読まれる。2026-10-18、段階9で見つけた）。描く前に読んでおく
+if _os.environ.get("MUJOCO_GL") == "osmesa":
+    import torch._dynamo  # noqa: F401,E402
 
 from .env import EyeWorldEnv  # noqa: F401,E402
 from .build import build_env, close_env  # noqa: F401,E402
