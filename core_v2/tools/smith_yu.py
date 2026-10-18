@@ -200,7 +200,7 @@ def summarize(results: list[dict]) -> dict:
 
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
-    from ..world_eye.switch import pop_world_flag, select
+    from ..world_eye.switch import pop_world_flag, select, suffix
     select(pop_world_flag(argv))          # --world eye|mimo（既定 mimo）
     opts = {"--seeds": "0-19", "--modes": "B,A", "--ear-n": "1000", "--gap": str(GAP_S),
             "--log-dir": "段階6_スミスとユー"}
@@ -215,7 +215,7 @@ def main(argv=None):
             i += 2
         else:
             i += 1
-    log_dir = os.path.join(run_v2.REPO, "G", "logs", opts["--log-dir"])
+    log_dir = os.path.join(run_v2.REPO, "G", "logs", suffix(opts["--log-dir"]))
     results = []
     for mode in opts["--modes"].split(","):
         for seed in parse_seeds(opts["--seeds"]):

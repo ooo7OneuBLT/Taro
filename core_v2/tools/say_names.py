@@ -77,10 +77,10 @@ def main(argv=None):
     ap.add_argument("--log-dir", default="段階7_体あり")
     ap.add_argument("--world", default="mimo", choices=["mimo", "eye"], help="目だけの場面で回すなら eye")
     a = ap.parse_args(argv)
-    from ..world_eye.switch import select
+    from ..world_eye.switch import select, suffix
     select(a.world)
     path = lambda p: p if os.path.isabs(p) else os.path.join(run_v2.REPO, p)   # noqa: E731
-    log_dir = os.path.join(run_v2.REPO, "G", "logs", a.log_dir)
+    log_dir = os.path.join(run_v2.REPO, "G", "logs", suffix(a.log_dir))
     os.makedirs(log_dir, exist_ok=True)
 
     from ..brain import Brain

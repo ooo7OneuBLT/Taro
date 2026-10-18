@@ -198,3 +198,4 @@ def test_world_flag_switches_run_v2():
         assert all(r["ang_ball"] is not None for r in rows)
     finally:
         run_v2.build_env, run_v2.close_env = orig
+        run_v2.WORLD = "mimo"

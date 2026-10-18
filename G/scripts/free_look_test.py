@@ -69,7 +69,8 @@ def plot(summary, out):
 def main(cfg_path, quick=False, plot_only=False, only=None):
     with open(cfg_path, encoding="utf-8") as f:
         cfg = json.load(f)
-    out = os.path.join(REPO, cfg["out"] + ("_quick" if quick else ""))
+    from core_v2.world_eye.switch import suffix
+    out = os.path.join(REPO, suffix(cfg["out"]) + ("_quick" if quick else ""))
     os.makedirs(out, exist_ok=True)
     seeds = cfg["seeds"][:1] if quick else cfg["seeds"]
     trials = []

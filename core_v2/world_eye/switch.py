@@ -44,3 +44,9 @@ def select(world: str) -> str:
     run_v2.WORLD = "eye"
     print("[世界] 目だけの場面（core_v2/world_eye）で回す。前後の画像は G/logs/目だけの場面/ の下", flush=True)
     return world
+
+
+def suffix(name: str) -> str:
+    """目だけの場面で回しているときは、出力の名前に「_目だけ」を足す（MIMo の結果を上書きしないため）。"""
+    from .. import run_v2
+    return name + "_目だけ" if getattr(run_v2, "WORLD", "mimo") == "eye" else name

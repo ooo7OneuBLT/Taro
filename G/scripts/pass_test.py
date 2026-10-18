@@ -191,7 +191,8 @@ def plot(trials, cfg, out):
 def main(cfg_path, quick=False, plot_only=False):
     with open(cfg_path, encoding="utf-8") as f:
         cfg = json.load(f)
-    out = os.path.join(REPO, cfg["out"] + ("_quick" if quick else ""))
+    from core_v2.world_eye.switch import suffix
+    out = os.path.join(REPO, suffix(cfg["out"]) + ("_quick" if quick else ""))
     os.makedirs(out, exist_ok=True)
     seeds = cfg["seeds"][:1] if quick else cfg["seeds"]
     trials = []
@@ -206,7 +207,8 @@ def main(cfg_path, quick=False, plot_only=False):
         if cfg.get("semantic_table"):
             meta_sem = {"table": sem.load_table(os.path.join(REPO, cfg["semantic_table"]))}
         elif cfg.get("semantic_learned"):
-            meta_sem = {"learned": sem.load_learned(os.path.join(REPO, cfg["semantic_learned"]))}
+            # 目だけの場面では、目だけの場面で学んだ表（learn_names --world eye の出力 *_目だけ.pt）を読む
+            meta_sem = {"learned": sem.load_learned(os.path.join(REPO, suffix(cfg["semantic_learned"][:-3]) + ".pt"))}
         else:
             meta_sem = {"empty": True}
         sem.learning = False
@@ -238,7 +240,7 @@ def main(cfg_path, quick=False, plot_only=False):
                 finally:
                     run_v2.close_env(env)
         # 脳の保存（段階2の仮部品に学習する重みは無いが、型どおり版と配線の指紋を残す）
-        save(brain, os.path.join(REPO, "G", "models", cfg.get("brain_out", "段階2_合格テスト_brain.pt")),
+        save(brain, os.path.join(REPO, "G", "models", suffix(cfg.get("brain_out", "段階2_合格テスト_brain.pt")[:-3]) + ".pt"),
              extra={"experiment": cfg["name"], "semantic": meta_sem,
                     "use_ior": bool(cfg.get("use_ior", True))})
         print(f"全体 {time.time() - t_start:.0f}秒", flush=True)

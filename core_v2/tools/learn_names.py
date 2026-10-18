@@ -83,7 +83,7 @@ def looking_at(env) -> str:
 
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
-    from ..world_eye.switch import pop_world_flag, select
+    from ..world_eye.switch import pop_world_flag, select, suffix
     select(pop_world_flag(argv))          # --world eye|mimo（既定 mimo）
     swap = "--swap" in argv
     opts = {"--out": None, "--scenes": DEFAULT_SCENES, "--max-s": "900", "--log-dir": "段階3_名づけ", "--ear": None}
@@ -100,8 +100,8 @@ def main(argv=None):
         i += 1
     n_target = int(pos[0]) if pos else 5
     tag = f"N{n_target}" + ("_swap" if swap else "")
-    out = opts["--out"] or os.path.join(run_v2.REPO, "G", "models", f"semantic_learned_{tag}.pt")
-    log_dir = os.path.join(run_v2.REPO, "G", "logs", opts["--log-dir"])
+    out = opts["--out"] or os.path.join(run_v2.REPO, "G", "models", f"semantic_learned_{tag}{suffix('')}.pt")
+    log_dir = os.path.join(run_v2.REPO, "G", "logs", suffix(opts["--log-dir"]))
     os.makedirs(log_dir, exist_ok=True)
     max_s = float(opts["--max-s"])
 
