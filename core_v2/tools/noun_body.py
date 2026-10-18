@@ -7,6 +7,7 @@
 * A：覚えた個体の4択（ほかの3つは別の語の覚えた個体）　B4：見せていない個体（個体3）の4択　B2：見せていない個体と、
   覚えた個体の色（色A）と同じ色の別の種類の個体の2択（形を選ぶ割合）　C：物を出さずに音だけ鳴らし（env.object_sound）、
   音の入口から意味の辞書へ届いた荷札で、20語のうちいちばん強い語が音の主か（noun_bed と同じ数え方）
+* 試しの頭ごとに、親が太郎を机の方へ向けて座らせる（目を最初の向き (0, EL0) に置く。grow_names.EyeTaro.face_table）
 * 試しのあいだは覚えない（意味の辞書・耳・種類の層の learning を切る）。太郎は試しごとに脳の「その場の状態」だけ消す（学んだ中身は残る）
 * 合格の線（1人の太郎）：A は 16語以上が 70%以上、B4 は平均 60%以上、B2 は 70%以上、C は音の6語で平均 60%以上
 
@@ -53,6 +54,7 @@ class Tester(EyeTaro):
     def look_trial(self, word: str, cands: list[tuple[int, int]], test: str, rng: random.Random) -> int:
         """候補 [(語の番号, 個体)] を並べ、語を言い、いちばん長く見た候補の番号（どれも見なければ −1）。"""
         env = self.use_room(ins.ROOM_OF[word])
+        self.face_table(cause=f"test_{test}")
         placed = ns.place(env, [(ins.WORDS[i], k, rng.randrange(ns.N_VIEWS)) for i, k in cands], cause=f"test_{test}")
         self.brain.reset()
         for _ in range(int(round(PREVIEW_S / ns.TICK_S))):
@@ -79,6 +81,7 @@ class Tester(EyeTaro):
         from ..tagging import word_tag
         from ..world_eye import sounds as snd
         env = self.use_room(ins.ROOM_OF[word])
+        self.face_table(cause="test_C")
         self.brain.reset()
         for _ in range(3):
             self.tick()

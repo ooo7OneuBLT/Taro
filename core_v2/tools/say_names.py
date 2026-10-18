@@ -121,6 +121,7 @@ def stage9(a, log_dir: str) -> dict:
                 env = t.use_room(ins.ROOM_OF[word])
                 others = rng.sample([w for w in ins.WORDS if ins.ROOM_OF[w] == ins.ROOM_OF[word] and w != word], 2)
                 items = [(w, rng.choice(ins.TRAIN_INST), rng.randrange(ns.N_VIEWS)) for w in [word] + others]
+                t.face_table(cause="say_names")          # 親が太郎を机の方へ向けて座らせる
                 placed = ns.place(env, items, cause="say_names")
                 torch.manual_seed(taro * 1000 + k)
                 t.brain.reset()

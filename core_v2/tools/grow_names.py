@@ -4,6 +4,7 @@
 場面1つ＝部屋を1つ選び、その部屋の語から3つ、覚える個体（個体0〜2）を並べて12秒。太郎は自分で目を動かす（41係の脳そのまま）。
 太郎が物を見始めて 0.5秒で音のある物を半分の割合で鳴らし、1.5秒で半分の割合で名前を言う。見ている間は1秒ごとに物を回す。
 場面と場面のあいだは3秒、何も無い。ほうびは無い。
+場面の頭ごとに、親が太郎を机の方へ向けて座らせる（目を最初の向き (0, EL0) に置く。EyeTaro.face_table）。
 
 * 始める太郎：育ち帳の、段2（無ければ段1）の終わりの写し（growth.start_point）。どちらも無ければ生まれたまま（そう表示する）
 * 育つ係：意味の辞書（まばら版、既定）・耳（名づけの中でも聞き続ける。段1の耳は grow_early の既定で20語を知っている）・
@@ -81,10 +82,18 @@ class EyeTaro:
             env.set_eye(0.0, ns.EL0, cause="start")
             self.envs[room] = env
         env = self.envs[room]
-        if prev is not None and prev is not env:   # 部屋が替わっても目の向きはそのまま
+        if prev is not None and prev is not env:   # 部屋が替わっても目の向きはそのまま（場面の頭で face_table が戻す）
             env.set_eye(prev._orienting.pan, prev._orienting.tilt, cause="room_change")
         self.env = env
         return env
+
+    def face_table(self, cause: str = "scene_start") -> None:
+        """親が太郎を机の方へ向けて座らせる（環境の側。太郎の跳びではない）：目を最初の向き (0, EL0) に置く。
+        場面・試しの頭ごとに呼ぶ。呼ばないと、目は前の場面の終わりの向き（可動域の端のことがある）のまま始まり、
+        物が視野の外だと何も見えず、目を動かすきっかけも無いので、そのまま動かない（2026-10-18、PC の段3）。
+        控えていた跳びの指令も消す（run_v2.run_trial の試行の頭と同じ）。"""
+        self.env.set_eye(0.0, ns.EL0, cause=cause)
+        self.env._orienting._map_target = None
 
     def save_images(self, on: bool) -> None:
         for e in self.envs.values():
@@ -130,11 +139,14 @@ class Grower(EyeTaro):
         self.n_scenes = 0
         self.n_learn = 0
         self.last_said = ""
+        self.last_named = ""                       # 親が最後に名前を言った物の語
+        self.learn_by_word: dict[str, int] = {}    # 覚えた回を、その前に親が最後に名前を言った物の語で数える（目安）
 
     def scene(self) -> None:
         rng = self.rng
         room = rng.choice(ns.ROOMS)
         env = self.use_room(room)
+        self.face_table()
         words = rng.sample([w for w in ins.WORDS if ins.ROOM_OF[w] == room], ns.N_SHOW)
         items = [(w, rng.choice(ins.TRAIN_INST), rng.randrange(ns.N_VIEWS)) for w in words]
         placed = ns.place(env, items)
@@ -145,6 +157,7 @@ class Grower(EyeTaro):
             got = self.tick()
             if "said" in did:
                 self.last_said = did["said"]
+                self.last_named = did["looking"]
             for key in ("said", "rang"):
                 if key in did:
                     self.events.append({"scene": self.n_scenes, "room": room, "t": round(t * TICK_S, 1), "event": key,
@@ -154,6 +167,8 @@ class Grower(EyeTaro):
                 # 覚え方B は名残りが消えてから（聞いて数秒あと）覚える。結び付くのは聞く前3秒に見ていた物なので、
                 # 「looking」はその回に見ている物（参考）、「text」は親が最後に言った文
                 self.n_learn += sem.last_event == "learn"
+                if sem.last_event == "learn" and self.last_named:
+                    self.learn_by_word[self.last_named] = self.learn_by_word.get(self.last_named, 0) + 1
                 cur = self.parent.cur.word if self.parent.cur else ""
                 self.events.append({"scene": self.n_scenes, "room": room, "t": round(t * TICK_S, 1),
                                     "event": sem.last_event, "word": "", "text": self.last_said, "looking": cur})
@@ -170,7 +185,8 @@ def summary(g: Grower, wall_s: float) -> dict:
     return {"scenes": g.n_scenes, "ticks": g.n_tick, "wall_s": round(wall_s, 1),
             "s_per_scene": round(wall_s / max(1, g.n_scenes), 2), "parent": g.parent.stats,
             "named_by_word": {w: g.parent.named.get(w, 0) for w in ins.WORDS},
-            "semantic_learn": g.n_learn, "ear_knows": {w: w in known for w in ins.WORDS},
+            "semantic_learn": g.n_learn, "learn_by_word": {w: g.learn_by_word.get(w, 0) for w in ins.WORDS},
+            "learn_min": min(g.learn_by_word.get(w, 0) for w in ins.WORDS), "ear_knows": {w: w in known for w in ins.WORDS},
             "ear_knows_n": sum(w in known for w in ins.WORDS), "start": g.start_name(), "eye": g.eye_info,
             "objects": g.objects, "kind": g.kind}
 
@@ -205,7 +221,8 @@ def main(argv=None):
             if (s + 1) % 10 == 0 or s + 1 == a.scenes:
                 el = time.time() - t0
                 print(f"[段3] 場面 {s + 1}/{a.scenes}　{el:.0f}秒（残り約 {el / (s + 1) * (a.scenes - s - 1) / 60:.0f}分）　"
-                      f"名づけ {g.parent.stats['names']}　音 {g.parent.stats['sounds']}　覚えた {g.n_learn}　"
+                      f"名づけ {g.parent.stats['names']}　音 {g.parent.stats['sounds']}　覚えた {g.n_learn}"
+                      f"（いちばん少ない語 {min(g.learn_by_word.get(w, 0) for w in ins.WORDS)}回）　"
                       f"耳が知っている語 {sum(w in g.brain.boxes['listen'].known() for w in ins.WORDS)}/20", flush=True)
         res = summary(g, time.time() - t0)
     finally:
@@ -227,7 +244,7 @@ def main(argv=None):
     res["log_root"] = log_root
     with open(os.path.join(log_root, "まとめ.json"), "w", encoding="utf-8") as f:
         json.dump(res, f, ensure_ascii=False, indent=1, default=str)
-    print(json.dumps({k: v for k, v in res.items() if k not in ("ear_knows", "named_by_word")}, ensure_ascii=False,
+    print(json.dumps({k: v for k, v in res.items() if k not in ("ear_knows", "named_by_word", "learn_by_word")}, ensure_ascii=False,
                      default=str), flush=True)
     return res
 
