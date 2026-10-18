@@ -1,11 +1,12 @@
 """段階8a：驚きの係（仮部品）と、名簿・意味の辞書・聞き分ける係の変更の確かめ。環境なしで回る。"""
 
+import pytest
 import torch
 
 from core_v2.boxes.eyein import ego_map
 from core_v2.boxes.listen import Listen
 from core_v2.boxes.objfile import ABSENT_TICKS, KEEP_S, SEATS, Objfile, bump_at
-from core_v2.boxes.semantic import RECALL_MIN, SURPRISE_TAG, Semantic
+from core_v2.boxes.semantic import SURPRISE_TAG, Semantic
 from core_v2.boxes.surprise import Surprise, centre_weight
 from core_v2.formats import TAG_DIM, Fmt, check, make_tag
 from core_v2.tagging import state_tag, word_tag
@@ -126,11 +127,11 @@ def test_surprise_tag_is_innate_and_not_a_word():
     assert abs(float(SURPRISE_TAG @ word_tag("予想外"))) < 0.5
 
 
-def test_semantic_learns_surprise_only_from_experience():
-    sem = Semantic(learning=True)
-    assert float(torch.linalg.vector_norm(sem.W.T @ SURPRISE_TAG)) == 0.0   # 生まれたときは何も結び付いていない
-    a = tag(8)
-    lst = [(a, bump_at(C, C)), (a, torch.zeros(28, 28)), (a, torch.zeros(28, 28))]
+@pytest.mark.parametrize("mem", ["sparse", "table"])
+def test_semantic_learns_surprise_only_from_experience(mem):
+    """驚きの荷札は、ほかの入力（見た目）と同じ足し方で意味の辞書に入る。まばら版でも表 W でも、驚きだけから「ない」を引ける。"""
+    sem = Semantic(learning=True, memory=mem)
+    assert sem.recall_word([], 1.0) is None and sem.last_word_norm == 0.0   # 生まれたときは何も結び付いていない
     q = word_tag("ない")
     for k in range(8):                      # 物が消えて驚いている間に「ない」を聞く、を8回（物は毎回ちがう）
         lst = [(tag(20 + k), bump_at(C, C)), (tag(20 + k), torch.zeros(28, 28)), (tag(20 + k), torch.zeros(28, 28))]
@@ -138,10 +139,11 @@ def test_semantic_learns_surprise_only_from_experience():
             sem.step({"objfile": lst, "surprise": torch.tensor(1.0 if i > 20 else 0.0),
                       "listen": q if i == 30 else torch.zeros(TAG_DIM)})
     r = sem.recall_word([], 1.0)
-    assert r is not None and float(r @ q) > 0.9
-    assert float(torch.linalg.vector_norm(sem.W.T @ SURPRISE_TAG)) >= RECALL_MIN
-    # 驚きが無ければ、今まで（段階7）と同じ引き方
-    assert torch.allclose(sem._seen_vec(lst, 0.0), make_tag(lst[-2][0]))
+    assert r is not None and float(r @ q) > 0.9 and sem.last_word_norm >= sem.recall_line
+    assert sem.recall_word([], 0.0) is None          # 驚きも物も無ければ何も引かない
+    # 驚きが無ければ、今まで（段階7）と同じ引き方（見ている物の荷札だけ）
+    x = sem._seen_vec(lst, 0.0)
+    assert torch.allclose(x[:TAG_DIM], make_tag(lst[-2][0])) and float(x[TAG_DIM:].abs().sum()) == 0.0
 
 
 def test_listen_sends_every_known_word_in_order():

@@ -9,6 +9,11 @@
 * 決まった乱数の行列（32→64、種 PROJECTION_SEED。見た目の行列とは別の種）で 64 にして長さ1にそろえる。学習しない（生まれつき）
 * 音が続く間（波形の長さを 0.1 秒の回に切り上げた回数）、同じ荷札を意味の辞書（semantic）と種類の層（kind）へ出す。
   強さは荷札の長さで表さず（TAG は長さ1の決まり）、意味の辞書は荷札が届いている回を強さ1として足す（仕様書の v＝1）
+* **時間の形を残す（段階9、2026-10-18、ユーザー決定、仕様書 `2026-10-18_段階9_仕様書_意味の辞書まばら化.md`）**：既定（shape="time"）は、
+  帯の時間平均の代わりに、時間で N_SLICES（4）つに切った帯の平均（4×32、音の全体の大きさを引く）と、N_GROUPS（8）つの帯の組ごとの
+  「変わる速さ」（10ms 先・40ms 先との差の大きさの平均、2×8、平均を引く）の2つの塊にし、塊ごとに長さ1にそろえて並べ、決まった乱数で 64 へ
+  （生まれつきの耳の前段。Chi・Ru・Shamma 2005 を小さくしたもの）。帯の時間平均だけだと あひる・犬 0.98、猫・電車 0.96 だったのが
+  0.84・0.70 になる（7種類×4個体で測った）。shape="mean" で前の荷札（1ビットも同じ）に戻せる（比べる用）
 numpy の FFT だけを使う（scipy は使わない）。tagging.py は段1の指紋に入っているので触らず、行列はここで作る。
 """
 
@@ -29,9 +34,15 @@ F_LO, F_HI = 50.0, 8000.0
 NFFT = 512
 PROJECTION_SEED = 20261018
 TICK_S = 0.1
+SHAPE = "time"           # 既定。"mean"＝前の帯の時間平均（比べる用）
+N_SLICES = 4             # 音を時間で切る数
+N_GROUPS = 8             # 変わる速さを測る帯の組
+LAGS = (1, 4)            # 10ms 先・40ms 先
+TIME_PROJ_SEED = 20261019
 
 _proj = None
 _fb = None
+_tproj = None
 
 
 def _mel(f):
@@ -79,11 +90,49 @@ def sound_tag(wave) -> torch.Tensor:
     return make_tag((band_mean(wave) @ projection()).astype(np.float32))
 
 
+def _spec(wave) -> np.ndarray:
+    y = np.asarray(wave, dtype=np.float64).reshape(-1)
+    win, hop = int(WIN_S * SR), int(HOP_S * SR)
+    if len(y) < win + 4 * hop * N_SLICES:
+        y = np.pad(y, (0, win + 4 * hop * N_SLICES - len(y)))
+    frames = np.stack([y[s:s + win] for s in range(0, len(y) - win + 1, hop)]) * np.hanning(win)
+    p = np.abs(np.fft.rfft(frames, NFFT)) ** 2
+    return np.log(p @ filterbank().T + 1e-10)        # 時間 × 32帯
+
+
+def time_features(wave) -> np.ndarray:
+    """波形 → [時間で4つに切った帯の平均（4×32） | 帯の組ごとの変わる速さ（2×8）]、塊ごとに長さ1。"""
+    S = _spec(wave)
+    sl = np.stack([c.mean(0) for c in np.array_split(S, N_SLICES)]) - S.mean()
+    a = sl.reshape(-1)
+    G = S.reshape(len(S), N_GROUPS, -1).mean(2)
+    b = np.concatenate([np.abs(G[lag:] - G[:-lag]).mean(0) for lag in LAGS])
+    b = b - b.mean()
+    unit = lambda v: v / (np.linalg.norm(v) + 1e-12)   # noqa: E731
+    return np.concatenate([unit(a), unit(b)])
+
+
+def sound_tag_time(wave) -> torch.Tensor:
+    global _tproj
+    f = time_features(wave)
+    if _tproj is None:
+        _tproj = np.random.default_rng(TIME_PROJ_SEED).standard_normal((len(f), TAG_DIM)) / math.sqrt(TAG_DIM)
+    return make_tag((f @ _tproj).astype(np.float32))
+
+
+def make_sound_tag(wave, shape: str | None = None) -> torch.Tensor:
+    """入口の荷札の作り方（shape：time＝時間の形を残す（既定）、mean＝帯の時間平均）。"""
+    return sound_tag_time(wave) if (shape or SHAPE) == "time" else sound_tag(wave)
+
+
 class Soundin(Box):
     BOX_ID = "soundin"
 
-    def __init__(self) -> None:
+    def __init__(self, shape: str | None = None) -> None:
         super().__init__()
+        self.shape = shape or SHAPE
+        if self.shape not in ("time", "mean"):
+            raise ValueError(f"shape は time か mean：{shape!r}")
         self.reset()
 
     def reset(self) -> None:
@@ -95,7 +144,7 @@ class Soundin(Box):
         out = self.passthrough()
         w = inbox.get(ENV)
         if w is not None and len(np.asarray(w).reshape(-1)) > 0:
-            self.tag = sound_tag(w)
+            self.tag = make_sound_tag(w, self.shape)
             self.left = max(1, math.ceil(len(np.asarray(w).reshape(-1)) / SR / TICK_S - 1e-9))
             self.n_heard += 1
         if self.left > 0 and self.tag is not None:

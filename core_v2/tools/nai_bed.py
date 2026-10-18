@@ -13,8 +13,8 @@
 
 試し（試験場の太郎を写して、覚える・喃語を止めて回す。1回数秒）：
 * A：知っている物が消える20回で驚きが立つ（u＞0）回数、対照20回（そのまま・目をそらす・持っていく）で立つ回数
-* B：教えていない物（でんしゃ・とけい）が消えて1秒後（親が言うころ）、逆に引いた Wᵀ(a＋u·S) の一番近い知っている語が
-  「ない」で、強さが RECALL_MIN 以上の回数（20回）。知っている物が消えたときに何が一番かも記録
+* B：教えていない物（でんしゃ・とけい）が消えて1秒後（親が言うころ）、逆に引いた語（表 W なら Wᵀ(a＋u·S)、まばら版なら
+  強い語の細胞の語の形の平均）の一番近い知っている語が「ない」で、強さが思い出す線（recall_line）以上の回数（20回）。知っている物が消えたときに何が一番かも記録
 * C（育ちの記録から）：太郎が言う語の係から「ない」を言った（M を使って言った）回のうち、物が消えてから3秒以内の割合。
   喃語の語の選び方（聞いた割合）で「ない」を言った回は別に数える
 * 段階7の試し（voice_bed.probe：わかる・言える ぼおる・こっぷ）もそのまま回す（③）
@@ -41,7 +41,6 @@ import torch
 from ..boxes import box_class
 from ..boxes.eyein import decode_ego, ego_map
 from ..boxes.objfile import GRID, Objfile, bump_at
-from ..boxes.semantic import RECALL_MIN
 from ..boxes.voice import SIM_MIN
 from ..formats import DTYPE, TAG_DIM
 from .. import mouth
@@ -304,9 +303,9 @@ def run_trial(b: dict, tag, kind: str, month: float, show_s: float = vb.SCENE_S,
             out["voice"] += env.get("voiceout", "")
         if k == n_show + int(read_at_s / TICK_S):
             x = sem_box._seen_vec(sem, sem_box._u)
-            if x is not None:
-                r = sem_box.W.T @ x
-                out["recall_norm"] = float(torch.linalg.vector_norm(r))
+            if x is not None:      # 逆引き（線で切らない）。まばら版は [見た目＋驚き | 音] に分けて渡す
+                r, s = (sem_box.reverse(x[:TAG_DIM], x[TAG_DIM:]) if sem_box.sparse else sem_box.reverse(x))
+                out["recall_norm"] = s
                 out["recall"] = r
     return out
 
@@ -335,7 +334,8 @@ def probe(bed: NaiBed) -> dict:
     bt = [run_trial(b, un[UNHEARD[i % 2]], "vanish", month) for i in range(N_TRIALS)]
     bw = [best_word(x["recall"], known) for x in bt]
     out["B_best_nai"] = sum(w == NAI for w in bw)
-    out["B_pass_n"] = sum(w == NAI and x["recall_norm"] >= RECALL_MIN for w, x in zip(bw, bt))
+    line = bed.boxes["semantic"].recall_line
+    out["B_pass_n"] = sum(w == NAI and x["recall_norm"] >= line for w, x in zip(bw, bt))
     out["B_best_words"] = {w: bw.count(w) for w in set(bw)}
     # 知っている物が消えたとき、何が一番か（試験 C の見込み）
     kw = [best_word(x["recall"], known) for x in van]

@@ -26,13 +26,14 @@
   いちばん似た物を見る。どれも届かなければ（または思い出せなければ）物を1つ乱数で見る（自由に見る＝偶然）。毎回、目の入口の雑音と向きは新しく引く
 * A：覚えた個体の4択（ほかの3つは別の語の覚えた個体）。語ごとに N_TRIALS 回
 * B4：見せていない個体（個体3）の4択。B2：見せていない個体と「覚えた個体の色（色A）と同じ色の、別の種類の個体」の2択（形を選ぶ割合）
-* C：物を隠して音だけ（見せていない雑音の種、個体は4つから乱数）→ Wᵀ(v·N) のいちばん強い語が音の主か（20語から、偶然5%）
+* C：物を隠して音だけ（見せていない雑音の種、個体は4つから乱数）→ 意味の辞書の word_scores（音だけ）のいちばん強い語が音の主か（20語から、偶然5%）
 * まず測る（先行研究 5節）：荷札の似かた（同じ種類の別の個体・別の種類・別の種類で同じ色）を、種類の層の前と後で
 
 使い方：
   python -m core_v2.tools.noun_bed [--taros 0-4] [--conds full,kind_off,one_inst,one_inst_kind_off] [--scenes 300]
                                    [--bank 代わり|<表の .pt>] [--log-dir 段階9_名詞]
-                                   [--semantic table|sparse] [--sound mean|time]   （まばら化の試し：sparse_semantic.py）
+                                   [--semantic sparse|table] [--sound time|mean]
+  （段階9 まばら化：既定は本物の係の既定と同じ sparse・time。table・mean で前の表 W・前の音の荷札（比べる用））
 出力：G/logs/<log-dir>/まとめ.json と 太郎ごとの json
 """
 
@@ -53,12 +54,11 @@ from ..boxes.eyein import decode_ego, ego_map
 from ..boxes.gaze import MATCH_COS
 from ..boxes.objfile import GRID, bump_at
 from ..boxes.semantic import RECALL_MIN  # noqa: F401  (noun_diag が使う)
-from ..boxes.soundin import sound_tag
+from ..boxes.soundin import make_sound_tag
 from ..formats import DTYPE, TAG_DIM, make_tag
 from ..tagging import appearance_tag, noisy, word_tag
 from ..world_eye import instances as ins
 from ..world_eye import sounds as snd
-from . import sparse_semantic as sps
 from .voice_bed import SubBrain
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir, os.pardir))
@@ -137,13 +137,11 @@ class Bank:
 
 
 # ---------------------------------------------------------------- 太郎
-def make_boxes(seed: int, kind_learning: bool = True, semantic: str = "table", sound: str = "mean") -> dict:
-    b = {bid: box_class(bid)() for bid in BOXES if bid != "kind"}
+def make_boxes(seed: int, kind_learning: bool = True, semantic: str = "sparse", sound: str = "time") -> dict:
+    b = {bid: box_class(bid)() for bid in BOXES if bid not in ("kind", "semantic", "soundin")}
     b["kind"] = box_class("kind")(learning=kind_learning, seed=seed)
-    if semantic == "sparse":      # 試し：まばらな語の表し方（tools/sparse_semantic.py。本物の太郎の係は替えていない）
-        b["semantic"] = sps.SparseSemantic()
-    if sound == "time":           # 試し：物の音の時間の形を残す入口
-        b["soundin"] = sps.SoundinTime()
+    b["semantic"] = box_class("semantic")(memory=semantic)      # sparse＝まばらな語の表し方（既定）／table＝前の表 W
+    b["soundin"] = box_class("soundin")(shape=sound)            # time＝時間の形を残す（既定）／mean＝前の荷札
     b["semantic"].learning = True
     # 試験場には目を向ける反射・驚きの係が無いので、名簿の→orienteye・→surprise の列は作らない（速くするだけ）
     b["objfile"].outputs = [e for e in b["objfile"].outputs if e.dst in ("semantic", "kind")]
@@ -152,7 +150,7 @@ def make_boxes(seed: int, kind_learning: bool = True, semantic: str = "table", s
 
 class NounBed:
     def __init__(self, seed: int, bank: Bank, kind_learning: bool = True, one_inst: bool = False,
-                 semantic: str = "table", sound: str = "mean") -> None:
+                 semantic: str = "sparse", sound: str = "time") -> None:
         self.seed = seed
         self.rng = random.Random(seed)
         torch.manual_seed(seed)
@@ -254,7 +252,7 @@ def view_tags(bed: NounBed, kind, i: int, k: int, rng) -> torch.Tensor:
 def look_trial(bed: NounBed, word: str, cands: list[tuple[int, int]], rng) -> int:
     """語を聞いて LOOK_S のあいだに、いちばん長く見た候補の番号。"""
     sem, kind = bed.boxes["semantic"], bed.boxes["kind"]
-    r = sem.recall(word_tag(word))      # 今の表：W q（‖W q‖ ≥ RECALL_MIN で出す）。まばら版：細胞の見た目の予想の平均
+    r = sem.recall(word_tag(word))      # まばら版：細胞の見た目の予想の平均。前の表：W q（‖W q‖ ≥ RECALL_MIN で出す）
     want = noisy(r) if r is not None else None
     counts = [0] * len(cands)
     for _ in range(int(LOOK_S / TICK_S)):
@@ -337,8 +335,7 @@ def probe(bed: NounBed, seed: int) -> dict:
         hit = 0
         for t in range(N_TRIALS):
             wave = snd.synth(ins.KIND_OF[w], rng.randrange(ins.N_INST), seed=10 ** 7 + t)
-            n = sps.sound_tag_time(wave) if bed.sound == "time" else sound_tag(wave)
-            score = sem.word_scores(wt, n=n) if hasattr(sem, "word_scores") else wt @ (sem.W.T @ n)
+            score = sem.word_scores(wt, n=make_sound_tag(wave, bed.sound))
             hit += words[int(torch.argmax(score))] == w
         out["C"][w] = hit / N_TRIALS
     out["sim_before"] = similarity(bed, rng, use_kind=False)
@@ -354,7 +351,7 @@ def summarize_one(p: dict) -> dict:
             "C6_mean": round(float(np.mean([C[w] for w in ins.C_WORDS])), 3), "C_spoon": C.get("すぷうん")}
 
 
-def run(seed: int, cond: str, bank: Bank, n_scenes: int, semantic: str = "table", sound: str = "mean") -> dict:
+def run(seed: int, cond: str, bank: Bank, n_scenes: int, semantic: str = "sparse", sound: str = "time") -> dict:
     t0 = time.time()
     bed = NounBed(seed, bank, kind_learning="kind_off" not in cond, one_inst=cond.startswith("one_inst"),
                   semantic=semantic, sound=sound)
@@ -410,10 +407,10 @@ def main(argv=None):
     ap.add_argument("--scenes", type=int, default=300)
     ap.add_argument("--bank", default="代わり")
     ap.add_argument("--log-dir", default="段階9_名詞")
-    ap.add_argument("--semantic", default="table", choices=["table", "sparse"],
-                    help="table＝今の 64×64 の表 W／sparse＝まばらな語の表し方（試し）")
-    ap.add_argument("--sound", default="mean", choices=["mean", "time"],
-                    help="mean＝今の物の音の荷札（帯の時間平均）／time＝時間の形を残す（試し）")
+    ap.add_argument("--semantic", default="sparse", choices=["sparse", "table"],
+                    help="sparse＝まばらな語の表し方（本物の係の既定）／table＝前の 64×64 の表 W（比べる用）")
+    ap.add_argument("--sound", default="time", choices=["time", "mean"],
+                    help="time＝時間の形を残す（本物の係の既定）／mean＝前の物の音の荷札（帯の時間平均）")
     a = ap.parse_args(argv)
     bank = Bank(load_bank(a.bank))
     log_dir = os.path.join(REPO, "G", "logs", a.log_dir)

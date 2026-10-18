@@ -45,7 +45,8 @@ def _mk(x) -> torch.Tensor:
 
 def grow_logged(seed: int, bank: nb.Bank, cond: str, n_scenes: int):
     """noun_bed と同じに育て、回ごとに (聞いた語, 音が来たか, 真ん中の物の語番号) を残す。"""
-    bed = nb.NounBed(seed, bank, kind_learning="kind_off" not in cond, one_inst=cond.startswith("one_inst"))
+    bed = nb.NounBed(seed, bank, kind_learning="kind_off" not in cond, one_inst=cond.startswith("one_inst"),
+                     semantic="table", sound="mean")      # 前の表 W の診断（段階9 まばら化の前）
     log = []
     orig = bed._tick
 

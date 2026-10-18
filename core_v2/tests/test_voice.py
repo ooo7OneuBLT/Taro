@@ -260,11 +260,13 @@ def test_bed_skipping_idle_time_gives_same_result():
         bed.skip_idle = skip
         bed.run_play(900)
         b = bed.boxes
-        res.append((b["voice"].get_extra_state(), dict(b["listen"].alone), b["semantic"].W.clone(),
+        res.append((b["voice"].get_extra_state(), dict(b["listen"].alone),
+                    {k: v.clone() for k, v in b["semantic"].state_dict().items()},
                     {k: v for k, v in bed.stats.items() if k != "ticks"}))
     assert res[0][0] == res[1][0]
     assert res[0][1] == res[1][1]
-    assert torch.allclose(res[0][2], res[1][2], atol=1e-4)
+    assert res[0][2].keys() == res[1][2].keys()
+    assert all(torch.allclose(res[0][2][k].double(), res[1][2][k].double(), atol=1e-4) for k in res[0][2])
     assert res[0][3] == res[1][3]
 
 
@@ -281,7 +283,8 @@ def test_export_and_import_voice_into_full_brain(tmp_path):
     assert brain.boxes["voice"].notebook == bed.boxes["voice"].notebook
     assert brain.boxes["voice"].M == bed.boxes["voice"].M
     assert len(brain.boxes["wordplan"].words) == len(bed.boxes["wordplan"].words)
-    assert float(brain.boxes["semantic"].W.abs().sum()) == 0.0
+    sem = brain.boxes["semantic"]
+    assert int(sem.n_learn) == 0 and sem.recall(word_tag("ぼおる")) is None
     assert not brain.boxes["voice"].learning and not brain.boxes["voice"].babbling
     brain.reset()                                       # 試行の切り替わりで、育てた中身は消えない
     assert brain.boxes["voice"].M == bed.boxes["voice"].M

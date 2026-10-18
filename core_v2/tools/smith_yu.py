@@ -34,7 +34,6 @@ import sys
 import time
 
 from .. import run_v2
-from ..boxes.semantic import RECALL_MIN
 from ..tagging import word_tag
 from .parent_speech import make_corpus
 
@@ -156,11 +155,12 @@ def run_one(seed: int, mode: str, *, ear_n: int, gap_s: float, log_dir: str, tic
         "trials_distractor_longer": sum(v["target"] < v["distractor"] for v in looks.values()),
         "n_learn": n_learn, "n_recenter": gaze["n_recenter"],
         "known_new_words": sorted(set(sy["word_of"].values()) & ear.known()),
-        "recall_norm": {w: round(float((sem.W @ word_tag(w)).norm()), 2) for w in sy["word_of"].values()},
+        "recall_norm": {w: round(sem.recall_strength(word_tag(w)), 2) for w in sy["word_of"].values()},
+        "recall_line": sem.recall_line,
         "word_of": {w: names[k] for k, w in sy["word_of"].items()},
         "trials": [{"i": s["i"], "word": sy["word_of"][s["target"]], "target": names[s["target"]],
                     "distractor": names[s["distractor"]],
-                    "recalled": float((sem.W @ word_tag(sy["word_of"][s["target"]])).norm()) >= RECALL_MIN,
+                    "recalled": sem.recall_strength(word_tag(sy["word_of"][s["target"]])) >= sem.recall_line,
                     **looks[s["i"]]} for s in slides if s["phase"] == "test"],
         "sim_s": sy["t_end"], "wall_s": round(time.time() - t_wall, 1),
     }
