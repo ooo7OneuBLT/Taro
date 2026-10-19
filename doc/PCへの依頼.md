@@ -234,14 +234,29 @@ PC は描くのが速く、そのかわり DINOv2 と切り出しが1回 約30�
 A 70〜90%（16語以上が70%以上に届くかは半々）、B4 65〜85%、B2 70〜90%、C 80〜95%。名づけの数が試験場（約600回）より少ないのと、
 本物の目が物を拾い損ねる回があるため。say_names は段階7（ボール当たり6〜7）と同じくらい、nai_body は段階8の体ありと同じくらい。
 
-### 依頼11　段階9：目を戻す直し（2b1e15a）のあと、段3から本番を回し直す
-状態：未。依頼10の残りをこちらに置き換える。PCが上げた 段3_目_real_dinov2_種0（名づけ36回）は使わない。
-ブランチ最新（2b1e15a 以降）で git pull してから、順に:
-1. `python -m core_v2.tools.grow_names --check --objects real --eye dinov2 --seed 0`（1場面。場面の始めに目が (0,-20) で、物が写っていることを絵で確かめる）
-2. `python -m core_v2.tools.grow_names --objects real --eye dinov2 --seed 0 --scenes 1000`（見込み 約1時間45分）。まとめ.json の learn_min が5未満なら `--from <できた段3の写しの名前>` で続けて回す。
-3. `python -m core_v2.tools.noun_body --from auto --seed 0 --eye dinov2 --words わんわん,こっぷ --trials 1 --image-trials 8 --log-dir 段階9_体あり_確かめ` → 良ければ `python -m core_v2.tools.noun_body --from auto --seed 0 --eye dinov2 --trials 10`
-4. `python -m core_v2.tools.say_names --from auto --objects real --eye dinov2 --growth-seed 0 --taros 0,1,2 --trials 6 --trial-s 30 --log-dir 段階9_段4_名前を言う`
-5. `python -m core_v2.tools.nai_body --from auto --growth-seed 0 --taros 0,1,2 --trials 10 --trial-s 30 --log-dir 段階9_段5_ない`
-6. `python -m core_v2.tools.smith_yu --world eye --seeds 0`
-7. `python -m core_v2.tools.growth list`
-返してほしいもの: 1の絵を見た一言、2の10場面ごとの行と learn_by_word・learn_min、3〜6の最後の行とまとめ.json、growth list、エラー全文。写しと記録の json はコミット・push してよい（G/assets は入れない）。
+### 依頼12　段階9：見る時間・自分の声・「ばす」の3つの直しのあと、段1から本番を回し直す
+状態：未。依頼11（と依頼10の残り）をこちらに置き換える（依頼11は回さない）。
+**まず `git pull`**（ブランチ claude/project-thread-1ua42q の最新。直しが3つ入っている）。それから、リポジトリの一番上で順に:
+
+直したこと（クラウド、2026-10-18）：
+* 目が動いた分を、目を動かす指令の写しで先に知る（eyein。画像のずれは小さな直しだけ）。「今見ている物」の印が物から外れなくなり、
+  見る時間が 1.2秒（真ん中）→ 4.6秒（クラウドの代わりの目・40場面。目の動きの見積もりが3マス以内：8〜12マスの跳び 36%→100%、
+  12〜16マス 4%→100%。名づけ 37→56回、覚えた 29→55回。コミット 4282274・c124c01・d3ca7c6 の説明）
+* 耳は太郎が話している間も聞く。自分の声の写し（口の帳面で予想した音）に合う音だけを自分の声とし、親の名前は捨てない
+* 段1の親の話しかけで、20語どれも「語だけ」で4回以上聞く（「ばす」が1回だけだった）。**段1が変わったので段1から育て直す**
+  （古い 段1_耳_種0・段2_喃語_種0・段3 の写しは「古い」と判定され、--from auto では使われない）
+
+1. `python -m core_v2.tools.grow_early 1 --seed 0`（数秒。育ち帳の known_words に20語ぜんぶ、ばす が単独で入っていること。「ばすだよ」などの文が入っていないこと。クラウドでは27語＝20語＋「いいこだね」などの文7つ）
+2. `python -m core_v2.tools.grow_early 2 --seed 0`（数秒）
+3. `python -m core_v2.tools.growth list`（新しい 段1_耳_種0_2・段2_喃語_種0_2 のような行ができていること）
+4. `python -m core_v2.tools.grow_names --check --objects real --eye dinov2 --seed 0`（1場面。場面の始めに目が (0,-20) で、物が写っていることを絵で確かめる）
+5. `python -m core_v2.tools.grow_names --objects real --eye dinov2 --seed 0 --scenes 1000`（見込み 約1時間45分）。まとめ.json の learn_min が5未満なら `--from <できた段3の写しの名前>` で続けて回す。
+6. `python -m core_v2.tools.noun_body --from auto --seed 0 --eye dinov2 --words わんわん,こっぷ --trials 1 --image-trials 8 --log-dir 段階9_体あり_確かめ` → 良ければ `python -m core_v2.tools.noun_body --from auto --seed 0 --eye dinov2 --trials 10`
+7. `python -m core_v2.tools.say_names --from auto --objects real --eye dinov2 --growth-seed 0 --taros 0,1,2 --trials 6 --trial-s 30 --log-dir 段階9_段4_名前を言う`
+8. `python -m core_v2.tools.nai_body --from auto --growth-seed 0 --taros 0,1,2 --trials 10 --trial-s 30 --log-dir 段階9_段5_ない`
+9. `python -m core_v2.tools.smith_yu --world eye --seeds 0`
+10. `python -m core_v2.tools.growth list`
+（任意・約3分）PCの本物の目でも見る時間を測るなら：`python -m core_v2.tools.look_diag --scenes 40 --objects real --eye dinov2 --from <1〜2でできた段2の写しの名前>` と、同じものに `--ego image`（直し前の決まり）を足したもの。
+
+返してほしいもの: 1の known_words、3と10の growth list、4の絵を見た一言、5の10場面ごとの行と learn_by_word・learn_min（名づけの数がクラウドの見込みどおり増えたか）、
+6〜9の最後の行とまとめ.json、（回したなら）look_diag の2つのまとめ.json、エラー全文。写しと記録の json はコミット・push してよい（G/assets は入れない）。
