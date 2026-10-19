@@ -3,8 +3,11 @@
 盤面の世界（2026-10-19、core_v2/board/mind.py の下書きから清書）：何をするか決める係。
 * vars→want：不快（お腹がすいた強さ）。feel→want：いら立ち
 * worth→want：行動ごとの見込み（行動の荷札, 地図の [0, j]＝j 番目の人に向けた時の見込み）
-* 不快＋いら立ちが高いほど何か行動しやすい（その割合で行動し、残りは何もしない）
-* 行動するときは、選択肢（行動×向ける相手。部屋にいる人だけ）を見込みに比例して選ぶ（確率マッチング）
+* semantic→want：目の前の物のわからなさ（4段目）。知りたい強さ＝CURIOSITY×わからなさ
+* 不快＋いら立ち＋知りたい強さが高いほど何か行動しやすい（その割合で行動し、残りは何もしない）
+* 行動するときは、選択肢（行動×向ける相手。部屋にいる人だけ）を、
+  （不快＋いら立ち）×ミルクの見込み ＋ 知りたい強さ×わかる見込み に比例して選ぶ（確率マッチング。
+  欲求の強さで見込みを重み付けて足す。知りたい強さが0なら3段目までと同じ）
 * 合図の強さ＝BASE_STRENGTH＋0.5×不快＋いら立ち（1まで）
 * want→cry・want→reach・want→wordplan（語を言う。3段目）：(行動の荷札, 地図の [0, j]＝強さ。j＝向ける人の場所)
 * want→worth：選んだ行動の写し（行動の荷札, 地図の [0, j]＝1）
@@ -19,6 +22,7 @@ from ..tagging import word_tag
 from .base import Box
 
 BASE_STRENGTH = 0.3
+CURIOSITY = 0.3                # わからなさ1のときの知りたい強さ（おなかの不快1より弱い）［仮置き］
 # 生まれつきの行動の荷札（worth.ACT_TAGS と同じ符号）。それ以外の荷札は語として口へ
 ACT_OUT = {"cry": word_tag("act:cry"), "reach": word_tag("act:reach")}
 
@@ -36,12 +40,13 @@ class Want(Box):
             self.last = {"action": "nothing", "strength": 0.0, "tag": None, "to": None}
             disc = float(inbox.get("vars", 0.0))
             stress = float(inbox.get("feel", 0.0))
+            curious = CURIOSITY * float(inbox.get("semantic", 0.0))
             options = []
             for act, m in inbox.get("worth") or []:
                 for j in range(GRID):
                     if float(m[0, j]) > 0:
-                        options.append((act, j, float(m[0, j])))
-            arousal = min(1.0, disc + stress)
+                        options.append((act, j, (disc + stress) * float(m[0, j]) + curious * float(m[1, j])))
+            arousal = min(1.0, disc + stress + curious)
             if options and float(torch.rand(())) < arousal:
                 r = float(torch.rand(())) * sum(o[2] for o in options)
                 for act, j, v in options:

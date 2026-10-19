@@ -49,37 +49,48 @@ def new_brain(seed: int, frozen: bool = False) -> Brain:
 
 @lru_cache(maxsize=None)
 def _base(name: str):
-    return word_tag("person:" + name)
+    """揺れのない生まれつきの符号（"obj:" で始まれば物、それ以外は人）。記録用。"""
+    return word_tag(name if name.startswith("obj:") else "person:" + name)
 
 
 def _who(j, names):
     return names[j] if 0 <= j < len(names) else None
 
 
+OBJECTS = ["ボール", "コップ", "くつ", "わんわん", "くるま", "バナナ"]
+
+
 def grow_core(rule: str, seed: int, days: int, frozen: bool = False, keep_log: bool = False,
               stage: int = 1, swap: bool = False, brain: Brain | None = None,
-              understand_words: bool = True) -> dict:
+              understand_words: bool = True, answer_questions: bool = True) -> dict:
     """stage 1：ママだけ。2：ママとパパ（brain が無ければ1段目を同じ日数育ててから）。
-    3：2段目の世界で大人が話し、言葉に応える（brain は2段目まで育った脳を渡す）。"""
+    3：2段目の世界で大人が話し、言葉に応える（brain は2段目まで育った脳を渡す）。
+    4：3段目の世界の目の前に物が置かれ、大人は問う語に名前で答える（brain は3段目まで育った脳）。
+    4段目は、おなかがすいていない1分ごとに (分, 目の前の物, 名前を知っていたか, 行動) を "curious" に記録する。"""
     if stage == 2 and brain is None:
         brain = grow_core(rule, seed, days, frozen, stage=1)["brain"]
     adults = stage1_adults() if stage == 1 else stage2_adults(swap)
     board = Board(rule=rule, seed=seed + 500 * (stage - 1), adults=adults,
-                  speech=speech_data()["lines"] if stage >= 3 else None, understand_words=understand_words)
+                  speech=speech_data()["lines"] if stage >= 3 else None, understand_words=understand_words,
+                  objects=OBJECTS if stage >= 4 else None, answer_questions=answer_questions)
     if brain is None:
         brain = new_brain(seed, frozen)
     else:
         torch.manual_seed(20_000 + seed)
     if stage >= 3:
         use_language(brain)
+    if stage >= 4:
+        brain.boxes["semantic"].use_board()
+    sem = brain.boxes["semantic"]
+    curious = []
     brain.reset()
     stress = brain.boxes["stress"]
     episodes, cur, log = [], [], []
-    fed, came, heard = False, None, None
+    fed, came, heard, spoke = False, None, None, None
     for t in range(days * MINUTES_PER_DAY):
         present = board.present()
         ext = {"gutin": {"fullness": board.fullness, "fed": fed},
-               "eyein": {"people": [(n, n == came) for n in present]}}
+               "eyein": {"people": [(n, n in (came, spoke)) for n in present], "object": board.object}}
         action, strength, target, word = "nothing", 0.0, None, None
         for k in range(TICKS_PER_MIN):
             if k == 0 and heard:
@@ -98,7 +109,10 @@ def grow_core(rule: str, seed: int, days: int, frozen: bool = False, keep_log: b
             action = "nothing"
         f0 = board.fullness
         obs = board.step(action, strength, target, word)
-        fed, came, heard = obs["fed"], obs["came"], obs["heard"]
+        if stage >= 4 and board.object and f0 >= HUNGRY_FROM:
+            k = sem.knowing(_base("obj:" + board.object))
+            curious.append((t, board.object, k >= 1.0, action if action != "say" else "say:" + word))
+        fed, came, heard, spoke = obs["fed"], obs["came"], obs["heard"], obs["spoke"]
         if action != "nothing":
             cur.append((t, action if action != "say" else "say:" + word, strength, target, tuple(present)))
         if keep_log:
@@ -109,4 +123,4 @@ def grow_core(rule: str, seed: int, days: int, frozen: bool = False, keep_log: b
             if cur:
                 episodes.append(cur)
             cur = []
-    return {"episodes": episodes, "log": log, "brain": brain}
+    return {"episodes": episodes, "log": log, "brain": brain, "curious": curious}

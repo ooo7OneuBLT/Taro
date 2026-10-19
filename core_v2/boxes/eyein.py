@@ -73,6 +73,7 @@ setup() を呼ぶまでは素通し（骨組みのテストは重い視覚を作
 のときは画像を見ず、部屋にいる人ごとに荷札（生まれつきの符号 word_tag("person:"+名前) に見るたびの揺れ
 FACE_NOISE を足して長さ1に戻したもの。揺れは1分に1回だけ作り直す）と地図（そばに来た人は1、ほかは0.5で塗る）を
 eyein→social へ送る。あとで本物の目（顔の見た目）に差し替える。
+4段目：{"object": 名前} があれば、目の前の物の見た目の荷札（word_tag("obj:"+名前) に同じ揺れ）を eyein→semantic へ送る。
 """
 
 from __future__ import annotations
@@ -304,6 +305,7 @@ class Eyein(Box):
     def reset(self) -> None:
         self.__dict__.pop("_board_n", None)      # 盤面の世界：1分の数え直し
         self.__dict__.pop("_board_seen", None)
+        self.__dict__.pop("_board_obj", None)
         if self._sal is not None:
             # 目立ちの地図は前のコマとの差（動き）を持つので、試行の頭で前のコマを捨てる
             self._sal._prev_gray = None
@@ -400,6 +402,18 @@ class Eyein(Box):
             self.last_mode = "track"
         return dets
 
+    def see_object(self, name) -> list:
+        """盤面の4段目：目の前の物 → [(見た目の荷札, 塗った地図)]。揺れは1分に1回（see_people と同じ回）。"""
+        if not name:
+            return []
+        if phase(self.__dict__.get("_board_n", 1) - 1) == 0 or "_board_obj" not in self.__dict__:
+            base = _PERSON_TAGS.get("obj:" + name)
+            if base is None:
+                base = _PERSON_TAGS["obj:" + name] = word_tag("obj:" + name)
+            t = base + torch.randn(TAG_DIM, dtype=DTYPE) * FACE_NOISE
+            self.__dict__["_board_obj"] = [(t / torch.linalg.vector_norm(t), torch.ones(GRID, GRID, dtype=DTYPE))]
+        return list(self.__dict__["_board_obj"])
+
     def see_people(self, people) -> list:
         """盤面の世界の下駄：人の名前の列 → (荷札, 地図) の列。揺れは1分に1回だけ作り直す。"""
         n = self.__dict__.get("_board_n", 0)
@@ -421,6 +435,7 @@ class Eyein(Box):
         env = inbox.get(ENV)
         if isinstance(env, dict) and "people" in env:
             out["social"] = self.see_people(env["people"])
+            out["semantic"] = self.see_object(env.get("object"))
             return out
         if not getattr(self, "_ready", False) or inbox.get(ENV) is None:
             return out

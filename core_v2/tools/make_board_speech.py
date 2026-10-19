@@ -29,6 +29,10 @@ SITUATIONS = {
     "busy": "場面：赤ちゃんが呼んでいるが、今は手が離せない",
     "chat": "場面：そばで遊んでいる赤ちゃんに、目に入った物（ボール・わんわん・くつ・コップなど）について話しかける",
 }
+# 4段目「あれなに？」：目の前の物（かな）と、聞かれて名前を教える場面
+OBJECTS = ["ボール", "コップ", "くつ", "わんわん", "くるま", "バナナ"]
+NAME_SITUATION = "場面：赤ちゃんが目の前の{obj}を見て「なに？」と聞いたので、名前を教える（{obj}という語を必ず入れる）"
+
 EAR_SYS = "文を単語に区切り、名詞と動詞と形容詞だけを、文に出てきた形のまま、空白区切りで1行で出す。ほかは何も書かない。"
 EAR_SHOTS = [("ねえ、くつはいてお外いこうか", "くつ はいて おそと いこう"),
              ("わんわんいたね、かわいいね", "わんわん いた かわいい")]
@@ -73,8 +77,9 @@ def ear_words(tok, model, line: str) -> list[str]:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--per", type=int, default=20, help="場面×人ごとの文の数")
+    ap.add_argument("--per-name", type=int, default=8, help="4段目：物×人ごとの名前を教える文の数")
     ap.add_argument("--out", default="core_v2/data/盤面_親の言葉.json")
-    ap.add_argument("--mouth", nargs="*", default=["まんま", "ママ", "パパ", "ミルク", "ボール", "わんわん", "ねんね"])
+    ap.add_argument("--mouth", nargs="*", default=["まんま", "ママ", "パパ", "ミルク", "ボール", "わんわん", "ねんね", "なに", "なあに", "コップ", "くつ", "くるま", "バナナ"])
     args = ap.parse_args()
     import torch
     torch.manual_seed(0)
@@ -92,6 +97,22 @@ def main():
                         {"role": "user", "content": prompt}]
                 line = clean_line(chat(tok, model, msgs, sample=True))
                 if line and line not in lines:
+                    lines.append(line)
+                    data["ear"][line] = ear_words(tok, model, line)
+                    print(key, line, "→", data["ear"][line], flush=True)
+                    json.dump(data, open(args.out, "w"), ensure_ascii=False, indent=1)
+    for obj in OBJECTS:
+        for who in ("ママ", "パパ"):
+            key = f"name:{obj}:{who}"
+            lines = data["lines"].setdefault(key, [])
+            tries = 0
+            while len(lines) < args.per_name and tries < args.per_name * 4:
+                tries += 1
+                msgs = [{"role": "system", "content": PARENT_SYS.format(who=who)},
+                        {"role": "user", "content": PARENT_SHOT[0]}, {"role": "assistant", "content": PARENT_SHOT[1]},
+                        {"role": "user", "content": NAME_SITUATION.format(obj=obj)}]
+                line = clean_line(chat(tok, model, msgs, sample=True))
+                if line and obj in line and line not in lines:
                     lines.append(line)
                     data["ear"][line] = ear_words(tok, model, line)
                     print(key, line, "→", data["ear"][line], flush=True)

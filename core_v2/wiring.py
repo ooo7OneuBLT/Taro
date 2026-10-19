@@ -52,6 +52,7 @@ ADDED_EDGES = [
     ("wordplan", "worth", "盤面3段目：言える語の一覧を、見込みを覚える係へ（選択肢に足す）"),
     ("want", "wordplan", "盤面3段目：言うと決めた語を、言う語を組み立てる係へ"),
     ("wordplan", "voiceout", "盤面3段目（口の下駄）：言う語をそのまま声の出口へ。下駄を外す時は声の係を通す"),
+    ("semantic", "want", "盤面4段目：目の前の物のわからなさ（知りたい）を、何をするか決める係へ（新しさ・わからなさが線条体を動かす）"),
 ]
 
 # 通り道の矢印の書式（設計書 技術付録D）。(書式, MOTOR のときの筋の数)
@@ -117,6 +118,8 @@ PATH_FORMATS: dict[tuple[str, str], tuple[Fmt, int | None]] = {
     ("wordplan", "worth"): (Fmt.TAG_AND_MAP, None), # 言える語（荷札, 空の地図）
     ("want", "wordplan"): (Fmt.TAG_AND_MAP, None),  # 言う語の荷札, 地図の [0, j]＝強さ
     ("wordplan", "voiceout"): (Fmt.TAG_AND_MAP, None),  # 同じ
+    ("semantic", "want"): (Fmt.AMOUNT, None),       # 4段目：目の前の物のわからなさ
+    ("semantic", "worth"): (Fmt.AMOUNT, None),      # 4段目：わかった（名前を知る度合いが上がった分）
 }
 
 

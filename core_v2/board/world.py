@@ -18,6 +18,11 @@
     ほかの大人にも OVERHEAR の割合で聞こえる
   - 人の名前（まま・ぱぱ）：呼ばれた人が同じ割合で気づいて来る（来たら、お腹がすいていればミルク）
   - ほかの語：向けられた大人がまれに気づく（NOTICE_OTHER）
+* 4段目（あれなに？）：objects を渡すと、太郎の目の前に物が置かれる（OBJECT_STAY_MIN 分ほどで替わる。ないときもある）。
+  - 問う語（なに・なあに・これ・あれ）：向けられた大人が食べ物の語と同じ割合で気づき、目の前の物の名前を教える一言を言う
+    （answer_questions=False なら問う語に応えない＝対照）
+  - 手の空いた大人がなんとなく話しかける時、目の前に物があれば半分はその物の名前を言う
+  - 話した大人は obs["spoke"]（太郎の目には、そばに来た人と同じに見える）
 """
 
 from __future__ import annotations
@@ -43,6 +48,9 @@ FOOD_WORDS = ("まんま", "みるく")
 NAME_WORDS = {"まま": "ママ", "ぱぱ": "パパ"}
 BUSY_REPLY = 0.3               # 手が離せない大人が、向けられた合図に一言返す割合
 CHAT_PER_MIN = 0.03            # 手の空いている大人が、なんとなく話しかける割合（1分あたり）
+QUESTION_WORDS = ("なに", "なあに", "これ", "あれ", "なんだ")
+OBJECT_STAY_MIN = 15           # 目の前の物が替わるまでの平均（分）
+NO_OBJECT = 0.3                # 替わった時に何も置かれない割合
 
 
 @dataclass
@@ -73,6 +81,9 @@ class Board:
     fullness: float = 0.8
     speech: dict | None = None             # {"feed:ママ": [一言, ...], ...}（3段目）
     understand_words: bool = True
+    objects: list | None = None            # 4段目：目の前に置かれうる物の名前
+    answer_questions: bool = True
+    object: str | None = None
     t: int = 0
     empty_min: int = 0
     rng: random.Random = field(init=False)
@@ -109,7 +120,7 @@ class Board:
             return NOTICE_OTHER if a.name == target else 0.0
         if word in NAME_WORDS:
             return min(1.0, a.notice * WORD_GAIN * strength) if NAME_WORDS[word] == a.name else 0.0
-        if word in FOOD_WORDS:
+        if word in FOOD_WORDS or (word in QUESTION_WORDS and self.answer_questions and self.object):
             return min(1.0, a.notice * WORD_GAIN * strength) * (1.0 if a.name == target else OVERHEAR)
         return NOTICE_OTHER if a.name == target else 0.0
 
@@ -146,21 +157,32 @@ class Board:
 
         fed = False
         came = noticed_by or checked_by
+        asked = action == "say" and word in QUESTION_WORDS and noticed_by is not None and bool(self.object)
+        if asked:
+            came = checked_by          # 聞かれて来た大人は名前を教える（ミルクはあげない）
         if came and self.fullness < FEED_IF_BELOW:
             self.fullness = min(1.0, self.fullness + FEED_AMOUNT)
             self.empty_min = 0
             fed = True
 
-        heard = None
+        heard, spoke = None, None
         if self.speech:
-            if fed:
+            if asked:
+                heard, spoke = self._say(f"name:{self.object}", noticed_by), noticed_by
+            elif fed:
                 heard = self._say("feed", came)
             elif came:
                 heard = self._say("called", came)
             elif action != "nothing" and target_busy(self.adults, target) and self.rng.random() < BUSY_REPLY:
                 heard = self._say("busy", target)
             elif free and self.rng.random() < CHAT_PER_MIN:
-                heard = self._say("chat", self.rng.choice(free).name)
+                spoke = self.rng.choice(free).name
+                if self.object and self.rng.random() < 0.5:
+                    heard = self._say(f"name:{self.object}", spoke)
+                else:
+                    heard = self._say("chat", spoke)
+        if self.objects and self.rng.random() < 1.0 / OBJECT_STAY_MIN:
+            self.object = None if self.rng.random() < NO_OBJECT else self.rng.choice(self.objects)
 
         self.fullness -= 1.0 / EMPTY_AFTER_MIN
         if action == "cry":
@@ -171,7 +193,7 @@ class Board:
         return {"fullness": self.fullness, "fed": fed, "came": came,
                 "noticed": noticed_by is not None, "checked": checked_by is not None,
                 "busy": target_adult is None or not target_adult.present or target_adult.busy_left > 0,
-                "present": self.present(), "heard": heard}
+                "present": self.present(), "heard": heard, "spoke": spoke, "object": self.object}
 
 
 def target_busy(adults, target) -> bool:

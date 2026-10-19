@@ -12,7 +12,9 @@
   選択肢には泣く・手と、できる語のうち今いる人への見込みが高い順に MAX_OBJECTS−2 個を出す
   （新しく言えるようになった語は生まれた時の見込み PRIOR から始まるので、一度は試される）
 * want→worth：選んだ行動の写し（行動の荷札, 地図の [0, j]＝1：j 番目の人に向けた）
-* worth→want：行動ごとの見込み（行動の荷札, 地図の [0, j]＝j 番目の人に向けた時の見込み）
+* semantic→worth：わかった（目の前の物の名前を知る度合いが上がった分。4段目）
+* worth→want：行動ごとの見込み（行動の荷札, 地図の [0, j]＝j 番目の人に向けた時にミルクが来る見込み、
+  [1, j]＝わかるようになる見込み）
 * worth→stress：期待したのに来なかった分（この1分の行動の見込み）
 * worth→feel：うれしさ（思ったより良かった分＝1−見込み）
 
@@ -20,6 +22,11 @@
 行動の1分あとにミルクが来たら1、1分遅れるごとに RECENCY 倍。来てくれた人に向けた行動だけ手柄で、
 別の人に向けた行動は「その人は来なかった」で0。WINDOW_MIN 分以内に来なければ0。
 1分に1回、rhythm.WORTH_PHASE の回に覚えて見込みを出す。
+
+4段目（あれなに？）：ほうびの3つめ「わかった」にも同じ形のNNをもう1つ持つ（Wk・uk・vk・bk）。
+わかったが来たら、そばにいる人（教えてくれた人）に向けた直前の行動に、ミルクと同じ手柄の付け方で手柄。
+どちらの見込みをどれだけ使うかは「選ぶ」係が、今の不快（おなか）とわからなさで決める（いくつかの欲求を、
+その強さで重み付けて足す。Keramati & Gutkin 2014 の体の内側の状態で重みを変える考え方）。
 """
 
 from __future__ import annotations
@@ -53,6 +60,11 @@ class Worth(Box):
         self.register_buffer("u", torch.zeros(TAG_DIM, dtype=DTYPE))
         self.register_buffer("v", torch.zeros(TAG_DIM, dtype=DTYPE))
         self.register_buffer("b", torch.tensor(math.log(PRIOR / (1 - PRIOR)), dtype=DTYPE))
+        # 4段目：「わかった」の見込み（同じ形）
+        self.register_buffer("Wk", torch.zeros(TAG_DIM, TAG_DIM, dtype=DTYPE))
+        self.register_buffer("uk", torch.zeros(TAG_DIM, dtype=DTYPE))
+        self.register_buffer("vk", torch.zeros(TAG_DIM, dtype=DTYPE))
+        self.register_buffer("bk", torch.tensor(math.log(PRIOR / (1 - PRIOR)), dtype=DTYPE))
         self.frozen = False    # True なら覚えない（対照）
         self.known_words: list[torch.Tensor] = []   # できる行動として知っている語（reset で消えない）
 
@@ -65,23 +77,29 @@ class Worth(Box):
     def reset(self) -> None:
         self.n = 0
         self.recent = deque()  # (分, 行動の荷札, 人の荷札, 見込み)
+        self.recent_k = deque()  # 4段目：わかったの手柄を待つ行動 (分, 行動の荷札, 人の荷札)
         self.offer = []
         self.people = []
         self.unmet = 0.0
         self.joy = 0.0
 
-    def value(self, act: torch.Tensor, person: torch.Tensor) -> float:
-        x = float(act @ self.W @ person) + float(self.u @ act) + float(self.v @ person) + float(self.b)
+    def _params(self, head: str):
+        return (self.W, self.u, self.v, self.b) if head == "food" else (self.Wk, self.uk, self.vk, self.bk)
+
+    def value(self, act: torch.Tensor, person: torch.Tensor, head: str = "food") -> float:
+        W, u, v, b = self._params(head)
+        x = float(act @ W @ person) + float(u @ act) + float(v @ person) + float(b)
         return 1.0 / (1.0 + math.exp(-x))
 
-    def learn(self, act: torch.Tensor, person: torch.Tensor, target: float) -> None:
+    def learn(self, act: torch.Tensor, person: torch.Tensor, target: float, head: str = "food") -> None:
         if self.frozen:
             return
-        err = LR * (target - self.value(act, person))
-        self.W += err * torch.outer(act, person)
-        self.u += err * act
-        self.v += err * person
-        self.b += err
+        W, u, v, b = self._params(head)
+        err = LR * (target - self.value(act, person, head))
+        W += err * torch.outer(act, person)
+        u += err * act
+        v += err * person
+        b += err
 
     def step(self, inbox):
         out = self.passthrough()
@@ -92,6 +110,7 @@ class Worth(Box):
         if p == WORTH_PHASE:
             people = inbox.get("social") or []
             fed = float(inbox.get("inner", 0.0)) > 0.5
+            aha = float(inbox.get("semantic", 0.0))
             came = next((t for t, m in people if float(m.max()) > NEAR), None)
             self.unmet, self.joy = 0.0, 0.0
             if fed:
@@ -106,9 +125,18 @@ class Worth(Box):
                 while self.recent and minute - 1 - self.recent[0][0] >= WINDOW_MIN:
                     _, act, who, _ = self.recent.popleft()
                     self.learn(act, who, 0.0)
+            if aha > 0.0:
+                for t0, act, who in self.recent_k:
+                    by_them = came is not None and float(who @ came) > SAME_PERSON
+                    self.learn(act, who, RECENCY ** (minute - t0 - 1) if by_them else 0.0, "know")
+                self.recent_k.clear()
+            while self.recent_k and minute - 1 - self.recent_k[0][0] >= WINDOW_MIN:
+                _, act, who = self.recent_k.popleft()
+                self.learn(act, who, 0.0, "know")
             self.people = [t for t, _ in people]
             def best(word):
-                return max((self.value(word, who) for who in self.people), default=0.0)
+                return max((self.value(word, who) + self.value(word, who, "know") for who in self.people),
+                           default=0.0)
             words = sorted(self.known_words, key=best, reverse=True)[:MAX_OBJECTS - len(ACT_TAGS)]
             acts = list(ACT_TAGS.values()) + words
             self.offer = []
@@ -116,6 +144,7 @@ class Worth(Box):
                 m = torch.zeros(GRID, GRID, dtype=DTYPE)
                 for j, who in enumerate(self.people[:GRID]):
                     m[0, j] = self.value(act, who)
+                    m[1, j] = self.value(act, who, "know")
                 self.offer.append((act, m))
         elif p == WANT_PHASE + 1:
             for act, m in inbox.get("want") or []:
@@ -123,6 +152,7 @@ class Worth(Box):
                 if j < len(self.people):
                     who = self.people[j]
                     self.recent.append((minute, act, who, self.value(act, who)))
+                    self.recent_k.append((minute, act, who))
         self.n += 1
         out["want"] = list(self.offer)
         out["stress"] = torch.tensor(min(1.0, self.unmet), dtype=DTYPE)

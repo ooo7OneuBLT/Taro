@@ -56,6 +56,14 @@
 学ぶこと自体のやり方（ヘッブ則・ETA・RECALL_MIN・覚え方）は生まれつき＝手で決める。
 W（まばら版は A・Q・T・c・cs）の中身だけが経験で変わる。どれも buffer なので save.py の保存に入り、reset() では消えない。
 
+* **盤面の世界（4段目「あれなに？」、2026-10-19。use_board() で入る）**：目の入口から「目の前の物」(見た目の荷札, 地図) が
+  届く。聞いた語（listen→semantic）が届いた回に目の前に物があれば、まばら版の覚え方で1回結び付ける（覚え方は上と同じ _bind。
+  場面をまたいで、いつも一緒に出る組だけが積み上がる）。1分に1回（rhythm の SEM_PHASE）、目の前の物の名前を
+  どれくらい知っているか k ＝ min(1, 逆向きに引く強さ／RECALL_N) を出し、
+  - semantic→want：わからなさ 1−k（目の前に物が無ければ0）。何か行動したくなるもと（知りたい）
+  - semantic→worth：わかった ＝ 同じ物について k が前の分より上がった分（ほうびの3つめ「予想の外れが減る」）
+  名前を何と呼ぶかは教えない（親が言った語が目の前の物と結び付くだけ）
+
 段階2の手で登録した表（register / load_table、`core_v2/tools/register_appearance.py`）も残す。
 表に1件でも登録してあれば、段階2と同じく表を引く（段階3の合格テスト②で使う）。
 """
@@ -143,6 +151,8 @@ class Semantic(Box):
         self.reset()
 
     def reset(self) -> None:
+        for k in ("_board_n", "_board_k", "_board_aha", "_board_unknown"):
+            self.__dict__.pop(k, None)
         self._prev_heard = False
         self._prev_q = None
         self._u = 0.0                    # 段階8：前の回に届いた驚きの強さ
@@ -357,8 +367,39 @@ class Semantic(Box):
         self.n_learn.fill_(int(blob.get("n_learn", 0)))
         return blob.get("meta", {})
 
+    def use_board(self) -> None:
+        self.__dict__["_board"] = True
+
+    def knowing(self, a) -> float:
+        """盤面：見た目 a の名前をどれくらい知っているか（0〜1）。"""
+        _, strength = self.reverse(make_tag(a))
+        return min(1.0, strength / RECALL_N)
+
+    def board_step(self, inbox, out):
+        from ..rhythm import SEM_PHASE, phase
+        n = self.__dict__.get("_board_n", 0)
+        seen = inbox.get("eyein") or []
+        obj = seen[0][0] if seen else None
+        q = inbox.get("listen")
+        if obj is not None and q is not None and float(torch.linalg.vector_norm(q)) > 0.0:
+            self._bind(make_tag(obj), None, make_tag(q))
+            self.n_learn += 1
+        if phase(n) == SEM_PHASE:
+            k = self.knowing(obj) if obj is not None else 0.0
+            prev = self.__dict__.get("_board_k")
+            same = prev is not None and obj is not None and float(prev[0] @ obj) > 0.5
+            self.__dict__["_board_aha"] = max(0.0, k - prev[1]) if same else 0.0
+            self.__dict__["_board_unknown"] = (1.0 - k) if obj is not None else 0.0
+            self.__dict__["_board_k"] = (obj, k) if obj is not None else None
+        self.__dict__["_board_n"] = n + 1
+        out["want"] = torch.tensor(self.__dict__.get("_board_unknown", 0.0), dtype=DTYPE)
+        out["worth"] = torch.tensor(self.__dict__.get("_board_aha", 0.0), dtype=DTYPE)
+        return out
+
     def step(self, inbox):
         out = self.passthrough()
+        if self.__dict__.get("_board"):
+            return self.board_step(inbox, out)
         self.last_event = ""
         q = inbox.get("listen")
         heard = q is not None and float(torch.linalg.vector_norm(q)) > 0.0
