@@ -14,9 +14,9 @@
 生まれつき（しくみ）。経験で変わるのは「聞いたことのある語の荷札」の一覧だけ（reset で消えない）。
 
 盤面の世界（2026-10-19、3段目「言葉で頼む」。use_board() で入る）：
-* 聞いた語ごとに聞いた回数を数え、SAYABLE_AFTER 回以上聞いた語を「言える語」として、多く聞いた順に
-  MAX_SAYABLE 個まで wordplan→worth へ送る（何をするか決める係の選択肢になる）。人も同じ回数で語を言い始める
-  （3回で覚える。Horst & Samuelson 2008 など、名前の段で使ったのと同じ線）
+* 聞いた語ごとに聞いた回数を数え、SAYABLE_AFTER 回以上聞いた語を「言える語」として wordplan→worth へ送る
+  （3回で覚える。Horst & Samuelson 2008 など、名前の段で使ったのと同じ線）。1回に送れるのは MAX_SAYABLE 個までなので、
+  言える語を順番に回して送る（どの語を選択肢にするかは、見込みを覚える係が見込みの高い順に決める）
 * 「選ぶ」係から言うと決めた語（want→wordplan）が届いたら、そのまま声の出口へ渡す（wordplan→voiceout）。
   声の係を通して口の形にするのは、口の下駄を外す時
 """ 
@@ -30,7 +30,7 @@ from .base import Box
 
 SAME_COS = 0.99   # これより似ていれば同じ語として一覧に足さない（荷札は語ごとに決まっているので同じ語なら1）
 SAYABLE_AFTER = 3     # 盤面：何回聞いたら言える語になるか
-MAX_SAYABLE = 6       # 盤面：選択肢にする言える語の数（泣く・手と合わせて MAX_OBJECTS 以内）
+MAX_SAYABLE = 6       # 盤面：1回に送る言える語の数（泣く・手と合わせて MAX_OBJECTS 以内）
 
 
 class Wordplan(Box):
@@ -66,9 +66,12 @@ class Wordplan(Box):
                 self._stacked = None
             self.counts[int((self._stack() @ q).argmax())] += 1
         if self.board:
-            order = sorted(range(len(self.words)), key=lambda i: -self.counts[i])
-            out["worth"] = [(self.words[i], torch.zeros(GRID, GRID, dtype=DTYPE))
-                            for i in order[:MAX_SAYABLE] if self.counts[i] >= SAYABLE_AFTER]
+            sayable = [i for i in range(len(self.words)) if self.counts[i] >= SAYABLE_AFTER]
+            if sayable:
+                k = self.__dict__.get("_turn", 0) % len(sayable)
+                pick = (sayable[k:] + sayable[:k])[:MAX_SAYABLE]
+                self.__dict__["_turn"] = k + MAX_SAYABLE
+                out["worth"] = [(self.words[i], torch.zeros(GRID, GRID, dtype=DTYPE)) for i in pick]
             if inbox.get("want"):
                 out["voiceout"] = list(inbox["want"])
         r = inbox.get("semantic")

@@ -8,7 +8,9 @@
 
 * social→worth：部屋にいる人の列（荷札, 地図）。地図が1の人＝そばに来た人（ミルクを持ってきた人）。列の順番 j が場所
 * inner→worth：この1分でミルクを飲んだか
-* wordplan→worth：言える語の列（荷札, 空の地図）。3段目から
+* wordplan→worth：言える語の列（荷札, 空の地図）。3段目から。届いた語は「できる行動」として覚えておき（known_words）、
+  選択肢には泣く・手と、できる語のうち今いる人への見込みが高い順に MAX_OBJECTS−2 個を出す
+  （新しく言えるようになった語は生まれた時の見込み PRIOR から始まるので、一度は試される）
 * want→worth：選んだ行動の写し（行動の荷札, 地図の [0, j]＝1：j 番目の人に向けた）
 * worth→want：行動ごとの見込み（行動の荷札, 地図の [0, j]＝j 番目の人に向けた時の見込み）
 * worth→stress：期待したのに来なかった分（この1分の行動の見込み）
@@ -52,6 +54,13 @@ class Worth(Box):
         self.register_buffer("v", torch.zeros(TAG_DIM, dtype=DTYPE))
         self.register_buffer("b", torch.tensor(math.log(PRIOR / (1 - PRIOR)), dtype=DTYPE))
         self.frozen = False    # True なら覚えない（対照）
+        self.known_words: list[torch.Tensor] = []   # できる行動として知っている語（reset で消えない）
+
+    def get_extra_state(self):
+        return {"known_words": [w.tolist() for w in self.known_words]}
+
+    def set_extra_state(self, state) -> None:
+        self.known_words = [torch.tensor(w, dtype=DTYPE) for w in state.get("known_words", [])]
 
     def reset(self) -> None:
         self.n = 0
@@ -77,6 +86,9 @@ class Worth(Box):
     def step(self, inbox):
         out = self.passthrough()
         p, minute = phase(self.n), self.n // TICKS_PER_MIN
+        for word, _ in inbox.get("wordplan") or []:
+            if not any(float(word @ k) > 0.99 for k in self.known_words):
+                self.known_words.append(word.clone())
         if p == WORTH_PHASE:
             people = inbox.get("social") or []
             fed = float(inbox.get("inner", 0.0)) > 0.5
@@ -95,9 +107,12 @@ class Worth(Box):
                     _, act, who, _ = self.recent.popleft()
                     self.learn(act, who, 0.0)
             self.people = [t for t, _ in people]
-            acts = list(ACT_TAGS.values()) + [t for t, _ in inbox.get("wordplan") or []]
+            def best(word):
+                return max((self.value(word, who) for who in self.people), default=0.0)
+            words = sorted(self.known_words, key=best, reverse=True)[:MAX_OBJECTS - len(ACT_TAGS)]
+            acts = list(ACT_TAGS.values()) + words
             self.offer = []
-            for act in acts[:MAX_OBJECTS]:
+            for act in acts:
                 m = torch.zeros(GRID, GRID, dtype=DTYPE)
                 for j, who in enumerate(self.people[:GRID]):
                     m[0, j] = self.value(act, who)
