@@ -14,6 +14,7 @@ world_thor.taro.ThorGrower（41係の脳・目・見えない親の手）を --s
 使い方（PC：WSL の Ubuntu の中。doc/PCへの依頼.md の依頼16）：
   python -m core_v2.tools.thor_watch [--seconds 20] [--scene FloorPlan1] [--eye dinov2|seg] [--from auto|birth|写しの名前]
                                      [--seed 0] [--stills 3] [--render-px 448] [--fov 60] [--out 動画の場所]
+                                     [--place auto|start] [--bring-in 5]
   python -m core_v2.tools.watch_scene --world thor [同じ引数]
   --fake：AI2-THOR の代わりの偽物の家（world_thor/fake.py。クラウドとテスト用。--eye seg と一緒に）
 出力：--out（既定 G/logs/動画/家の場面_<部屋>_<目>_種<seed>.mp4。ffmpeg が無ければ .gif）、_1.png …（--stills）、_まとめ.json、
@@ -96,7 +97,8 @@ class ThorPainter(Painter):
             "learn_now": sem.last_event == "learn", "looking": looking,
             "look_s": p.look_ticks * TICK_S if looking else 0.0,
             "holding": p.word if p.held else "", "hold_s": p.d * TICK_S if p.held else 0.0,
-            "brings": p.stats["brings"], "names": p.stats["names"], "learns": g.n_learn + (sem.last_event == "learn"),
+            "brings": p.stats["brings"], "names": p.stats["names"], "mode": p.mode if p.held else "",
+            "b_follow": p.stats["brings_follow"], "b_in": p.stats["brings_bringin"], "learns": g.n_learn + (sem.last_event == "learn"),
         }
 
     def draw(self, g: ThorRecorder, st: dict) -> np.ndarray:
@@ -159,13 +161,15 @@ class ThorPainter(Painter):
         D.text((x0 + 22 + bw, by - 6), f"{st['look_s']:.1f}秒", font=self.f.small, fill=FG)
         y = by + 30
         D.text((x0, y), "親の手", font=self.f.small, fill=DIM)
-        hold = f"{st['holding']} を見せている（{st['hold_s']:.1f}秒）" if st["holding"] else ""
+        tag = {"follow": "見ていた物", "bringin": "親から"}.get(st.get("mode", ""), "")
+        hold = f"{st['holding']} を見せている（{tag}・{st['hold_s']:.1f}秒）" if st["holding"] else ""
         D.text((x0 + 12, y + 30), hold or "―", font=self.f.mid, fill=ORANGE if hold else DIM)
         y += 76
         if st["learn"]:
             D.rounded_rectangle([x0, y, W - PAD, y + 56], radius=12, fill=(60, 50, 10), outline=YELLOW, width=3)
             D.text((x0 + 16, y + 8), f"覚えた！「{st['learn']}」", font=self.f.big, fill=YELLOW)
-        D.text((x0, H - PAD - 34), f"持ってきた {st['brings']}　名づけ {st['names']}　覚えた {st['learns']}",
+        D.text((x0, H - PAD - 34), f"持ってきた {st['brings']}（見ていた {st['b_follow']}・親から {st['b_in']}）　"
+                                   f"名づけ {st['names']}　覚えた {st['learns']}",
                font=self.f.mid, fill=FG)
         return np.asarray(img)
 
@@ -183,6 +187,10 @@ def run(argv=None) -> dict:
     ap.add_argument("--render-px", type=int, default=448, help="AI2-THOR に描かせる大きさ（目の入口へは 224 に縮める）")
     ap.add_argument("--fov", type=float, default=60.0, help="目の画角（60＝目の入口の指令の写しの較正と同じ。変えると写しが外れる）")
     ap.add_argument("--platform", default=None, help="AI2-THOR の platform（既定なし＝Linux64・窓あり。WSL では CloudRendering は動かない）")
+    ap.add_argument("--place", default="auto", choices=["auto", "start"],
+                    help="太郎の座る場所：auto＝名前を言える物が目に入る所を選ぶ／start＝エージェントの始めの場所")
+    ap.add_argument("--bring-in", type=float, default=tp.BRING_IN_AFTER_S,
+                    help="名前の物をこの秒数見なければ親が物を持ってきて見せる（0＝しない）")
     ap.add_argument("--fake", action="store_true", help="偽物の家（world_thor/fake.py）。テスト・クラウド用")
     ap.add_argument("--max-ticks", type=int, default=0, help="この回数で止める（試し用）")
     ap.add_argument("--out", default=None)
@@ -214,10 +222,15 @@ def run(argv=None) -> dict:
             frames_kept.append(buf.getvalue())
 
     env = make_env(a.scene, fake=a.fake, render_px=a.render_px, platform=a.platform, fov=a.fov,
-                   log_dir=os.path.dirname(os.path.abspath(out)), seed=a.seed)
+                   log_dir=os.path.dirname(os.path.abspath(out)), seed=a.seed, place=a.place)
     import time
     t0 = time.time()
-    g = ThorRecorder(a.seed, a.eye, env=env, start=a.start, repeat=a.repeat, frame_fn=on_tick)
+    g = ThorRecorder(a.seed, a.eye, env=env, start=a.start, repeat=a.repeat, frame_fn=on_tick,
+                     bring_in_after=a.bring_in if a.bring_in > 0 else None)
+    pl = env.placement
+    print(f"[家の動画] 座る場所（{pl['mode']}）：{pl['position']} 向き {pl['yaw']}度　目に入る名前の物 {pl['n_in_view']}"
+          f"（{'・'.join(pl['words']) or 'なし'}）　点 {pl['score']}（引いた点 {pl['penalty']} {pl['why']}）　"
+          f"始めの場所なら {pl['start_n_in_view']}　候補 {pl['n_candidates']}", flush=True)
     print(f"[家の動画] 始める太郎：{g.start_name()}　目：{g.eye_info.get('eye')}　部屋：{a.scene}　"
           f"名前を言える物 {len(env.targets)}（{sorted({env.word_of(i) for i in env.targets})}）　{ticks / 10:.0f}秒", flush=True)
     try:
@@ -244,8 +257,11 @@ def run(argv=None) -> dict:
     lk = res["looks"]
     print(f"[家の動画] 動画 {path}（{len(stats)}コマ、実時間 {res['wall_s']}秒、AI2-THOR を {res['thor_calls']}回、失敗 {res['thor_fail']}）",
           flush=True)
-    print(f"[家の動画] 親：持ってきた {res['parent']['brings']}　名づけ {res['parent']['names']}"
-          f"（言い直し {res['parent']['repeats']}）　語ごと {res['named_by_word']}", flush=True)
+    ps = res["parent"]
+    print(f"[家の動画] 親：持ってきた {ps['brings']}（follow {ps['brings_follow']}・bringin {ps['brings_bringin']}、"
+          f"bringin を見た {ps['bringin_looked']}・見なかった {ps['bringin_unlooked']}）　名づけ {ps['names']}"
+          f"（follow {ps['names_follow']}・bringin {ps['names_bringin']}、言い直し {ps['repeats']}）　語ごと {res['named_by_word']}",
+          flush=True)
     print(f"[家の動画] 見た時間：{lk['looks']}回　平均 {lk['mean_s']}秒　真ん中 {lk['median_s']}秒　最長 {lk['max_s']}秒　"
           f"1秒以上 {lk['n_ge_1s']}回　語ごと {lk['by_word']}", flush=True)
     return res

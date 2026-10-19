@@ -5,7 +5,8 @@ env._orienting.set_map_target へ。太郎の声は次の回に自分の耳へ�
 家1つ）と目（eye.install_thor_eye）と親（parent.FollowInParent）だけ。
 
 * ThorTaro：脳＋目＋家。face_home() で目を最初の向き（真正面・下へ10度）に置く（親が座らせる。EyeTaro.face_table と同じ役）
-* ThorGrower：意味の辞書と耳を育てながら（grow_names.Grower と同じ係を learning=True）、見えない親の手と回す。
+* ThorGrower：意味の辞書と耳を育てながら（grow_names.Grower と同じ係を learning=True）、見えない親の手と回す
+  （follow-in と、5秒名前の物を見ないときの bring-in。bring_in_after=None で follow-in だけ）。
   run(秒) で回し、見た時間（LookLog）と親のしたこと（名づけの回数など）を数える。写しはまだ作らない（計画②で）
 """
 
@@ -17,6 +18,7 @@ import torch
 
 from ..tools import growth
 from ..tools.grow_names import EyeTaro
+from .parent import BRING_IN_AFTER_S as tp_BRING_IN
 from .parent import TICK_S, FollowInParent, LookLog
 
 FROM_PHASE = 6      # start="auto" のとき：段5以下の、目だけの場面で育った終わりの写しのうち、いちばん上の段の最新
@@ -71,13 +73,14 @@ class ThorTaro(EyeTaro):
 
 
 class ThorGrower(ThorTaro):
-    def __init__(self, *a, repeat: int | None = None, **kw) -> None:
+    def __init__(self, *a, repeat: int | None = None, bring_in_after: float | None = tp_BRING_IN, **kw) -> None:
         super().__init__(*a, **kw)
         b = self.brain.boxes
         b["semantic"].learning = True
         b["listen"].learning = True
         self.rng = random.Random(self.seed)
-        self.parent = FollowInParent(self.rng, **({} if repeat is None else {"repeat": repeat}))
+        self.parent = FollowInParent(self.rng, bring_in_after=bring_in_after,
+                                     **({} if repeat is None else {"repeat": repeat}))
         self.looks = LookLog()
         self.events: list[dict] = []
         self.n_learn = 0
@@ -95,7 +98,7 @@ class ThorGrower(ThorTaro):
         for key in ("brought", "said", "put"):
             if key in did:
                 self.events.append({"t": t, "event": key, "word": did.get("holding") or did.get("brought") or did.get("put", ""),
-                                    "text": did.get("said", ""), "looking": did["looking"]})
+                                    "text": did.get("said", ""), "looking": did["looking"], "mode": did.get("mode", "")})
         if "said" in did:
             self.last_said, self.last_named = did["said"], did.get("holding", "")
         sem = self.brain.boxes["semantic"]
@@ -116,6 +119,7 @@ class ThorGrower(ThorTaro):
     def summary(self) -> dict:
         return {"ticks": self.n_tick, "seconds": round(self.n_tick * TICK_S, 1), "parent": dict(self.parent.stats),
                 "named_by_word": dict(self.parent.named), "looks": self.looks.summary(),
+                "placement": {k: v for k, v in getattr(self.env, "placement", {}).items()},
                 "semantic_learn": self.n_learn, "learn_by_word": dict(self.learn_by_word),
                 "eye": self.eye_info, "start": self.start_name(), "scene": self.env.scene_name,
                 "thor_calls": self.env.n_calls, "thor_fail": self.env.n_fail,

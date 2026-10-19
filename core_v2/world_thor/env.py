@@ -17,6 +17,16 @@
 正解（記録・親・動画の字のためだけ。太郎には渡さない）：物ごとの色分けの絵（renderInstanceSegmentation）から、
 「目の真ん中にある物」（centre_object）と、物の見えている所の真ん中（object_centres）を求める。
 
+座る場所（place="auto"、既定。依頼16 の PC の絵で、エージェントの始めの場所は FloorPlan1 で冷蔵庫の扉の目の前、
+FloorPlan201 でソファの後ろの壁ぎわだった。名前を言える物がほとんど目に入らず、親の「1秒見たら持ってくる」が1回も起きなかった）：
+reset のとき、GetReachablePositions の場所から PLACE_MAX_CANDIDATES（60）か所を選び（種で決まる）、向き 0/90/180/270度ごとに、
+「名前を言える拾える物で、目から PLACE_NEAR_M〜PLACE_FAR_M（0.5〜2.0m）にあり、最初の目の向き（下へ10度・画角60度）の
+絵の中に入るもの」の数を、メタデータの物の場所から幾何で数える（描かない）。閉じた戸棚・冷蔵庫の中の物、目との間に
+大きな物（PLACE_LARGE_M＝0.4m 以上）の箱がある物は数えない。目の真正面 PLACE_BLOCK_M（0.6m）以内に名前の無い大きな物が
+あれば PLACE_BLOCK_PENALTY、目の 0.5m 先の床が歩けない（壁・家具がすぐ前）なら PLACE_WALL_PENALTY を引く。
+いちばん点の高い所へ Teleport する（同点は種の乱数で選ぶ）。親が子を、物の見える所へ座らせる（旧太郎の親が
+おもちゃを子の前に並べたのと同じ役）［Tier3・モデル上の選択。数は仮置き］。place="start" は今までどおり。
+
 AI2-THOR は1回の呼び出しが重い（約55ミリ秒）ので、環境の1歩（0.01秒）ごとには呼ばない。物を動かす（hold・put_back）・
 目の向きは控えておき、画像を読む（render_eye・centre_object）ときにまとめて送る（物を動かす → 最後にカメラの向き）。
 """
@@ -39,6 +49,14 @@ FOV_DEG = 60.0           # 上の説明（目の入口の指令の写しの較�
 PX = 224
 CENTRE_DEG = 5.0         # 「目の真ん中にある物」を数える円の半径（度。watch_scene の視線の丸と同じ）
 CENTRE_MIN_FRAC = 0.15   # その円の画素のうち、これだけ以上を占める物だけを「真ん中の物」とする［仮置き］
+PLACE_MAX_CANDIDATES = 60
+PLACE_YAWS = (0.0, 90.0, 180.0, 270.0)
+PLACE_NEAR_M, PLACE_FAR_M = 0.5, 2.0
+PLACE_LARGE_M = 0.4        # これより大きい（箱のいちばん長い辺）名前の無い物を「大きな物」とする
+PLACE_BLOCK_M = 0.6
+PLACE_BLOCK_PENALTY = 3.0
+PLACE_WALL_PENALTY = 1.0
+PLACE_IGNORE_TYPES = ("Floor", "Rug", "Window", "Painting", "Poster", "LightSwitch", "Curtains", "Blinds")
 CONTROLLER_KW = {"server_timeout": 900, "makeAgentsVisible": False, "renderInstanceSegmentation": True}
 
 
@@ -117,7 +135,7 @@ class ThorEnv:
     def __init__(self, scene: str = "FloorPlan1", controller=None, px: int = PX, render_px: int | None = None,
                  fov: float = FOV_DEG, eye_y: float = EYE_Y_M, eye_ahead: float = EYE_AHEAD_M,
                  base_tilt: float = BASE_TILT_DEG, platform: str | None = None, log_dir: str | None = None,
-                 seed: int = 0, controller_kw: dict | None = None) -> None:
+                 seed: int = 0, controller_kw: dict | None = None, place: str = "auto") -> None:
         from .parent import TYPE_WORD
         self.scene_name = scene
         self.px = int(px)
@@ -126,6 +144,10 @@ class ThorEnv:
         self.eye_y, self.eye_ahead, self.base_tilt = float(eye_y), float(eye_ahead), float(base_tilt)
         self.type_word = dict(TYPE_WORD)
         self.dt = DT
+        if place not in ("auto", "start"):
+            raise ValueError(f"place は auto か start：{place}")
+        self.place = place
+        self.placement: dict = {}
         self.action_space = _ActionSpace()
         self.unwrapped = self
         self.controller = controller if controller is not None else make_controller(
@@ -152,6 +174,7 @@ class ThorEnv:
         ev = self.controller.reset(scene=self.scene_name)
         self.n_calls += 1
         self._take(ev)
+        self._place()
         ag = self._event.metadata["agent"]
         self.agent_yaw = float(ag["rotation"]["y"])
         fwd0, _r, _u = cam_basis(self.agent_yaw, 0.0)
@@ -179,7 +202,154 @@ class ThorEnv:
                         if o["objectType"] in self.type_word and o.get("pickupable", True)]
         self._open_log(seed)
         self._log("reset", "", f"{self.scene_name} 物{len(self.objects)} 名前を言える物{len(self.targets)}")
+        pl = self.placement
+        self._log("place", "", f"{pl.get('mode')} 場所{pl.get('position')} 向き{pl.get('yaw')} 点{pl.get('score')} "
+                               f"目に入る名前の物{pl.get('n_in_view')} {'・'.join(pl.get('words', []))} "
+                               f"候補{pl.get('n_candidates')} {pl.get('error', '')}", cause="place")
         return LazyObs(self, self.n_step), {"targets": list(self.targets)}
+
+    # ================================================================ 座る場所
+    def _nameable(self) -> list[str]:
+        return [i for i, o in self.objects.items()
+                if o["objectType"] in self.type_word and o.get("pickupable", True)]
+
+    def _hidden(self, o) -> bool:
+        """閉じた戸棚・冷蔵庫・引き出しなどの中にある物（外からは見えない）。"""
+        for pid in o.get("parentReceptacles") or []:
+            p = self.objects.get(pid)
+            if p is not None and p.get("openable") and not p.get("isOpen", False):
+                return True
+        return False
+
+    @staticmethod
+    def _box(o):
+        bb = o.get("axisAlignedBoundingBox") or {}
+        if not bb.get("center") or not bb.get("size"):
+            return None
+        c, sz = vec(bb["center"]), vec(bb["size"])
+        return c - sz / 2.0, c + sz / 2.0
+
+    @staticmethod
+    def _ray_box(p, d, lo, hi):
+        """p から d の向き（単位でなくてよい）の光線が箱 [lo, hi] に入る t（箱の中からなら 0）。当たらなければ None。"""
+        t0, t1 = -np.inf, np.inf
+        for k in range(3):
+            if abs(d[k]) < 1e-12:
+                if p[k] < lo[k] or p[k] > hi[k]:
+                    return None
+                continue
+            a, b = (lo[k] - p[k]) / d[k], (hi[k] - p[k]) / d[k]
+            t0, t1 = max(t0, min(a, b)), min(t1, max(a, b))
+        if t1 < max(t0, 0.0):
+            return None
+        return max(t0, 0.0)
+
+    def score_spot(self, pos, yaw: float, reach=None) -> dict:
+        """その場所・向きに座ったときの点（上の説明）。pos はエージェントの場所（GetReachablePositions の点）。"""
+        fwd0 = cam_basis(yaw, 0.0)[0]
+        eye = np.asarray(pos, dtype=float) + self.eye_ahead * fwd0
+        eye[1] = self.eye_y
+        pitch = -self.base_tilt
+        targets = set(self._nameable())
+        large = []
+        for i, o in self.objects.items():
+            if i in targets or o["objectType"] in PLACE_IGNORE_TYPES:
+                continue
+            bx = self._box(o)
+            if bx is not None and float(np.max(bx[1] - bx[0])) >= PLACE_LARGE_M:
+                large.append((i, bx))
+        seen = []
+        for i in sorted(targets):
+            o = self.objects[i]
+            if self._hidden(o):
+                continue
+            c = self._centre(o)
+            v = c - eye
+            dist = float(np.linalg.norm(v))
+            if not (PLACE_NEAR_M <= dist <= PLACE_FAR_M):
+                continue
+            pr = project(c, eye, yaw, pitch, self.px, self.fov)
+            if pr is None or not (0.0 <= pr[0] < self.px and 0.0 <= pr[1] < self.px):
+                continue
+            parents = set(o.get("parentReceptacles") or [])
+            blocked = False
+            for j, (lo, hi) in large:
+                if j in parents:
+                    continue
+                t = self._ray_box(eye, v, lo, hi)
+                if t is not None and 0.02 < t < 0.95:       # v の長さを1とした割合（物の手前で当たる）
+                    blocked = True
+                    break
+            if not blocked:
+                seen.append(i)
+        penalty, why = 0.0, []
+        hdir = np.array([fwd0[0], 0.0, fwd0[2]])
+        for j, (lo, hi) in large:
+            t = self._ray_box(eye, hdir, lo, hi)
+            if t is not None and t < PLACE_BLOCK_M:
+                penalty += PLACE_BLOCK_PENALTY
+                why.append(self.objects[j]["objectType"])
+                break
+        if reach is not None and len(reach):
+            ahead = np.asarray(pos, dtype=float) + 0.5 * fwd0
+            dd = np.hypot(reach[:, 0] - ahead[0], reach[:, 2] - ahead[2])
+            if float(dd.min()) > 0.15:
+                penalty += PLACE_WALL_PENALTY
+                why.append("前が歩けない")
+        return {"score": len(seen) - penalty, "n_in_view": len(seen), "seen": seen, "penalty": penalty,
+                "why": why, "eye": eye}
+
+    def _place(self) -> None:
+        """座る場所を決めて、そこへ Teleport する（place="auto"）。決めた所は self.placement に残す。"""
+        ag = self._event.metadata["agent"]
+        here, yaw0 = vec(ag["position"]), float(ag["rotation"]["y"])
+        reach = None
+        self.placement_error = ""
+        if self.place == "auto":
+            ev = self._call("GetReachablePositions")
+            pts = ev.metadata.get("actionReturn") if self._ok(ev) else None
+            if not pts:
+                self.placement_error = f"GetReachablePositions：{self.last_error}"
+            if pts:
+                reach = np.array([[float(p["x"]), float(p["y"]), float(p["z"])] for p in pts])
+        start = self.score_spot(here, yaw0, reach)
+        best = {"pos": here, "yaw": yaw0, **start}
+        n_cand = 0
+        if reach is not None:
+            idx = np.arange(len(reach))
+            if len(idx) > PLACE_MAX_CANDIDATES:
+                idx = np.sort(self.np_random.choice(idx, PLACE_MAX_CANDIDATES, replace=False))
+            cands = [{"pos": here, "yaw": yaw0, **start}]
+            for i in idx:
+                for y in PLACE_YAWS:
+                    cands.append({"pos": reach[i], "yaw": y, **self.score_spot(reach[i], y, reach)})
+            n_cand = len(cands)
+            top = max(c["score"] for c in cands)
+            tied = [c for c in cands if c["score"] >= top - 1e-9]
+            best = tied[int(self.np_random.integers(len(tied)))] if len(tied) > 1 else tied[0]
+            moved = not (np.allclose(best["pos"], here, atol=1e-3) and abs((best["yaw"] - yaw0) % 360.0) < 1e-3)
+            if moved:
+                p = xyz(best["pos"])
+                ok = False
+                for act in ("Teleport", "TeleportFull"):
+                    ev = self._call(act, position=p, rotation={"x": 0.0, "y": float(best["yaw"]), "z": 0.0},
+                                    horizon=0.0, standing=True)
+                    if self._ok(ev):
+                        ok = True
+                        break
+                if not ok:
+                    best = {"pos": here, "yaw": yaw0, **start}
+                    self.placement_error = self.last_error
+        ag = self._event.metadata["agent"]
+        self.placement = {
+            "mode": self.place if reach is not None or self.place == "start" else "start(到達点なし)",
+            "position": [round(float(x), 3) for x in vec(ag["position"])], "yaw": round(float(ag["rotation"]["y"]), 1),
+            "score": round(float(best["score"]), 2), "n_in_view": int(best["n_in_view"]),
+            "words": [self.type_word.get(self.objects[i]["objectType"], "") for i in best["seen"]],
+            "penalty": best["penalty"], "why": list(best["why"]), "n_candidates": n_cand,
+            "start_n_in_view": int(start["n_in_view"]), "start_score": round(float(start["score"]), 2),
+            "error": self.placement_error[:200],
+        }
 
     def step(self, action=None):
         self.time += self.dt
