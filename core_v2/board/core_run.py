@@ -58,21 +58,31 @@ def _who(j, names):
 
 
 OBJECTS = ["ボール", "コップ", "くつ", "わんわん", "くるま", "バナナ"]
+NEW_OBJECTS = ["りんご", "ぼうし", "いす", "ほん", "にゃんにゃん", "でんしゃ"]   # 4段目の後半：初めて見る物
 
 
 def grow_core(rule: str, seed: int, days: int, frozen: bool = False, keep_log: bool = False,
               stage: int = 1, swap: bool = False, brain: Brain | None = None,
-              understand_words: bool = True, answer_questions: bool = True) -> dict:
+              understand_words: bool = True, answer_questions: bool = True,
+              objects: list | None = None, joy_news: bool = True) -> dict:
     """stage 1：ママだけ。2：ママとパパ（brain が無ければ1段目を同じ日数育ててから）。
     3：2段目の世界で大人が話し、言葉に応える（brain は2段目まで育った脳を渡す）。
     4：3段目の世界の目の前に物が置かれ、大人は問う語に名前で答える（brain は3段目まで育った脳）。
-    4段目は、おなかがすいていない1分ごとに (分, 目の前の物, 名前を知っていたか, 行動) を "curious" に記録する。"""
+    4段目は、おなかがすいていない1分ごとに (分, 目の前の物, 名前を知っていたか, 行動) を "curious" に記録する
+    （objects で目の前に置く物を替えられる。既定は OBJECTS）。
+    5段目：4段目の世界に、満腹の時のすすめ（offers）と、物の話への応え方（news。joy_news=False で対照）を足す。
+    すすめられている1分ごとに "offers" へ (分, 行動, すすめた人に向けたか, 断られたか, 飲まされたか)、
+    話す行動・物の名前を言った1分ごとに "tells" へ (分, 行動, 語, 相手, 相手がいなかった間の物か, 喜んだか)、
+    その分に話せた行動の数を "can_tell" へ ({"tell_new": 人数, "tell_old": 人数}) 記録する。"""
     if stage == 2 and brain is None:
         brain = grow_core(rule, seed, days, frozen, stage=1)["brain"]
     adults = stage1_adults() if stage == 1 else stage2_adults(swap)
+    objs = objects or (OBJECTS if stage == 4 else OBJECTS + NEW_OBJECTS)
     board = Board(rule=rule, seed=seed + 500 * (stage - 1), adults=adults,
                   speech=speech_data()["lines"] if stage >= 3 else None, understand_words=understand_words,
-                  objects=OBJECTS if stage >= 4 else None, answer_questions=answer_questions)
+                  objects=objs if stage >= 4 else None, answer_questions=answer_questions,
+                  offers=stage >= 5, news=stage >= 5, joy_news=joy_news,
+                  object_words={normalize_kana(o): o for o in objs} if stage >= 5 else None)
     if brain is None:
         brain = new_brain(seed, frozen)
     else:
@@ -81,16 +91,20 @@ def grow_core(rule: str, seed: int, days: int, frozen: bool = False, keep_log: b
         use_language(brain)
     if stage >= 4:
         brain.boxes["semantic"].use_board()
+    from core_v2.boxes.worth import TELL_TAGS
+    want, episodic = brain.boxes["want"], brain.boxes["episodic"]
+    offers, tells, can_tell = [], [], []
     sem = brain.boxes["semantic"]
     curious = []
     brain.reset()
     stress = brain.boxes["stress"]
     episodes, cur, log = [], [], []
     fed, came, heard, spoke = False, None, None, None
+    offered, overfed, smiled = False, False, None
     for t in range(days * MINUTES_PER_DAY):
         present = board.present()
-        ext = {"gutin": {"fullness": board.fullness, "fed": fed},
-               "eyein": {"people": [(n, n in (came, spoke)) for n in present], "object": board.object}}
+        ext = {"gutin": {"fullness": board.fullness, "fed": fed, "offered": offered, "overfed": overfed},
+               "eyein": {"people": [(n, n in (came, spoke), n == smiled) for n in present], "object": board.object}}
         action, strength, target, word = "nothing", 0.0, None, None
         for k in range(TICKS_PER_MIN):
             if k == 0 and heard:
@@ -108,7 +122,24 @@ def grow_core(rule: str, seed: int, days: int, frozen: bool = False, keep_log: b
         if target is None:
             action = "nothing"
         f0 = board.fullness
+        offerer = board.offer[0] if board.offer else None
+        tag = want.last.get("tag")
+        kind = next((k for k, tg in TELL_TAGS.items() if tag is not None and float(tg @ tag) > 0.99), None)
         obs = board.step(action, strength, target, word)
+        if stage >= 5:
+            if offerer is not None:
+                offers.append((t, action if action != "say" else "say:" + word, target == offerer,
+                               obs["refused"], obs["overfed"]))
+            if kind or (action == "say" and word in (board.object_words or {})):
+                told = obs["told"]
+                tells.append((t, kind, word, target, bool(told and told[2]), obs["smiled"] is not None))
+            avail = {k: 0 for k in TELL_TAGS}
+            for tg, m in episodic.out_worth:
+                k = next(k for k, x in TELL_TAGS.items() if float(x @ tg) > 0.99)
+                avail[k] = int((m[0] > 0).sum())
+            if any(avail.values()):
+                can_tell.append((t, avail))
+        offered, overfed, smiled = obs["offered"], obs["overfed"], obs["smiled"]
         if stage >= 4 and board.object and f0 >= HUNGRY_FROM:
             k = sem.knowing(_base("obj:" + board.object))
             curious.append((t, board.object, k >= 1.0, action if action != "say" else "say:" + word))
@@ -123,4 +154,5 @@ def grow_core(rule: str, seed: int, days: int, frozen: bool = False, keep_log: b
             if cur:
                 episodes.append(cur)
             cur = []
-    return {"episodes": episodes, "log": log, "brain": brain, "curious": curious}
+    return {"episodes": episodes, "log": log, "brain": brain, "curious": curious,
+            "offers": offers, "tells": tells, "can_tell": can_tell}

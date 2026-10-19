@@ -53,6 +53,11 @@ ADDED_EDGES = [
     ("want", "wordplan", "盤面3段目：言うと決めた語を、言う語を組み立てる係へ"),
     ("wordplan", "voiceout", "盤面3段目（口の下駄）：言う語をそのまま声の出口へ。下駄を外す時は声の係を通す"),
     ("semantic", "want", "盤面4段目：目の前の物のわからなさ（知りたい）を、何をするか決める係へ（新しさ・わからなさが線条体を動かす）"),
+    ("inner", "want", "盤面5段目：いや（満腹なのにミルクが口に来る）を、何をするか決める係へ（島皮質→線条体）"),
+    ("social", "want", "盤面5段目：会いたかった人が戻ってきた強さ（相手に向かいたい）を、何をするか決める係へ"),
+    ("semantic", "episodic", "盤面5段目：目の前の物の名前（知っていれば語の荷札）を、思い出の帳面へ"),
+    ("episodic", "wordplan", "盤面5段目：話せる思い出（物の名前の語と、誰がその時いなかったか）を、言う語を組み立てる係へ"),
+    ("wordplan", "episodic", "盤面5段目：話した思い出（誰に話したか）を帳面へ"),
 ]
 
 # 通り道の矢印の書式（設計書 技術付録D）。(書式, MOTOR のときの筋の数)
@@ -98,8 +103,8 @@ PATH_FORMATS: dict[tuple[str, str], tuple[Fmt, int | None]] = {
     # 盤面の世界（2026-10-19、何をするか決める係の通り道。core_v2/rhythm.py の位相の順）
     ("gutin", "need"): (Fmt.AMOUNT, None),          # お腹の空き具合（1−満ち具合）
     ("gutin", "feel"): (Fmt.AMOUNT, None),          # ミルクを飲んだ（1/0）
-    ("gutin", "inner"): (Fmt.AMOUNT, None),         # 同じ
-    ("inner", "worth"): (Fmt.AMOUNT, None),         # 同じ
+    ("gutin", "inner"): (Fmt.TAG_AND_MAP, None),    # 体の内側の知らせの列（worth.BODY_TAGS の荷札, 地図の [0, 0]＝強さ）：飲んだ・いや・飲まされた
+    ("inner", "worth"): (Fmt.TAG_AND_MAP, None),    # 同じ
     ("need", "vars"): (Fmt.AMOUNT, None),           # 不快（お腹がすいた強さ）
     ("vars", "want"): (Fmt.AMOUNT, None),           # 同じ
     ("eyein", "social"): (Fmt.TAG_AND_MAP, None),   # 部屋にいる人（荷札, 地図。1＝そばに来た人、0.5＝部屋にいる人）
@@ -120,6 +125,13 @@ PATH_FORMATS: dict[tuple[str, str], tuple[Fmt, int | None]] = {
     ("wordplan", "voiceout"): (Fmt.TAG_AND_MAP, None),  # 同じ
     ("semantic", "want"): (Fmt.AMOUNT, None),       # 4段目：目の前の物のわからなさ
     ("semantic", "worth"): (Fmt.AMOUNT, None),      # 4段目：わかった（名前を知る度合いが上がった分）
+    ("inner", "want"): (Fmt.AMOUNT, None),          # 5段目：いや
+    ("social", "want"): (Fmt.AMOUNT, None),         # 5段目：会いたかった人が戻ってきた強さ（戻った直後1）
+    ("eyein", "episodic"): (Fmt.TAG_AND_MAP, None), # 5段目：[(目の前の物の荷札, 空), (部屋にいる人の荷札, 地図), …]（物が無ければ荷札ゼロ）
+    ("semantic", "episodic"): (Fmt.TAG, None),      # 5段目：目の前の物の名前の語（知らなければゼロ）
+    ("episodic", "worth"): (Fmt.TAG_AND_MAP, None), # 5段目：話す行動（worth.TELL_TAGS, 地図の [0, j]＝1：j 番目の人に話せる）
+    ("episodic", "wordplan"): (Fmt.TAG_AND_MAP, None),  # 5段目：話せる語（荷札, [0, j]＝j がいなかった時の物、[1, j]＝j もいた時の物）
+    ("wordplan", "episodic"): (Fmt.TAG_AND_MAP, None),  # 5段目：話した語（荷札, [0, j]＝1：j に話した）
 }
 
 

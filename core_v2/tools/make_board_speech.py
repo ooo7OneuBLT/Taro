@@ -28,14 +28,22 @@ SITUATIONS = {
     "called": "場面：赤ちゃんに呼ばれたので、そばに来た",
     "busy": "場面：赤ちゃんが呼んでいるが、今は手が離せない",
     "chat": "場面：そばで遊んでいる赤ちゃんに、目に入った物（ボール・わんわん・くつ・コップなど）について話しかける",
+    # 4段目：物を見せて名前を聞く遊び（Ninio & Bruner 1978 の絵本読みの「これなあに？」）。次の1分に名前を言う
+    "quiz": "場面：目の前の物を指さして、赤ちゃんに「これなあに？」と聞く（物の名前は言わない）",
+    # 5段目「断る・前のことを話す」
+    "offer": "場面：赤ちゃんはもうおなかいっぱいだけど、もう少しミルク（まんま）を飲ませようとすすめる",
+    "refused": "場面：赤ちゃんがミルクをいやがったので、やめてあげる（「いや」か「いらない」という語を入れる）",
+    "back": "場面：しばらく部屋の外にいて、赤ちゃんのところへ戻ってきて、留守の間になにかあったか聞く",
 }
 # 4段目「あれなに？」：目の前の物（かな）と、聞かれて名前を教える場面
 OBJECTS = ["ボール", "コップ", "くつ", "わんわん", "くるま", "バナナ"]
+NEW_OBJECTS = ["りんご", "ぼうし", "いす", "ほん", "にゃんにゃん", "でんしゃ"]   # 4段目の後半：初めて見る物
 NAME_SITUATION = "場面：赤ちゃんが目の前の{obj}を見て「なに？」と聞いたので、名前を教える（{obj}という語を必ず入れる）"
 
-EAR_SYS = "文を単語に区切り、名詞と動詞と形容詞だけを、文に出てきた形のまま、空白区切りで1行で出す。ほかは何も書かない。"
+EAR_SYS = "文を単語に区切り、名詞と代名詞と動詞と形容詞だけを、文に出てきた形のまま、空白区切りで1行で出す。ほかは何も書かない。"
 EAR_SHOTS = [("ねえ、くつはいてお外いこうか", "くつ はいて おそと いこう"),
-             ("わんわんいたね、かわいいね", "わんわん いた かわいい")]
+             ("わんわんいたね、かわいいね", "わんわん いた かわいい"),
+             ("あれ、これなあに？", "これ なあに")]   # 4段目：問う語（代名詞）も聞き取る
 MOUTH_SYS = "あなたは1歳の赤ちゃんの口です。渡された単語1つだけを、赤ちゃんが言うように短く言ってください。ほかの言葉は足さないでください。"
 
 
@@ -79,7 +87,9 @@ def main():
     ap.add_argument("--per", type=int, default=20, help="場面×人ごとの文の数")
     ap.add_argument("--per-name", type=int, default=8, help="4段目：物×人ごとの名前を教える文の数")
     ap.add_argument("--out", default="core_v2/data/盤面_親の言葉.json")
-    ap.add_argument("--mouth", nargs="*", default=["まんま", "ママ", "パパ", "ミルク", "ボール", "わんわん", "ねんね", "なに", "なあに", "コップ", "くつ", "くるま", "バナナ"])
+    ap.add_argument("--mouth", nargs="*", default=["まんま", "ママ", "パパ", "ミルク", "ボール", "わんわん", "ねんね", "なに", "なあに", "コップ", "くつ", "くるま", "バナナ",
+                                                   "いや", "いらない"] + NEW_OBJECTS)
+    ap.add_argument("--objects", nargs="*", default=OBJECTS + NEW_OBJECTS, help="名前を教える文を作る物")
     args = ap.parse_args()
     import torch
     torch.manual_seed(0)
@@ -91,7 +101,9 @@ def main():
         for who in ("ママ", "パパ"):
             key = f"{sit}:{who}"
             lines = data["lines"].setdefault(key, [])
-            while len(lines) < args.per:
+            tries = 0
+            while len(lines) < args.per and tries < args.per * 4:   # 同じ文ばかり出る場面で止まらないように
+                tries += 1
                 msgs = [{"role": "system", "content": PARENT_SYS.format(who=who)},
                         {"role": "user", "content": PARENT_SHOT[0]}, {"role": "assistant", "content": PARENT_SHOT[1]},
                         {"role": "user", "content": prompt}]
@@ -101,7 +113,7 @@ def main():
                     data["ear"][line] = ear_words(tok, model, line)
                     print(key, line, "→", data["ear"][line], flush=True)
                     json.dump(data, open(args.out, "w"), ensure_ascii=False, indent=1)
-    for obj in OBJECTS:
+    for obj in args.objects:
         for who in ("ママ", "パパ"):
             key = f"name:{obj}:{who}"
             lines = data["lines"].setdefault(key, [])

@@ -61,6 +61,7 @@ W（まばら版は A・Q・T・c・cs）の中身だけが経験で変わる。
   場面をまたいで、いつも一緒に出る組だけが積み上がる）。1分に1回（rhythm の SEM_PHASE）、目の前の物の名前を
   どれくらい知っているか k を出す。k は「物 → 語 → 物」の引き直しが元の物に戻るか：目の前の物から逆に語を引き（3回以上
   覚えた細胞だけ）、その語から見た目の予想を引いて、目の前の物との似かた c から k ＝ (c−KNOW_LO)/(KNOW_HI−KNOW_LO)（0〜1）。
+  （1回でも覚えた細胞で引く案は、1回だけ一緒に聞いた語の細胞が見た目にぴったり合って勝ち、だめだった）
   どの物とも一緒に聞く語（まんま・だね）は、引き直すと物の平均になり元の物に戻らないので、知っていることにならない
   - semantic→want：わからなさ 1−k（目の前に物が無ければ0）。何か行動したくなるもと（知りたい）
   - semantic→worth：わかった ＝ 同じ物について k が前の分より上がった分（ほうびの3つめ「予想の外れが減る」）
@@ -98,6 +99,7 @@ _ZMAP = torch.zeros(GRID, GRID, dtype=DTYPE)
 # 盤面4段目：「知っている」の引き直しの似かた。物の荷札の揺れ（1つの数あたり0.1）で、正しい名前なら約0.78、
 # 6つの物どれとも聞く語なら約0.3［仮置き］
 KNOW_LO, KNOW_HI = 0.35, 0.7
+NAME_KNOWN = 0.5         # 盤面5段目：知る度合いがこれ以上なら、目の前の物の名前の語を思い出の帳面へ渡す
 
 
 def _proj(seed: int, n_in: int, n_out: int) -> torch.Tensor:
@@ -388,7 +390,7 @@ class Semantic(Box):
         return min(1.0, max(0.0, (c - KNOW_LO) / (KNOW_HI - KNOW_LO)))
 
     def board_step(self, inbox, out):
-        from ..rhythm import SEM_PHASE, phase
+        from ..rhythm import OUT_PHASE, SEM_PHASE, phase
         n = self.__dict__.get("_board_n", 0)
         seen = inbox.get("eyein") or []
         obj = seen[0][0] if seen else None
@@ -396,16 +398,32 @@ class Semantic(Box):
         if obj is not None and q is not None and float(torch.linalg.vector_norm(q)) > 0.0:
             self._bind(make_tag(obj), None, make_tag(q))
             self.n_learn += 1
-        if phase(n) == SEM_PHASE:
+        if phase(n) == SEM_PHASE:      # わからなさ（この分に選ぶ係へ）・目の前の物の名前（思い出の帳面へ）
             k = self.knowing(obj) if obj is not None else 0.0
-            prev = self.__dict__.get("_board_k")
-            same = prev is not None and obj is not None and float(prev[0] @ obj) > 0.5
-            self.__dict__["_board_aha"] = max(0.0, k - prev[1]) if same else 0.0
             self.__dict__["_board_unknown"] = (1.0 - k) if obj is not None else 0.0
-            self.__dict__["_board_k"] = (obj, k) if obj is not None else None
+            word = self.reverse(make_tag(obj))[0] if obj is not None and k >= NAME_KNOWN else None
+            self.__dict__["_board_name"] = make_tag(word) if word is not None else torch.zeros(TAG_DIM, dtype=DTYPE)
+        if phase(n) == OUT_PHASE:      # わかった（この分に聞いた語を覚え終えてから。次の分の初めに worth が読む）
+            # わかった＝その物について、今までで一番わかった度合いを超えた分（覚えたものどうしの混ざりで
+            # 度合いが上下するので、下がって戻っただけの分は数えない）
+            k = self.knowing(obj) if obj is not None else 0.0
+            best = self.__dict__.setdefault("_board_best", [])       # [(物の荷札, 一番わかった度合い)]
+            i = next((i for i, (o, _) in enumerate(best) if obj is not None and float(o @ obj) > 0.9), None)
+            aha = 0.0
+            if obj is not None:
+                if i is None:
+                    best.append((make_tag(obj), k))
+                    aha = k
+                else:
+                    aha = max(0.0, k - best[i][1])
+                    best[i] = (best[i][0], max(k, best[i][1]))
+            self.__dict__["_board_aha"] = aha
+        elif phase(n) == 0:
+            self.__dict__["_board_aha"] = 0.0
         self.__dict__["_board_n"] = n + 1
         out["want"] = torch.tensor(self.__dict__.get("_board_unknown", 0.0), dtype=DTYPE)
         out["worth"] = torch.tensor(self.__dict__.get("_board_aha", 0.0), dtype=DTYPE)
+        out["episodic"] = self.__dict__.get("_board_name", torch.zeros(TAG_DIM, dtype=DTYPE))
         return out
 
     def step(self, inbox):

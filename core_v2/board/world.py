@@ -21,8 +21,16 @@
 * 4段目（あれなに？）：objects を渡すと、太郎の目の前に物が置かれる（OBJECT_STAY_MIN 分ほどで替わる。ないときもある）。
   - 問う語（なに・なあに・これ・あれ）：向けられた大人が食べ物の語と同じ割合で気づき、目の前の物の名前を教える一言を言う
     （answer_questions=False なら問う語に応えない＝対照）
-  - 手の空いた大人がなんとなく話しかける時、目の前に物があれば半分はその物の名前を言う
+  - 目の前に物がある時、手の空いた大人がときどき（NAME_PER_MIN）その物の名前を言う。その半分は「これなあに？」と聞いてから
+    次の1分に名前を言う（絵本読みの決まった流れ、Ninio & Bruner 1978）。物が無い時はふつうのおしゃべり
   - 話した大人は obs["spoke"]（太郎の目には、そばに来た人と同じに見える）
+* 5段目「断る」（offers=True）：満腹（FULL_FROM 以上）の時、手の空いた大人がときどきミルクをすすめる（obs["offered"]）。
+  太郎がその大人に泣く・手で押す（気づきやすさ×強さ）か、断る語（いや・いらない。言葉に応える世界では×WORD_GAIN）を
+  向けて気づかれると、やめて「いらないのね」と言う（obs["refused"]）。OFFER_MIN 分断られなければ飲ませてしまう（obs["overfed"]）
+* 5段目「前のことを話す」（news=True）：物が目の前にあった間に部屋にいた大人を覚えておく（seen_by）。太郎が物の名前を
+  大人に言って気づかれると、その大人はその物の話をする。自分がいなかった間の物（今は目の前に無い）なら NEWS_JOY の割合で
+  喜ぶ（obs["smiled"]）、自分も見ていた物・目の前の物なら PLAIN_JOY（joy_news=False ならいつも PLAIN_JOY＝対照）。
+  部屋に戻ってきた大人は「なにかあった？」と聞く（obs["back"]）
 """
 
 from __future__ import annotations
@@ -48,7 +56,17 @@ FOOD_WORDS = ("まんま", "みるく")
 NAME_WORDS = {"まま": "ママ", "ぱぱ": "パパ"}
 BUSY_REPLY = 0.3               # 手が離せない大人が、向けられた合図に一言返す割合
 CHAT_PER_MIN = 0.03            # 手の空いている大人が、なんとなく話しかける割合（1分あたり）
-QUESTION_WORDS = ("なに", "なあに", "これ", "あれ", "なんだ")
+NAME_PER_MIN = 0.01            # 4段目：目の前に物がある時、聞かれなくても大人がその物の名前を言う割合（1分あたり）［仮置き］
+QUIZ_SHARE = 0.5               # そのうち「これなあに？」と聞いてから次の1分に名前を言う割合（Ninio & Bruner 1978）［仮置き］
+QUESTION_WORDS = ("なに", "なあに", "これ", "あれ", "なんだ", "なんだい", "なんだろう")
+# 5段目「断る」：満腹の時に大人がミルクをすすめる
+FULL_FROM = 0.85               # これより満ちていると、大人がときどき「もう少し飲む？」とすすめる
+OFFER_PER_MIN = 0.03           # 満腹の時、手の空いた大人がすすめ始める割合（1分あたり）［仮置き］
+OFFER_MIN = 3                  # 断られなければ、すすめて3分で飲ませてしまう（満腹なのに飲まされて苦しい）
+REFUSE_WORDS = ("いや", "いらない", "ないない")
+# 5段目「前のことを話す」：戻ってきた大人は、自分がいなかった間の物の話を喜ぶ
+NEWS_JOY = 0.9                 # 自分がいなかった間の物の名前を言われて、気づいた大人が喜ぶ割合［仮置き］
+PLAIN_JOY = 0.2                # 自分も見ていた物・目の前の物の名前の時に喜ぶ割合
 OBJECT_STAY_MIN = 15           # 目の前の物が替わるまでの平均（分）
 NO_OBJECT = 0.3                # 替わった時に何も置かれない割合
 
@@ -84,6 +102,13 @@ class Board:
     objects: list | None = None            # 4段目：目の前に置かれうる物の名前
     answer_questions: bool = True
     object: str | None = None
+    quiz: tuple | None = None              # 4段目：「これなあに？」と聞いた (物, 大人)。次の1分に名前を言う
+    offers: bool = False                   # 5段目：満腹の時にミルクをすすめる
+    offer: list | None = None              # すすめている [大人, 残りの分]
+    news: bool = False                     # 5段目：太郎が物の名前を言うと、大人はその物を知っていたかで応え方を変える
+    joy_news: bool = True                  # False なら、いなかった間の物の話も同じにしか喜ばない（対照）
+    object_words: dict | None = None       # 物の名前のかな → 物（core_run が渡す）
+    seen_by: dict = field(default_factory=dict)   # 物 → その物が目の前にあった間に部屋にいた大人
     t: int = 0
     empty_min: int = 0
     rng: random.Random = field(init=False)
@@ -127,8 +152,12 @@ class Board:
     def step(self, action: str, strength: float, target: str | None = None, word: str | None = None) -> dict:
         """太郎の1分の行動を受け取り、世界を1分進める。target は合図を向けた大人の名前、word は言った語（かな）。"""
         assert action in ACTIONS
+        before = set(self.present())
         if self.t > 0 and self.t % PRESENCE_BLOCK_MIN == 0:
             self._update_presence()
+        back = [n for n in self.present() if n not in before]      # 部屋に戻ってきた大人
+        if self.object:
+            self.seen_by.setdefault(self.object, set()).update(self.present())
         for a in self.adults:
             self._busy_tick(a)
         free = [a for a in self.adults if a.present and a.busy_left == 0]
@@ -136,7 +165,38 @@ class Board:
             target = self.adults[0].name
 
         noticed_by = None
-        if action != "nothing":
+        refused = overfed = False
+        smiled = None
+        offerer = self.offer[0] if self.offer else None
+        if offerer and not any(a.name == offerer for a in free):
+            self.offer, offerer = None, None                       # すすめていた大人が離れた
+        tell = None
+        if self.news and action == "say" and self.object_words and word in self.object_words:
+            tell = self.object_words[word]
+        special = (offerer is not None and target == offerer and action != "nothing") or tell is not None
+        if special:
+            a = next((x for x in free if x.name == target), None)
+            if a is not None and offerer == target:
+                if action in ("cry", "reach"):                     # いやがる（泣く・押しのける）
+                    p = a.notice * strength
+                elif action == "say" and word in REFUSE_WORDS:
+                    p = min(1.0, a.notice * WORD_GAIN * strength) if self.understand_words else NOTICE_OTHER
+                else:
+                    p = 0.0
+                refused = self.rng.random() < p
+            elif a is not None and tell is not None:               # 物の名前を言った
+                if self.rng.random() < min(1.0, a.notice * WORD_GAIN * strength):
+                    is_news = tell != self.object and a.name not in self.seen_by.get(tell, {a.name})
+                    joy = NEWS_JOY if (is_news and self.joy_news) else PLAIN_JOY
+                    smiled = a.name if self.rng.random() < joy else None
+                    self.seen_by.setdefault(tell, set()).add(a.name)   # 聞いて知った
+                    noticed_by = None
+                    tell = (tell, a.name, is_news)
+                else:
+                    tell = None
+            if not isinstance(tell, tuple):
+                tell = None                                        # 話は届かなかった（気づかれない・すすめの最中）
+        elif action != "nothing":
             for a in free:
                 if action == "say":
                     p = self._notice_word(a, word or "", strength, target)
@@ -165,9 +225,29 @@ class Board:
             self.empty_min = 0
             fed = True
 
+        started = False
+        if refused:
+            self.offer = None
+        elif self.offer:
+            self.offer[1] -= 1
+            if self.offer[1] <= 0:                                 # 断られなかった：飲ませてしまう
+                self.fullness, overfed, self.offer = 1.0, True, None
+        elif (self.offers and self.fullness >= FULL_FROM and free and not fed
+              and self.rng.random() < OFFER_PER_MIN):
+            self.offer, started = [self.rng.choice(free).name, OFFER_MIN], True
+
         heard, spoke = None, None
+        quiz, self.quiz = self.quiz, None
         if self.speech:
-            if asked:
+            if refused:
+                heard, spoke = self._say("refused", offerer), offerer
+            elif overfed:
+                heard, spoke = self._say("feed", offerer), offerer
+            elif started:
+                heard, spoke = self._say("offer", self.offer[0]), self.offer[0]
+            elif tell:
+                heard, spoke = self._say(f"name:{tell[0]}", tell[1]), tell[1]
+            elif asked:
                 heard, spoke = self._say(f"name:{self.object}", noticed_by), noticed_by
             elif fed:
                 heard = self._say("feed", came)
@@ -175,14 +255,26 @@ class Board:
                 heard = self._say("called", came)
             elif action != "nothing" and target_busy(self.adults, target) and self.rng.random() < BUSY_REPLY:
                 heard = self._say("busy", target)
-            elif free and self.rng.random() < CHAT_PER_MIN:
-                spoke = self.rng.choice(free).name
-                if self.object and self.rng.random() < 0.5:
-                    heard = self._say(f"name:{self.object}", spoke)
+            elif quiz and quiz[0] == self.object and any(a.name == quiz[1] for a in free):
+                spoke = quiz[1]                         # 「これなあに？」の続き：名前を言う
+                heard = self._say(f"name:{self.object}", spoke)
+            elif free and self.object and self.rng.random() < NAME_PER_MIN:
+                spoke = self.rng.choice(free).name           # 目の前の物の話（名前を言う）
+                if self.rng.random() < QUIZ_SHARE and (self.speech or {}).get(f"quiz:{spoke}"):
+                    heard = self._say("quiz", spoke)
+                    self.quiz = (self.object, spoke)
                 else:
-                    heard = self._say("chat", spoke)
+                    heard = self._say(f"name:{self.object}", spoke)
+            elif self.news and back and (self.speech or {}).get(f"back:{back[0]}"):
+                spoke = back[0]                              # 戻ってきて「なにかあった？」
+                heard = self._say("back", spoke)
+            elif free and not self.object and self.rng.random() < CHAT_PER_MIN:
+                spoke = self.rng.choice(free).name           # 物が無い時のおしゃべり（ボール遊びの話）
+                heard = self._say("chat", spoke)
         if self.objects and self.rng.random() < 1.0 / OBJECT_STAY_MIN:
             self.object = None if self.rng.random() < NO_OBJECT else self.rng.choice(self.objects)
+            if self.object:
+                self.seen_by[self.object] = set(self.present())      # 新しく置かれた（前に見た人の分は消える）
 
         self.fullness -= 1.0 / EMPTY_AFTER_MIN
         if action == "cry":
@@ -193,7 +285,9 @@ class Board:
         return {"fullness": self.fullness, "fed": fed, "came": came,
                 "noticed": noticed_by is not None, "checked": checked_by is not None,
                 "busy": target_adult is None or not target_adult.present or target_adult.busy_left > 0,
-                "present": self.present(), "heard": heard, "spoke": spoke, "object": self.object}
+                "present": self.present(), "heard": heard, "spoke": spoke, "object": self.object,
+                "offered": self.offer is not None, "overfed": overfed, "refused": refused, "smiled": smiled,
+                "back": back, "told": tell}
 
 
 def target_busy(adults, target) -> bool:

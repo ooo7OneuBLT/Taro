@@ -4,13 +4,17 @@
 * vars→want：不快（お腹がすいた強さ）。feel→want：いら立ち
 * worth→want：行動ごとの見込み（行動の荷札, 地図の [0, j]＝j 番目の人に向けた時の見込み）
 * semantic→want：目の前の物のわからなさ（4段目）。知りたい強さ＝CURIOSITY×わからなさ
+* inner→want：いや（満腹なのにミルクが口に来る強さ、5段目）
+* social→want：会いたかった人が戻ってきた強さ（5段目）。相手に向かいたい強さ＝SOCIAL×その強さ
 * 不快＋いら立ち＋知りたい強さが高いほど何か行動しやすい（その割合で行動し、残りは何もしない）
-* 行動するときは、選択肢（行動×向ける相手。部屋にいる人だけ）を、
-  （不快＋いら立ち）×ミルクの見込み ＋ 知りたい強さ×わかる見込み に比例して選ぶ（確率マッチング。
-  欲求の強さで見込みを重み付けて足す。知りたい強さが0なら3段目までと同じ）
-* 合図の強さ＝BASE_STRENGTH＋0.5×不快＋いら立ち（1まで）
+* 行動するときは、まずどの欲求のために動くかを強さに比例して選び（ミルク：不快＋いら立ち、わかる：知りたい強さ、
+  いや：いやの強さ、相手：相手に向かいたい強さ）、
+  次に選択肢（行動×向ける相手。部屋にいる人だけ）を、その欲求の見込みに比例して選ぶ（確率マッチング。
+  欲求ごとに見込みを持ち、体の内側の状態で使い分ける。Keramati & Gutkin 2014。知りたい強さが0なら3段目までと同じ）
+* 合図の強さ＝BASE_STRENGTH＋0.5×不快＋いら立ち＋ミルク以外の欲求の強さ（1まで）
 * want→cry・want→reach・want→wordplan（語を言う。3段目）：(行動の荷札, 地図の [0, j]＝強さ。j＝向ける人の場所)
-* want→worth：選んだ行動の写し（行動の荷札, 地図の [0, j]＝1）
+* want→worth：選んだ行動の写し（行動の荷札, 地図の [0, j]＝1、[r, j]＝行 r の欲求のために選んだなら1（ミルクは無し）。
+  その欲求の見込みだけを覚える）
 1分に1回、rhythm.WANT_PHASE の回に選ぶ。乱数は torch の大域の乱数。生まれつき（学習は worth の側）。
 """
 
@@ -23,6 +27,8 @@ from .base import Box
 
 BASE_STRENGTH = 0.3
 CURIOSITY = 0.3                # わからなさ1のときの知りたい強さ（おなかの不快1より弱い）［仮置き］
+SOCIAL = 1.0                   # 5段目：会いたかった人が戻ってきた時の、相手に向かいたい強さ（戻った直後1）［仮置き］
+HEADS = ("food", "know", "stop", "social")   # worth.HEADS と同じ並び（地図の行）
 # 生まれつきの行動の荷札（worth.ACT_TAGS と同じ符号）。それ以外の荷札は語として口へ
 ACT_OUT = {"cry": word_tag("act:cry"), "reach": word_tag("act:reach")}
 
@@ -41,19 +47,32 @@ class Want(Box):
             disc = float(inbox.get("vars", 0.0))
             stress = float(inbox.get("feel", 0.0))
             curious = CURIOSITY * float(inbox.get("semantic", 0.0))
+            drives = {"food": disc + stress, "know": curious,
+                      "stop": float(inbox.get("inner", 0.0)), "social": SOCIAL * float(inbox.get("social", 0.0))}
+            total = sum(drives.values())
+            arousal = min(1.0, total)
             options = []
             for act, m in inbox.get("worth") or []:
                 for j in range(GRID):
                     if float(m[0, j]) > 0:
-                        options.append((act, j, (disc + stress) * float(m[0, j]) + curious * float(m[1, j])))
-            arousal = min(1.0, disc + stress + curious)
+                        options.append((act, j, [float(m[r, j]) for r in range(len(HEADS))]))
             if options and float(torch.rand(())) < arousal:
+                # どの欲求のために動くか（ミルクの欲求しか無ければ乱数を引かない＝3段目までと同じ乱数の並び）
+                head = "food"
+                if total > drives["food"]:
+                    r = float(torch.rand(())) * total
+                    for head in HEADS:
+                        r -= drives[head]
+                        if r <= 0:
+                            break
+                row = HEADS.index(head)
+                options = [(act, j, vs[row]) for act, j, vs in options]
                 r = float(torch.rand(())) * sum(o[2] for o in options)
                 for act, j, v in options:
                     r -= v
                     if r <= 0:
                         break
-                strength = min(1.0, BASE_STRENGTH + 0.5 * disc + stress)
+                strength = min(1.0, BASE_STRENGTH + 0.5 * disc + stress + total - drives["food"])
                 kind = next((k for k, t in ACT_OUT.items() if float(t @ act) > 0.99), "wordplan")
                 self.last = {"action": kind if kind != "wordplan" else "say", "strength": strength, "tag": act, "to": j}
                 m = torch.zeros(GRID, GRID, dtype=DTYPE)
@@ -61,6 +80,8 @@ class Want(Box):
                 out[kind] = [(act, m)]
                 copy = torch.zeros(GRID, GRID, dtype=DTYPE)
                 copy[0, j] = 1.0
+                if row > 0:
+                    copy[row, j] = 1.0
                 out["worth"] = [(act, copy)]
         self.n += 1
         return out
