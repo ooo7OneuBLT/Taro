@@ -29,21 +29,21 @@ def test_hungry_baby_signals_to_someone_in_room():
         out = to_env.get("voiceout") if isinstance(to_env.get("voiceout"), dict) else to_env.get("bodyout")
         if out:
             acts += 1
-            from core_v2.tagging import word_tag
-            assert float(out["to"] @ word_tag("person:パパ")) > 0.3
+            assert out["to"] == 0      # 部屋にいるのはパパだけ（目に見えている0番目）
     assert acts >= 20                  # 空腹の不快1なら毎分なにかする
 
 
 def test_worth_learns_cry_to_mom():
     r = grow_core("cry", 0, 2)
     worth = r["brain"].boxes["worth"]
+    from core_v2.boxes.worth import ACT_TAGS
     from core_v2.tagging import word_tag
     mama = word_tag("person:ママ")
-    assert worth.value(0, mama) > worth.value(1, mama)      # 泣く > 手を伸ばす
-    assert worth.value(0, mama) > 0.1                       # 生まれた時より上
+    assert worth.value(ACT_TAGS["cry"], mama) > worth.value(ACT_TAGS["reach"], mama)   # 泣く > 手を伸ばす
+    assert worth.value(ACT_TAGS["cry"], mama) > 0.1                                   # 生まれた時より上
 
 
 def test_frozen_worth_does_not_change():
     r = grow_core("cry", 0, 1, frozen=True)
     worth = r["brain"].boxes["worth"]
-    assert torch.all(worth.w == 0)
+    assert torch.all(worth.W == 0) and torch.all(worth.u == 0)

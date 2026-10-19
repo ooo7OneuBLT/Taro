@@ -49,6 +49,9 @@ ADDED_EDGES = [
     ("want", "cry", "盤面：泣くと決めたら泣き声の係へ（向ける相手と強さ）"),
     ("want", "reach", "盤面：手を伸ばすと決めたら手の係へ（向ける相手と強さ）"),
     ("reach", "bodyout", "盤面：手を伸ばす指令を体の出口へ"),
+    ("wordplan", "worth", "盤面3段目：言える語の一覧を、見込みを覚える係へ（選択肢に足す）"),
+    ("want", "wordplan", "盤面3段目：言うと決めた語を、言う語を組み立てる係へ"),
+    ("wordplan", "voiceout", "盤面3段目（口の下駄）：言う語をそのまま声の出口へ。下駄を外す時は声の係を通す"),
 ]
 
 # 通り道の矢印の書式（設計書 技術付録D）。(書式, MOTOR のときの筋の数)
@@ -100,17 +103,20 @@ PATH_FORMATS: dict[tuple[str, str], tuple[Fmt, int | None]] = {
     ("vars", "want"): (Fmt.AMOUNT, None),           # 同じ
     ("eyein", "social"): (Fmt.TAG_AND_MAP, None),   # 部屋にいる人（荷札, 地図。1＝そばに来た人、0.5＝部屋にいる人）
     ("social", "worth"): (Fmt.TAG_AND_MAP, None),   # 同じ
-    ("worth", "want"): (Fmt.TAG_AND_MAP, None),     # 人ごとの見込み（地図の1行目に合図ごとの値）
+    ("worth", "want"): (Fmt.TAG_AND_MAP, None),     # 行動ごとの見込み（行動の荷札, 地図の [0, j]＝j 番目の人に向けた時の値）
     ("worth", "stress"): (Fmt.AMOUNT, None),        # 期待したのに来なかった分
     ("worth", "feel"): (Fmt.AMOUNT, None),          # うれしさ（思ったより良かった分）
     ("feel", "stress"): (Fmt.AMOUNT, None),         # ミルクを飲んだ（いら立ちを下げる）
     ("stress", "feel"): (Fmt.AMOUNT, None),         # 今のいら立ち
     ("feel", "want"): (Fmt.AMOUNT, None),           # 同じ
-    ("want", "worth"): (Fmt.TAG_AND_MAP, None),     # 選んだ行動の写し（荷札, 地図の [0, 合図の番号]＝1）
-    ("want", "cry"): (Fmt.TAG_AND_MAP, None),       # 向ける相手の荷札, 強さで塗った地図
+    ("want", "worth"): (Fmt.TAG_AND_MAP, None),     # 選んだ行動の写し（行動の荷札, 地図の [0, j]＝1）
+    ("want", "cry"): (Fmt.TAG_AND_MAP, None),       # 行動の荷札, 地図の [0, j]＝強さ（j＝向ける人の場所）
     ("want", "reach"): (Fmt.TAG_AND_MAP, None),     # 同じ
     ("cry", "voiceout"): (Fmt.TAG_AND_MAP, None),   # 同じ
     ("reach", "bodyout"): (Fmt.TAG_AND_MAP, None),  # 同じ
+    ("wordplan", "worth"): (Fmt.TAG_AND_MAP, None), # 言える語（荷札, 空の地図）
+    ("want", "wordplan"): (Fmt.TAG_AND_MAP, None),  # 言う語の荷札, 地図の [0, j]＝強さ
+    ("wordplan", "voiceout"): (Fmt.TAG_AND_MAP, None),  # 同じ
 }
 
 

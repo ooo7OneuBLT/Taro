@@ -52,6 +52,7 @@ import torch
 from torch import nn
 
 from ..tagging import word_tag
+from .earin import normalize_kana
 from .base import Box
 
 KANA = [chr(c) for c in range(0x3041, 0x3097)] + ["ー"]
@@ -201,10 +202,22 @@ class Listen(Box):
                 own.append(kana_only(rest.pop(k)))
         return "".join(own), rest
 
+    def use_board_ear(self, table: dict[str, list[str]]) -> None:
+        """盤面の世界の耳の下駄（3段目、2026-10-19）：{親の一言（かなにそろえた物）: 単語の列}。
+        LLM で先に作った表（core_v2/tools/make_board_speech.py）。表にある一言が届いたら、切り分けずに
+        その単語を順に送る（聞き分ける係の出口と同じ形）。あとで本物の聞き分け（この係の中身）に替える。"""
+        self.__dict__["_board_ear"] = {normalize_kana(k): [normalize_kana(w) for w in v] for k, v in table.items()}
+
     def step(self, inbox):
         out = self.passthrough()
         self.last_heard, self.last_chunks, self.last_word = [], [], ""
         text = inbox.get("earin") or ""
+        ear = self.__dict__.get("_board_ear")
+        if ear is not None:
+            if text:
+                self.last_heard = [text]
+                self._queue += ear.get(text, [])
+            return self._send_next(out)
         expected = inbox.get("voice") or ""
         utterances = text.split()            # 1回に2つ届いたら空白で区切られている
         self.last_self = ""

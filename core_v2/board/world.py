@@ -11,6 +11,13 @@
 * 気づいたら、太郎のお腹が満ちていなければミルクを飲ませる（満ちていれば何もしない）
 * 放っておかれてお腹が空のまま長くたつと、部屋にいる大人が自分から様子を見に来る（飢えないため）
 * 1段目：大人はママだけ、いつもいる。2段目：ママとパパ。いる時間と気づきやすさが違う
+* 3段目（言葉）：大人は話す（speech に場面ごとの一言の表を渡したとき。LLM で先に作った物）。
+  ミルクをあげる時・呼ばれて来た時・手が離せない時・ときどきの話しかけ。言った一言は obs["heard"]。
+  太郎が語を言うと（action="say"）、大人は語の意味で応える（understand_words=False なら言葉に応えない＝対照）：
+  - 食べ物の語（まんま・みるく）：向けられた大人が「気づきやすさ×WORD_GAIN×強さ」の割合で気づく（泣き声より伝わりやすい）。
+    ほかの大人にも OVERHEAR の割合で聞こえる
+  - 人の名前（まま・ぱぱ）：呼ばれた人が同じ割合で気づいて来る（来たら、お腹がすいていればミルク）
+  - ほかの語：向けられた大人がまれに気づく（NOTICE_OTHER）
 """
 
 from __future__ import annotations
@@ -18,7 +25,7 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass, field
 
-ACTIONS = ("nothing", "cry", "reach")
+ACTIONS = ("nothing", "cry", "reach", "say")
 
 MINUTES_PER_DAY = 24 * 60
 EMPTY_AFTER_MIN = 240          # 満腹から空まで4時間
@@ -31,6 +38,11 @@ OVERHEAR = 0.3                 # 向けられていない泣き声に気づく�
 PRESENCE_BLOCK_MIN = 30        # 部屋にいる・いないが変わる単位
 CHECK_AFTER_EMPTY_MIN = 30     # 空のまま放っておかれたら様子を見に来るまで
 CRY_COST = 0.002               # 泣くとお腹が少し早く減る（体の負担）
+WORD_GAIN = 1.8                # 意味の分かる語は泣き声よりこれだけ気づかれやすい
+FOOD_WORDS = ("まんま", "みるく")
+NAME_WORDS = {"まま": "ママ", "ぱぱ": "パパ"}
+BUSY_REPLY = 0.3               # 手が離せない大人が、向けられた合図に一言返す割合
+CHAT_PER_MIN = 0.03            # 手の空いている大人が、なんとなく話しかける割合（1分あたり）
 
 
 @dataclass
@@ -59,6 +71,8 @@ class Board:
     seed: int = 0
     adults: list = field(default_factory=stage1_adults)
     fullness: float = 0.8
+    speech: dict | None = None             # {"feed:ママ": [一言, ...], ...}（3段目）
+    understand_words: bool = True
     t: int = 0
     empty_min: int = 0
     rng: random.Random = field(init=False)
@@ -86,8 +100,21 @@ class Board:
         """太郎に見えている大人（部屋にいる人）。"""
         return [a.name for a in self.adults if a.present]
 
-    def step(self, action: str, strength: float, target: str | None = None) -> dict:
-        """太郎の1分の行動を受け取り、世界を1分進める。target は合図を向けた大人の名前。"""
+    def _say(self, sit: str, who: str) -> str | None:
+        lines = (self.speech or {}).get(f"{sit}:{who}")
+        return self.rng.choice(lines) if lines else None
+
+    def _notice_word(self, a: Adult, word: str, strength: float, target: str) -> float:
+        if not self.understand_words:
+            return NOTICE_OTHER if a.name == target else 0.0
+        if word in NAME_WORDS:
+            return min(1.0, a.notice * WORD_GAIN * strength) if NAME_WORDS[word] == a.name else 0.0
+        if word in FOOD_WORDS:
+            return min(1.0, a.notice * WORD_GAIN * strength) * (1.0 if a.name == target else OVERHEAR)
+        return NOTICE_OTHER if a.name == target else 0.0
+
+    def step(self, action: str, strength: float, target: str | None = None, word: str | None = None) -> dict:
+        """太郎の1分の行動を受け取り、世界を1分進める。target は合図を向けた大人の名前、word は言った語（かな）。"""
         assert action in ACTIONS
         if self.t > 0 and self.t % PRESENCE_BLOCK_MIN == 0:
             self._update_presence()
@@ -100,7 +127,9 @@ class Board:
         noticed_by = None
         if action != "nothing":
             for a in free:
-                if action == self.rule:
+                if action == "say":
+                    p = self._notice_word(a, word or "", strength, target)
+                elif action == self.rule:
                     p = a.notice * strength * (1.0 if a.name == target else (OVERHEAR if action == "cry" else 0.0))
                 else:
                     p = NOTICE_OTHER if a.name == target else 0.0
@@ -122,6 +151,17 @@ class Board:
             self.empty_min = 0
             fed = True
 
+        heard = None
+        if self.speech:
+            if fed:
+                heard = self._say("feed", came)
+            elif came:
+                heard = self._say("called", came)
+            elif action != "nothing" and target_busy(self.adults, target) and self.rng.random() < BUSY_REPLY:
+                heard = self._say("busy", target)
+            elif free and self.rng.random() < CHAT_PER_MIN:
+                heard = self._say("chat", self.rng.choice(free).name)
+
         self.fullness -= 1.0 / EMPTY_AFTER_MIN
         if action == "cry":
             self.fullness -= CRY_COST * strength
@@ -131,4 +171,9 @@ class Board:
         return {"fullness": self.fullness, "fed": fed, "came": came,
                 "noticed": noticed_by is not None, "checked": checked_by is not None,
                 "busy": target_adult is None or not target_adult.present or target_adult.busy_left > 0,
-                "present": self.present()}
+                "present": self.present(), "heard": heard}
+
+
+def target_busy(adults, target) -> bool:
+    a = next((a for a in adults if a.name == target), None)
+    return a is not None and a.present and a.busy_left > 0
