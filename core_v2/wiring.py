@@ -44,6 +44,11 @@ ADDED_EDGES = [
     ("objfile", "semantic", "段階4：名前を結び付ける行の荷札。段階6：行ごとの見ていた割合も"),
     ("objfile", "surprise", "段階8：席ごとの行の荷札と場所・見えたか、最後に目立ちが急に下がった所の地図"),
     ("surprise", "semantic", "段階8：驚きの強さ。意味の辞書が驚きの荷札を結び付ける相手に足す"),
+    # 盤面の世界（2026-10-19、core_v2/board の下書きから清書。何をするか決める係の通り道）
+    ("want", "worth", "盤面：選んだ行動の写し。どの人にどの合図を向けたかを、見込みを覚える係が知る（線条体→前頭前野の写し）"),
+    ("want", "cry", "盤面：泣くと決めたら泣き声の係へ（向ける相手と強さ）"),
+    ("want", "reach", "盤面：手を伸ばすと決めたら手の係へ（向ける相手と強さ）"),
+    ("reach", "bodyout", "盤面：手を伸ばす指令を体の出口へ"),
 ]
 
 # 通り道の矢印の書式（設計書 技術付録D）。(書式, MOTOR のときの筋の数)
@@ -86,6 +91,26 @@ PATH_FORMATS: dict[tuple[str, str], tuple[Fmt, int | None]] = {
     # 段階8（ない、2026-10-18）
     ("objfile", "surprise"): (Fmt.TAG_AND_MAP, None),  # 席1〜7の (行の荷札, 場所の山。高さ1＝見えた・0.5＝見えない) と最後に (ゼロ, 目立ちが急に下がった所)
     ("surprise", "semantic"): (Fmt.AMOUNT, None),   # 驚きの強さ 0〜1（8b で予測のNNに替えても、この形は変えない）
+    # 盤面の世界（2026-10-19、何をするか決める係の通り道。core_v2/rhythm.py の位相の順）
+    ("gutin", "need"): (Fmt.AMOUNT, None),          # お腹の空き具合（1−満ち具合）
+    ("gutin", "feel"): (Fmt.AMOUNT, None),          # ミルクを飲んだ（1/0）
+    ("gutin", "inner"): (Fmt.AMOUNT, None),         # 同じ
+    ("inner", "worth"): (Fmt.AMOUNT, None),         # 同じ
+    ("need", "vars"): (Fmt.AMOUNT, None),           # 不快（お腹がすいた強さ）
+    ("vars", "want"): (Fmt.AMOUNT, None),           # 同じ
+    ("eyein", "social"): (Fmt.TAG_AND_MAP, None),   # 部屋にいる人（荷札, 地図。1＝そばに来た人、0.5＝部屋にいる人）
+    ("social", "worth"): (Fmt.TAG_AND_MAP, None),   # 同じ
+    ("worth", "want"): (Fmt.TAG_AND_MAP, None),     # 人ごとの見込み（地図の1行目に合図ごとの値）
+    ("worth", "stress"): (Fmt.AMOUNT, None),        # 期待したのに来なかった分
+    ("worth", "feel"): (Fmt.AMOUNT, None),          # うれしさ（思ったより良かった分）
+    ("feel", "stress"): (Fmt.AMOUNT, None),         # ミルクを飲んだ（いら立ちを下げる）
+    ("stress", "feel"): (Fmt.AMOUNT, None),         # 今のいら立ち
+    ("feel", "want"): (Fmt.AMOUNT, None),           # 同じ
+    ("want", "worth"): (Fmt.TAG_AND_MAP, None),     # 選んだ行動の写し（荷札, 地図の [0, 合図の番号]＝1）
+    ("want", "cry"): (Fmt.TAG_AND_MAP, None),       # 向ける相手の荷札, 強さで塗った地図
+    ("want", "reach"): (Fmt.TAG_AND_MAP, None),     # 同じ
+    ("cry", "voiceout"): (Fmt.TAG_AND_MAP, None),   # 同じ
+    ("reach", "bodyout"): (Fmt.TAG_AND_MAP, None),  # 同じ
 }
 
 

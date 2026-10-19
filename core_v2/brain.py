@@ -26,6 +26,9 @@ class Brain(nn.Module):
         self.boxes = nn.ModuleDict({bid: boxes[bid] for bid in wiring.BOX_IDS})
         self.edges = {e.key: e for e in wiring.EDGES}
         self._incoming = {bid: wiring.incoming(bid) for bid in wiring.BOX_IDS}
+        # 速くするため：矢印の鍵（出す係, 受ける係）を先に作っておく（Edge.key を毎回呼ぶと回の時間の1割を食う）
+        self._in_keys = {bid: [(e.src, e.key) for e in self._incoming[bid]] for bid in wiring.BOX_IDS}
+        self._out_dsts = {bid: {e.dst for e in self.boxes[bid].outputs} for bid in wiring.BOX_IDS}
         self.check_formats = check_formats
         self.reset()
 
@@ -61,7 +64,8 @@ class Brain(nn.Module):
 
         outboxes = {}
         for bid in order:
-            inbox = {e.src: self.buffer[e.key] for e in self._incoming[bid]}
+            buf = self.buffer
+            inbox = {src: buf[key] for src, key in self._in_keys[bid]}
             if bid in external:
                 inbox[ENV] = external[bid]
             outboxes[bid] = self.boxes[bid].step(inbox)
@@ -72,15 +76,15 @@ class Brain(nn.Module):
             out = dict(outboxes[bid])
             if ENV in out:
                 to_env[bid] = out.pop(ENV)
-            expected = {e.dst for e in self.boxes[bid].outputs}
-            if set(out) != expected:
+            expected = self._out_dsts[bid]
+            if out.keys() != expected:
                 missing, extra = expected - set(out), set(out) - expected
                 raise FormatError(f"{bid} の outbox が配線と合わない（不足 {sorted(missing)}・余分 {sorted(extra)}）")
             for dst, value in out.items():
-                edge = self.edges[(bid, dst)]
                 if self.check_formats:
+                    edge = self.edges[(bid, dst)]
                     check(edge.fmt, value, edge.size, name=f"{bid}→{dst}")
-                new_buffer[edge.key] = value
+                new_buffer[(bid, dst)] = value
 
         self.buffer = new_buffer
         self.delivered = set(new_buffer)

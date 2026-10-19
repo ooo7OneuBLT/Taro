@@ -8,7 +8,8 @@
 * 環境からの入力（inbox[ENV]）：月齢（か月、float）。口の成長は体の側の話なので、環境（試験場・体）が渡す。
   無ければ 0（母音だけ）
 * 環境への指令（outbox[ENV]）：出たかな1文字か ""。環境はそれを次の回に耳の入口へ戻す（自分の声を聞く）
-* 泣き（cry→voiceout）は段階7ではまだ素通し
+* 泣き（cry→voiceout、盤面の世界 2026-10-19）：泣く指令（向ける相手の荷札と、強さで塗った地図）が届いた回だけ、
+  環境への指令を {"kana": 出たかな, "cry": 強さ, "to": 向けた相手の荷札} にする（届かない回は今までどおりかなの文字列）
 
 生まれつき（手で書いた表と月齢の段階）。学習は無い。
 """
@@ -29,4 +30,7 @@ class Voiceout(Box):
         month = float(inbox.get(ENV) or 0.0)
         self.last_char = mouth.speak(params, month) if params is not None else ""
         out[ENV] = self.last_char
+        if inbox.get("cry"):
+            tag, m = inbox["cry"][0]
+            out[ENV] = {"kana": self.last_char, "cry": float(m.max()), "to": tag}
         return out

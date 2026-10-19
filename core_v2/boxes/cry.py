@@ -1,6 +1,7 @@
 """生まれつきの声（泣き声）（1段目 反射）。
 
-段階2・工程1：素通し（出ていく矢印すべてに書式のゼロを渡す）。
+盤面の世界（2026-10-19、下書きから清書）：「選ぶ」係から泣く指令（向ける相手の荷札と、強さで塗った地図）が
+届いたら、そのまま声の出口へ渡す（cry→voiceout）。生まれつき。
 """
 
 from .base import Box
@@ -8,3 +9,9 @@ from .base import Box
 
 class Cry(Box):
     BOX_ID = "cry"
+
+    def step(self, inbox):
+        out = self.passthrough()
+        if inbox.get("want"):
+            out["voiceout"] = list(inbox["want"])
+        return out

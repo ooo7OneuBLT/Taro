@@ -68,6 +68,11 @@ detector="sam" で段階2までの切り出しに戻せる）。
 
 環境からの入力（inbox[ENV]）：左目の画像（224×224×3、uint8）。
 setup() を呼ぶまでは素通し（骨組みのテストは重い視覚を作らずに回る）。
+
+盤面の世界（2026-10-19、手書きの下駄：目は名簿を直接受け取る）：inbox[ENV] が {"people": [(名前, そばにいるか), ...]}
+のときは画像を見ず、部屋にいる人ごとに荷札（生まれつきの符号 word_tag("person:"+名前) に見るたびの揺れ
+FACE_NOISE を足して長さ1に戻したもの。揺れは1分に1回だけ作り直す）と地図（そばに来た人は1、ほかは0.5で塗る）を
+eyein→social へ送る。あとで本物の目（顔の見た目）に差し替える。
 """
 
 from __future__ import annotations
@@ -80,7 +85,8 @@ import numpy as np
 import torch
 
 from ..formats import GRID, MAX_OBJECTS, TAG_DIM, DTYPE
-from ..tagging import appearance_tag, noisy
+from ..rhythm import phase
+from ..tagging import appearance_tag, noisy, word_tag
 from .base import ENV, Box
 
 _REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir, os.pardir))
@@ -104,6 +110,8 @@ TRACK_PATCHES = 2         # 間の回に物を探す範囲（DINOv2 のマス、
 SAME_COS = 0.6            # これ未満なら見失った［仮置き］
 SCENE_SAME_COS = 0.9      # 画面全体の似かたがこれ未満なら目が跳んだとみて切り出し直す［仮置き］
 JUMP_PX = 28.0            # 画面全体のずれがこれを超えたら切り出し直す（DINOv2 の2マス）
+FACE_NOISE = 0.1          # 盤面の世界：人の荷札の見るたびの揺れ（1つの数あたり）
+_PERSON_TAGS: dict = {}   # 名前 → 生まれつきの符号（作り直さないよう覚えておく）
 EGO_SCALE = 0.5           # 目の動きの地図：真ん中からのずれ（マス）にこれを掛けた所に山を置く
 # 指令の写し（段階9）
 EGO_SOURCE = "efference"  # "efference"（指令の写し＋画像の小さな直し）／"image"（前の決まり：画像のずれだけ）
@@ -294,6 +302,8 @@ class Eyein(Box):
         self._ready = True
 
     def reset(self) -> None:
+        self.__dict__.pop("_board_n", None)      # 盤面の世界：1分の数え直し
+        self.__dict__.pop("_board_seen", None)
         if self._sal is not None:
             # 目立ちの地図は前のコマとの差（動き）を持つので、試行の頭で前のコマを捨てる
             self._sal._prev_gray = None
@@ -390,8 +400,28 @@ class Eyein(Box):
             self.last_mode = "track"
         return dets
 
+    def see_people(self, people) -> list:
+        """盤面の世界の下駄：人の名前の列 → (荷札, 地図) の列。揺れは1分に1回だけ作り直す。"""
+        n = self.__dict__.get("_board_n", 0)
+        if phase(n) == 0 or "_board_seen" not in self.__dict__:
+            seen = []
+            for name, near in people[:MAX_OBJECTS]:
+                base = _PERSON_TAGS.get(name)
+                if base is None:
+                    base = _PERSON_TAGS[name] = word_tag("person:" + name)
+                t = base + torch.randn(TAG_DIM, dtype=DTYPE) * FACE_NOISE
+                seen.append((t / torch.linalg.vector_norm(t),
+                             torch.full((GRID, GRID), 1.0 if near else 0.5, dtype=DTYPE)))
+            self.__dict__["_board_seen"] = seen
+        self.__dict__["_board_n"] = n + 1
+        return list(self.__dict__["_board_seen"])
+
     def step(self, inbox):
         out = self.passthrough()
+        env = inbox.get(ENV)
+        if isinstance(env, dict) and "people" in env:
+            out["social"] = self.see_people(env["people"])
+            return out
         if not getattr(self, "_ready", False) or inbox.get(ENV) is None:
             return out
         objs, sal = self.see(inbox[ENV])
