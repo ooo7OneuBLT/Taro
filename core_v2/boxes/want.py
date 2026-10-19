@@ -7,8 +7,9 @@
 * inner→want：いや（満腹なのにミルクが口に来る強さ、5段目）
 * social→want：会いたかった人が戻ってきた強さ（5段目）。相手に向かいたい強さ＝SOCIAL×その強さ
 * 不快＋いら立ち＋知りたい強さが高いほど何か行動しやすい（その割合で行動し、残りは何もしない）
-* 行動するときは、まずどの欲求のために動くかを強さに比例して選び（ミルク：不快＋いら立ち、わかる：知りたい強さ、
-  いや：いやの強さ、相手：相手に向かいたい強さ）、
+* 行動するときは、まずどの欲求のために動くかを「強さ×その欲求で一番見込みのある行動の見込み」に比例して選び
+  （ミルク：不快＋いら立ち、わかる：知りたい強さ、いや：いやの強さ、相手：相手に向かいたい強さ。見込みを掛けないと、
+  3段目で人が部屋に戻るたびに「相手」の欲求で泣く・手を伸ばすを半々に選び、まんまを言う割合が下がった）、
   次に選択肢（行動×向ける相手。部屋にいる人だけ）を、その欲求の見込みに比例して選ぶ（確率マッチング。
   欲求ごとに見込みを持ち、体の内側の状態で使い分ける。Keramati & Gutkin 2014。知りたい強さが0なら3段目までと同じ）
 * 合図の強さ＝BASE_STRENGTH＋0.5×不快＋いら立ち＋ミルク以外の欲求の強さ（1まで）
@@ -61,10 +62,14 @@ class Want(Box):
                 # どの欲求のために動くか（ミルクの欲求しか無ければ乱数を引かない＝3段目までと同じ乱数の並び）
                 head = "food"
                 if total > drives["food"]:
-                    r = float(torch.rand(())) * total
-                    for head in HEADS:
-                        r -= drives[head]
-                        if r <= 0:
+                    # 欲求の強さ×その欲求で一番見込みのある行動の見込み（得られそうな分）に比例して選ぶ
+                    pull = {h: drives[h] * max((vs[i] for _, _, vs in options), default=0.0)
+                            for i, h in enumerate(HEADS)}
+                    r = float(torch.rand(())) * sum(pull.values())
+                    for h in HEADS:
+                        r -= pull[h]
+                        if r <= 0 and pull[h] > 0:
+                            head = h
                             break
                 row = HEADS.index(head)
                 options = [(act, j, vs[row]) for act, j, vs in options if vs[row] > 0]   # その欲求で思い浮かぶ行動だけ
