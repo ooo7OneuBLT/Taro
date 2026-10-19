@@ -312,3 +312,46 @@ A 70〜90%（16語以上が70%以上に届くかは半々）、B4 65〜85%、B2 
 3. 0.1秒ごと1歩で、20秒（200歩）が実時間で何秒かかったか。
 
 **返してほしいもの**：体が消えたか、60cmの絵4枚、動画、使えた物の名前、かかった秒数。詰まったらエラーの最後の20行。
+
+### 依頼16　家の場面①：太郎の脳を AI2-THOR の家につなぎ、20秒の動画で見る
+
+状態：未（2026-10-19 計画①、ユーザー承認済み。依頼15のあとに。WSL の Ubuntu 22.04、窓あり＝Linux64）
+
+**ねらい**：目だけの場面（MuJoCo の机）の代わりに、AI2-THOR の台所に太郎の目（床から0.6m、画角60度）を置き、41係の脳・目の入口（DINOv2）を
+そのままつなぐ。見えない親の手（follow-in）：太郎が物を1秒見続けたら、その物を目の前0.3mへ持ってきて ±3cm・2回/秒で振り、名前を言い
+（見続けていれば2秒ごとに最大2回言い直す）、5秒で元へ戻す。名前を言える物は りんご・ぱん・こっぷ・おさら・すぷうん・ほん・りもこん・まくら・くま・ぼおる。
+コードは `core_v2/world_thor/`（説明は __init__.py）、道具は `core_v2/tools/thor_watch.py`（`watch_scene --world thor` でも同じ）。
+クラウドでは偽物の家（world_thor/fake.py）と代わりの目（seg）でしか確かめていない。本物の AI2-THOR・本物の目（dinov2）はここが初めて。
+
+**WSL に太郎の箱を作る**（依頼14の ~/ai2thor とは別。AI2-THOR のビルドは ~/.ai2thor に落ちているので、取り直しにならない）：
+1. リポジトリは WSL の中へ clone する（/mnt/c 越しは読み書きが遅い）：
+   `cd ~ && git clone https://github.com/ooo7OneuBLT/Taro.git taro_repo && cd taro_repo && git checkout claude/project-thread-1ua42q && git pull`
+   （2回目からは `git pull` だけ。育ち帳の写し core_v2/data/育ち/*.pt と 育ち帳.json はリポジトリに入っているので、そのまま使える）
+2. `python3 -m venv ~/taro && source ~/taro/bin/activate`
+3. torch は CUDA 版（requirements.txt の①と同じ版）：`pip install torch==2.14.0+cu130 torchvision==0.29.0+cu130 --index-url https://download.pytorch.org/whl/cu130`
+   （WSL の nvidia-smi が示す CUDA が 13 より古くて入らなければ、cu126 か cu121 の索引で同じ系の版を入れ、入れた版を返す）
+4. `pip install -r requirements.txt`（mobile_sam は git から。通らなければ飛ばしてよい：家の場面の dinov2 の目は MobileSAM を使わない）→ `pip install ai2thor imageio-ffmpeg`
+5. DINOv2 を取り直さないよう、Windows の torch.hub の置き場を写す：
+   `mkdir -p ~/.cache/torch && cp -r /mnt/c/Users/<利用者名>/.cache/torch/hub ~/.cache/torch/`
+   （中に facebookresearch_dinov2_main と checkpoints/dinov2_vits14_pretrain.pth があること）
+6. 確かめ：`python -m core_v2.world_eye.eye_backend` が「作れる」、`python -c "import torch; print(torch.cuda.is_available())"` が True
+7. 日本語の字体（動画の字）：`sudo apt install -y fonts-ipafont-gothic`（上野さんにパスワードを頼む。無くても動くが字が四角になる）
+
+**回すコマンド**（~/taro_repo で、`source ~/taro/bin/activate` のあと。負荷の決まり core_v2/perf.py はそのまま効く：torch のスレッド1本。
+変えるときだけ TARO_THREADS。AI2-THOR の窓が Windows の画面に出る。閉じないこと）：
+
+```
+python -m core_v2.tools.thor_watch --seconds 20 --scene FloorPlan1 --eye dinov2 --stills 3
+```
+
+* 始める太郎は、目だけの場面で育った写しのいちばん上の段（段5_目 があればそれ）。表示の「始める太郎」を返す
+* 最初の起動は遅い（server_timeout=900）。20秒（200回）が実時間で何秒かかったかも表示される
+* 通ったら、居間でも1回：`--scene FloorPlan201`（りもこん・まくら・ほん が出るか）
+
+**返してほしいもの**：
+- 最後の3行（[家の動画] 動画…／親：持ってきた・名づけ・語ごと／見た時間：回数・平均・真ん中・最長・1秒以上・語ごと）と、始めの行（名前を言える物の一覧）
+- 動画 G/logs/動画/家の場面_FloorPlan1_dinov2_種0.mp4 と静止画3枚（_1〜_3.png）を、前回と同じやり方で共有フォルダへ。_まとめ.json と events_*.csv は返事に添える
+- 本物の目の様子のひとこと：黄色い四角（太郎が見ていると思っている所）が物に乗っているか、家具や壁ばかりを物として拾っていないか
+  （目の入口の切り出しは「床から浮いたまとまり」を拾う決まりで、MuJoCo の無地の床に合わせてある。家の床と家具でどうなるかが、いちばん知りたいこと）
+- `thor_fail` が0でなければ、events_*.csv の teleport_fail・camera_fail の行。詰まったらエラーの最後の20行
+- かかった時間、GPU のメモリ（nvidia-smi）
