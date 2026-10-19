@@ -20,8 +20,8 @@
   飲まされた（満腹なのに）。数1つなら「ミルクを飲んだ」（3段目まで）
 * wordplan→worth：言える語の列（荷札, 地図の [0, 0]＝まねしたさ）。届いた語は「できる行動」として覚えておき（known_words）、
   選択肢には泣く・手・話す（話せる時）と、できる語を欲求の順（food, know, stop, social, food, …）に1つずつ、
-  その欲求の見込みが高い順に選んで出す。food 以外は見込みに「まだあまり言っていない分 EXPLORE/√(1＋言った回数)」と
-  ECHO×まねしたさを足した順（言った回数の少ない行動を試したくなる、新しさのおまけ。Kakade & Dayan 2002。まねしたさは
+  その欲求の見込みに「まだあまり言っていない分 EXPLORE/√(1＋言った回数)」と ECHO×まねしたさを足した順で選んで出す
+  （新しさのおまけが無いと、見込みが同じ語のうち先に覚えた語ばかりが選択肢になり、まんまが一度も試されなかった）（言った回数の少ない行動を試したくなる、新しさのおまけ。Kakade & Dayan 2002。まねしたさは
   今さっき聞いた語ほど大きい）
 * episodic→worth：話せる思い出（話す行動の荷札, 地図の [0, j]＝1：j 番目の人に話せる）。5段目
 * want→worth：選んだ行動の写し（行動の荷札, 地図の [0, j]＝1：j 番目の人に向けた、[r, j]＝1：行 r の欲求のため）
@@ -222,7 +222,7 @@ class Worth(Box):
         def key(head):
             def k(i):
                 v = max((self.value(self.known_words[i], who, head) for who in self.people), default=0.0)
-                return v if head == "food" else v + EXPLORE / math.sqrt(1 + self.said[i]) + ECHO * echo.get(i, 0.0)
+                return v + EXPLORE / math.sqrt(1 + self.said[i]) + ECHO * echo.get(i, 0.0)
             return k
 
         acts = [(a, None, HEADS) for a in ACT_TAGS.values()] + [(a, m, HEADS) for a, m in tell]
