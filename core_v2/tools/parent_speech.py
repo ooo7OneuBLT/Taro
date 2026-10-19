@@ -25,15 +25,30 @@ P_ALONE = 0.1      # 語1つだけの発話の割合［Tier2・記憶ベース�
 P_FILLER = 0.15    # 物の名前の入らない文の割合［仮置き］
 
 
-def make_corpus(n: int, seed: int = 0, words=None) -> list[str]:
-    """n 文の話しかけを作る（決まった種で毎回同じ）。"""
+def make_corpus(n: int, seed: int = 0, words=None, alone: str = "deck") -> list[str]:
+    """n 文の話しかけを作る（決まった種で毎回同じ）。
+
+    alone：語1つだけの発話でどの語を言うか。
+    * "deck"（既定、段階9 2026-10-18）：語を1枚ずつ配る山札（全部の語を混ぜて順に言い、言い終えたら混ぜ直す）。
+      親は身の回りの物を代わる代わる単独で言うので、どの語も同じくらい単独で聞く。1000文・20語で語ごとに4〜6回
+    * "random"（段階5〜9の前の決まり）：毎回くじ。1000文・20語で「ばす」が1回しかなく（語にするには KNOWN_MIN＝2回）、
+      「ばすだよ」「ほらばす」など11個の文がまるごと語になった（`太郎/2026-10-18_段階9_見る時間が短いわけ.md`）
+    山札は別の乱数で回すので、ほかの発話（どの型・どの語）は "random" と同じ。"""
     rng = random.Random(seed)
+    deck_rng = random.Random(10_007 * (int(seed) + 1))
     words = list(words or WORDS)
+    deck: list[str] = []
     out = []
     for _ in range(n):
         r = rng.random()
         if r < P_ALONE:
-            out.append(rng.choice(words))
+            w = rng.choice(words)             # くじは引く（"deck" でもほかの発話の乱数の並びを変えないため）
+            if alone == "deck":
+                if not deck:
+                    deck = list(words)
+                    deck_rng.shuffle(deck)
+                w = deck.pop()
+            out.append(w)
         elif r < P_ALONE + P_FILLER:
             out.append(rng.choice(FILLERS))
         else:
