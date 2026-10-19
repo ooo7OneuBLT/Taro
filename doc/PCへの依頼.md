@@ -260,3 +260,26 @@ A 70〜90%（16語以上が70%以上に届くかは半々）、B4 65〜85%、B2 
 
 返してほしいもの: 1の known_words、3と10の growth list、4の絵を見た一言、5の10場面ごとの行と learn_by_word・learn_min（名づけの数がクラウドの見込みどおり増えたか）、
 6〜9の最後の行とまとめ.json、（回したなら）look_diag の2つのまとめ.json、エラー全文。写しと記録の json はコミット・push してよい（G/assets は入れない）。
+
+### 依頼13　家の場面の下見：AI2-THOR が Windows で動くか、赤ちゃんの目の高さ（約60cm）の絵が出るか
+
+状態：未（2026-10-19 ユーザー承認「いいよ」03:25。依頼12の鎖が終わってから。GPUを取り合わないように）
+
+**ねらい**：太郎の世界を「手を抜かずに作られた家」に移す下見。調べた結果は `/mnt/project-files/太郎/文献調査/2026-10-19_家の場面_AI2-THORとVirtualHome.md`。
+公式に配られているのは Mac・Linux 用だけ（ai2thor 5.0.0、2022-12）。Windows で動くかを、軽い順に試す。
+
+**太郎の .venv には入れない。** 別の箱を作る：`py -3.10 -m venv G\envs\ai2thor`（3.10 が無ければ手元の 3.x）→ `G\envs\ai2thor\Scripts\python -m pip install ai2thor pillow`
+
+**試す順**（どれかで絵が出たら、そこで止めてよい）：
+1. そのまま：`from ai2thor.controller import Controller; c = Controller(scene="FloorPlan1", width=640, height=480)`。ビルドの自動ダウンロードが Windows で通るか。
+2. Windows 用ビルド指定：`from ai2thor.platform import StandaloneWindows64` があれば `Controller(platform=StandaloneWindows64, scene="FloorPlan1")`（無ければ `pip install --upgrade git+https://github.com/allenai/ai2thor.git` の最新で再挑戦）。
+3. WSL2 の Ubuntu が入っていれば、その中で `pip install ai2thor` → `Controller(platform=CloudRendering, scene="FloorPlan1")`。
+4. どれも駄目なら、ここで止めて、各段のエラーの最後の20行を返す（Unity Editor 2020.3.25f1 を入れて中身から動かす案は、ユーザーに聞いてから）。
+
+**絵が出たら**（下の短いスクリプトで。G/scripts/ai2thor_shita_mi.py として置いてよい）：
+- 台所 FloorPlan1・居間 FloorPlan201・寝室 FloorPlan301・お風呂 FloorPlan401 の4つで、ふつうの目線の絵を1枚ずつ `c.last_event.frame` から PNG に保存。
+- 同じ4部屋で、目を床から約0.6mに置いた絵：`c.step(action="AddThirdPartyCamera", position=dict(x=<エージェントのx>, y=0.6, z=<z>), rotation=dict(x=10, y=<向き>, z=0), fieldOfView=90)` → `c.last_event.third_party_camera_frames[0]` を保存。うまくいかなければ `c.step(action="Crouch")` の絵でもよい。
+- 速さ：`RotateRight` を200回して、1秒あたりの回数。
+- 物を1つ拾えるか：`c.step(action="PickupObject", objectId=<見えている拾える物のid>)` の成否。
+
+**返してほしいもの**：どの手で動いたか（または全部のエラー）、1秒あたりの回数、GPUのメモリ使用量、絵8枚（前回の動画と同じやり方で共有フォルダへ。置けなければ置いた場所）。
