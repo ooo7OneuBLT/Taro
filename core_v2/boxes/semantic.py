@@ -59,7 +59,9 @@ W（まばら版は A・Q・T・c・cs）の中身だけが経験で変わる。
 * **盤面の世界（4段目「あれなに？」、2026-10-19。use_board() で入る）**：目の入口から「目の前の物」(見た目の荷札, 地図) が
   届く。聞いた語（listen→semantic）が届いた回に目の前に物があれば、まばら版の覚え方で1回結び付ける（覚え方は上と同じ _bind。
   場面をまたいで、いつも一緒に出る組だけが積み上がる）。1分に1回（rhythm の SEM_PHASE）、目の前の物の名前を
-  どれくらい知っているか k ＝ min(1, 逆向きに引く強さ／RECALL_N) を出し、
+  どれくらい知っているか k を出す。k は「物 → 語 → 物」の引き直しが元の物に戻るか：目の前の物から逆に語を引き（3回以上
+  覚えた細胞だけ）、その語から見た目の予想を引いて、目の前の物との似かた c から k ＝ (c−KNOW_LO)/(KNOW_HI−KNOW_LO)（0〜1）。
+  どの物とも一緒に聞く語（まんま・だね）は、引き直すと物の平均になり元の物に戻らないので、知っていることにならない
   - semantic→want：わからなさ 1−k（目の前に物が無ければ0）。何か行動したくなるもと（知りたい）
   - semantic→worth：わかった ＝ 同じ物について k が前の分より上がった分（ほうびの3つめ「予想の外れが減る」）
   名前を何と呼ぶかは教えない（親が言った語が目の前の物と結び付くだけ）
@@ -93,6 +95,9 @@ RECALL_N = 3             # 思い出すのに要る、光った細胞の覚え�
 WORD_SEED, SOUND_SEED = 31, 32
 N_RIVALS = MAX_OBJECTS - 2   # まちがえそうな物の数（書式の上限 8 − 聞いた語の予想 − 物ふつうの見た目）
 _ZMAP = torch.zeros(GRID, GRID, dtype=DTYPE)
+# 盤面4段目：「知っている」の引き直しの似かた。物の荷札の揺れ（1つの数あたり0.1）で、正しい名前なら約0.78、
+# 6つの物どれとも聞く語なら約0.3［仮置き］
+KNOW_LO, KNOW_HI = 0.35, 0.7
 
 
 def _proj(seed: int, n_in: int, n_out: int) -> torch.Tensor:
@@ -371,9 +376,16 @@ class Semantic(Box):
         self.__dict__["_board"] = True
 
     def knowing(self, a) -> float:
-        """盤面：見た目 a の名前をどれくらい知っているか（0〜1）。"""
-        _, strength = self.reverse(make_tag(a))
-        return min(1.0, strength / RECALL_N)
+        """盤面：見た目 a の名前をどれくらい知っているか（0〜1）。物 → 語 → 物 の引き直しが元に戻る度合い。"""
+        a = make_tag(a)
+        word, strength = self.reverse(a)
+        if word is None or strength < RECALL_N:
+            return 0.0
+        r = self.recall(word)
+        if r is None:
+            return 0.0
+        c = float(r @ a)
+        return min(1.0, max(0.0, (c - KNOW_LO) / (KNOW_HI - KNOW_LO)))
 
     def board_step(self, inbox, out):
         from ..rhythm import SEM_PHASE, phase
