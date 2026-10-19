@@ -104,7 +104,8 @@ def _hash_path(rel: str) -> str | None:
     files = [p] if os.path.isfile(p) else sorted(
         os.path.join(d, f) for d, _, fs in os.walk(p) for f in fs if f.endswith(".py"))
     for f in files:
-        h.update(os.path.relpath(f, REPO).encode())
+        # 区切りは「\」にそろえる（今までの写しは全部 Windows で作られた。Linux（WSL）で数えても同じ指紋になるように）
+        h.update(os.path.relpath(f, REPO).replace("/", "\\").encode())
         with open(f, "rb") as fp:
             h.update(fp.read())
     return h.hexdigest()[:12]
@@ -244,7 +245,9 @@ def load(boxes, name_or_row, only: list[str] | None = None) -> dict:
     """写しを係へ読む（boxes にある係だけ。only で絞れる）。配線の指紋が違えば止める。"""
     from ..wiring import wiring_hash
     row = find(name_or_row) if isinstance(name_or_row, str) else name_or_row
-    blob = torch.load(os.path.join(REPO, row["file"]), map_location="cpu", weights_only=False)
+    # 育ち帳の場所は Windows で書くと「\」区切り。Linux（WSL）でも読めるように区切りをそろえる
+    blob = torch.load(os.path.join(REPO, *row["file"].replace("\\", "/").split("/")), map_location="cpu",
+                      weights_only=False)
     fp = blob["meta"].get("fingerprints", {})
     if any(k.startswith("wiring@") for k in fp):
         now = wiring_fingerprints()
