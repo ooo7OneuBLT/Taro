@@ -50,8 +50,11 @@ def main():
     ap.add_argument("--out", default="board_core_out")
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
+    per_seed = []
     with Pool(args.procs) as pool:
-        per_seed = pool.map(_one, [(s, args.days, args.days2, args.days3) for s in range(args.seeds)])
+        for r in pool.imap(_one, [(s, args.days, args.days2, args.days3) for s in range(args.seeds)]):
+            per_seed.append(r)
+            print(f"  {len(per_seed)}/{args.seeds}人 終わり", flush=True)   # 途中経過
     runs = {k: [{"episodes": r[k]} for r in per_seed] for k in per_seed[0]}
     res = {}
     for name, rule in (("cry", "cry"), ("reach", "reach"), ("frozen", "cry")):
