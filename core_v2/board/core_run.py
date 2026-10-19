@@ -55,9 +55,16 @@ def use_language(brain: Brain) -> None:
     brain.boxes["voiceout"].use_board_mouth({w: mouth.get(w, w) for w in words})
 
 
+# 盤面の世界で出すものが一度もゼロでなくならない係（1〜5段目を1日ずつ回して調べた、2026-10-19）。
+# 飛ばしても行動は変わらず、1回が速くなる。環境へ出す係（〜out）と環境から受ける係は飛ばさない
+BOARD_IDLE = {"bodyin", "bodyplan", "bodyreflex", "cb", "combine", "gaze", "goal", "habitgaze", "habitmove", "kind",
+              "map", "monitor", "orientear", "orienteye", "plan", "prio", "soundin", "surprise", "voice", "volume"}
+
+
 def new_brain(seed: int, frozen: bool = False) -> Brain:
     torch.manual_seed(10_000 + seed)
     brain = Brain(check_formats=False)
+    brain.skip = set(BOARD_IDLE)
     brain.boxes["worth"].frozen = frozen
     return brain
 
@@ -104,6 +111,7 @@ def grow_core(rule: str, seed: int, days: int, frozen: bool = False, keep_log: b
         brain = new_brain(seed, frozen)
     else:
         torch.manual_seed(20_000 + seed)
+    brain.skip = set(BOARD_IDLE)
     if stage >= 3:
         use_language(brain)
     if stage >= 4:

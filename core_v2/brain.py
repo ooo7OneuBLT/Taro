@@ -30,6 +30,7 @@ class Brain(nn.Module):
         self._in_keys = {bid: [(e.src, e.key) for e in self._incoming[bid]] for bid in wiring.BOX_IDS}
         self._out_dsts = {bid: {e.dst for e in self.boxes[bid].outputs} for bid in wiring.BOX_IDS}
         self.check_formats = check_formats
+        self.skip: set[str] = set()   # 動かさない係（出すものはゼロのまま）。盤面の世界で使わない係を飛ばして速くする
         self.reset()
 
     def reset(self) -> None:
@@ -63,7 +64,11 @@ class Brain(nn.Module):
             raise ValueError("order は41係をちょうど1回ずつ含むこと")
 
         outboxes = {}
+        skip = getattr(self, "skip", ())
         for bid in order:
+            if bid in skip:
+                outboxes[bid] = self.boxes[bid].passthrough()
+                continue
             buf = self.buffer
             inbox = {src: buf[key] for src, key in self._in_keys[bid]}
             if bid in external:

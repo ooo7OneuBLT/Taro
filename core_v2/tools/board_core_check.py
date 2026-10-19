@@ -6,9 +6,9 @@
 * H 教えていない：親が言葉に応えない世界では、泣くままでいる（最後の10回の合図の半分以上が泣く）
 3段目は2段目（ママがよく応える世界）まで育った同じ脳の続きから、--days3 日。
 
-4段目（あれなに？）の線（3段目まで育った脳の続き。目の前に物6種類 --days4 日、そのあと初めて見る物6種類 --days4b 日）：
-* G4 わからない物の前で、問う語（なに・なあに・これ…）を言う割合が、知っている物の前の2倍以上（4段目の後半、20人の合計）
-* H4 問う語に名前で答える世界の太郎は、答えない世界の太郎より、わからない物の前で問う語を2倍以上言う（4段目の後半）
+4段目（あれなに？）の線（3段目まで育った脳の続き。目の前に物24種類 --days4 日、そのあと初めて見る物6種類 --days4b 日）：
+* G4 わからない物の前で、問う語（なに・なあに・これ…）を言う割合が、知っている物の前の2倍以上（4段目の全部の日、合計）
+* H4 問う語に名前で答える世界の太郎は、答えない世界の太郎より、わからない物の前で問う語を2倍以上言う（4段目の全部の日）
 * I4 初めて見る物でも同じ（初めて見る物の --days4b 日、答える世界÷答えない世界が2倍以上）
 5段目（断る・前のことを話す）の線（4段目まで育った脳の続き、--days5 日。対照＝言葉に応えず、話を特に喜ばない世界）：
 * I5 断る語：最後の半分で、すすめた人に向けた断り（泣く・手で押す・いや・いらない）のうち、言葉が半分以上（20人の合計）
@@ -31,35 +31,44 @@ import json
 import os
 from multiprocessing import Pool
 
-from core_v2.board.core_run import NEW_OBJECTS, grow_core
+import torch
+
+from core_v2.board.core_run import NEW_OBJECTS, grow_core, new_brain
 from core_v2.board.world import MINUTES_PER_DAY, QUESTION_WORDS, REFUSE_WORDS
 from core_v2.tools.board_stage1 import alone_asks, escalation, summarize, target_share
 
 
 def _one(args):
-    import torch
-    torch.set_num_threads(1)      # 小さい計算ばかりなので、1人1スレッド（多いと取り合って数倍遅くなった）
-    seed, days, days2, days3, days4, days4b, days5, controls, out_dir = args
+    seed, days, days2, days3, days4, days4b, days5, controls, out_dir, brains = args
     path = os.path.join(out_dir, f"seed_{seed}.json")
     if os.path.exists(path):                     # 前に終わった人は読むだけ（止めて回し直せる）
         with open(path) as f:
             return json.load(f)
     out = {}
-    cry = grow_core("cry", seed, days)
-    out["cry"] = cry["episodes"]
-    if controls:
-        out["reach"] = grow_core("reach", seed, days)["episodes"]
-        frozen = grow_core("cry", seed, days, frozen=True)
-        out["frozen"] = frozen["episodes"]
-    mama = grow_core("cry", seed, days2, stage=2, brain=copy.deepcopy(cry["brain"]))
-    out["mama_good"] = mama["episodes"]
-    words = grow_core("cry", seed, days3, stage=3, brain=copy.deepcopy(mama["brain"]))
-    out["words"] = words["episodes"]
-    out["no_words"] = grow_core("cry", seed, days3, stage=3, brain=copy.deepcopy(mama["brain"]),
-                                understand_words=False)["episodes"]
+    saved3 = os.path.join(brains, f"brain3_{seed}.pt") if brains else None
+    if saved3 and os.path.exists(saved3):
+        # 3段目まで育った太郎を読み、4・5段目だけ回す（育った太郎は段ごとに保存し、0から育て直さない）
+        b3 = new_brain(seed)
+        b3.load_state_dict(torch.load(saved3, weights_only=False))
+        controls = False
+    else:
+        cry = grow_core("cry", seed, days)
+        out["cry"] = cry["episodes"]
+        if controls:
+            out["reach"] = grow_core("reach", seed, days)["episodes"]
+            frozen = grow_core("cry", seed, days, frozen=True)
+            out["frozen"] = frozen["episodes"]
+        mama = grow_core("cry", seed, days2, stage=2, brain=copy.deepcopy(cry["brain"]))
+        out["mama_good"] = mama["episodes"]
+        words = grow_core("cry", seed, days3, stage=3, brain=copy.deepcopy(mama["brain"]))
+        out["words"] = words["episodes"]
+        out["no_words"] = grow_core("cry", seed, days3, stage=3, brain=copy.deepcopy(mama["brain"]),
+                                    understand_words=False)["episodes"]
+        b3 = words["brain"]
+        torch.save(b3.state_dict(), os.path.join(out_dir, f"brain3_{seed}.pt"))
     if days4:
         for arm, answer in (("ask", True), ("no_ask", False)):
-            r4 = grow_core("cry", seed, days4, stage=4, brain=copy.deepcopy(words["brain"]), answer_questions=answer)
+            r4 = grow_core("cry", seed, days4, stage=4, brain=copy.deepcopy(b3), answer_questions=answer)
             out[arm] = r4["curious"]
             r4b = grow_core("cry", seed, days4b, stage=4, brain=r4["brain"], answer_questions=answer,
                             objects=NEW_OBJECTS)
@@ -90,6 +99,8 @@ def main():
     ap.add_argument("--days5", type=int, default=15)
     ap.add_argument("--procs", type=int, default=4)
     ap.add_argument("--out", default="board_core_out")
+    ap.add_argument("--brains3", default=None,
+                    help="3段目まで育った太郎（brain3_種.pt）のあるフォルダ。あれば1〜3段目を飛ばして4・5段目だけ回す")
     ap.add_argument("--no-controls", action="store_true",
                     help="1・2段目の対照（手・覚えない・パパがよく応える・覚えない2段目）を回さない")
     args = ap.parse_args()
@@ -97,7 +108,7 @@ def main():
     per_seed = []
     with Pool(args.procs) as pool:
         for r in pool.imap(_one, [(s, args.days, args.days2, args.days3, args.days4, args.days4b, args.days5,
-                                   not args.no_controls, args.out) for s in range(args.seeds)]):
+                                   not args.no_controls, args.out, args.brains3) for s in range(args.seeds)]):
             per_seed.append(r)
             print(f"  {len(per_seed)}/{args.seeds}人 終わり", flush=True)   # 途中経過
     runs = {k: [{"episodes": r[k]} for r in per_seed] for k in per_seed[0]}
@@ -122,6 +133,8 @@ def main():
               f"(7割以上 {sum(x >= 0.7 for x in s['last_each'])}/{len(s['last_each'])}人)"
               f"  パパだけの時の合図 {a['per_episode']:.1f}回")
     for name in ("words", "no_words"):
+        if name not in runs:
+            continue
         s = {k: summarize(runs[name], k) for k in ("say:まんま", "say:みるく", "cry", "reach")}
         said = [sum(1 for e in ep if e[1].startswith("say:")) / len(ep) for r in runs[name] for ep in r["episodes"][-10:]]
         res[name] = {k: v for k, v in s.items()} | {"say_all": sum(said) / len(said)}
@@ -156,9 +169,9 @@ def _rate(x):
 
 def stage4(per_seed, days4):
     res = {}
-    half = days4 * MINUTES_PER_DAY // 2
+    # 4段目の全部の日で数える（物24種類は3日目ごろにほぼ全部わかり、後半はわからない物の前の分がほとんど無い）
     for arm in ("ask", "no_ask"):
-        res[arm] = _asks([r[arm] for r in per_seed], half)
+        res[arm] = _asks([r[arm] for r in per_seed])
         res[arm + "_new"] = _asks([r[arm + "_new"] for r in per_seed])
     a, n = res["ask"], res["no_ask"]
     g4 = _rate(a["unknown"]) / max(_rate(a["known"]), 1e-9)
