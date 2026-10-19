@@ -39,13 +39,18 @@ from core_v2.tools.board_stage1 import alone_asks, escalation, summarize, target
 def _one(args):
     import torch
     torch.set_num_threads(1)      # 小さい計算ばかりなので、1人1スレッド（多いと取り合って数倍遅くなった）
-    seed, days, days2, days3, days4, days4b, days5 = args
+    seed, days, days2, days3, days4, days4b, days5, controls, out_dir = args
+    path = os.path.join(out_dir, f"seed_{seed}.json")
+    if os.path.exists(path):                     # 前に終わった人は読むだけ（止めて回し直せる）
+        with open(path) as f:
+            return json.load(f)
     out = {}
     cry = grow_core("cry", seed, days)
     out["cry"] = cry["episodes"]
-    out["reach"] = grow_core("reach", seed, days)["episodes"]
-    frozen = grow_core("cry", seed, days, frozen=True)
-    out["frozen"] = frozen["episodes"]
+    if controls:
+        out["reach"] = grow_core("reach", seed, days)["episodes"]
+        frozen = grow_core("cry", seed, days, frozen=True)
+        out["frozen"] = frozen["episodes"]
     mama = grow_core("cry", seed, days2, stage=2, brain=copy.deepcopy(cry["brain"]))
     out["mama_good"] = mama["episodes"]
     words = grow_core("cry", seed, days3, stage=3, brain=copy.deepcopy(mama["brain"]))
@@ -64,9 +69,14 @@ def _one(args):
         for arm, kind in (("five", True), ("five_ctrl", False)):
             r5 = grow_core("cry", seed, days5, stage=5, brain=copy.deepcopy(b4), understand_words=kind, joy_news=kind)
             out[arm] = {k: r5[k] for k in ("offers", "tells", "can_tell", "episodes")}
-    out["papa_good"] = grow_core("cry", seed, days2, stage=2, swap=True, brain=copy.deepcopy(cry["brain"]))["episodes"]
-    out["frozen2"] = grow_core("cry", seed, days2, stage=2, brain=frozen["brain"])["episodes"]
-    return out
+    if controls:
+        out["papa_good"] = grow_core("cry", seed, days2, stage=2, swap=True,
+                                     brain=copy.deepcopy(cry["brain"]))["episodes"]
+        out["frozen2"] = grow_core("cry", seed, days2, stage=2, brain=frozen["brain"])["episodes"]
+    with open(path, "w") as f:                   # 1人ずつ書く
+        json.dump(out, f, ensure_ascii=False)
+    with open(path) as f:
+        return json.load(f)                      # 読み直した形にそろえる（タプル→リスト）
 
 
 def main():
@@ -80,12 +90,14 @@ def main():
     ap.add_argument("--days5", type=int, default=15)
     ap.add_argument("--procs", type=int, default=4)
     ap.add_argument("--out", default="board_core_out")
+    ap.add_argument("--no-controls", action="store_true",
+                    help="1・2段目の対照（手・覚えない・パパがよく応える・覚えない2段目）を回さない")
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
     per_seed = []
     with Pool(args.procs) as pool:
-        for r in pool.imap(_one, [(s, args.days, args.days2, args.days3, args.days4, args.days4b, args.days5)
-                                    for s in range(args.seeds)]):
+        for r in pool.imap(_one, [(s, args.days, args.days2, args.days3, args.days4, args.days4b, args.days5,
+                                   not args.no_controls, args.out) for s in range(args.seeds)]):
             per_seed.append(r)
             print(f"  {len(per_seed)}/{args.seeds}人 終わり", flush=True)   # 途中経過
     runs = {k: [{"episodes": r[k]} for r in per_seed] for k in per_seed[0]}
@@ -93,12 +105,16 @@ def main():
         json.dump(per_seed, f, ensure_ascii=False)
     res = {}
     for name, rule in (("cry", "cry"), ("reach", "reach"), ("frozen", "cry")):
+        if name not in runs:
+            continue
         s = summarize(runs[name], rule)
         res[name] = {"share": s, "esc": escalation(runs[name]) if rule == "cry" else None}
         print(f"1段目 {name}: 最初3回 {s['first']:.2f} → 最後10回 {s['last']:.2f}  "
               f"(7割以上 {sum(x >= 0.7 for x in s['last_each'])}/{len(s['last_each'])}人)"
               + (f"  無視10分後の強まり {res[name]['esc']['rise']:+.3f}" if res[name]["esc"] else ""))
     for name, who in (("mama_good", "ママ"), ("papa_good", "パパ"), ("frozen2", "ママ")):
+        if name not in runs:
+            continue
         s = target_share(runs[name], who)
         a = alone_asks(runs[name], "パパ")
         res[name] = {"target": s, "alone_papa": a}
