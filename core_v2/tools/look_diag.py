@@ -120,6 +120,8 @@ class Diag(gn.Grower):
             r, c = info["peak_rc"]
             best = None
             for d in getattr(eyein, "last_dets", []) or []:
+                if "name" not in d:   # 本物の目（dinov2）の切り出しには正解の名前が付かない
+                    continue
                 dd = math.hypot(d["pos"][0] / CELL_PX - c - 0.5, d["pos"][1] / CELL_PX - r - 0.5)
                 if best is None or dd < best[0]:
                     best = (dd, d["name"])
@@ -130,7 +132,8 @@ class Diag(gn.Grower):
                 fired_to = "(物でない所)"
         heard_word = self.brain.boxes["listen"].last_word
         # 目の動きの見積もり（画像の位相相関）と、物の本当の動き（環境の正解の中心）を比べる
-        dets = {d["name"]: (d["pos"][0] / CELL_PX, d["pos"][1] / CELL_PX) for d in getattr(eyein, "last_dets", []) or []}
+        dets = {d["name"]: (d["pos"][0] / CELL_PX, d["pos"][1] / CELL_PX) for d in getattr(eyein, "last_dets", []) or []
+                if "name" in d}   # 本物の目では名前が無いので、目の動きの当たり具合は測れない（見る時間・名づけは測れる）
         prev = getattr(self, "_prev_dets", {})
         common = [n for n in dets if n in prev]
         true_mv = est_mv = None
