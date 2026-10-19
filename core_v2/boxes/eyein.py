@@ -402,8 +402,9 @@ class Eyein(Box):
             self.last_mode = "track"
         return dets
 
-    def see_object(self, name) -> list:
-        """盤面の4段目：目の前の物 → [(見た目の荷札, 塗った地図)]。揺れは1分に1回（see_people と同じ回）。"""
+    def see_object(self, name, attend: bool = False) -> list:
+        """盤面の4段目：目の前の物 → [(見た目の荷札, 塗った地図)]。揺れは1分に1回（see_people と同じ回）。
+        地図の行1は [1, 0]＝大人もその物を見ている（一緒に見ている、Baldwin 1991。ほかは0）。"""
         if not name:
             return []
         if phase(self.__dict__.get("_board_n", 1) - 1) == 0 or "_board_obj" not in self.__dict__:
@@ -412,7 +413,11 @@ class Eyein(Box):
                 base = _PERSON_TAGS["obj:" + name] = word_tag("obj:" + name)
             t = base + torch.randn(TAG_DIM, dtype=DTYPE) * FACE_NOISE
             self.__dict__["_board_obj"] = [(t / torch.linalg.vector_norm(t), torch.ones(GRID, GRID, dtype=DTYPE))]
-        return list(self.__dict__["_board_obj"])
+        tag, m = self.__dict__["_board_obj"][0]
+        m = m.clone()
+        m[1] = 0.0
+        m[1, 0] = 1.0 if attend else 0.0
+        return [(tag, m)]
 
     def see_people(self, people) -> list:
         """盤面の世界の下駄：人の (名前, そばにいるか[, 笑って応えたか]) の列 → (荷札, 地図) の列。地図は全体が
@@ -439,7 +444,7 @@ class Eyein(Box):
         env = inbox.get(ENV)
         if isinstance(env, dict) and "people" in env:
             out["social"] = self.see_people(env["people"])
-            out["semantic"] = self.see_object(env.get("object"))
+            out["semantic"] = self.see_object(env.get("object"), bool(env.get("attend")))
             obj = out["semantic"][0][0] if out["semantic"] else torch.zeros(TAG_DIM, dtype=DTYPE)
             out["episodic"] = [(obj, torch.zeros(GRID, GRID, dtype=DTYPE))] + out["social"]   # 5段目：思い出の帳面へ
             out["worth"] = [(obj, torch.zeros(GRID, GRID, dtype=DTYPE))] if env.get("object") else []   # 4段目

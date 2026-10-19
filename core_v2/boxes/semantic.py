@@ -99,6 +99,7 @@ _ZMAP = torch.zeros(GRID, GRID, dtype=DTYPE)
 # 盤面4段目：「知っている」の引き直しの似かた。物の荷札の揺れ（1つの数あたり0.1）で、正しい名前なら約0.78、
 # 6つの物どれとも聞く語なら約0.3［仮置き］
 KNOW_LO, KNOW_HI = 0.35, 0.7
+SAME_OBJECT = 0.3        # 盤面4段目：見た目の荷札の似かたがこれより大きければ同じ物（worth.SAME_PERSON と同じ）
 NAME_KNOWN = 0.5         # 盤面5段目：知る度合いがこれ以上なら、目の前の物の名前の語を思い出の帳面へ渡す
 
 
@@ -395,9 +396,13 @@ class Semantic(Box):
         seen = inbox.get("eyein") or []
         obj = seen[0][0] if seen else None
         q = inbox.get("listen")
-        if obj is not None and q is not None and float(torch.linalg.vector_norm(q)) > 0.0:
+        # 語と物を結ぶのは、大人もその物を見て話している時だけ（地図の [1, 0]。一緒に見ている時の語を
+        # その物の名前と取る、Baldwin 1991。忙しい時の「まっててね」などを物と結んで、わかったが出ていた）
+        attend = bool(seen) and float(seen[0][1][1, 0]) > 0.5
+        if obj is not None and attend and q is not None and float(torch.linalg.vector_norm(q)) > 0.0:
             self._bind(make_tag(obj), None, make_tag(q))
             self.n_learn += 1
+            self.__dict__["_board_heard"] = True       # この分に物と語を結んだ（わかったが変わりうる）
         if phase(n) == SEM_PHASE:      # わからなさ（この分に選ぶ係へ）・目の前の物の名前（思い出の帳面へ）
             k = self.knowing(obj) if obj is not None else 0.0
             self.__dict__["_board_unknown"] = (1.0 - k) if obj is not None else 0.0
@@ -406,16 +411,20 @@ class Semantic(Box):
         if phase(n) == OUT_PHASE:      # わかった（この分に聞いた語を覚え終えてから。次の分の初めに worth が読む）
             # わかった＝その物について、今までで一番わかった度合いを超えた分（覚えたものどうしの混ざりで
             # 度合いが上下するので、下がって戻っただけの分は数えない）
+            # 物と語を結ばなかった分は数えない（見るたびの揺れで度合いが変わるだけ）。物は荷札の似かたで見分ける
+            # （見るたびに揺れるので、同じ物どうしの似かたは0.6ほど。前は0.9で比べていて、毎分「初めての物」になり
+            # わかったが毎分出ていた）
+            heard = self.__dict__.pop("_board_heard", False)
             k = self.knowing(obj) if obj is not None else 0.0
             best = self.__dict__.setdefault("_board_best", [])       # [(物の荷札, 一番わかった度合い)]
-            i = next((i for i, (o, _) in enumerate(best) if obj is not None and float(o @ obj) > 0.9), None)
+            sims = [float(o @ obj) for o, _ in best] if obj is not None else []
+            i = max(range(len(sims)), key=sims.__getitem__) if sims and max(sims) > SAME_OBJECT else None
             aha = 0.0
             if obj is not None:
                 if i is None:
-                    best.append((make_tag(obj), k))
-                    aha = k
+                    best.append((make_tag(obj), k))                  # 初めて見た物：今の度合いを覚えるだけ
                 else:
-                    aha = max(0.0, k - best[i][1])
+                    aha = max(0.0, k - best[i][1]) if heard else 0.0
                     best[i] = (best[i][0], max(k, best[i][1]))
             self.__dict__["_board_aha"] = aha
         elif phase(n) == 0:

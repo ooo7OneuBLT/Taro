@@ -238,6 +238,7 @@ class Board:
             self.offer, started = [self.rng.choice(free).name, OFFER_MIN], True
 
         heard, spoke = None, None
+        attend = False                     # この一言の間、大人が目の前の物を見ている（物の話をしている）
         quiz, self.quiz = self.quiz, None
         if self.speech:
             if refused:
@@ -249,7 +250,7 @@ class Board:
             elif tell:
                 heard, spoke = self._say(f"name:{tell[0]}", tell[1]), tell[1]
             elif asked:
-                heard, spoke = self._say(f"name:{self.object}", noticed_by), noticed_by
+                heard, spoke, attend = self._say(f"name:{self.object}", noticed_by), noticed_by, True
                 self.quiz = (self.object, noticed_by)       # 次の1分にもう一度名前を言う（聞かれた名前はくり返して教える）
             elif fed:
                 heard = self._say("feed", came)
@@ -258,10 +259,10 @@ class Board:
             elif action != "nothing" and target_busy(self.adults, target) and self.rng.random() < BUSY_REPLY:
                 heard = self._say("busy", target)
             elif quiz and quiz[0] == self.object and any(a.name == quiz[1] for a in free):
-                spoke = quiz[1]                         # 「これなあに？」の続き：名前を言う
+                spoke, attend = quiz[1], True           # 「これなあに？」の続き：名前を言う
                 heard = self._say(f"name:{self.object}", spoke)
             elif free and self.object and self.rng.random() < NAME_PER_MIN:
-                spoke = self.rng.choice(free).name           # 目の前の物の話（名前を言う）
+                spoke, attend = self.rng.choice(free).name, True   # 目の前の物の話（名前を言う）
                 if self.rng.random() < QUIZ_SHARE and (self.speech or {}).get(f"quiz:{spoke}"):
                     heard = self._say("quiz", spoke)
                     self.quiz = (self.object, spoke)
@@ -289,7 +290,7 @@ class Board:
                 "busy": target_adult is None or not target_adult.present or target_adult.busy_left > 0,
                 "present": self.present(), "heard": heard, "spoke": spoke, "object": self.object,
                 "offered": self.offer is not None, "overfed": overfed, "refused": refused, "smiled": smiled,
-                "back": back, "told": tell}
+                "back": back, "told": tell, "attend": attend}
 
 
 def target_busy(adults, target) -> bool:

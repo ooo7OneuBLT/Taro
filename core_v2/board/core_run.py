@@ -24,10 +24,25 @@ from core_v2.tagging import word_tag
 SPEECH = os.path.join(os.path.dirname(__file__), os.pardir, "data", "盤面_親の言葉.json")
 
 
+# 4段目：物を増やす分の名前（LLMの親のせりふは無いので、名前を型に入れた短い一言で名前を言う）
+EXTRA_OBJECTS = ["みかん", "いちご", "さかな", "とり", "うさぎ", "ぞう", "くま", "おさら", "スプーン", "かさ",
+                 "ふく", "はな", "たまご", "パン", "ボタン", "かぎ", "てがみ", "とけい"]
+NAME_TEMPLATES = [("{n}だよ", ["{k}", "だよ"]), ("{n}だね", ["{k}", "だね"]), ("ほら、{n}", ["ほら", "{k}"]),
+                  ("これは{n}", ["これ", "{k}"]), ("{n}、{n}", ["{k}", "{k}"])]
+
+
 @lru_cache(maxsize=1)
 def speech_data() -> dict:
     with open(SPEECH, encoding="utf-8") as f:
-        return json.load(f)
+        d = json.load(f)
+    for obj in EXTRA_OBJECTS:
+        k = normalize_kana(obj)
+        for who in ("ママ", "パパ"):
+            d["lines"].setdefault(f"name:{obj}:{who}", [t.format(n=obj) for t, _ in NAME_TEMPLATES])
+        for t, ear in NAME_TEMPLATES:
+            d["ear"].setdefault(t.format(n=obj), [w.format(k=k) for w in ear])
+        d["mouth"].setdefault(obj, obj)
+    return d
 
 
 def use_language(brain: Brain) -> None:
@@ -58,6 +73,7 @@ def _who(j, names):
 
 
 OBJECTS = ["ボール", "コップ", "くつ", "わんわん", "くるま", "バナナ"]
+ATTEND_MIN = 2   # 大人が物を見て話した一言が耳を通って届き終わるまでの分（一緒に見ている、が続く間）
 NEW_OBJECTS = ["りんご", "ぼうし", "いす", "ほん", "にゃんにゃん", "でんしゃ"]   # 4段目の後半：初めて見る物
 
 
@@ -69,7 +85,8 @@ def grow_core(rule: str, seed: int, days: int, frozen: bool = False, keep_log: b
     3：2段目の世界で大人が話し、言葉に応える（brain は2段目まで育った脳を渡す）。
     4：3段目の世界の目の前に物が置かれ、大人は問う語に名前で答える（brain は3段目まで育った脳）。
     4段目は、おなかがすいていない1分ごとに (分, 目の前の物, 名前を知っていたか, 行動) を "curious" に記録する
-    （objects で目の前に置く物を替えられる。既定は OBJECTS）。
+    （objects で目の前に置く物を替えられる。既定は OBJECTS＋EXTRA_OBJECTS の24種類：6種類だとすぐ全部わかってしまい、
+    わかった！が数回しか起きなかった）。
     5段目：4段目の世界に、満腹の時のすすめ（offers）と、物の話への応え方（news。joy_news=False で対照）を足す。
     すすめられている1分ごとに "offers" へ (分, 行動, すすめた人に向けたか, 断られたか, 飲まされたか)、
     話す行動・物の名前を言った1分ごとに "tells" へ (分, 行動, 語, 相手, 相手がいなかった間の物か, 喜んだか)、
@@ -77,7 +94,7 @@ def grow_core(rule: str, seed: int, days: int, frozen: bool = False, keep_log: b
     if stage == 2 and brain is None:
         brain = grow_core(rule, seed, days, frozen, stage=1)["brain"]
     adults = stage1_adults() if stage == 1 else stage2_adults(swap)
-    objs = objects or (OBJECTS if stage == 4 else OBJECTS + NEW_OBJECTS)
+    objs = objects or (OBJECTS + EXTRA_OBJECTS if stage == 4 else OBJECTS + NEW_OBJECTS)
     board = Board(rule=rule, seed=seed + 500 * (stage - 1), adults=adults,
                   speech=speech_data()["lines"] if stage >= 3 else None, understand_words=understand_words,
                   objects=objs if stage >= 4 else None, answer_questions=answer_questions,
@@ -101,10 +118,12 @@ def grow_core(rule: str, seed: int, days: int, frozen: bool = False, keep_log: b
     episodes, cur, log = [], [], []
     fed, came, heard, spoke = False, None, None, None
     offered, overfed, smiled = False, False, None
+    attend_left = 0
     for t in range(days * MINUTES_PER_DAY):
         present = board.present()
         ext = {"gutin": {"fullness": board.fullness, "fed": fed, "offered": offered, "overfed": overfed},
-               "eyein": {"people": [(n, n in (came, spoke), n == smiled) for n in present], "object": board.object}}
+               "eyein": {"people": [(n, n in (came, spoke), n == smiled) for n in present], "object": board.object,
+                         "attend": attend_left > 0}}
         action, strength, target, word = "nothing", 0.0, None, None
         for k in range(TICKS_PER_MIN):
             if k == 0 and heard:
@@ -144,6 +163,8 @@ def grow_core(rule: str, seed: int, days: int, frozen: bool = False, keep_log: b
             k = sem.knowing(_base("obj:" + board.object))
             curious.append((t, board.object, k >= 1.0, action if action != "say" else "say:" + word))
         fed, came, heard, spoke = obs["fed"], obs["came"], obs["heard"], obs["spoke"]
+        # 大人が物を見て話した一言は、耳を通って届き終わるまで（ATTEND_MIN 分）「一緒に見ている」が続く
+        attend_left = ATTEND_MIN if obs.get("attend") else max(0, attend_left - 1)
         if action != "nothing":
             cur.append((t, action if action != "say" else "say:" + word, strength, target, tuple(present)))
         if keep_log:
