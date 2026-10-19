@@ -52,7 +52,7 @@ def test_path_formats():
     assert fmt[("eyein", "orienteye")] == (Fmt.TAG_AND_MAP, None)  # 段階3
     assert fmt[("listen", "voice")] == (Fmt.TEXT, None)   # 段階7
     assert fmt[("voice", "voiceout")] == (Fmt.MOTOR, 22)
-    assert fmt[("voice", "listen")] == (Fmt.AMOUNT, None)
+    assert fmt[("voice", "listen")] == (Fmt.TEXT, None)    # 段階9：戻るはずの自分の音
     assert fmt[("objfile", "surprise")] == (Fmt.TAG_AND_MAP, None)   # 段階8
     assert fmt[("surprise", "semantic")] == (Fmt.AMOUNT, None)
     assert sum(1 for e in wiring.EDGES if e.key in wiring.PATH_FORMATS) == 36   # 段階9で7本（7本足し eyein→objfile を外した、orienteye→eyein）

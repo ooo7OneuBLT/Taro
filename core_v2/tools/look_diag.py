@@ -85,7 +85,7 @@ class Diag(gn.Grower):
 
         def lstep(inbox, _orig=lorig):
             v = inbox.get("voice")
-            self._own_voice = v is not None and float(v) > 0.5
+            self._own_voice = bool(v)          # 自分の声の写し（段階9から TEXT：戻るはずの自分の音）
             return _orig(inbox)
         ls.step = lstep
         self._own_voice = False

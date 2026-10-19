@@ -156,6 +156,19 @@ def path_record(brain) -> dict[str, Any]:
     return rec
 
 
+SAID_GAP_TICKS = 6     # 太郎の声がこれだけ途切れたら1つの声が終わったとみなす（voice_bed.END_GAP_TICKS と同じ）
+
+
+def taro_said(u, text: str) -> None:
+    """太郎の声を親の耳へ：目だけの場面は env.taro_said、MIMo の場面は旧太郎と同じ合図（_taro_voice_signal・_taro_voice_text）。"""
+    f = getattr(u, "taro_said", None)
+    if callable(f):
+        f(text)
+    else:
+        u._taro_voice_signal = True
+        u._taro_voice_text = str(text)
+
+
 def run_trial(brain, env, *, seed: int, duration_s: float = 10.0,
               on_tick: Callable[[dict[str, Any]], None] | None = None,
               manual_eye: Callable[[int, Any], tuple[float, float] | None] | None = None,
@@ -196,6 +209,7 @@ def run_trial(brain, env, *, seed: int, duration_s: float = 10.0,
     act = zero_action(env)
     rows = []
     echo = ""
+    said, quiet = "", 0
     n_ticks = int(round(duration_s / (K * DT)))
     for i in range(n_ticks):
         heard = []
@@ -223,6 +237,15 @@ def run_trial(brain, env, *, seed: int, duration_s: float = 10.0,
             to_env = brain.tick(ext)
             cmd = to_env.get("eyeout")
         echo = to_env.get("voiceout", "")
+        # 段階9：太郎の声を親の耳へも（ParentLabeling の respond_to_voice が読む合図。旧太郎の brain_tick と同じ約束）。
+        # 1音ずつではなく、声が SAID_GAP_TICKS 回途切れたら1つの声として渡す。今の場面は respond_to_voice を使っていないので親は変わらない
+        if echo:
+            said, quiet = said + echo, 0
+        elif said:
+            quiet += 1
+            if quiet >= SAID_GAP_TICKS:
+                taro_said(u, said)
+                said, quiet = "", 0
         if manual_eye is not None:
             cmd = manual_eye(i, cmd)
         if cmd is not None:

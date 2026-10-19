@@ -19,13 +19,22 @@
   決まった乱数で数にしたもの（tagging.word_tag＝生まれつきの耳の符号）。知っている語が無ければゼロ
   （「でんしゃはどこ？」では何も探さない）
 
-* **段階7（2026-10-17）**：声の係（voice）から自分の声の写し（AMOUNT）が 1 で来ている間に聞いた音は、自分の声。
+* **段階7（2026-10-17）**（段階9で下のとおり変えた）：声の係（voice）から自分の声の写し（AMOUNT）が 1 で来ている間に聞いた音は、自分の声。
   次の音の当て方も回数も直さず（自分の喃語を親の語として覚えない）、意味の辞書へも送らず、そのかなを声の係へ渡す
   （口の帳面を作るため。TEXT）。写しが無い間は、聞いた発話の中の知っている語を空白区切りで声の係へ（TEXT）、
   最初の知っている語の荷札を言う語の係（wordplan）へ渡す（意味の辞書へ渡すものと同じ）
 
 * **段階8（2026-10-18）**：発話の中の知っている語を**全部、順に**送る（今までは最初の1つだけ。「ぼおるないね」の「ない」が落ちていた）。
   聞いた回に1つ目、次の回に2つ目…と1回に1つずつ意味の辞書と言う語の係へ（語ごとに意味の辞書の名残りが1つできる）
+
+* **段階9（2026-10-18）：自分が話している間も聞く**（人間も自分の声と一緒に他人の声を聞く）。前は自分の声の写しが来ている
+  間に聞いた音を**全部**自分の声として捨てていたので、太郎が声を出している最中の親の名づけも捨てていた（look_diag：
+  名づけ37回のうち7回）。今は、声の係から届く写しは「いま耳に戻ってくるはずの自分の音」（声の係の口の帳面が、出した口の
+  指令から予想したかな。帳面にまだ無い指令なら UNKNOWN_SOUND）。耳に届いた発話（空白区切り）のうち、
+  予想と同じ音を1つずつ自分の声とみる。予想と同じ音が無ければ（体が育って予想と違う音が出た、帳面に無い指令）、
+  1音だけの発話を自分の声とみる（口は1回に1音しか出さない）。自分の声とみた音だけを覚えず・意味の辞書へ送らず、
+  「聞いた自分の声」として声の係へ渡す（口の帳面のため。last_self にも残す）。**残りの発話（同じ回の親の声）は
+  ふだんどおり聞く**。声の係へは「自分の声|親の知っている語…」の形で渡す（自分の声が無い回は今までどおり親の語だけ）
 
 NNの中の状態から語の荷札を作る案は、1試行目で違う語どうしが似すぎた（似かた 平均0.62・最大0.89、
 わんわん／にゃんにゃん）ので、仕様書 §2 の決めどおり生まれつきの耳の符号に替えた。
@@ -54,6 +63,8 @@ LR = 3e-3                 # 1発話ごとに1回直す強さ［仮置き］
 KNOWN_MIN = 2             # 語1つだけで何回聞いたら「知っている語」か［仮置き］
 MEAN_RATE = 0.01          # 終わりの予想の平均を、1音ごとにどれだけ新しい値へ寄せるか［仮置き］
 INIT_SEED = 0             # NNの重みの最初の値（毎回同じにする）
+UNKNOWN_SOUND = "？"      # 自分の声の写しで「自分の音が1つ戻るが、何の音かはまだ分からない」
+SELF_SEP = "|"            # 声の係へ渡す TEXT で、聞いた自分の声と親の語を分ける印
 
 
 def kana_only(text: str) -> str:
@@ -177,21 +188,36 @@ class Listen(Box):
         if self.alone[s] in (1, KNOWN_MIN):   # 知っている語の一覧が変わりうるのは、新しい発話か、回数が線に届いたときだけ
             self._known = None
 
+    @staticmethod
+    def split_self(utterances: list[str], expected: str) -> tuple[str, list[str]]:
+        """届いた発話の並びから、写し（いま戻るはずの自分の音、空白区切り）に合う音を抜き出す。(自分の声, 残り)。"""
+        rest = list(utterances)
+        own = []
+        for exp in expected.split():
+            k = next((i for i, u in enumerate(rest) if exp != UNKNOWN_SOUND and kana_only(u) == exp), None)
+            if k is None:                    # 予想どおりの音が無い：1音だけの発話を自分の声とみる（口は1回に1音）
+                k = next((i for i, u in enumerate(rest) if len(kana_only(u)) == 1), None)
+            if k is not None:
+                own.append(kana_only(rest.pop(k)))
+        return "".join(own), rest
+
     def step(self, inbox):
         out = self.passthrough()
         self.last_heard, self.last_chunks, self.last_word = [], [], ""
         text = inbox.get("earin") or ""
-        own = inbox.get("voice")
-        if own is not None and float(own) > 0.5:
-            # 段階7：自分の声の写しが来ている間に聞いた音は自分の声。覚えず、意味の辞書へも送らず、声の係へそのまま返す
-            self.last_self = kana_only(text)
-            out["voice"] = self.last_self
-            return self._send_next(out)
-        if not text:
+        expected = inbox.get("voice") or ""
+        utterances = text.split()            # 1回に2つ届いたら空白で区切られている
+        self.last_self = ""
+        if expected:
+            # 段階9：写しに合う音だけが自分の声。覚えず、意味の辞書へも送らない。残り（親の声）はふだんどおり聞く
+            self.last_self, utterances = self.split_self(utterances, str(expected))
+        if not utterances:
+            if self.last_self:
+                out["voice"] = self.last_self + SELF_SEP
             return self._send_next(out)
         known = self.known()
         found = []
-        for u in text.split():               # 1回に2つ届いたら空白で区切られている
+        for u in utterances:
             ch = self.segment(u)
             self.last_heard.append(u)
             self.last_chunks.append(ch)
@@ -200,7 +226,7 @@ class Listen(Box):
                 self.hear(u)
                 self.chunks.update(ch)
         self._queue += found
-        out["voice"] = " ".join(found)
+        out["voice"] = (self.last_self + SELF_SEP if self.last_self else "") + " ".join(found)
         return self._send_next(out)
 
     def _send_next(self, out):

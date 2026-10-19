@@ -110,15 +110,20 @@ class EyeTaro:
             utt = info.get("parent_utterance")
             if utt and utt.get("text"):
                 heard.append(str(utt["text"]))
-        ext = {"eyein": obs["eye_left"], "earin": " ".join(heard)}
+        # 段階9：太郎の声も次の回に自分の耳へ戻す（人間も自分の声を聞く。run_v2・say_names と同じ）。耳は自分の声の写しに
+        # 合う音だけを自分の声とし、同じ回の親の声はふつうに聞く
+        ext = {"eyein": obs["eye_left"], "earin": " ".join(x for x in [self._echo] + heard if x)}
         if sound is not None:
             ext["soundin"] = sound
         to_env = self.brain.tick(ext)
+        self._echo = to_env.get("voiceout", "") or ""
         cmd = to_env.get("eyeout")
         if cmd is not None:
             env._orienting.set_map_target(float(cmd[0]), float(cmd[1]))
         self.n_tick += 1
         return {"heard": " ".join(heard), "sound": sound is not None}
+
+    _echo = ""        # 前の回に太郎が出した声（この回に耳へ戻る）
 
     def close(self) -> None:
         for e in self.envs.values():

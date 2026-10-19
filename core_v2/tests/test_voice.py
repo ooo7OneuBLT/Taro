@@ -45,13 +45,14 @@ def test_voiceout_reads_motor_and_month():
 
 # ---------------------------------------------------------------- 声の係だけを回す道具
 class Ear:
-    """声の係の出した口の指令を、ECHO_TICKS 回あとに音として戻す（声の出口→耳→聞き分けの代わり）。"""
+    """声の係の出した口の指令を、ECHO_TICKS 回あとに音として戻す（声の出口→耳→聞き分けの代わり。聞き分けが自分の声と分けた形で渡す）。"""
 
     def __init__(self, voice, month):
         self.voice, self.month, self.t, self.back, self.heard = voice, month, 0, {}, []
 
     def tick(self, parent="", plan=None):
-        heard = " ".join(x for x in (self.back.pop(self.t, ""), parent) if x)
+        own = self.back.pop(self.t, "")
+        heard = (own + "|" if own else "") + parent      # 聞き分ける係の形：「聞いた自分の声|親の語」（段階9）
         inbox = {"listen": heard}
         if plan is not None:
             inbox["wordplan"] = plan
@@ -213,11 +214,44 @@ def test_parent_response_brings_next_babble_sooner():
 # ---------------------------------------------------------------- 自分の声の写し・逆向きに引く
 def test_listen_does_not_learn_own_voice():
     ear = Listen(learning=True)
-    out = ear.step({"earin": "ま", "voice": torch.tensor(1.0)})
-    assert out["voice"] == "ま" and not ear.alone
+    out = ear.step({"earin": "ま", "voice": "ま"})
+    assert out["voice"] == "ま|" and not ear.alone and ear.last_self == "ま"
     assert float(torch.linalg.vector_norm(out["semantic"])) == 0.0
-    out = ear.step({"earin": "ま", "voice": torch.tensor(0.0)})
+    out = ear.step({"earin": "ま", "voice": ""})
     assert ear.alone["ま"] == 1
+
+
+def test_listen_hears_parent_while_speaking():
+    """段階9：自分が話している間も、親の声は聞く。写しに合う音だけが自分の声。"""
+    ear = Listen(learning=True)
+    for _ in range(2):
+        ear.step({"earin": "ぼおる"})
+        ear.step({"earin": "ぼおるだね"})
+        ear.step({"earin": "ほらぼおる"})
+    assert "ぼおる" in ear.known()
+    n = ear.alone["ぼおるだね"]
+    out = ear.step({"earin": "ば ぼおるだね", "voice": "ば"})
+    assert ear.last_self == "ば" and ear.alone["ぼおるだね"] == n + 1 and "ば" not in ear.alone
+    assert out["voice"] == "ば|ぼおる" and float(out["semantic"] @ word_tag("ぼおる")) > 0.99
+    # 予想と違う音が出ても（体が育った・帳面に無い指令）、1音だけの発話を自分の声とみる
+    out = ear.step({"earin": "ぼおる ぶ", "voice": "？"})
+    assert ear.last_self == "ぶ" and out["voice"] == "ぶ|ぼおる" and "ぶ" not in ear.alone
+
+
+def test_voice_takes_own_and_parent_from_same_tick():
+    v = Voice(learning=True)
+    p = (0, 0, 0, 0)
+    v.fifo, v.own_start = [(p, -ECHO_TICKS)], -ECHO_TICKS
+    v.step({"listen": "ば|ぼおる"})
+    assert [e["voice"] for e in v.log if e["event"] == "own"] == ["ば"] and v.lexicon["ぼおる"] == 1
+    assert v.known_sounds() == {"ば"}
+    v2 = Voice(learning=True)
+    v2.fifo = [(p, -ECHO_TICKS)]
+    v2.step({"listen": "ぼおる"})                 # 親の語だけ（自分の声と取りちがえない）
+    assert v2.own == "" and v2.lexicon["ぼおる"] == 1
+    v2.note(p, "ま")
+    v2.fifo = [(p, v2.t - 2)]
+    assert v2.step({})["listen"] == "ま"         # 写しは帳面から予想した音
 
 
 def test_semantic_reverse_lookup():

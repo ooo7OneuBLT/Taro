@@ -30,12 +30,13 @@
 * **親が応えると、また声を出したくなる**（やる気の側の生まれつきのほうび、仕様書 §2-3。Goldstein ら 2003）：
   自分の声のあと M_WINDOW_S 秒以内に親の語を聞いたら、次の喃語までの待ちを RESP_LATENCY_S 秒の平均で引き直す。
   ふだんは平均 BABBLE_INTERVAL_S 秒ごと（前の太郎 B の穏やかな時間の喃語の間隔）
-* **自分の声の写し**（聞き分ける係へ AMOUNT）：口の指令を出してから、その音が耳から戻るまで 1。聞き分ける係は
-  その間に聞いた音を親の語として覚えず、この係へそのまま渡す。戻ってきた音は口の帳面と自分の声の列になる。
-  ECHO_MAX_TICKS 回たっても戻らない音（耳へ返さない環境）は待つのをやめる
+* **自分の声の写し**（聞き分ける係へ。段階9から TEXT）：口の指令を出してから、その音が耳から戻るまで、口の帳面から予想した
+  その音（帳面に無い指令なら「？」）。聞き分ける係は、聞いた音のうち予想に合う音だけを自分の声とし（親の語として覚えない）、
+  この係へ「自分の声|親の語」の形で渡す。同じ回の親の語もふつうに聞く（段階9まで、写しの間は親の声も全部捨てていた）。
+  戻ってきた音は口の帳面と自分の声の列になる。ECHO_MAX_TICKS 回たっても戻らない音（耳へ返さない環境）は待つのをやめる
 
-受け取るもの：wordplan（言いたい語の荷札）、listen（TEXT：親の知っている語を空白区切り、または自分の声の音）。
-出すもの：voiceout（MOTOR 22。1音の口の指令、黙る回はゼロ）、listen（AMOUNT：自分の声の写し）。
+受け取るもの：wordplan（言いたい語の荷札）、listen（TEXT：親の知っている語を空白区切り。自分の声が戻った回は「自分の声|親の語」）。
+出すもの：voiceout（MOTOR 22。1音の口の指令、黙る回はゼロ）、listen（TEXT：自分の声の写し＝戻るはずの音）。
 goal・habitmove・reach からの矢印と habitmove・cb への矢印は段階7では使わない（ゼロ）。
 
 生まれつき（手で決める）：喃語の出し方・数え方・言う条件と、下の数字。**経験で変わる**：口の帳面・聞いた語の回数・M。
@@ -51,9 +52,9 @@ from collections import Counter
 import torch
 
 from .. import mouth
-from ..formats import DTYPE
 from ..tagging import word_tag
 from .base import Box
+from .listen import SELF_SEP, UNKNOWN_SOUND
 from .semantic import WORD_TRACE_S
 
 TICK_S = 0.1
@@ -71,8 +72,6 @@ ECHO_TICKS = 4            # 口の指令を出してから、その音がこの�
 ECHO_MAX_TICKS = 10       # 自分の声が耳から戻るのを待つ最長の回数（1秒）［Tier3］
 
 M_WINDOW_TICKS = int(round(M_WINDOW_S / TICK_S))
-_ONE = torch.tensor(1.0, dtype=DTYPE)
-_ZERO = torch.tensor(0.0, dtype=DTYPE)
 
 
 def _draw_ticks(rng: random.Random, mean_s: float) -> int:
@@ -250,17 +249,19 @@ class Voice(Box):
         out = self.passthrough()
         self.t += 1
         heard = inbox.get("listen") or ""
+        # 段階9：聞き分ける係は「聞いた自分の声|親の語…」の形で渡す（自分の声が無い回は親の語だけ）
+        own_heard, _sep, parent_words = heard.rpartition(SELF_SEP) if SELF_SEP in heard else ("", "", heard)
         self.fifo = [(p, t0) for p, t0 in self.fifo if self.t - t0 <= ECHO_MAX_TICKS]
-        if heard and self.fifo and self.t - self.fifo[0][1] >= ECHO_TICKS:   # 自分の声が耳から戻った
-            for c in heard.split()[0]:
+        if own_heard and self.fifo and self.t - self.fifo[0][1] >= ECHO_TICKS:   # 自分の声が耳から戻った
+            for c in own_heard:
                 if not self.fifo or self.t - self.fifo[0][1] < ECHO_TICKS:
                     break
                 p, _ = self.fifo.pop(0)
                 if self.learning:
                     self.note(p, c)
                 self.own += c
-        elif heard:                                  # 親の語
-            for w in heard.split():
+        if parent_words:                             # 親の語（自分が話している最中に聞いた親の語も）
+            for w in parent_words.split():
                 if self.learning:
                     self.lexicon[w] += 1
                 self.recent.append((w, self.t))
@@ -306,7 +307,14 @@ class Voice(Box):
             self.fifo.append((p, self.t))
             out["voiceout"] = mouth.to_motor(p)
             self.emit_wait = SYLL_TICKS
-        # 写し：聞き分ける係に音が届く回（出してから ECHO_TICKS−1 回目）に 1 が届くように、1つ前の回に出す
-        echo = any(ECHO_TICKS - 2 <= self.t - t0 <= ECHO_MAX_TICKS for _, t0 in self.fifo)
-        out["listen"] = _ONE if echo else _ZERO
+        # 写し：聞き分ける係に音が届く回（出してから ECHO_TICKS−1 回目）に届くように、1つ前の回に出す。
+        # 段階9：中身は「いま戻るはずの自分の音」。口の帳面（この指令でどの音が出たか）から予想したかなを、出した順に空白区切りで。
+        # 帳面にまだ無い指令は UNKNOWN_SOUND（自分の音が1つ戻るが、何の音かは分からない）
+        out["listen"] = " ".join(self.predict_sound(p) for p, t0 in self.fifo
+                                 if ECHO_TICKS - 2 <= self.t - t0 <= ECHO_MAX_TICKS)
         return out
+
+    def predict_sound(self, params) -> str:
+        """口の帳面の順向き：この指令で最後に出た音（帳面に無ければ UNKNOWN_SOUND）。"""
+        got = self._by_cmd.get(params)
+        return next(iter(got))[1] if got else UNKNOWN_SOUND

@@ -81,7 +81,7 @@ PATH_FORMATS: dict[tuple[str, str], tuple[Fmt, int | None]] = {
     ("listen", "wordplan"): (Fmt.TAG, None),        # 聞いた知っている語
     ("wordplan", "voice"): (Fmt.TAG, None),         # 言いたい語（言わないときはゼロ）
     ("listen", "voice"): (Fmt.TEXT, None),          # 2つめの TEXT：親の知っている語（空白区切り）か、耳から戻った自分の声のかな
-    ("voice", "listen"): (Fmt.AMOUNT, None),        # 自分の声の写し（1＝いま自分の声が耳に戻ってくる）
+    ("voice", "listen"): (Fmt.TEXT, None),          # 自分の声の写し：いま耳に戻るはずの自分の音（口の帳面の予想、空白区切り。無い回は ""）。段階9で AMOUNT から
     ("voice", "voiceout"): (Fmt.MOTOR, 22),         # 1音の口の指令：調音点7・調音法7・声帯2・母音6（core_v2/mouth.py）
     # 段階8（ない、2026-10-18）
     ("objfile", "surprise"): (Fmt.TAG_AND_MAP, None),  # 席1〜7の (行の荷札, 場所の山。高さ1＝見えた・0.5＝見えない) と最後に (ゼロ, 目立ちが急に下がった所)
