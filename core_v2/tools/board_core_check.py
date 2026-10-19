@@ -2,7 +2,7 @@
 
 使い方：
   python -m core_v2.tools.board_core_check [--seeds 20] [--days 5] [--days2 15] [--procs 4] [--out 出力フォルダ]
-1人1日およそ5秒（1分に脳を6回進めるため）。人ごとに別の手で並べて回す。
+1人1日およそ7秒（1分に脳を8回進めるため）。人ごとに別の手で並べて回す。
 """
 
 from __future__ import annotations
