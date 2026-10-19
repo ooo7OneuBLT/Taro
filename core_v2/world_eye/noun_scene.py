@@ -38,6 +38,8 @@ N_SHOW = 3
 NAME_AT_S = 1.5
 SOUND_AT_S = 0.5
 P_NAME = 0.5
+REPEAT_LABELS = 2       # 名前を言ったあと、太郎が見続けていれば言い直す回数（旧太郎 parent.py の連呼 repeat_labels。親は1回の提示で同じ語を繰り返す：Gogate 2000）
+REPEAT_GAP_S = 2.0      # 言い直しの間隔（旧太郎の repeat_gap_sec と同じ）
 P_SOUND = 0.5
 TURN_EVERY_S = 1.0
 TICK_S = 0.1
@@ -173,9 +175,11 @@ def naming_utterance(word: str, rng: random.Random) -> str:
 class NounParent:
     """1回（0.1秒）ごとに呼ぶ親。太郎が見ている物を見て、鳴らす・名前を言う・回す。"""
 
-    def __init__(self, rng: random.Random, p_name: float = P_NAME, p_sound: float = P_SOUND) -> None:
+    def __init__(self, rng: random.Random, p_name: float = P_NAME, p_sound: float = P_SOUND,
+                 repeat: int = REPEAT_LABELS) -> None:
         self.rng = rng
         self.p_name, self.p_sound = p_name, p_sound
+        self.repeat = repeat
         self.stats = {"names": 0, "sounds": 0, "turns": 0, "looks": 0, "look_ticks": 0}
         self.named: dict[str, int] = {}
         self.reset()
@@ -209,7 +213,8 @@ class NounParent:
             env.object_sound(p.name, wave)
             self.stats["sounds"] += 1
             did["rang"] = p.word
-        if self.say and self.d == int(round(NAME_AT_S / TICK_S)):
+        at, gap = int(round(NAME_AT_S / TICK_S)), int(round(REPEAT_GAP_S / TICK_S))
+        if self.say and self.d >= at and (self.d - at) % gap == 0 and (self.d - at) // gap <= self.repeat:
             text = naming_utterance(p.word, self.rng)
             env.say(text, target=p.name, cause="parent_name")
             self.stats["names"] += 1

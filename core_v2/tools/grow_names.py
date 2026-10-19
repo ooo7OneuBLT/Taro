@@ -131,15 +131,16 @@ class EyeTaro:
 
 
 class Grower(EyeTaro):
-    def __init__(self, *a, kind: str = "off", **kw) -> None:
+    def __init__(self, *a, kind: str = "off", repeat: int = ns.REPEAT_LABELS, **kw) -> None:
         super().__init__(*a, **kw)
+        self.repeat = repeat
         b = self.brain.boxes
         b["semantic"].learning = True
         b["listen"].learning = True
         b["kind"].learning = kind == "on"
         self.kind = kind
         self.rng = random.Random(self.seed)
-        self.parent = ns.NounParent(self.rng)
+        self.parent = ns.NounParent(self.rng, repeat=self.repeat)
         self.events: list[dict] = []
         self.n_scenes = 0
         self.n_learn = 0
@@ -208,6 +209,7 @@ def main(argv=None):
     ap.add_argument("--image-scenes", type=int, default=3, help="前後の画像を残す場面の数（そのあとは events.csv だけ）")
     ap.add_argument("--log-dir", default="段階9_段3_目")
     ap.add_argument("--name", default=None, help="写しの名前（既定 段3_目_<物>_<目>_種<seed>）")
+    ap.add_argument("--repeat", type=int, default=ns.REPEAT_LABELS, help="親が見続けている物の名前を言い直す回数（0＝1回だけ＝2026-10-19より前）")
     ap.add_argument("--check", action="store_true", help="1場面だけ回して画像を残す（写しは作らない）")
     a = ap.parse_args(argv)
     if a.check:
@@ -215,7 +217,7 @@ def main(argv=None):
     tag = f"{a.objects}_{a.eye}_種{a.seed}" + ("_確かめ" if a.check else "")
     log_root = os.path.join(growth.REPO, "G", "logs", f"{a.log_dir}_{tag}")
     os.makedirs(log_root, exist_ok=True)
-    g = Grower(a.seed, a.objects, a.eye, a.table, log_root=log_root, start=a.start, kind=a.kind)
+    g = Grower(a.seed, a.objects, a.eye, a.table, log_root=log_root, start=a.start, kind=a.kind, repeat=a.repeat)
     print(f"[段3] 始める太郎：{g.start_name()}　目：{g.eye_info}　物：{a.objects}　場面 {a.scenes}", flush=True)
     t0 = time.time()
     try:
@@ -240,7 +242,7 @@ def main(argv=None):
         name = a.name or growth.free_name(f"段3_目_{a.objects}_{a.eye}_種{a.seed}")
         row = growth.save(g.brain.boxes, 3, name, end=True, parent=g.start_row["name"] if g.start_row else None,
                           conditions={"world": "eye", "eye": a.eye, "eye_info": g.eye_info, "objects": a.objects,
-                                      "seed": a.seed, "scenes": a.scenes, "kind": a.kind, "words": 20, "rooms": 3,
+                                      "seed": a.seed, "scenes": a.scenes, "kind": a.kind, "repeat": a.repeat, "words": 20, "rooms": 3,
                                       "semantic": g.brain.boxes["semantic"].memory},
                           note=f"名づけ {res['parent']['names']}・音 {res['parent']['sounds']}・覚えた {res['semantic_learn']}・"
                                f"耳が知っている語 {res['ear_knows_n']}/20")
