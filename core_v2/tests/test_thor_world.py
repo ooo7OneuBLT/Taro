@@ -9,8 +9,11 @@
   幾何で数えて、名前の物が3つ以上目に入る所へ Teleport する。place="start" では動かない
 * ひとりで見せる（bring-in）：名前の物を見ないまま5秒（50回目）で、親が物を目の前へ持ってくる。太郎が見るまで名前は言わず、
   見はじめて 0.5秒で言う。見たら5秒で戻す。一度も見なければ8秒で、言わずに戻す
-* 最初は真正面やや下のりんごが目の真ん中にある。親は1秒見続けたら目の前 0.3m へ持ってきて、0.5秒で「りんご」を含む文を言い、
-  見続けていれば 2秒ごとに2回言い直し（計3回）、5秒で元の場所へ戻す。戻した物は3秒は持ってこない
+* 最初は真正面やや下のりんごが目の真ん中にある。親は1秒見続けたら目の前 0.3m へ運びはじめ（1秒かけて、なめらかな弧で）、
+  着いて 0.5秒で「りんご」を含む文を言い、見続けていれば 2秒ごとに2回言い直し（計3回）、着いて5秒で1秒かけて元の場所へ運んで置く。
+  戻した物は3秒は持ってこない
+* 運ぶ道（2026-10-19）：0.1秒ごとの動きは 0.15m より小さく（ワープしない）、はじめは上へ（持ち上げる）、着く所は目の前 0.3m、
+  戻すと置き場所・向きにぴったり。運んでいる間は手の中（env.in_hand）だが名前は言わない
 """
 
 import json
@@ -102,7 +105,8 @@ def test_centre_object_from_segmentation(env):
 def test_parent_brings_shakes_names_and_puts_back(env):
     par = tp.FollowInParent(random.Random(0))
     said, did_log, where = [], [], []
-    for k in range(100):                       # 10秒。太郎の目は動かない（脳はつながない）
+    arr = None
+    for k in range(130):                       # 13秒。太郎の目は動かない（脳はつながない）
         did = par.tick(env)
         did_log.append(did)
         for _ in range(10):
@@ -111,16 +115,21 @@ def test_parent_brings_shakes_names_and_puts_back(env):
                 said.append((k, info["parent_utterance"]["text"]))
         env.render_eye()
         where.append(vec(env.objects[APPLE]["position"]))
-        if k == 15:                            # 持ってきて0.6秒：目の前 0.3m（振っている分 ±3cm）
+        if "arrived" in did and arr is None:
+            arr = k
+        if k == 24:                            # 着いて0.6秒：目の前 0.3m（揺らしている分 ±2.5cm・上下 0.8cm）
             g = cam_basis(env.cam_yaw, env.cam_pitch)[0]
             want = env.eye_pos + 0.3 * g
             got = vec(env.objects[APPLE]["axisAlignedBoundingBox"]["center"])
-            assert np.linalg.norm(got - want) < 0.035
+            assert np.linalg.norm(got - want) < 0.03
     brought = [k for k, d in enumerate(did_log) if "brought" in d]
     put = [k for k, d in enumerate(did_log) if "put" in d]
-    assert brought[0] == 9                     # 10回目（1秒）で持ってくる
-    assert put[0] == brought[0] + 55           # 5秒で戻す。ただし最後の言い直し（4.5秒）から1秒は持っている
-    assert [k for k, _ in said[:3]] == [brought[0] + 5, brought[0] + 25, brought[0] + 45]
+    assert brought[0] == 9                     # 10回目（1秒）で持ち上げはじめる
+    assert arr == 18                           # 1秒（10回）かけて運ぶ：持ち上げた回が1回目、10回目に着く
+    assert all(did_log[k].get("moving") == "in" for k in range(10, 18))
+    assert put[0] == arr + 55 + 9              # 着いて5秒で戻しはじめ（最後の言い直し 4.5秒から1秒）、1秒かけて置く
+    assert all(did_log[k].get("moving") == "out" for k in range(arr + 55, put[0]))
+    assert [k for k, _ in said[:3]] == [arr + 5, arr + 25, arr + 45]
     assert all("りんご" in t for _, t in said[:3])
     assert par.stats["repeats"] == 2
     assert np.allclose(where[put[0]], env.home[APPLE][0])
@@ -258,23 +267,29 @@ def test_bring_in_after_5s_names_only_after_taro_looks(env):
     assert b == [49] and did_log[49]["mode"] == "bringin"
     oid = par.held
     assert oid in env.targets and par.mode == "bringin"
-    # 太郎はよそを見ている（2秒）：持って振っているが、名前は言わない
+    n_in = par.move_n                            # 遠い物はゆっくり運ぶ（1秒より長い）
+    assert n_in > 10
+    _run_parent(env, par, n_in - 1, eye=away, said=said, did_log=did_log)
+    arr = 49 + n_in - 1
+    assert "arrived" in did_log[arr] and par.phase == "hold"
+    # 太郎はよそを見ている（2秒）：持って揺らしているが、名前は言わない
     _run_parent(env, par, 20, eye=other, said=said, did_log=did_log)
     assert said == [] and par.held == oid and par.first_look is None
     # 持ってきた所（視線の先 0.3m）を見る → はじめて見た回から 0.5秒で言う
     _run_parent(env, par, 1, eye=away, said=said, did_log=did_log)
     assert env.centre_object() == oid
     _run_parent(env, par, 29, eye=away, said=said, did_log=did_log)
-    first_look = 70                              # 71回目（k=70）の tick で見つける
-    assert par.first_look == first_look - 49
+    first_look = arr + 21                        # 着いて21回目の tick で見つける
+    assert par.first_look == 21
     assert said and said[0][0] == first_look + 5
     assert env.word_of(oid) in said[0][1]["text"] and said[0][1]["cause"] == "parent_name_bringin"
     assert said[0][1]["target"] == oid
     assert said[1][0] == first_look + 25          # 見続けていれば2秒ごとに言い直す
     # 持って5秒（50回）で戻す
-    _run_parent(env, par, 10, eye=away, said=said, did_log=did_log)
+    _run_parent(env, par, 40, eye=away, said=said, did_log=did_log)
     put = [k for k, d in enumerate(did_log) if "put" in d]
-    assert put == [49 + 56]                       # 最後の名づけ（持って4.6秒）から1秒
+    assert "moving" not in did_log[arr + 55] and did_log[arr + 56].get("moving") == "out"   # 最後の名づけ（着いて4.6秒）から1秒
+    assert put == [arr + 56 + par.move_n - 1]           # 戻す道の回数（置いたあとも残っている）
     assert np.allclose(vec(env.objects[oid]["position"]), env.home[oid][0])
     s = par.stats
     assert s["brings_bringin"] == 1 and s["brings_follow"] == 0 and s["names_bringin"] == 2 and s["bringin_looked"] == 1
@@ -286,16 +301,22 @@ def test_bring_in_never_looked_puts_back_after_8s_without_naming(env):
     _run_parent(env, par, 50, eye=(-45.0, 33.0), said=said, did_log=did_log)
     first = par.held
     assert first is not None
-    _run_parent(env, par, 120, eye=(45.0, 33.0), said=said, did_log=did_log)
+    # 着くまでは同じ所を見ている（運んでくる間は着く所が視線の先へ寄るので、着く前によそを向くと太郎の見ている所へ来る）
+    _run_parent(env, par, par.move_n - 1, eye=(-45.0, 33.0), said=said, did_log=did_log)
+    assert par.phase == "hold"
+    _run_parent(env, par, 220, eye=(45.0, 33.0), said=said, did_log=did_log)
+    arr = [k for k, d in enumerate(did_log) if "arrived" in d][0]
     put = [k for k, d in enumerate(did_log) if "put" in d]
-    assert put[0] == 49 + 80 and [k for k, _ in said if k <= put[0]] == []
+    assert did_log[arr + 80].get("moving") == "out"            # 着いて8秒で戻しはじめる
+    assert put[0] > arr + 80 and [k for k, _ in said if k <= put[0]] == []
     assert par.stats["bringin_unlooked"] == 1
     # 戻して3秒（手が空くまで）は持ってこない。次は別の物（ここで見せた物は選ばない）
     b = [k for k, d in enumerate(did_log) if "brought" in d]
     assert b[1] == put[0] + 30
     assert did_log[b[1]]["brought"] and par.recent[0] == first and par.recent[1] != first
-    # 2つめは今の視線の先（よそを見ている所）へ持ってくるので、太郎はすぐ見て、0.5秒あとに名前を聞く
-    assert said and said[0][0] == b[1] + 1 + 5 and said[0][1]["target"] == par.recent[1]
+    # 2つめは今の視線の先（よそを見ている所）へ持ってくるので、太郎は着いたらすぐ見て、0.5秒あとに名前を聞く
+    arr2 = [k for k, d in enumerate(did_log) if "arrived" in d][1]
+    assert said and said[0][0] == arr2 + 1 + 5 and said[0][1]["target"] == par.recent[1]
 
 
 def test_bring_in_off_keeps_follow_only(env):
@@ -367,10 +388,11 @@ def test_put_back_returns_toy_to_its_floor_spot():
         assert e.centre_object() == toy
         par = tp.FollowInParent(random.Random(0), bring_in_after=None)
         did_log = []
-        _run_parent(e, par, 70, did_log=did_log)       # 目は動かさない（持ってきた物は視線の先）
+        _run_parent(e, par, 100, did_log=did_log)      # 目は動かさない（持ってきた物は視線の先）
         b = [k for k, d in enumerate(did_log) if "brought" in d]
+        arr = [k for k, d in enumerate(did_log) if "arrived" in d]
         put = [k for k, d in enumerate(did_log) if "put" in d]
-        assert b[0] == 9 and put[0] == 9 + 55
+        assert b[0] == 9 and arr[0] > b[0] + 9 and put[0] > arr[0] + 55 + 9     # 床から目の前までは 1秒より長くかける
         assert np.allclose(vec(e.objects[toy]["position"]), floor)
         assert e.objects[toy]["position"]["y"] == pytest.approx(0.0, abs=1e-6)
     finally:
@@ -381,14 +403,14 @@ def test_no_naming_while_taro_looks_away_reproduces_pc_bug(env):
     """依頼17 の PC：持ってきた物から太郎が目をそらしても、0.5秒目の名づけは言っていた（k==0 は見ていなくてよかった）。"""
     par = tp.FollowInParent(random.Random(0))
     said, did_log = [], []
-    _run_parent(env, par, 10, said=said, did_log=did_log)
-    assert "brought" in did_log[9] and par.held == APPLE
-    _run_parent(env, par, 20, eye=(-45.0, 33.0), said=said, did_log=did_log)   # よそ（壁）を見ている 2秒
+    _run_parent(env, par, 19, said=said, did_log=did_log)                      # 1秒で持ち上げ、1秒かけて運んで着く（18回目）
+    assert "brought" in did_log[9] and "arrived" in did_log[18] and par.held == APPLE
+    _run_parent(env, par, 20, eye=(-45.0, 33.0), said=said, did_log=did_log)   # 着いてから、よそ（壁）を見ている 2秒
     assert said == [] and par.held == APPLE                                     # 前はここで「りんご」と言っていた
     _run_parent(env, par, 1, eye=(0.0, env.base_tilt), said=said, did_log=did_log)
     assert env.centre_object() == APPLE
     _run_parent(env, par, 3, said=said, did_log=did_log)
-    assert len(said) == 1 and said[0][0] == 30 and said[0][1]["target"] == APPLE and "りんご" in said[0][1]["text"]
+    assert len(said) == 1 and said[0][0] == 39 and said[0][1]["target"] == APPLE and "りんご" in said[0][1]["text"]
     assert all(d.get("said") is None or d["looking"] == "りんご" for d in did_log)
 
 
@@ -486,3 +508,108 @@ def test_first_frame_tool_writes_eye_and_topdown(tmp_path):
     assert res["placement"]["toys_in_view"] == 4 and res["n_reach"] > 100 and res["thor_fail"] == 0
     res2 = thor_watch.run(["--first-frame", "--fake", "--render-px", "224", "--spot=-1,1,90", "--out", str(tmp_path)])
     assert res2["placement"]["position"][0] == -1.0 and res2["placement"]["yaw"] == 90.0
+
+
+# ---------------------------------------------------------------- なめらかに運ぶ（2026-10-19、動画で「物がワープして浮いている」）
+def _carry_track(env, par, ticks, eye=None):
+    """毎回の (did, 物の真ん中, in_hand, 名づけ) を集める。"""
+    out = []
+    for _k in range(ticks):
+        if eye is not None:
+            env.set_eye(*eye)
+        did = par.tick(env)
+        heard = None
+        for _ in range(10):
+            _o, _r, _t, _tr, info = env.step()
+            if "parent_utterance" in info:
+                heard = info["parent_utterance"]
+        env.render_eye()
+        oid = par.held if par.held else next((i for i in env.objects if env.word_of(i) == did.get("put")), None)
+        out.append((did, None if oid is None else env._centre(env.objects[oid]).copy(), set(env.in_hand), heard))
+    return out
+
+
+@pytest.mark.parametrize("case", ["counter", "floor_toy", "bringin_far"])
+def test_carry_is_continuous_arrives_and_returns_home(case):
+    e = _demo(place=(0.0, 0.0, 0.0)) if case == "floor_toy" else fake_env(toys=0)
+    try:
+        if case == "floor_toy":
+            _aim(e, e.toys[1])
+            e.render_eye()
+        eye = (-45.0, 33.0) if case == "bringin_far" else None
+        par = tp.FollowInParent(random.Random(0), bring_in_after=(5.0 if case == "bringin_far" else None))
+        before = {i: e._centre(o).copy() for i, o in e.objects.items()}
+        tr = _carry_track(e, par, 160, eye=eye)
+        b = next(k for k, (d, *_r) in enumerate(tr) if "brought" in d)
+        arr = next(k for k, (d, *_r) in enumerate(tr) if "arrived" in d)
+        put = next(k for k, (d, *_r) in enumerate(tr) if "put" in d)
+        oid = next(i for i in e.objects if e.word_of(i) == tr[b][0]["brought"]) if case != "bringin_far" else par.recent[0]
+        start = before[oid]
+        # 道はつながっている：持ち上げた回から置いた回まで、0.1秒の動きは 0.15m より小さい（ワープしない）
+        pts = [start] + [c for (_d, c, *_r) in tr[b:put + 1]]
+        steps = [float(np.linalg.norm(pts[i + 1] - pts[i])) for i in range(len(pts) - 1)]
+        assert max(steps) < 0.15, max(steps)
+        assert arr - b + 1 >= 10                                # 1秒以上かけて運ぶ
+        # はじめは持ち上げる（上へ動く分が横に動く分の半分より大きい）。道の一番高い所は両端の高い方より上で、0.1m は超えない
+        up = pts[3] - pts[0]
+        assert up[1] > 0.5 * np.hypot(up[0], up[2]) and up[1] > 0
+        top = max(p[1] for p in pts[: arr - b + 2])
+        hi = max(start[1], pts[arr - b + 1][1])
+        assert hi < top < hi + 0.1
+        # 着いた所は目の前 0.3m（着いた回は揺らしていない）
+        want = e.eye_pos + 0.3 * e.gaze_dir() if case != "bringin_far" else par.base
+        assert np.linalg.norm(tr[arr][1] - want) < 1e-3
+        assert np.allclose(par.base if par.base is not None else want, want)
+        # 戻すと置き場所・向きにぴったり、手は空
+        assert np.linalg.norm(tr[put][1] - start) < 1e-6                 # 置いた回の物の真ん中＝はじめの置き場所
+        assert oid not in tr[put][2]
+        # 運んでいる間は手の中、名前は言わない（聞こえない）
+        moving = [k for k in range(b, put) if tr[k][0].get("moving") or k == b]
+        assert moving and all(oid in tr[k][2] for k in moving)
+        assert all(tr[k][0].get("said") is None for k in moving)
+        assert all(tr[k][3] is None for k in moving if k > b and tr[k - 1][0].get("moving"))
+        assert all(tr[k][0].get("moving") is None for k in range(b, put) if tr[k][0].get("said"))
+    finally:
+        e.close()
+
+
+def test_carry_in_follows_taro_gaze_smoothly(env):
+    """運んでくる間に太郎が目を移すと、着く所も今の視線の先（0.3m）へ寄っていく。1回に 4cm まで（道はつながったまま）。"""
+    par = tp.FollowInParent(random.Random(0), bring_in_after=None)
+    _run_parent(env, par, 10)
+    assert par.phase == "in"
+    tr = _carry_track(env, par, par.move_n + 5, eye=(10.0, env.base_tilt))
+    arr = next(k for k, (d, *_r) in enumerate(tr) if "arrived" in d)
+    want = env.eye_pos + 0.3 * env.gaze_dir()
+    assert np.linalg.norm(tr[arr][1] - want) < 1e-3 and env.centre_object() == APPLE
+    pts = [c for (_d, c, *_r) in tr[: arr + 1]]
+    assert max(float(np.linalg.norm(pts[i + 1] - pts[i])) for i in range(len(pts) - 1)) < 0.15
+
+
+def test_no_naming_while_carrying_even_when_looking(env):
+    """運んでくる間も戻す間も、太郎が物を見ていても名前は言わない。言うのは着いて揺らしている回だけ。"""
+    par = tp.FollowInParent(random.Random(0))
+    log = []
+    for _k in range(200):
+        if par.held is not None:
+            _aim(env, par.held)                         # 道具で目を物に向け続ける（いつも見ている）
+        _run_parent(env, par, 1, did_log=log)
+    said = [k for k, d in enumerate(log) if "said" in d]
+    assert said and all(log[k].get("moving") is None and "brought" not in log[k] for k in said)
+    assert any(log[k].get("moving") for k in range(len(log)))
+    for k in said:
+        assert any("arrived" in log[j] for j in range(k - 60, k))
+
+
+def test_carry_helpers_shape():
+    assert tp.min_jerk(0.0) == 0.0 and tp.min_jerk(1.0) == 1.0 and tp.min_jerk(0.5) == pytest.approx(0.5)
+    assert tp.min_jerk(0.05) < 0.01                       # ゆっくり動き出す
+    p = tp.carry_path([0, 0.05, 1.0], [0, 0.55, 0.6])
+    assert p[1][1] == pytest.approx(0.65) and p[1][2] == pytest.approx(0.9)    # 置き場所の真上寄り・高い方より 0.1m 上
+    q = tp.carry_path([0, 0.55, 0.6], [0, 0.05, 1.0], lift_end=True)
+    assert np.allclose(q[1], p[1])                        # 戻す道は同じ弧を逆に
+    assert 10 < tp.move_ticks(p) <= 15                    # 床から目の前（道 0.8m ほど）は 1.4秒
+    assert tp.move_ticks(tp.carry_path([0, 0.5, 0.9], [0, 0.55, 0.6])) == 10     # 近い物は 1秒
+    far = tp.carry_path([0, 0.9, 3.0], [0, 0.55, 0.3])
+    assert tp.move_ticks(far) > 40
+    assert np.hypot(far[1][0] - 0, far[1][2] - 3.0) == pytest.approx(0.15)      # 遠くても真ん中の点は横に 0.15m まで

@@ -3,12 +3,26 @@
 親は太郎の見ている物に合わせる（follow-in labeling：Tomasello・Farrar 1986。子が見ている物に親が名前を言うと、
 子の注意を移させて言うより語がよく残る。旧太郎 parent.py の「見ている物に合わせて言う」と同じ考え）：
 * 太郎がある物を BRING_AFTER_S（1秒）続けて見たら（目の真ん中に写っている物＝環境の正解 centre_object）、
-  親がその物を手に取り、目の前 HOLD_DIST_M（0.3m）、そのときの視線の先へ持ってくる（TeleportObject、forceKinematic）
-* 持っている間は、太郎から見て左右に ±SHAKE_M（3cm）、SHAKE_HZ（2回/秒）でやさしく振る
-* 持ってきて NAME_AT_S（0.5秒）で、太郎が見ていれば名前を言う（P_NAME＝1.0：この世界では毎回言う）。言い方は段階5の話しかけと同じ
+  親がその物を手に取り、目の前 HOLD_DIST_M（0.3m）、そのときの視線の先へ運んでくる（TeleportObject、forceKinematic）
+* 運ぶ（2026-10-19、動画を見て「物がワープして浮いている」と言われて）：前は置き場所から目の前へ1回で飛ばしていた。
+  いまは 0.1秒ごとに少しずつ Teleport して、なめらかな道を運ぶ。道は2次のベジェ曲線で、真ん中の点（control）を
+  置き場所の真上寄り（目の前へ向かって MOVE_CTRL_FRAC＝1/4、長くても MOVE_CTRL_MAX_M＝0.15m のところ）・両端の高い方より
+  MOVE_LIFT_M（0.1m）上に置く（0.2m では床のおもちゃが太郎の目の高さより上へ浮き上がって見えた）
+  ＝まず持ち上げて、弧を描いて太郎の前へ来る。速さは最小躍度（minimum-jerk：10s³−15s⁴+6s⁵。人の手の届く動きの形、
+  Flash & Hogan 1985）で、ゆっくり動き出してゆっくり止まる。かかる時間は BRING_MOVE_S（1.0秒）か、道の長さ÷MOVE_SPEED_MPS
+  （平均 0.6m/秒）の長い方（遠い物ほどゆっくり。1回の動きが 0.15m を超えないように）、長くても MOVE_MAX_S（5秒）。
+  運んでくる間、着く所は太郎の今の視線の先（目の前 0.3m）へ 1回に MOVE_FOLLOW_M（4cm）まで寄せていく（親は子の目を見ながら
+  持ってくる。寄せないと、運んでいる 1〜1.5秒の間に生まれたての太郎の目がよそへ移り、着いたときには見ていなかった：
+  偽の家・脳つき25秒で名づけ 10→1回）。運んでいる間も物は親の手の中（env.in_hand）だが、名前は言わない。
+  持つ時間・名づけ・見たかどうかは、着いた回から数える
+* 持っている間は、太郎から見て左右に ±SHAKE_M（2.5cm）、SHAKE_HZ（1.5回/秒）でやさしく揺らし、上下にも少し
+  （SHAKE_UP_M＝0.8cm、左右の倍の速さ：横に揺らすと手首で少し上下する）。揺れの大きさは着いてから SHAKE_RAMP_S（0.3秒）で
+  0 から大きくなる（着いたとたんに振りはじめない）
+* 持ってきて（着いて）NAME_AT_S（0.5秒）で、太郎が見ていれば名前を言う（P_NAME＝1.0：この世界では毎回言う）。言い方は段階5の話しかけと同じ
   （noun_scene.naming_utterance：1割は語だけ、残りは文の型）。そのあと太郎が見続けていれば REPEAT_GAP_S（2秒）ごとに
   最大 REPEAT（2）回言い直す（旧太郎の連呼 repeat_labels。noun_scene と同じ）
-* HOLD_S（5秒）たったら元の場所・向きへ戻す。戻した物は COOLDOWN_S（3秒）は持ってこない（戻したとたんにまた見て、
+* HOLD_S（5秒）たったら、来た道を逆にたどって（同じ形の弧：持ち上げて、置き場所の上から下ろす）元の場所へ運び、
+  着いたら元の場所・向きに置いて手を離す（put_back）。戻した物は COOLDOWN_S（3秒）は持ってこない（戻したとたんにまた見て、
   同じ物ばかり行き来しないため）［仮置き］
 * ひとりで見せる（bring-in。旧太郎の親の solo_presentation：見せたい物を1つだけ子の視線の先へ持ってきて振る）：
   太郎が BRING_IN_AFTER_S（5秒）のあいだ名前を言える物を1つも見ず、親の手が空いていて、戻したばかり（COOLDOWN_S）でなければ、
@@ -25,7 +39,7 @@
   見たときに言う（言い直しも同じ。言い直しの間は前に言った回から REPEAT_GAP_S）。最後に言ってから NAME_TAIL_S（1秒）は戻さない
   （前は 4.5秒目の言い直しの 0.5秒あとに戻していた）。環境の側でも、持っていない物の名づけは届けない（env.in_hand・say_drop）
 * 親がおもちゃを床に並べた場面（env.toys）では、ひとりで見せる物は床のおもちゃから先に選ぶ。戻すのは床の置いた所（env.home）
-* 親の手そのものは描かない（AI2-THOR に手が無い。物だけが浮いて動く）。物の音はまだ無い（音の素が無い。object_sound の口だけある）
+* 親の手そのものは描かない（AI2-THOR に手が無い。物だけが動く。手で持って運ぶような道と速さにして、浮いて見えるのを減らす）。物の音はまだ無い（音の素が無い。object_sound の口だけある）
 
 語の表（TYPE_WORD）：AI2-THOR の物の種類（objectType。unity/Assets/Scripts/SimObjType.cs で確かめた名前）→ 子どもの語。
 台所（FloorPlan1〜30）と居間（FloorPlan201〜230）にある、拾える小さな物から10語。目だけの場面の20語と重なる語
@@ -50,8 +64,17 @@ WORDS = sorted(set(TYPE_WORD.values()), key=list(TYPE_WORD.values()).index)
 TICK_S = 0.1
 BRING_AFTER_S = 1.0
 HOLD_DIST_M = 0.3
-SHAKE_M = 0.03
-SHAKE_HZ = 2.0
+SHAKE_M = 0.025         # 左右の揺れ（片側）
+SHAKE_UP_M = 0.008      # 上下の揺れ（片側。左右の倍の速さ）
+SHAKE_HZ = 1.5
+SHAKE_RAMP_S = 0.3      # 着いてから揺れが大きくなるまで
+BRING_MOVE_S = 1.0      # 運ぶ時間（短くてもこれだけ。持ってくるのも戻すのも）
+MOVE_SPEED_MPS = 0.6    # 運ぶ平均の速さ（遠い物は BRING_MOVE_S より長くかける）
+MOVE_MAX_S = 5.0
+MOVE_LIFT_M = 0.1       # 道の真ん中の点を、両端の高い方よりこれだけ上に置く（まず持ち上げる。0.2 では目の高さより上へ浮いて見えた）
+MOVE_CTRL_FRAC = 0.25   # 道の真ん中の点は、置き場所から目の前へ向かってこれだけの所の上
+MOVE_CTRL_MAX_M = 0.15  # ただし横には長くてもこれだけ（遠い物でも、まず上へ持ち上げる）
+MOVE_FOLLOW_M = 0.04    # 運んでくる間、着く所を太郎の今の視線の先へ寄せる（1回にこれだけまで）
 NAME_AT_S = 0.5
 P_NAME = 1.0
 REPEAT = 2
@@ -69,6 +92,39 @@ MIN_Y_M = 0.05          # 持ってくる所が床より下にならないよう
 def naming_utterance(word: str, rng: random.Random) -> str:
     from ..world_eye.noun_scene import naming_utterance as nu
     return nu(word, rng)
+
+
+def min_jerk(s: float) -> float:
+    """最小躍度の進み具合（0→1。はじめと終わりで速さも加速度も 0）。"""
+    s = min(1.0, max(0.0, float(s)))
+    return s * s * s * (10.0 - 15.0 * s + 6.0 * s * s)
+
+
+def carry_path(start, end, lift_end: bool = False) -> tuple:
+    """start→end を運ぶ2次ベジェの3点。真ん中の点は「持ち上げる側」（lift_end=False なら start、True なら end）の
+    真上寄り（相手へ横に MOVE_CTRL_FRAC、長くても MOVE_CTRL_MAX_M）で、両端の高い方より MOVE_LIFT_M 上。戻すときは lift_end=True（置き場所の上から下ろす）。"""
+    a, b = np.asarray(start, dtype=float), np.asarray(end, dtype=float)
+    near, far = (b, a) if lift_end else (a, b)
+    flat = (far - near) * np.array([1.0, 0.0, 1.0])
+    dist = float(np.linalg.norm(flat))
+    ctrl = near + (min(MOVE_CTRL_FRAC * dist, MOVE_CTRL_MAX_M) / dist) * flat if dist > 1e-9 else near.copy()
+    ctrl[1] = max(a[1], b[1]) + MOVE_LIFT_M
+    return a, ctrl, b
+
+
+def bezier(p, u: float) -> np.ndarray:
+    a, c, b = p
+    return (1 - u) ** 2 * a + 2 * u * (1 - u) * c + u * u * b
+
+
+def path_len(p, n: int = 40) -> float:
+    pts = [bezier(p, i / n) for i in range(n + 1)]
+    return float(sum(np.linalg.norm(pts[i + 1] - pts[i]) for i in range(n)))
+
+
+def move_ticks(p) -> int:
+    t = min(MOVE_MAX_S, max(BRING_MOVE_S, path_len(p) / MOVE_SPEED_MPS))
+    return max(1, int(math.ceil(t / TICK_S - 1e-9)))
 
 
 class FollowInParent:
@@ -90,8 +146,12 @@ class FollowInParent:
     def reset(self) -> None:
         self.looking = None        # 太郎が今見ている物（親から見た正解）
         self.look_ticks = 0
-        self.held = None           # 持っている物の id
-        self.d = 0                 # 持ってからの回数
+        self.held = None           # 持っている物の id（運んでいる間も）
+        self.d = 0                 # 着いてからの回数（運んでいる間は 0）
+        self.phase = ""            # in＝運んでくる｜hold＝持って見せる｜out＝戻しに運ぶ
+        self.path = None           # 運ぶ道（ベジェの3点）
+        self.move_n = 0            # 運ぶ回数
+        self.move_k = 0            # 運んだ回数
         self.say = False
         self.base = None           # 振る真ん中
         self.axis = None           # 振る向き（太郎から見て左右）
@@ -136,11 +196,13 @@ class FollowInParent:
                     did["brought"] = env.word_of(pick)
                     did["mode"] = "bringin"
             return did
-        # 持っている間：振る・言う・戻す
-        self.d += 1
         word = env.word_of(self.held)
         did["holding"] = word
         did["mode"] = self.mode
+        if self.phase in ("in", "out"):
+            return self._carry(env, did, word)
+        # 持っている間：揺らす・言う・戻しに運ぶ
+        self.d += 1
         if self.first_look is None and oid == self.held:
             self.first_look = self.d
             env._log("look_held", self.held, f"{self.d * TICK_S:.1f}s", cause=f"parent_{self.mode}")
@@ -155,19 +217,13 @@ class FollowInParent:
         if self.last_name is not None:
             end = max(end, self.last_name + tail)
         if self.d >= end:
-            env.put_back(self.held, cause="parent_put")
-            self.cool[self.held] = int(round(COOLDOWN_S / TICK_S))
-            self.hand_cool = int(round(COOLDOWN_S / TICK_S))
-            self.stats["puts"] += 1
-            if self.mode == "bringin":
-                self.stats["bringin_looked" if self.first_look is not None else "bringin_unlooked"] += 1
-            did["put"] = word
-            self.held = None
-            self.word = ""
-            self.mode = ""
-            return did
-        t = self.d * TICK_S
-        env.hold(self.held, self.base + SHAKE_M * math.sin(2.0 * math.pi * SHAKE_HZ * t) * self.axis, cause="parent_shake")
+            from .env import vec
+            o = env.objects[self.held]
+            home = env.home[self.held][0] + (env._centre(o) - vec(o["position"]))     # 置き場所での物の真ん中
+            self._start_move(self.shake_pos(self.d - 1), home, "out", lift_end=True)
+            env._log("carry_out", self.held, f"{self.move_n * TICK_S:.1f}s", cause="parent_put")
+            return self._carry(env, did, word)
+        env.hold(self.held, self.shake_pos(self.d), cause="parent_shake")
         if self.first_look is None:
             return did
         if self.say and self.n_said <= self.repeat and self.d >= self.next_name and oid == self.held:
@@ -213,10 +269,78 @@ class FollowInParent:
         if mode == "bringin":
             self.presented[oid] = self.presented.get(oid, 0) + 1
             self.recent.append(oid)
-        env.hold(oid, base, cause=f"parent_{mode}")
-        env._log("bring", oid, f"{self.word} {mode}", cause=f"parent_{mode}")
+        self._start_move(env._centre(env.objects[oid]), base, "in")
+        env._log("bring", oid, f"{self.word} {mode} {self.move_n * TICK_S:.1f}s", cause=f"parent_{mode}")
         self.stats["brings"] += 1
         self.stats[f"brings_{mode}"] += 1
+        self._carry(env, {}, self.word)          # 持ってきた回から動き出す
+
+    def _start_move(self, start, end, phase: str, lift_end: bool = False) -> None:
+        self.path = carry_path(start, end, lift_end=lift_end)
+        self.move_n = move_ticks(self.path)
+        self.move_k = 0
+        self.phase = phase
+
+    def _follow_gaze(self, env) -> None:
+        """運んでくる道の着く所を、太郎の今の視線の先へ少し寄せる（1回に MOVE_FOLLOW_M まで。道はつながったまま）。"""
+        from .env import cam_basis
+        want = np.asarray(env.eye_pos, dtype=float) + HOLD_DIST_M * env.gaze_dir()
+        want[1] = max(float(want[1]), MIN_Y_M)
+        a, c, b = self.path
+        step = want - b
+        n = float(np.linalg.norm(step))
+        if n > MOVE_FOLLOW_M:
+            step *= MOVE_FOLLOW_M / n
+        if n > 1e-9:
+            self.path = (a, c, b + step)
+            self.base = b + step
+            self.axis = cam_basis(env.cam_yaw, env.cam_pitch)[1]
+
+    def carry_pos(self, k: int | None = None) -> np.ndarray:
+        """運んでいる道の k 回目（0＝出発、move_n＝着いた所）の物の真ん中。"""
+        k = self.move_k if k is None else k
+        return bezier(self.path, min_jerk(k / self.move_n))
+
+    def shake_pos(self, d: int) -> np.ndarray:
+        """着いて d 回目の、揺らしている物の真ん中（左右に SHAKE_M、上下に SHAKE_UP_M、はじめ SHAKE_RAMP_S で大きくなる）。"""
+        t = max(0, d) * TICK_S
+        ramp = min_jerk(t / SHAKE_RAMP_S) if SHAKE_RAMP_S > 0 else 1.0
+        w = 2.0 * math.pi * SHAKE_HZ * t
+        return self.base + ramp * (SHAKE_M * math.sin(w) * self.axis + np.array([0.0, SHAKE_UP_M * math.sin(2.0 * w), 0.0]))
+
+    def _carry(self, env, did: dict, word: str) -> dict:
+        """運ぶ1回分（持ってくるのも戻すのも）。名前は言わない。着いたら持つ（in）か、置いて手を離す（out）。"""
+        self.move_k += 1
+        did["moving"] = self.phase
+        if self.phase == "in":
+            self._follow_gaze(env)
+            if self.move_k >= self.move_n:
+                env.hold(self.held, self.base, cause="parent_arrive")
+                self.phase, self.d = "hold", 0
+                env._log("arrive", self.held, word, cause=f"parent_{self.mode}")
+                did["arrived"] = word
+                did.pop("moving")
+            else:
+                env.hold(self.held, self.carry_pos(), cause="parent_carry")
+            return did
+        # out：戻しに運ぶ
+        if self.move_k < self.move_n:
+            env.hold(self.held, self.carry_pos(), cause="parent_carry")
+            return did
+        env.put_back(self.held, cause="parent_put")
+        self.cool[self.held] = int(round(COOLDOWN_S / TICK_S))
+        self.hand_cool = int(round(COOLDOWN_S / TICK_S))
+        self.stats["puts"] += 1
+        if self.mode == "bringin":
+            self.stats["bringin_looked" if self.first_look is not None else "bringin_unlooked"] += 1
+        did["put"] = word
+        did.pop("moving")
+        self.held = None
+        self.word = ""
+        self.mode = ""
+        self.phase = ""
+        self.path = None
+        return did
 
 
 class LookLog:

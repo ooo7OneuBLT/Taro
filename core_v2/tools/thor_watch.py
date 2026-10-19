@@ -7,7 +7,7 @@ world_thor.taro.ThorGrower（41係の脳・目・見えない親の手）を --s
   桃色の丸＝視線の真ん中（半径5度）。黄色い四角＝物の名簿（objfile）の「今見ている物」。物の下の小さな字＝その物の本当の語
   （AI2-THOR の色分けの正解。太郎が知っているわけではない）
 * 右の欄：秒、親が言ったこと、太郎が聞き取った語、太郎の声、見ている物（親から見た正解）と見ている秒数の棒、
-  親の手（持ってきた物と持っている秒）、「覚えた！」、ここまでの持ってきた・名づけ・覚えた回数
+  親の手（はこんでいる物、持ってきた物と持っている秒）、「覚えた！」、ここまでの持ってきた・名づけ・覚えた回数
 終わりに、親の名づけの回数と、太郎が物を見続けた時間（回数・平均・真ん中・最長・1秒以上の回数・語ごと）を表示し、
 動画と同じ名前の _まとめ.json に残す。
 
@@ -104,6 +104,7 @@ class ThorPainter(Painter):
             "learn_now": sem.last_event == "learn", "looking": looking,
             "look_s": p.look_ticks * TICK_S if looking else 0.0,
             "holding": p.word if p.held else "", "hold_s": p.d * TICK_S if p.held else 0.0,
+            "phase": p.phase if p.held else "",
             "brings": p.stats["brings"], "names": p.stats["names"], "mode": p.mode if p.held else "",
             "b_follow": p.stats["brings_follow"], "b_in": p.stats["brings_bringin"], "learns": g.n_learn + (sem.last_event == "learn"),
         }
@@ -169,7 +170,12 @@ class ThorPainter(Painter):
         y = by + 30
         D.text((x0, y), "親の手", font=self.f.small, fill=DIM)
         tag = {"follow": "見ていた物", "bringin": "親から"}.get(st.get("mode", ""), "")
-        hold = f"{st['holding']} を見せている（{tag}・{st['hold_s']:.1f}秒）" if st["holding"] else ""
+        if not st["holding"]:
+            hold = ""
+        elif st.get("phase") in ("in", "out"):
+            hold = f"{st['holding']} をはこんでいる（{'前へ' if st['phase'] == 'in' else 'もどす'}）"
+        else:
+            hold = f"{st['holding']} を見せている（{tag}・{st['hold_s']:.1f}秒）"
         D.text((x0 + 12, y + 30), hold or "―", font=self.f.mid, fill=ORANGE if hold else DIM)
         y += 76
         if st["learn"]:
