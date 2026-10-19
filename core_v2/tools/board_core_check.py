@@ -37,6 +37,8 @@ from core_v2.tools.board_stage1 import alone_asks, escalation, summarize, target
 
 
 def _one(args):
+    import torch
+    torch.set_num_threads(1)      # 小さい計算ばかりなので、1人1スレッド（多いと取り合って数倍遅くなった）
     seed, days, days2, days3, days4, days4b, days5 = args
     out = {}
     cry = grow_core("cry", seed, days)
