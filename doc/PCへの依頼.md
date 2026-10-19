@@ -355,3 +355,46 @@ python -m core_v2.tools.thor_watch --seconds 20 --scene FloorPlan1 --eye dinov2 
   （目の入口の切り出しは「床から浮いたまとまり」を拾う決まりで、MuJoCo の無地の床に合わせてある。家の床と家具でどうなるかが、いちばん知りたいこと）
 - `thor_fail` が0でなければ、events_*.csv の teleport_fail・camera_fail の行。詰まったらエラーの最後の20行
 - かかった時間、GPU のメモリ（nvidia-smi）
+
+### 依頼17　家の場面②：座る場所を選ぶ・親がひとりで物を見せる（bring-in）を入れて、依頼16 と同じ20秒の動画をもう一度
+
+状態：未（2026-10-19 依頼16 の結果を受けて。依頼16 では FloorPlan1 で冷蔵庫の扉の目の前、FloorPlan201 でソファの後ろの壁ぎわに座り、
+名前を言える物がほとんど目に入らず、持ってきた 0・名づけ 0 だった）
+
+**変えたこと**（core_v2/world_thor。クラウドでは偽物の家でテスト済み）：
+1. 座る場所（`--place auto`、既定）：reset のとき GetReachablePositions の場所から最大60か所 × 向き 0/90/180/270度を、メタデータの物の場所から
+   幾何で数え（描かない）、「名前を言える拾える物が 0.5〜2m にあって目（下へ10度・画角60度）の絵に入る数」がいちばん多い所へ Teleport する。
+   真正面 0.6m 以内に名前の無い大きな物（冷蔵庫・ソファ…）があると減点、0.5m 先の床が歩けない（壁ぎわ）と減点。閉じた冷蔵庫・戸棚の中の物は数えない。
+   `--place start` で今までどおり（エージェントの始めの場所）
+2. 親がひとりで見せる（bring-in、旧太郎の solo_presentation）：太郎が名前の物を5秒見ず、親の手が空いていれば、近い物（3m 以内、見せた回数の少ない順）を
+   目の前 0.3m・視線の先へ持ってきて振る（follow-in と同じ）。名前は太郎がその物を見てから言う（見はじめて 0.5秒、見続ければ2秒ごとに言い直し）。
+   見たら5秒で戻す、一度も見なければ8秒で言わずに戻す。`--bring-in 0` で切れる
+3. 60度の画角・指令の写し・見た時間の記録（LookLog）は変えていない
+
+**準備**（WSL の Ubuntu、~/taro_repo。依頼16 と同じ箱 ~/taro）：
+PC の取り決めどおり G 側（Windows の作業場所）が正。Windows の作業場所で `git pull` したあと、WSL へ写す（依頼16 のときと同じやり方。
+<Windows の作業場所> は依頼16 で使った /mnt/c/… の場所）：
+
+```
+source ~/taro/bin/activate
+rsync -a <Windows の作業場所>/core_v2/ ~/taro_repo/core_v2/
+rsync -a <Windows の作業場所>/run/world/ ~/taro_repo/run/world/
+cd ~/taro_repo
+python -m pytest core_v2/tests/test_thor_world.py -q      # 15 passed になること（偽物の家。AI2-THOR は起こさない）
+```
+
+**回すコマンド**（依頼16 と同じ2本。始める太郎は 段5_目_種0_2 にそろえる）：
+
+```
+python -m core_v2.tools.thor_watch --seconds 20 --scene FloorPlan1 --eye dinov2 --from 段5_目_種0_2 --stills 3 --out G/logs/動画/家の場面2_FloorPlan1_dinov2_種0.mp4
+python -m core_v2.tools.thor_watch --seconds 20 --scene FloorPlan201 --eye dinov2 --from 段5_目_種0_2 --stills 3 --out G/logs/動画/家の場面2_FloorPlan201_dinov2_種0.mp4
+```
+
+**返してほしいもの**（部屋ごとに）：
+- 始めの行「[家の動画] 座る場所（auto）：…」（選んだ場所・向き・目に入る名前の物の数と語・点・始めの場所なら何個だったか・候補の数）
+- 最後の3行（動画…／親：持ってきた（follow・bringin、bringin を見た・見なかった）・名づけ（follow・bringin）・語ごと／見た時間：回数・平均・真ん中・最長・1秒以上・語ごと）
+- 動画 家の場面2_<部屋>_dinov2_種0.mp4 と静止画3枚（_1〜_3.png）を、依頼16 と同じ共有フォルダへ。_まとめ.json（"placement" と "parent" の欄）と
+  events_<部屋>_seed0.csv（place・bring・look_held・say の行）は返事に添える
+- 動画を見たひとこと：選んだ場所から物が見えているか（冷蔵庫・壁の目の前でないか）、親が持ってきた物を太郎が見たか
+- `thor_fail` が0でなければ events_*.csv の teleport_fail・camera_fail の行。Teleport が通らなかったときは「座る場所」の行が start のままになるので、
+  エラーの文（_まとめ.json の placement.error と events の place の行に出る）と、端末の最後の20行を返す
