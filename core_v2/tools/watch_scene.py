@@ -10,6 +10,7 @@ grow_names.Grower をそのまま使い、0.1秒の1回ごとに1コマ描く（
   ここまでの名づけ・覚えた回数
 
 使い方：
+  python -m core_v2.tools.watch_scene --world thor [thor_watch の引数]   … 家の場面（AI2-THOR）。core_v2/tools/thor_watch.py
   python -m core_v2.tools.watch_scene [--from 写しの名前|auto|birth] [--eye table|dinov2] [--objects made|real]
                                       [--scenes 2] [--repeat 2] [--seed 0] [--speed 1] [--stills 3] [--out 動画の場所]
 出力：--out（既定 G/logs/動画/太郎の場面_<物>_<目>_種<seed>.mp4）。ffmpeg が無ければ .gif。
@@ -145,12 +146,12 @@ class Recorder(Grower):
         super().close()
 
 
-def word_of(q) -> str:
-    """耳が意味の辞書へ渡した語の荷札から、いちばん近い語（20語）。"""
+def word_of(q, words=None) -> str:
+    """耳が意味の辞書へ渡した語の荷札から、いちばん近い語（既定は20語。家の場面は thor_watch が語の表を渡す）。"""
     import torch
     from ..tagging import word_tag
     best, bc = "", -2.0
-    for w in ins.WORDS:
+    for w in (words or ins.WORDS):
         c = float(word_tag(w) @ q / (torch.linalg.vector_norm(q) + 1e-9))
         if c > bc:
             best, bc = w, c
@@ -343,7 +344,15 @@ def pick_stills(stats: list[dict], n: int) -> list[int]:
 
 
 def run(argv=None) -> dict:
+    pre = argparse.ArgumentParser(add_help=False)
+    pre.add_argument("--world", default="eye", choices=["eye", "thor"])
+    w, rest = pre.parse_known_args(argv)
+    if w.world == "thor":            # 家の場面（AI2-THOR）は thor_watch へ（引数はそちらの決まり）
+        from . import thor_watch
+        return thor_watch.run(rest)
+    argv = rest
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("--world", default="eye", choices=["eye", "thor"], help="eye＝目だけの場面／thor＝家の場面（thor_watch へ）")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--scenes", type=int, default=2)
     ap.add_argument("--objects", default="made", choices=["made", "real"])
