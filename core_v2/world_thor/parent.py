@@ -5,7 +5,7 @@
 * 太郎がある物を BRING_AFTER_S（1秒）続けて見たら（目の真ん中に写っている物＝環境の正解 centre_object）、
   親がその物を手に取り、目の前 HOLD_DIST_M（0.3m）、そのときの視線の先へ持ってくる（TeleportObject、forceKinematic）
 * 持っている間は、太郎から見て左右に ±SHAKE_M（3cm）、SHAKE_HZ（2回/秒）でやさしく振る
-* 持ってきて NAME_AT_S（0.5秒）で名前を言う（P_NAME＝1.0：この世界では毎回言う）。言い方は段階5の話しかけと同じ
+* 持ってきて NAME_AT_S（0.5秒）で、太郎が見ていれば名前を言う（P_NAME＝1.0：この世界では毎回言う）。言い方は段階5の話しかけと同じ
   （noun_scene.naming_utterance：1割は語だけ、残りは文の型）。そのあと太郎が見続けていれば REPEAT_GAP_S（2秒）ごとに
   最大 REPEAT（2）回言い直す（旧太郎の連呼 repeat_labels。noun_scene と同じ）
 * HOLD_S（5秒）たったら元の場所・向きへ戻す。戻した物は COOLDOWN_S（3秒）は持ってこない（戻したとたんにまた見て、
@@ -18,6 +18,13 @@
   follow-in で持ってきた時を「見はじめた時」とするのと同じ時間の決め方）。太郎が見たら HOLD_S（5秒）で戻す
   （見はじめが遅くても、はじめの名前を言うまでは持っている）。一度も見なければ BRING_IN_GIVE_UP_S（8秒）で、名前を言わずに戻す。
   持ってきたこと・言ったことは、どちらの決まりか（mode：follow｜bringin）を events と数に残す［Tier3・数は仮置き］
+* 名づけは「親がその物を持っていて、太郎がその物を見ている（centre_object＝持っている物）回」だけ（依頼17 の PC の結果を受けて、
+  2026-10-19）。前は、はじめの1回（持ってきて 0.5秒）は太郎が見ていなくても言っていた（k==0 は見ていなくてよい、という決まり）。
+  持ってきた物がいきなり目の前に来て太郎が目をそらすと、親は「りんご」と言い、太郎は戸棚やトースターを見ていた。
+  意味の辞書は名づけの前後に見ていた物と結び付けるので、名前が違う物に付いていた。いまは、言う時が来ても太郎が見ていなければ待ち、
+  見たときに言う（言い直しも同じ。言い直しの間は前に言った回から REPEAT_GAP_S）。最後に言ってから NAME_TAIL_S（1秒）は戻さない
+  （前は 4.5秒目の言い直しの 0.5秒あとに戻していた）。環境の側でも、持っていない物の名づけは届けない（env.in_hand・say_drop）
+* 親がおもちゃを床に並べた場面（env.toys）では、ひとりで見せる物は床のおもちゃから先に選ぶ。戻すのは床の置いた所（env.home）
 * 親の手そのものは描かない（AI2-THOR に手が無い。物だけが浮いて動く）。物の音はまだ無い（音の素が無い。object_sound の口だけある）
 
 語の表（TYPE_WORD）：AI2-THOR の物の種類（objectType。unity/Assets/Scripts/SimObjType.cs で確かめた名前）→ 子どもの語。
@@ -55,6 +62,7 @@ BRING_IN_AFTER_S = 5.0
 BRING_IN_GIVE_UP_S = 8.0
 BRING_IN_NEAR_M = 3.0
 BRING_IN_RECENT = 3
+NAME_TAIL_S = 1.0       # 名づけのあと、少なくともこれだけは持っている（聞いた語の名残り WORD_TRACE_S＝1秒の間、物を見せておく）
 MIN_Y_M = 0.05          # 持ってくる所が床より下にならないように
 
 
@@ -93,6 +101,9 @@ class FollowInParent:
         self.first_look = None     # 持ってから太郎がはじめて見た回（follow は 0）
         self.no_look = 0           # 名前を言える物を見ていない回の続き
         self.hand_cool = 0         # 戻してからの、ひとりで見せない回
+        self.n_said = 0            # 今持っている物の名前を言った回数
+        self.next_name = 0         # 次に名前を言ってよい回（持ってからの回）
+        self.last_name = None      # 最後に名前を言った回（持ってからの回）
 
     def tick(self, env) -> dict:
         """戻り値：その回に親がしたこと {"looking": 語, "said": 文, "brought": 語, "put": 語, "holding": 語}。"""
@@ -134,10 +145,15 @@ class FollowInParent:
             self.first_look = self.d
             env._log("look_held", self.held, f"{self.d * TICK_S:.1f}s", cause=f"parent_{self.mode}")
         at, gap = int(round(NAME_AT_S / TICK_S)), int(round(REPEAT_GAP_S / TICK_S))
+        tail = int(round(NAME_TAIL_S / TICK_S))
         if self.first_look is None:
             end = int(round(BRING_IN_GIVE_UP_S / TICK_S))
         else:
             end = max(int(round(HOLD_S / TICK_S)), self.first_look + at + 1)
+            if self.n_said == 0:
+                self.next_name = max(self.next_name, self.first_look + at)
+        if self.last_name is not None:
+            end = max(end, self.last_name + tail)
         if self.d >= end:
             env.put_back(self.held, cause="parent_put")
             self.cool[self.held] = int(round(COOLDOWN_S / TICK_S))
@@ -154,22 +170,23 @@ class FollowInParent:
         env.hold(self.held, self.base + SHAKE_M * math.sin(2.0 * math.pi * SHAKE_HZ * t) * self.axis, cause="parent_shake")
         if self.first_look is None:
             return did
-        dd = self.d - self.first_look
-        k = (dd - at) // gap
-        if self.say and dd >= at and (dd - at) % gap == 0 and k <= self.repeat \
-                and (k == 0 or oid == self.held):
+        if self.say and self.n_said <= self.repeat and self.d >= self.next_name and oid == self.held:
             text = naming_utterance(word, self.rng)
             env.say(text, target=self.held, cause=f"parent_name_{self.mode}")
             self.stats["names"] += 1
             self.stats[f"names_{self.mode}"] += 1
-            self.stats["repeats"] += k > 0
+            self.stats["repeats"] += self.n_said > 0
+            self.n_said += 1
+            self.last_name = self.d
+            self.next_name = self.d + gap
             self.named[word] = self.named.get(word, 0) + 1
             did["said"] = text
         return did
 
     def _choose(self, env):
         """ひとりで見せる物を選ぶ（上の説明）。選べなければ None。"""
-        targets = [i for i in env.targets if i in env.objects and i not in self.cool]
+        toys = [i for i in getattr(env, "toys", []) if i in env.objects and i not in self.cool]
+        targets = toys or [i for i in env.targets if i in env.objects and i not in self.cool]
         if not targets:
             return None
         eye = np.asarray(env.eye_pos, dtype=float)
@@ -192,6 +209,7 @@ class FollowInParent:
         self.say = self.rng.random() < self.p_name
         self.mode = mode
         self.first_look = 0 if mode == "follow" else None
+        self.n_said, self.next_name, self.last_name = 0, 0, None
         if mode == "bringin":
             self.presented[oid] = self.presented.get(oid, 0) + 1
             self.recent.append(oid)

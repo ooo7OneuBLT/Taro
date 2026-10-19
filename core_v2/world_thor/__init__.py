@@ -12,7 +12,7 @@ PC での下見（依頼13〜15）で分かったこと：
 * TeleportObject（forceKinematic）で物を目の前へ動かせる。PickupObject も通る
 
 置き場所：
-* env.py    … 環境本体（ThorEnv）。reset で名前の物が目に入る所を選んで座る（place="auto"）。ai2thor は使うときにだけ読む（クラウドのテストと、ほかの道具は ai2thor 無しで回る）
+* env.py    … 環境本体（ThorEnv）。reset で座る場所を決め（place=(x, z, yaw) で手で、auto は控え）、親がおもちゃ（toys＝4）を太郎の前の床に並べる。ai2thor は使うときにだけ読む（クラウドのテストと、ほかの道具は ai2thor 無しで回る）
 * fake.py   … ai2thor の代わりの小さな偽物（FakeController）。テストと、クラウドで配線を確かめるため
 * parent.py … 見えない親の手（follow-in：太郎が1秒見た物を目の前へ持ってきて、振って、名前を言い、5秒で戻す。
               bring-in：5秒名前の物を見なければ親が物を持ってきて、太郎が見てから名前を言う）と、
@@ -20,7 +20,7 @@ PC での下見（依頼13〜15）で分かったこと：
 * eye.py    … 目の入口の作り方（dinov2＝本物の目。seg＝クラウドの確かめ用の代わりの目、DINOv2 ではない）
 * taro.py   … 家の場面の太郎（grow_names.EyeTaro と同じ1回の回し方）と、名づけで育つ太郎（ThorGrower）、見る時間の記録
 
-道具：python -m core_v2.tools.thor_watch（動画）。watch_scene に --world thor を付けても同じ。
+道具：python -m core_v2.tools.thor_watch（動画）。--first-frame で最初の目の絵と上から見た絵だけ（座る場所を選ぶため）。watch_scene に --world thor を付けても同じ。
 """
 
 from .env import ThorEnv  # noqa: F401

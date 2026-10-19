@@ -27,6 +27,21 @@ reset のとき、GetReachablePositions の場所から PLACE_MAX_CANDIDATES（6
 いちばん点の高い所へ Teleport する（同点は種の乱数で選ぶ）。親が子を、物の見える所へ座らせる（旧太郎の親が
 おもちゃを子の前に並べたのと同じ役）［Tier3・モデル上の選択。数は仮置き］。place="start" は今までどおり。
 
+依頼17 の PC の結果（自動の座る場所でも、目に入る名前の物は FloorPlan1・FloorPlan201 とも1つだけ。台所の物は調理台の上にあり、
+0.6m の目からは見えない）を受けて（2026-10-19）：
+* 親がおもちゃを並べる（toys＝TOYS_N（4）、0 で切る）：座らせたあと、親が名前を言える拾える物を3〜4つ（語の表から、
+  できるだけ違う語、目に近い順。閉じた戸棚の中の物は後回し）、太郎の前の床に並べる。向き（目の向き yaw から）
+  TOY_ANGLES（−20・−7・+7・+20度）、目からの水平の距離 TOY_NEAR_M〜TOY_FAR_M（0.6〜1.2m）のうち、物の真ん中が最初の目の絵の
+  下 TOY_ROW_MAX（85%）より上に入る、いちばん近い所。床が歩ける所の近く（TOY_FREE_M 以内に到達点）で、床の上の大きな物の箱に
+  入らない所だけ。置き方は PlaceObjectAtPoint（物の底をその点に置く）、通らなければ TeleportObject（forceKinematic=False、
+  真ん中の高さ＝床＋箱の高さの半分）。置いた所を物の「元の場所」（home）にする（親が持ってきて戻すとき、調理台ではなく床へ戻す）。
+  置いたあと、目の絵に写すと何個入るか（幾何と色分けの絵の両方）を記録する。依頼の「目から 0.6〜1.0m」は、下へ10度・画角60度の
+  目では床の 0.7m より手前が絵の下に外れるので、水平 0.6〜1.2m で絵に入るいちばん近い所にした［Tier3・モデル上の選択］
+* 座る場所（place）：(x, z, yaw) を渡せば、そこへそのまま Teleport する（手で選ぶ。上から見た絵 thor_watch --first-frame を見て決める）。
+  通らなければいちばん近い到達点へ。auto は控え：候補は「真正面 PLACE_AHEAD_MIN_M（1.5m）先まで歩ける」所だけ。
+  おもちゃを並べるときは、前の開け具合（PLACE_AHEAD_CAP まで）＋おもちゃの所の左右の開け具合＋床の上の大きな物からの離れで点を付ける
+  （物が目に入っているかは見ない。親が並べるので）
+
 AI2-THOR は1回の呼び出しが重い（約55ミリ秒）ので、環境の1歩（0.01秒）ごとには呼ばない。物を動かす（hold・put_back）・
 目の向きは控えておき、画像を読む（render_eye・centre_object）ときにまとめて送る（物を動かす → 最後にカメラの向き）。
 """
@@ -56,6 +71,19 @@ PLACE_LARGE_M = 0.4        # これより大きい（箱のいちばん長い辺
 PLACE_BLOCK_M = 0.6
 PLACE_BLOCK_PENALTY = 3.0
 PLACE_WALL_PENALTY = 1.0
+PLACE_AHEAD_MIN_M = 1.5   # 真正面にこれだけ歩ける所が続くこと（座る場所の候補の条件）
+PLACE_STEP_M = 0.25       # AI2-THOR の到達点の格子
+PLACE_REACH_TOL_M = 0.1
+PLACE_AHEAD_CAP_M = 3.0
+PLACE_SIDE_CAP_M = 1.0
+PLACE_CLEAR_CAP_M = 1.5
+TOYS_N = 4
+TOY_ANGLES = {1: (0.0,), 2: (-8.0, 8.0), 3: (-15.0, 0.0, 15.0), 4: (-20.0, -7.0, 7.0, 20.0)}
+TOY_NEAR_M, TOY_FAR_M, TOY_STEP_M = 0.6, 1.2, 0.05
+TOY_ROW_MAX = 0.85        # 物の真ん中が絵の下からこれより上（行の割合）
+TOY_COL_MARGIN = 0.06
+TOY_FREE_M = 0.35         # この距離以内に到達点がある床を「開いた床」とする
+FLOOR_BOX_TOP_M = 0.5     # 箱の下がこれより低い大きな物を「床の上の大きな物」とする（吊り戸棚は数えない）
 PLACE_IGNORE_TYPES = ("Floor", "Rug", "Window", "Painting", "Poster", "LightSwitch", "Curtains", "Blinds")
 CONTROLLER_KW = {"server_timeout": 900, "makeAgentsVisible": False, "renderInstanceSegmentation": True}
 
@@ -135,7 +163,7 @@ class ThorEnv:
     def __init__(self, scene: str = "FloorPlan1", controller=None, px: int = PX, render_px: int | None = None,
                  fov: float = FOV_DEG, eye_y: float = EYE_Y_M, eye_ahead: float = EYE_AHEAD_M,
                  base_tilt: float = BASE_TILT_DEG, platform: str | None = None, log_dir: str | None = None,
-                 seed: int = 0, controller_kw: dict | None = None, place: str = "auto") -> None:
+                 seed: int = 0, controller_kw: dict | None = None, place="auto", toys: int = TOYS_N) -> None:
         from .parent import TYPE_WORD
         self.scene_name = scene
         self.px = int(px)
@@ -144,10 +172,21 @@ class ThorEnv:
         self.eye_y, self.eye_ahead, self.base_tilt = float(eye_y), float(eye_ahead), float(base_tilt)
         self.type_word = dict(TYPE_WORD)
         self.dt = DT
-        if place not in ("auto", "start"):
-            raise ValueError(f"place は auto か start：{place}")
+        if isinstance(place, str) and "," in place:
+            place = tuple(float(x) for x in place.split(","))
+        if isinstance(place, (tuple, list)):
+            if len(place) != 3:
+                raise ValueError(f"place は (x, z, yaw)：{place}")
+            place = tuple(float(x) for x in place)
+        elif place not in ("auto", "start"):
+            raise ValueError(f"place は auto・start・(x, z, yaw)：{place}")
         self.place = place
+        self.n_toys = max(0, int(toys))
         self.placement: dict = {}
+        self.toys: list[str] = []
+        self.toy_info: list[dict] = []
+        self.reach = None
+        self.in_hand: set = set()        # 親が今持っている物（持っていない物の名づけは届けない）
         self.action_space = _ActionSpace()
         self.unwrapped = self
         self.controller = controller if controller is not None else make_controller(
@@ -174,7 +213,9 @@ class ThorEnv:
         ev = self.controller.reset(scene=self.scene_name)
         self.n_calls += 1
         self._take(ev)
+        self.in_hand = set()
         self._place()
+        self._set_out_toys()
         ag = self._event.metadata["agent"]
         self.agent_yaw = float(ag["rotation"]["y"])
         fwd0, _r, _u = cam_basis(self.agent_yaw, 0.0)
@@ -200,12 +241,24 @@ class ThorEnv:
         self.home = {i: (vec(o["position"]), vec(o["rotation"])) for i, o in self.objects.items()}
         self.targets = [i for i, o in self.objects.items()
                         if o["objectType"] in self.type_word and o.get("pickupable", True)]
+        if self.toys:
+            seen = set(self.object_centres())
+            for t in self.toy_info:
+                t["seen"] = t["id"] in seen
+        self.placement["toys_in_view"] = sum(t["in_view"] for t in self.toy_info)
+        self.placement["toys_seen"] = sum(t.get("seen", False) for t in self.toy_info)
+        self.placement["toys"] = [t["word"] for t in self.toy_info]
         self._open_log(seed)
         self._log("reset", "", f"{self.scene_name} 物{len(self.objects)} 名前を言える物{len(self.targets)}")
         pl = self.placement
         self._log("place", "", f"{pl.get('mode')} 場所{pl.get('position')} 向き{pl.get('yaw')} 点{pl.get('score')} "
-                               f"目に入る名前の物{pl.get('n_in_view')} {'・'.join(pl.get('words', []))} "
-                               f"候補{pl.get('n_candidates')} {pl.get('error', '')}", cause="place")
+                               f"前{pl.get('ahead_m')}m 目に入る名前の物{pl.get('n_in_view')} {'・'.join(pl.get('words', []))} "
+                               f"候補{pl.get('n_candidates')}（前が開いた所{pl.get('n_open')}） {pl.get('error', '')}", cause="place")
+        for t in self.toy_info:
+            self._log("toy", t["id"], f"{t['word']} {t['angle']:+.0f}度 {t['dist']:.2f}m {t['method']} "
+                                      f"絵に入る{int(t['in_view'])} 写る{int(t.get('seen', False))}", cause="parent_toys")
+        self._log("toys", "", f"並べた{len(self.toys)} 絵に入る{pl['toys_in_view']} 写る{pl['toys_seen']} "
+                              f"{'・'.join(pl['toys'])}", cause="parent_toys")
         return LazyObs(self, self.n_step), {"targets": list(self.targets)}
 
     # ================================================================ 座る場所
@@ -299,57 +352,239 @@ class ThorEnv:
         return {"score": len(seen) - penalty, "n_in_view": len(seen), "seen": seen, "penalty": penalty,
                 "why": why, "eye": eye}
 
+    def _large_boxes(self, floor_only: bool = False) -> list:
+        """名前の無い大きな物の箱 [(id, (lo, hi))]。floor_only なら箱の下が床に近い物だけ（床の上の家具）。"""
+        targets = set(self._nameable())
+        out = []
+        for i, o in self.objects.items():
+            if i in targets or o["objectType"] in PLACE_IGNORE_TYPES:
+                continue
+            bx = self._box(o)
+            if bx is None or float(np.max(bx[1] - bx[0])) < PLACE_LARGE_M:
+                continue
+            if floor_only and float(bx[0][1]) - self.floor_y > FLOOR_BOX_TOP_M:
+                continue
+            out.append((i, bx))
+        return out
+
+    def _reach_near(self, p, tol: float = PLACE_REACH_TOL_M) -> bool:
+        if self.reach is None or not len(self.reach):
+            return False
+        d = np.hypot(self.reach[:, 0] - p[0], self.reach[:, 2] - p[2])
+        return bool(d.min() <= tol)
+
+    def _run_len(self, p, d, cap: float) -> float:
+        """p から水平の向き d へ、到達点が続く長さ（PLACE_STEP_M きざみ、cap まで）。"""
+        n = 0
+        while (n + 1) * PLACE_STEP_M <= cap + 1e-9 and self._reach_near(p + (n + 1) * PLACE_STEP_M * d):
+            n += 1
+        return n * PLACE_STEP_M
+
+    @staticmethod
+    def _xz_dist_box(p, lo, hi) -> float:
+        dx = max(lo[0] - p[0], 0.0, p[0] - hi[0])
+        dz = max(lo[2] - p[2], 0.0, p[2] - hi[2])
+        return float(math.hypot(dx, dz))
+
+    def space_spot(self, pos, yaw: float) -> dict:
+        """前の開け具合の点（おもちゃを並べるとき。上の説明）。ahead_m が PLACE_AHEAD_MIN_M 未満なら候補にしない。"""
+        pos = np.asarray(pos, dtype=float)
+        fwd = cam_basis(yaw, 0.0)[0]
+        right = cam_basis(yaw, 0.0)[1]
+        ahead = self._run_len(pos, fwd, PLACE_AHEAD_CAP_M)
+        zone = pos + (self.eye_ahead + 1.0) * fwd                     # おもちゃを並べる辺り（目の 1m 先）
+        zone_grid = pos + round((self.eye_ahead + 1.0) / PLACE_STEP_M) * PLACE_STEP_M * fwd
+        side = min(self._run_len(zone_grid, right, PLACE_SIDE_CAP_M), self._run_len(zone_grid, -right, PLACE_SIDE_CAP_M))
+        clear = PLACE_CLEAR_CAP_M
+        for _j, (lo, hi) in self._large_boxes(floor_only=True):
+            clear = min(clear, self._xz_dist_box(zone, lo, hi))
+        return {"ahead_m": ahead, "side_m": side, "clear_m": round(clear, 3),
+                "space": min(ahead, PLACE_AHEAD_CAP_M) + side + clear, "open": ahead >= PLACE_AHEAD_MIN_M - 1e-9}
+
+    def _teleport_agent(self, pos, yaw: float) -> bool:
+        p = xyz(pos)
+        for act in ("Teleport", "TeleportFull"):
+            ev = self._call(act, position=p, rotation={"x": 0.0, "y": float(yaw), "z": 0.0}, horizon=0.0, standing=True)
+            if self._ok(ev):
+                return True
+        return False
+
     def _place(self) -> None:
-        """座る場所を決めて、そこへ Teleport する（place="auto"）。決めた所は self.placement に残す。"""
+        """座る場所を決めて、そこへ Teleport する（上の説明）。決めた所は self.placement に残す。"""
         ag = self._event.metadata["agent"]
         here, yaw0 = vec(ag["position"]), float(ag["rotation"]["y"])
-        reach = None
+        self.reach = None
         self.placement_error = ""
-        if self.place == "auto":
+        self.floor_y = self._floor_y()
+        if self.place != "start":
             ev = self._call("GetReachablePositions")
             pts = ev.metadata.get("actionReturn") if self._ok(ev) else None
             if not pts:
                 self.placement_error = f"GetReachablePositions：{self.last_error}"
             if pts:
-                reach = np.array([[float(p["x"]), float(p["y"]), float(p["z"])] for p in pts])
-        start = self.score_spot(here, yaw0, reach)
-        best = {"pos": here, "yaw": yaw0, **start}
-        n_cand = 0
-        if reach is not None:
+                self.reach = np.array([[float(p["x"]), float(p["y"]), float(p["z"])] for p in pts])
+        reach = self.reach
+        toys_on = self.n_toys > 0
+
+        def cand(pos, yaw):
+            c = {"pos": np.asarray(pos, dtype=float), "yaw": float(yaw), **self.score_spot(pos, yaw, reach)}
+            if reach is not None:
+                c.update(self.space_spot(pos, yaw))
+            else:
+                c.update({"ahead_m": None, "side_m": None, "clear_m": None, "space": 0.0, "open": False})
+            c["rank"] = c["space"] if toys_on else c["score"]
+            return c
+
+        start = cand(here, yaw0)
+        best = start
+        n_cand = n_open = 0
+        mode = self.place if isinstance(self.place, str) else "spot"
+        if isinstance(self.place, tuple):
+            x, z, yaw = self.place
+            want = np.array([x, here[1], z])
+            if not self._teleport_agent(want, yaw):
+                err = self.last_error
+                if reach is not None and len(reach):
+                    k = int(np.argmin(np.hypot(reach[:, 0] - x, reach[:, 2] - z)))
+                    want = reach[k]
+                    if self._teleport_agent(want, yaw):
+                        mode = "spot(近い到達点へ)"
+                        self.placement_error = f"指定の所へ行けなかった：{err[:120]}"
+                    else:
+                        mode = "spot(失敗→始めの場所)"
+                        self.placement_error = self.last_error
+                else:
+                    mode = "spot(失敗→始めの場所)"
+                    self.placement_error = err
+            ag = self._event.metadata["agent"]
+            best = cand(vec(ag["position"]), float(ag["rotation"]["y"]))
+        elif self.place == "auto" and reach is not None:
             idx = np.arange(len(reach))
             if len(idx) > PLACE_MAX_CANDIDATES:
                 idx = np.sort(self.np_random.choice(idx, PLACE_MAX_CANDIDATES, replace=False))
-            cands = [{"pos": here, "yaw": yaw0, **start}]
-            for i in idx:
-                for y in PLACE_YAWS:
-                    cands.append({"pos": reach[i], "yaw": y, **self.score_spot(reach[i], y, reach)})
+            cands = [start] + [cand(reach[i], y) for i in idx for y in PLACE_YAWS]
             n_cand = len(cands)
-            top = max(c["score"] for c in cands)
-            tied = [c for c in cands if c["score"] >= top - 1e-9]
-            best = tied[int(self.np_random.integers(len(tied)))] if len(tied) > 1 else tied[0]
-            moved = not (np.allclose(best["pos"], here, atol=1e-3) and abs((best["yaw"] - yaw0) % 360.0) < 1e-3)
-            if moved:
-                p = xyz(best["pos"])
-                ok = False
-                for act in ("Teleport", "TeleportFull"):
-                    ev = self._call(act, position=p, rotation={"x": 0.0, "y": float(best["yaw"]), "z": 0.0},
-                                    horizon=0.0, standing=True)
-                    if self._ok(ev):
-                        ok = True
-                        break
-                if not ok:
-                    best = {"pos": here, "yaw": yaw0, **start}
+            ok = [c for c in cands if c["open"]]
+            n_open = len(ok)
+            if not ok:
+                self.placement_error = f"真正面 {PLACE_AHEAD_MIN_M}m 先まで歩ける所が無い（始めの場所のまま）"
+                mode = "auto(前が開いた所なし→始めの場所)"
+            else:
+                top = max(c["rank"] for c in ok)
+                tied = [c for c in ok if c["rank"] >= top - 1e-9]
+                best = tied[int(self.np_random.integers(len(tied)))] if len(tied) > 1 else tied[0]
+                moved = not (np.allclose(best["pos"], here, atol=1e-3) and abs((best["yaw"] - yaw0) % 360.0) < 1e-3)
+                if moved and not self._teleport_agent(best["pos"], best["yaw"]):
+                    best = start
                     self.placement_error = self.last_error
+        elif self.place == "auto":
+            mode = "start(到達点なし)"
         ag = self._event.metadata["agent"]
         self.placement = {
-            "mode": self.place if reach is not None or self.place == "start" else "start(到達点なし)",
-            "position": [round(float(x), 3) for x in vec(ag["position"])], "yaw": round(float(ag["rotation"]["y"]), 1),
-            "score": round(float(best["score"]), 2), "n_in_view": int(best["n_in_view"]),
+            "mode": mode, "position": [round(float(x), 3) for x in vec(ag["position"])],
+            "yaw": round(float(ag["rotation"]["y"]), 1),
+            "score": round(float(best["rank"]), 2), "n_in_view": int(best["n_in_view"]),
+            "ahead_m": best["ahead_m"], "side_m": best["side_m"], "clear_m": best["clear_m"],
             "words": [self.type_word.get(self.objects[i]["objectType"], "") for i in best["seen"]],
-            "penalty": best["penalty"], "why": list(best["why"]), "n_candidates": n_cand,
-            "start_n_in_view": int(start["n_in_view"]), "start_score": round(float(start["score"]), 2),
-            "error": self.placement_error[:200],
+            "penalty": best["penalty"], "why": list(best["why"]), "n_candidates": n_cand, "n_open": n_open,
+            "start_n_in_view": int(start["n_in_view"]), "start_score": round(float(start["rank"]), 2),
+            "start_ahead_m": start["ahead_m"], "error": self.placement_error[:200],
+            "by": "space" if toys_on else "objects",
         }
+
+    def _floor_y(self) -> float:
+        """床の高さ（Floor の箱の上。無ければ 0）。"""
+        for o in self.objects.values():
+            if o["objectType"] == "Floor":
+                bx = self._box(o)
+                if bx is not None and -0.3 < float(bx[1][1]) < 0.3:
+                    return float(bx[1][1])
+        return 0.0
+
+    # ================================================================ 親がおもちゃを並べる
+    def _toy_choice(self, eye) -> list[str]:
+        """並べる物：語の表の拾える物を、できるだけ違う語で、目に近い順（閉じた戸棚の中は後回し）。"""
+        cand = sorted(self._nameable(), key=lambda i: (self._hidden(self.objects[i]),
+                                                       round(float(np.linalg.norm(self._centre(self.objects[i]) - eye)), 4), i))
+        out, words = [], set()
+        for i in cand:
+            w = self.type_word[self.objects[i]["objectType"]]
+            if w not in words:
+                out.append(i)
+                words.add(w)
+        out += [i for i in cand if i not in out]
+        return out[:self.n_toys]
+
+    def _toy_spot(self, oid, eye, yaw, ang):
+        """ang の向きで、絵に入る・開いた床の、いちばん近い床の点。無ければ None。"""
+        o = self.objects[oid]
+        bx = self._box(o)
+        size = (bx[1] - bx[0]) if bx is not None else np.array([0.1, 0.1, 0.1])
+        r = 0.5 * float(max(size[0], size[2]))
+        h = math.radians(yaw + ang)
+        dvec = np.array([math.sin(h), 0.0, math.cos(h)])
+        floor_boxes = self._large_boxes(floor_only=True)
+        for d in np.arange(TOY_NEAR_M, TOY_FAR_M + 1e-9, TOY_STEP_M):
+            p = np.array([eye[0], self.floor_y, eye[2]]) + d * dvec
+            c = p + np.array([0.0, 0.5 * float(size[1]), 0.0])
+            pr = project(c, eye, yaw, -self.base_tilt, self.px, self.fov)
+            if pr is None or pr[1] > TOY_ROW_MAX * self.px or pr[1] < 0:
+                continue
+            if not (TOY_COL_MARGIN * self.px <= pr[0] <= (1 - TOY_COL_MARGIN) * self.px):
+                continue
+            if self.reach is not None and len(self.reach) > 1 and not self._reach_near(p, TOY_FREE_M):
+                continue
+            if any(self._xz_dist_box(p, lo, hi) < r for _j, (lo, hi) in floor_boxes):
+                continue
+            return p, c, float(d)
+        return None
+
+    def _set_out_toys(self) -> None:
+        self.toys, self.toy_info = [], []
+        if self.n_toys <= 0:
+            return
+        ag = self._event.metadata["agent"]
+        yaw = float(ag["rotation"]["y"])
+        eye = vec(ag["position"]) + self.eye_ahead * cam_basis(yaw, 0.0)[0]
+        eye[1] = self.eye_y
+        picks = self._toy_choice(eye)
+        angles = TOY_ANGLES[max(1, min(4, len(picks)))] if picks else ()
+        for oid, ang in zip(picks, angles):
+            spot = self._toy_spot(oid, eye, yaw, ang)
+            if spot is None:
+                self._log("toy_skip", oid, f"{ang:+.0f}度に置ける床が無い", cause="parent_toys")
+                self.toy_info.append({"id": oid, "word": self.word_of(oid), "angle": ang, "dist": 0.0, "method": "置けない",
+                                      "spot": None, "in_view": False, "placed": False})
+                continue
+            p, c, d = spot
+            method = "PlaceObjectAtPoint"
+            try:
+                ev = self._call("PlaceObjectAtPoint", objectId=oid, position=xyz(p))
+                placed_ok = self._ok(ev)
+            except Exception as ex:  # noqa: BLE001  版によっては知らない動作で例外になる（未確認）→ 控えへ
+                placed_ok = False
+                self.n_fail += 1
+                self.last_error = f"{type(ex).__name__}: {ex}"
+            if not placed_ok:
+                err = self.last_error
+                o = self.objects[oid]
+                off = self._centre(o) - vec(o["position"])
+                ev = self._call("TeleportObject", objectId=oid, position=xyz(c - off), rotation=o["rotation"],
+                                forceAction=True, forceKinematic=False)
+                method = "TeleportObject(控え)"
+                if not self._ok(ev):
+                    method = "失敗"
+                self.toy_error = err[:120]
+            o = self.objects.get(oid)
+            got = self._centre(o) if o is not None else c
+            pr = project(got, eye, yaw, -self.base_tilt, self.px, self.fov)
+            inv = pr is not None and 0 <= pr[0] < self.px and 0 <= pr[1] < self.px
+            placed = method != "失敗"
+            if placed:
+                self.toys.append(oid)
+            self.toy_info.append({"id": oid, "word": self.word_of(oid), "angle": ang, "dist": round(d, 2),
+                                  "method": method, "spot": [round(float(x), 3) for x in p],
+                                  "at": [round(float(x), 3) for x in got], "in_view": bool(inv), "placed": placed})
 
     def step(self, action=None):
         self.time += self.dt
@@ -358,10 +593,15 @@ class ThorEnv:
         info = {}
         if self._pending_sound:
             info["object_sound"] = self._pending_sound.pop(0)
-        if self._pending_say:
+        while self._pending_say:
             utt = self._pending_say.pop(0)
+            if str(utt.get("cause", "")).startswith("parent_name") and utt.get("target") not in self.in_hand:
+                # 親の名づけは、その物を持っている間だけ届ける（戻したあとに残った名づけは捨てる。依頼17）
+                self._log("say_drop", str(utt.get("target") or ""), str(utt.get("text", "")), cause=str(utt.get("cause", "")))
+                continue
             info["parent_utterance"] = utt
             self._log("say", str(utt.get("target") or ""), str(utt.get("text", "")), cause=str(utt.get("cause", "")))
+            break
         return LazyObs(self, self.n_step), 0.0, False, False, info
 
     def close(self) -> None:
@@ -399,10 +639,14 @@ class ThorEnv:
         off = self._centre(o) - vec(o["position"])
         rot = vec(o["rotation"]) if rot is None else np.asarray(rot, dtype=float)
         self._pending_tp[oid] = (np.asarray(pos, dtype=float) - off, rot)
+        self.in_hand.add(oid)
 
     def put_back(self, oid: str, cause: str = "parent") -> None:
         """物を最初の場所・向き（reset のとき）へ戻す。"""
         self._pending_tp[oid] = self.home[oid]
+        self.in_hand.discard(oid)
+        self._pending_say = [u for u in self._pending_say if u.get("target") != oid
+                             or not str(u.get("cause", "")).startswith("parent_name")]
         self._log("put_back", oid, "", cause=cause)
 
     def word_of(self, oid: str | None) -> str:

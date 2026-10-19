@@ -7,7 +7,7 @@ errorMessage）・third_party_camera_frames・third_party_instance_segmentation_
 目の入口の画像のずれ・指令の写しを確かめられる）。向きと写し方は env.py の cam_basis・project と同じ式。
 エージェント：agent_pos・agent_yaw（既定 (0, 0.9, 0)・+z 向き）。GetReachablePositions は reachable（既定はその場所1つ）を
 actionReturn で返す。Teleport・TeleportFull（position・rotation・horizon・standing）でエージェントを動かす（reachable に
-無い場所は失敗。本物もそう）。物は (id, 種類, 真ん中, 大きさ, 色) に、6つめとして追加の metadata（openable・isOpen・
+無い場所は失敗。本物もそう）。PlaceObjectAtPoint（物の底をその点に置く。place_at_point=False で「知らない」にできる）。物は (id, 種類, 真ん中, 大きさ, 色) に、6つめとして追加の metadata（openable・isOpen・
 parentReceptacles・pickupable など）を渡せる。
 物の位置（position）は物の底（本物の AI2-THOR も多くの物は底か中ほど）、見かけの真ん中は axisAlignedBoundingBox.center。
 """
@@ -33,6 +33,27 @@ FLOOR_ID = "Floor|+00.00|+00.00|+00.00"
 WALL_ID = "Wall|+00.00|+00.00|+00.00"
 
 
+# 台所に似せた部屋（thor_watch --fake と、テストで使う）：歩ける所は x −2〜2・z −1〜3 の 0.25m の格子。始めは (0, 0.9, 0) で
+# −z（冷蔵庫）を向く。名前の物は右の調理台（x≈2.4）の上 0.95m（0.6m の目からは見えにくい）と、閉じた冷蔵庫の中
+FRIDGE_ID = "Fridge|+00.00|+00.80|-01.60"
+COUNTER_ID = "CounterTop|+02.45|+00.45|+01.00"
+DEMO_ROOM = {
+    "agent_yaw": 180.0,
+    "reachable": [(x * 0.25, 0.9, z * 0.25) for x in range(-8, 9) for z in range(-4, 13)],
+    "objects": [
+        (FRIDGE_ID, "Fridge", (0.0, 0.8, -1.6), 1.0, (200, 200, 205), {"openable": True, "isOpen": False}),
+        (COUNTER_ID, "CounterTop", (2.45, 0.45, 1.0), 0.9, (150, 140, 120)),
+        ("Chair|-01.80|+00.40|+02.80", "Chair", (-1.8, 0.4, 2.8), 0.7, (110, 70, 40)),
+        ("Apple|+02.40|+00.95|+00.40", "Apple", (2.4, 0.95, 0.4), 0.09, (200, 30, 30)),
+        ("Cup|+02.40|+00.95|+00.80", "Cup", (2.4, 0.95, 0.8), 0.10, (240, 240, 250)),
+        ("Plate|+02.40|+00.92|+01.20", "Plate", (2.4, 0.92, 1.2), 0.20, (230, 220, 160)),
+        ("Bread|+02.40|+00.96|+01.60", "Bread", (2.4, 0.96, 1.6), 0.15, (210, 160, 90)),
+        ("Mug|+02.40|+00.95|+02.00", "Mug", (2.4, 0.95, 2.0), 0.10, (90, 160, 200)),
+        ("Apple|+00.00|+00.60|-01.60", "Apple", (0.0, 0.6, -1.6), 0.09, (190, 40, 40), {"parentReceptacles": [FRIDGE_ID]}),
+    ],
+}
+
+
 class FakeEvent:
     def __init__(self, metadata, cams, color_to_object_id) -> None:
         self.metadata = metadata
@@ -44,8 +65,10 @@ class FakeEvent:
 
 class FakeController:
     def __init__(self, scene: str = "FloorPlan1", width: int = 224, height: int = 224, objects=None,
-                 agent_yaw: float = 0.0, agent_pos=(0.0, 0.9, 0.0), reachable=None, **kw) -> None:
+                 agent_yaw: float = 0.0, agent_pos=(0.0, 0.9, 0.0), reachable=None, place_at_point: bool = True,
+                 **kw) -> None:
         self.width, self.height = int(width), int(height)
+        self.place_at_point = bool(place_at_point)      # False：PlaceObjectAtPoint を知らない（TeleportObject の控えを試す）
         self.kw = dict(kw)
         self._objects_src = objects or DEFAULT_OBJECTS
         self.agent_yaw0 = float(agent_yaw)
@@ -74,7 +97,7 @@ class FakeController:
                  "axisAlignedBoundingBox": {"center": _d(c), "size": _d((size, size, size))}}
             o.update(extra)
             self.objects.append(o)
-            self.colors[oid] = (40 + 20 * k, 200 - 15 * k, 100 + 30 * k)
+            self.colors[oid] = (40 + 20 * k, 200 - 15 * k, 100 + 30 * k) if k < 6 else (30 + k, 60, 240 - k)
         self.last_event = self._event(True, "")
         return self.last_event
 
@@ -103,6 +126,15 @@ class FakeController:
                 o["position"] = _d(p)
                 if "rotation" in kw:
                     o["rotation"] = dict(kw["rotation"])
+                o["axisAlignedBoundingBox"]["center"] = _d(p + np.array([0.0, o["_size"] / 2.0, 0.0]))
+        elif action == "PlaceObjectAtPoint" and self.place_at_point:
+            # 本物と同じく、物の底をその点に置く（偽物は物理が無いので、そのまま止まる）
+            o = next((o for o in self.objects if o["objectId"] == kw.get("objectId")), None)
+            if o is None or not o.get("pickupable", True):
+                ok, err = False, f"PlaceObjectAtPoint：置けない物 {kw.get('objectId')}"
+            else:
+                p = vec(kw["position"])
+                o["position"] = _d(p)
                 o["axisAlignedBoundingBox"]["center"] = _d(p + np.array([0.0, o["_size"] / 2.0, 0.0]))
         elif action == "GetReachablePositions":
             self.last_event = self._event(True, "", action_return=[_d(p) for p in self.reachable])
@@ -192,4 +224,4 @@ def fake_env(scene: str = "FloorPlan1", px: int = 224, render_px: int | None = N
     return ThorEnv(scene, controller=ctl, px=px, render_px=rp, **kw)
 
 
-__all__ = ["FakeController", "FakeEvent", "fake_env", "DEFAULT_OBJECTS"]
+__all__ = ["FakeController", "FakeEvent", "fake_env", "DEFAULT_OBJECTS", "DEMO_ROOM"]

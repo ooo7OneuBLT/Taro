@@ -33,7 +33,7 @@ REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir, os.par
 
 @pytest.fixture
 def env():
-    e = fake_env()
+    e = fake_env(toys=0)          # おもちゃを並べない（物は DEFAULT_OBJECTS の場所のまま）
     yield e
     e.close()
 
@@ -119,7 +119,7 @@ def test_parent_brings_shakes_names_and_puts_back(env):
     brought = [k for k, d in enumerate(did_log) if "brought" in d]
     put = [k for k, d in enumerate(did_log) if "put" in d]
     assert brought[0] == 9                     # 10回目（1秒）で持ってくる
-    assert put[0] == brought[0] + 50           # 5秒で戻す
+    assert put[0] == brought[0] + 55           # 5秒で戻す。ただし最後の言い直し（4.5秒）から1秒は持っている
     assert [k for k, _ in said[:3]] == [brought[0] + 5, brought[0] + 25, brought[0] + 45]
     assert all("りんご" in t for _, t in said[:3])
     assert par.stats["repeats"] == 2
@@ -180,9 +180,9 @@ FRIDGE = ("Fridge|+00.00|+00.60|-00.55", "Fridge", (0.0, 0.6, -0.55), 0.9, (200,
 def _room(place):
     """始めの場所 (0, 0.9, 0) は −z（冷蔵庫）を向く。名前の物は +z 側の 1m ほど先。歩ける所は 0.25m の格子。"""
     from core_v2.world_thor.fake import DEFAULT_OBJECTS
-    grid = [(x * 0.25, 0.9, z * 0.25) for x in range(-4, 5) for z in range(-1, 4)]
-    return fake_env(place=place, controller_kw={"objects": DEFAULT_OBJECTS + [FRIDGE], "agent_yaw": 180.0,
-                                                 "reachable": grid})
+    grid = [(x * 0.25, 0.9, z * 0.25) for x in range(-4, 5) for z in range(-8, 4)]
+    return fake_env(place=place, toys=0, controller_kw={"objects": DEFAULT_OBJECTS + [FRIDGE], "agent_yaw": 180.0,
+                                                         "reachable": grid})
 
 
 def test_placement_picks_spot_with_nameable_objects_in_view():
@@ -193,7 +193,7 @@ def test_placement_picks_spot_with_nameable_objects_in_view():
         assert bad.agent_yaw == pytest.approx(180.0)
         pl = good.placement
         assert pl["start_n_in_view"] == 0 and pl["n_in_view"] >= 3 and pl["penalty"] == 0.0
-        assert pl["n_candidates"] == 1 + 45 * 4
+        assert pl["n_candidates"] == 1 + 60 * 4 and pl["ahead_m"] >= 1.5
         tele = [c for c in good.controller.calls if c[0] == "Teleport"]
         assert len(tele) == 1 and tele[0][1]["standing"] is True
         assert tele[0][1]["rotation"]["y"] == pytest.approx(pl["yaw"])
@@ -224,7 +224,7 @@ def test_placement_skips_objects_inside_closed_fridge():
               {"openable": True, "isOpen": False})
     inside = ("Apple|+00.00|+00.50|+01.40", "Apple", (0.0, 0.5, 1.4), 0.09, (200, 30, 30),
               {"parentReceptacles": [closed[0]]})
-    e = fake_env(controller_kw={"objects": DEFAULT_OBJECTS[1:] + [closed, inside]})
+    e = fake_env(toys=0, controller_kw={"objects": DEFAULT_OBJECTS[1:] + [closed, inside]})
     try:
         r = e.score_spot(np.array([0.0, 0.9, 0.0]), 0.0)
         assert inside[0] not in r["seen"] and len(r["seen"]) >= 2
@@ -274,7 +274,7 @@ def test_bring_in_after_5s_names_only_after_taro_looks(env):
     # 持って5秒（50回）で戻す
     _run_parent(env, par, 10, eye=away, said=said, did_log=did_log)
     put = [k for k, d in enumerate(did_log) if "put" in d]
-    assert put == [49 + 50]
+    assert put == [49 + 56]                       # 最後の名づけ（持って4.6秒）から1秒
     assert np.allclose(vec(env.objects[oid]["position"]), env.home[oid][0])
     s = par.stats
     assert s["brings_bringin"] == 1 and s["brings_follow"] == 0 and s["names_bringin"] == 2 and s["bringin_looked"] == 1
@@ -303,3 +303,186 @@ def test_bring_in_off_keeps_follow_only(env):
     did_log = []
     _run_parent(env, par, 80, eye=(-45.0, 33.0), did_log=did_log)
     assert par.stats["brings"] == 0
+
+
+# ---------------------------------------------------------------- 依頼17 の結果を受けて：おもちゃを並べる・名づけは持って見ている間だけ・座る場所
+def _demo(**kw):
+    from core_v2.world_thor.fake import DEMO_ROOM
+    ckw = dict(DEMO_ROOM)
+    ckw.update(kw.pop("controller_kw", {}))
+    return fake_env(controller_kw=ckw, **kw)
+
+
+def _aim(env, oid):
+    """目を物の見かけの真ん中へ向ける（道具の set_eye。太郎の跳びではない）。"""
+    v = env._centre(env.objects[oid]) - env.eye_pos
+    pan = np.degrees(np.arctan2(v[0], v[2])) - env.agent_yaw
+    tilt = np.degrees(np.arctan2(v[1], np.hypot(v[0], v[2])))
+    env.set_eye(float(pan), float(tilt))
+
+
+def test_parent_sets_out_toys_on_floor_in_view():
+    e = _demo(place=(0.0, 0.0, 0.0))
+    try:
+        assert len(e.toys) == 4
+        words = [e.word_of(i) for i in e.toys]
+        assert len(set(words)) == 4 and "Apple|+00.00|+00.60|-01.60" not in e.toys   # 冷蔵庫の中のりんごは後回し
+        assert [t["angle"] for t in e.toy_info] == [-20.0, -7.0, 7.0, 20.0]
+        for t in e.toy_info:
+            o = e.objects[t["id"]]
+            assert o["position"]["y"] == pytest.approx(0.0, abs=1e-6)          # 床の上（物の底）
+            d = np.hypot(o["position"]["x"] - e.eye_pos[0], o["position"]["z"] - e.eye_pos[2])
+            assert 0.6 - 1e-6 <= d <= 1.2 + 1e-6 and t["method"] == "PlaceObjectAtPoint"
+            assert np.allclose(e.home[t["id"]][0], vec(o["position"]))          # 戻す所は床の置いた所
+        pl = e.placement
+        assert pl["toys_in_view"] == 4 and pl["toys_seen"] == 4
+        assert set(e.object_centres()) >= set(e.toys)
+        cols = sorted(e.object_centres()[i][0] for i in e.toys)
+        assert cols[0] < 70 and cols[-1] > 154                                 # 視野に散らばる
+        assert sum(c[0] == "PlaceObjectAtPoint" for c in e.controller.calls) == 4
+    finally:
+        e.close()
+
+
+def test_toys_fall_back_to_teleport_without_place_at_point():
+    e = _demo(place=(0.0, 0.0, 0.0), controller_kw={"place_at_point": False})
+    try:
+        assert len(e.toys) == 4 and all(t["method"] == "TeleportObject(控え)" for t in e.toy_info)
+        tele = [c for c in e.controller.calls if c[0] == "TeleportObject"]
+        assert len(tele) == 4 and all(c[1]["forceKinematic"] is False for c in tele)
+        for i in e.toys:
+            assert e.objects[i]["position"]["y"] == pytest.approx(0.0, abs=1e-6)
+        assert e.placement["toys_in_view"] == 4
+    finally:
+        e.close()
+
+
+def test_put_back_returns_toy_to_its_floor_spot():
+    e = _demo(place=(0.0, 0.0, 0.0))
+    try:
+        toy = e.toys[1]
+        floor = vec(e.objects[toy]["position"]).copy()
+        _aim(e, toy)
+        e.render_eye()
+        assert e.centre_object() == toy
+        par = tp.FollowInParent(random.Random(0), bring_in_after=None)
+        did_log = []
+        _run_parent(e, par, 70, did_log=did_log)       # 目は動かさない（持ってきた物は視線の先）
+        b = [k for k, d in enumerate(did_log) if "brought" in d]
+        put = [k for k, d in enumerate(did_log) if "put" in d]
+        assert b[0] == 9 and put[0] == 9 + 55
+        assert np.allclose(vec(e.objects[toy]["position"]), floor)
+        assert e.objects[toy]["position"]["y"] == pytest.approx(0.0, abs=1e-6)
+    finally:
+        e.close()
+
+
+def test_no_naming_while_taro_looks_away_reproduces_pc_bug(env):
+    """依頼17 の PC：持ってきた物から太郎が目をそらしても、0.5秒目の名づけは言っていた（k==0 は見ていなくてよかった）。"""
+    par = tp.FollowInParent(random.Random(0))
+    said, did_log = [], []
+    _run_parent(env, par, 10, said=said, did_log=did_log)
+    assert "brought" in did_log[9] and par.held == APPLE
+    _run_parent(env, par, 20, eye=(-45.0, 33.0), said=said, did_log=did_log)   # よそ（壁）を見ている 2秒
+    assert said == [] and par.held == APPLE                                     # 前はここで「りんご」と言っていた
+    _run_parent(env, par, 1, eye=(0.0, env.base_tilt), said=said, did_log=did_log)
+    assert env.centre_object() == APPLE
+    _run_parent(env, par, 3, said=said, did_log=did_log)
+    assert len(said) == 1 and said[0][0] == 30 and said[0][1]["target"] == APPLE and "りんご" in said[0][1]["text"]
+    assert all(d.get("said") is None or d["looking"] == "りんご" for d in did_log)
+
+
+def test_no_naming_after_put_back_or_when_hand_empty(env):
+    # 環境の側：持っていない物の名づけは届けない（env.say に残っていても）
+    env.say("りんごだよ", target=APPLE, cause="parent_name_follow")
+    _o, _r, _t, _tr, info = env.step()
+    assert "parent_utterance" not in info
+    env.hold(APPLE, env.eye_pos + 0.3 * env.gaze_dir())
+    env.say("りんごだよ", target=APPLE, cause="parent_name_follow")
+    env.put_back(APPLE)
+    _o, _r, _t, _tr, info = env.step()
+    assert "parent_utterance" not in info
+    env.hold(APPLE, env.eye_pos + 0.3 * env.gaze_dir())
+    env.say("りんごだよ", target=APPLE, cause="parent_name_follow")
+    _o, _r, _t, _tr, info = env.step()
+    assert info["parent_utterance"]["text"] == "りんごだよ"
+    env.put_back(APPLE)
+    env.render_eye()
+    # 親の側：言った回は、いつも持っていて、太郎がその物を見ている回。最後の名づけから1秒は戻さない
+    par = tp.FollowInParent(random.Random(1))
+    did_log, said = [], []
+    rng = np.random.default_rng(0)
+    for k in range(300):
+        if k % 7 == 0:
+            env.set_eye(float(rng.uniform(-20, 20)), float(rng.uniform(-25, 5)))
+        _run_parent(env, par, 1, said=said, did_log=did_log)
+    names = [k for k, d in enumerate(did_log) if "said" in d]
+    assert names, "一度も言わなかった（確かめにならない）"
+    for k in names:
+        d = did_log[k]
+        assert d["holding"] and d["looking"] == d["holding"]
+    puts = [k for k, d in enumerate(did_log) if "put" in d]
+    for k in names:
+        nxt = [p for p in puts if p > k]
+        assert not nxt or nxt[0] - k >= 10
+
+
+def test_bring_in_prefers_toys_on_floor():
+    e = _demo(place=(0.0, 0.0, 0.0))
+    try:
+        par = tp.FollowInParent(random.Random(0))
+        did_log = []
+        _run_parent(e, par, 50, eye=(-45.0, 33.0), did_log=did_log)
+        assert did_log[49].get("mode") == "bringin" and par.held in e.toys
+    finally:
+        e.close()
+
+
+def test_placement_requires_open_floor_ahead():
+    from core_v2.world_thor.fake import DEFAULT_OBJECTS
+    # 奥行き 1m しかない細長い部屋：物は +z 側にあるが、+z を向くと 1.5m 先が歩けない → 左右（90・270度）を向く所だけが候補
+    grid = [(x * 0.25, 0.9, z * 0.25) for x in range(-8, 9) for z in range(-1, 4)]
+    for toys in (0, 4):
+        e = fake_env(toys=toys, controller_kw={"objects": DEFAULT_OBJECTS, "reachable": grid})
+        try:
+            pl = e.placement
+            assert pl["ahead_m"] >= 1.5 and pl["yaw"] in (90.0, 270.0) and pl["mode"] == "auto"
+            assert pl["n_open"] < pl["n_candidates"]
+        finally:
+            e.close()
+    # どこも前が開いていない → 始めの場所のまま
+    tiny = [(x * 0.25, 0.9, z * 0.25) for x in range(-2, 3) for z in range(-1, 2)]
+    e = fake_env(controller_kw={"reachable": tiny})
+    try:
+        assert e.placement["n_open"] == 0 and "前が開いた所なし" in e.placement["mode"]
+        assert not any(c[0] == "Teleport" for c in e.controller.calls)
+    finally:
+        e.close()
+
+
+def test_spot_by_hand_teleports_exactly_and_snaps_when_unreachable():
+    e = _demo(place="1.0,0.5,270")
+    try:
+        assert e.placement["mode"] == "spot" and e.placement["position"] == [1.0, 0.9, 0.5] and e.placement["yaw"] == 270.0
+        tele = [c for c in e.controller.calls if c[0] == "Teleport"]
+        assert tele[0][1]["position"] == {"x": 1.0, "y": 0.9, "z": 0.5}
+        assert len(e.toys) >= 3                                         # 手で選んだ所でも並べる
+    finally:
+        e.close()
+    e = _demo(place=(1.1, 0.4, 0.0))
+    try:
+        assert e.placement["mode"] == "spot(近い到達点へ)" and e.placement["position"] == [1.0, 0.9, 0.5]
+    finally:
+        e.close()
+
+
+def test_first_frame_tool_writes_eye_and_topdown(tmp_path):
+    from core_v2.tools import thor_watch
+    res = thor_watch.run(["--first-frame", "--fake", "--scene", "FloorPlan1", "--render-px", "224",
+                          "--out", str(tmp_path)])
+    assert os.path.isfile(tmp_path / "家の場面3_最初_FloorPlan1.png")
+    assert os.path.isfile(tmp_path / "家の場面3_上から_FloorPlan1.png")
+    assert os.path.isfile(tmp_path / "家の場面3_最初_FloorPlan1.json")
+    assert res["placement"]["toys_in_view"] == 4 and res["n_reach"] > 100 and res["thor_fail"] == 0
+    res2 = thor_watch.run(["--first-frame", "--fake", "--render-px", "224", "--spot=-1,1,90", "--out", str(tmp_path)])
+    assert res2["placement"]["position"][0] == -1.0 and res2["placement"]["yaw"] == 90.0
