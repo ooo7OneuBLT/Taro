@@ -21,12 +21,13 @@
 * wordplan→worth：言える語の列（荷札, 地図の [0, 0]＝まねしたさ）。届いた語は「できる行動」として覚えておき（known_words）、
   選択肢には泣く・手・話す（話せる時）と、できる語を欲求の順（food, know, stop, social, food, …）に1つずつ、
   その欲求の見込みが高い順に選んで出す。food 以外は見込みに「まだあまり言っていない分 EXPLORE/√(1＋言った回数)」と
-  まねしたさを足した順（言った回数の少ない行動を試したくなる、新しさのおまけ。Kakade & Dayan 2002。まねしたさは
+  ECHO×まねしたさを足した順（言った回数の少ない行動を試したくなる、新しさのおまけ。Kakade & Dayan 2002。まねしたさは
   今さっき聞いた語ほど大きい）
 * episodic→worth：話せる思い出（話す行動の荷札, 地図の [0, j]＝1：j 番目の人に話せる）。5段目
 * want→worth：選んだ行動の写し（行動の荷札, 地図の [0, j]＝1：j 番目の人に向けた、[r, j]＝1：行 r の欲求のため）
 * semantic→worth：わかった（目の前の物の名前を知る度合いが上がった分。意味の辞書が分の終わりに出し、次の分の初めに読む）
-* worth→want：行動ごとの見込み（行動の荷札, 地図の [r, j]＝j 番目の人に向けた時の行 r の見込み。[0, j]＞0 が向けられる印）
+* worth→want：行動ごとの見込み（行動の荷札, 地図の [r, j]＝j 番目の人に向けた時の行 r の見込み）。泣く・手・話すは全部の行、
+  語はその語を選んだ欲求の行だけ（ほかの行は0＝その欲求の時には思い浮かばない）。0 の所は選べない
 * worth→stress：期待したのに来なかった分（この1分の、ミルクのための行動の見込み）
 * worth→feel：うれしさ（思ったより良かった分＝1−見込み。ミルク）
 
@@ -68,6 +69,8 @@ LR = 0.2                       # 学び方の速さ
 SAME_PERSON = 0.3              # 荷札の似かたがこれより大きければ同じ人（見るたびに少し揺れるので）
 NEAR = 0.9                     # 地図の [0, 0] がこれより大きい人＝そばに来た人
 EXPLORE = 0.1                  # 新しさのおまけ（一度も言っていない語）［仮置き］
+ECHO = 0.15                    # まねしたさ1（聞いたばかり）のおまけ。まだ言っていない語のおまけより少し大きく、
+                               # 覚えた見込みが0.25を超えた語には負ける（まねは選択肢に入れるだけ）［仮置き］
 
 
 def body(x) -> dict:
@@ -213,16 +216,16 @@ class Worth(Box):
         return out
 
     def _make_offer(self, tell) -> list:
-        """選択肢：泣く・手・話す（話せる人だけ）＋言える語を欲求の順に1つずつ。"""
+        """選択肢：泣く・手・話す（話せる人だけ）＋言える語を欲求の順に1つずつ（語は選んだ欲求の行だけに見込みを書く）。"""
         echo = self.__dict__.get("_echo", {})
 
         def key(head):
             def k(i):
                 v = max((self.value(self.known_words[i], who, head) for who in self.people), default=0.0)
-                return v if head == "food" else v + EXPLORE / math.sqrt(1 + self.said[i]) + echo.get(i, 0.0)
+                return v if head == "food" else v + EXPLORE / math.sqrt(1 + self.said[i]) + ECHO * echo.get(i, 0.0)
             return k
 
-        acts = [(a, None) for a in ACT_TAGS.values()] + [(a, m) for a, m in tell]
+        acts = [(a, None, HEADS) for a in ACT_TAGS.values()] + [(a, m, HEADS) for a, m in tell]
         n_words = MAX_OBJECTS - len(acts)
         left, pick = list(range(len(self.known_words))), []
         while left and len(pick) < n_words:
@@ -230,16 +233,16 @@ class Worth(Box):
                 if not left or len(pick) >= n_words:
                     break
                 i = max(left, key=key(h))
-                pick.append(i)
+                pick.append((i, h))
                 left.remove(i)
-        acts += [(self.known_words[i], None) for i in pick]
+        acts += [(self.known_words[i], None, (h,)) for i, h in pick]
         offer = []
-        for act, avail in acts:
+        for act, avail, heads in acts:
             m = torch.zeros(GRID, GRID, dtype=DTYPE)
             for j, who in enumerate(self.people[:GRID]):
                 if avail is not None and float(avail[0, j]) <= 0.0:
                     continue                    # この人には話せない
-                for h in HEADS:
+                for h in heads:
                     m[HEAD_ROW[h], j] = self.value(act, who, h)
             offer.append((act, m))
         return offer

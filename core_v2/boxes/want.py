@@ -2,7 +2,7 @@
 
 盤面の世界（2026-10-19、core_v2/board/mind.py の下書きから清書）：何をするか決める係。
 * vars→want：不快（お腹がすいた強さ）。feel→want：いら立ち
-* worth→want：行動ごとの見込み（行動の荷札, 地図の [0, j]＝j 番目の人に向けた時の見込み）
+* worth→want：行動ごとの見込み（行動の荷札, 地図の [r, j]＝j 番目の人に向けた時の、行 r の欲求の見込み。0＝選べない）
 * semantic→want：目の前の物のわからなさ（4段目）。知りたい強さ＝CURIOSITY×わからなさ
 * inner→want：いや（満腹なのにミルクが口に来る強さ、5段目）
 * social→want：会いたかった人が戻ってきた強さ（5段目）。相手に向かいたい強さ＝SOCIAL×その強さ
@@ -54,8 +54,9 @@ class Want(Box):
             options = []
             for act, m in inbox.get("worth") or []:
                 for j in range(GRID):
-                    if float(m[0, j]) > 0:
-                        options.append((act, j, [float(m[r, j]) for r in range(len(HEADS))]))
+                    vs = [float(m[r, j]) for r in range(len(HEADS))]
+                    if max(vs) > 0:
+                        options.append((act, j, vs))
             if options and float(torch.rand(())) < arousal:
                 # どの欲求のために動くか（ミルクの欲求しか無ければ乱数を引かない＝3段目までと同じ乱数の並び）
                 head = "food"
@@ -66,7 +67,7 @@ class Want(Box):
                         if r <= 0:
                             break
                 row = HEADS.index(head)
-                options = [(act, j, vs[row]) for act, j, vs in options]
+                options = [(act, j, vs[row]) for act, j, vs in options if vs[row] > 0]   # その欲求で思い浮かぶ行動だけ
                 r = float(torch.rand(())) * sum(o[2] for o in options)
                 for act, j, v in options:
                     r -= v
