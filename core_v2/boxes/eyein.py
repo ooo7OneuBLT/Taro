@@ -442,6 +442,7 @@ class Eyein(Box):
             out["semantic"] = self.see_object(env.get("object"))
             obj = out["semantic"][0][0] if out["semantic"] else torch.zeros(TAG_DIM, dtype=DTYPE)
             out["episodic"] = [(obj, torch.zeros(GRID, GRID, dtype=DTYPE))] + out["social"]   # 5段目：思い出の帳面へ
+            out["worth"] = [(obj, torch.zeros(GRID, GRID, dtype=DTYPE))] if env.get("object") else []   # 4段目
             return out
         if not getattr(self, "_ready", False) or inbox.get(ENV) is None:
             return out

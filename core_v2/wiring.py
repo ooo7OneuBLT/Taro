@@ -58,6 +58,7 @@ ADDED_EDGES = [
     ("semantic", "episodic", "盤面5段目：目の前の物の名前（知っていれば語の荷札）を、思い出の帳面へ"),
     ("episodic", "wordplan", "盤面5段目：話せる思い出（物の名前の語と、誰がその時いなかったか）を、言う語を組み立てる係へ"),
     ("wordplan", "episodic", "盤面5段目：話した思い出（誰に話したか）を帳面へ"),
+    ("eyein", "worth", "盤面4段目：目の前に物があるか。ある時だけ「わかる」の見込みの語を思い浮かべる"),
 ]
 
 # 通り道の矢印の書式（設計書 技術付録D）。(書式, MOTOR のときの筋の数)
@@ -132,6 +133,7 @@ PATH_FORMATS: dict[tuple[str, str], tuple[Fmt, int | None]] = {
     ("episodic", "worth"): (Fmt.TAG_AND_MAP, None), # 5段目：話す行動（worth.TELL_TAGS, 地図の [0, j]＝1：j 番目の人に話せる）
     ("episodic", "wordplan"): (Fmt.TAG_AND_MAP, None),  # 5段目：話せる語（荷札, [0, j]＝j がいなかった時の物、[1, j]＝j もいた時の物）
     ("wordplan", "episodic"): (Fmt.TAG_AND_MAP, None),  # 5段目：話した語（荷札, [0, j]＝1：j に話した）
+    ("eyein", "worth"): (Fmt.TAG_AND_MAP, None),    # 4段目：[(目の前の物の荷札, 空)]（物が無ければ空の列）
 }
 
 

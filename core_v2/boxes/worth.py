@@ -23,6 +23,9 @@
   その欲求の見込みに「まだあまり言っていない分 EXPLORE/√(1＋言った回数)」と ECHO×まねしたさを足した順で選んで出す
   （新しさのおまけが無いと、見込みが同じ語のうち先に覚えた語ばかりが選択肢になり、まんまが一度も試されなかった）（言った回数の少ない行動を試したくなる、新しさのおまけ。Kakade & Dayan 2002。まねしたさは
   今さっき聞いた語ほど大きい）
+* eyein→worth：目の前の物（[(物の荷札, 空)]、無ければ空の列）。語の選択肢を欲求の順に選ぶ時、food のほかは
+  今その欲求が起こりうるものだけを回す：know＝物がある、stop＝いや（inner）がある、social＝話せる思い出がある
+  （起こりえない欲求に語の枠を回すと、3段目ではミルクの語の枠が6つのうち2つになり、みるくが選択肢に入らなかった）
 * episodic→worth：話せる思い出（話す行動の荷札, 地図の [0, j]＝1：j 番目の人に話せる）。5段目
 * want→worth：選んだ行動の写し（行動の荷札, 地図の [0, j]＝1：j 番目の人に向けた、[r, j]＝1：行 r の欲求のため）
 * semantic→worth：わかった（目の前の物の名前を知る度合いが上がった分。意味の辞書が分の終わりに出し、次の分の初めに読む）
@@ -35,6 +38,11 @@
 行動の1分あとにほうびが来たら1、1分遅れるごとに RECENCY 倍。ほうびをくれた人に向けた行動だけ手柄で、
 別の人に向けた行動は「その人はくれなかった」で0。WINDOW_MIN 分以内に来なければ0。
 * food：ミルクを飲んだ時、そばに来た人
+ミルクと結び付いた語（paired）：言える語を聞くたび、ミルクを飲んだ前後（PAIR_MIN 分）に聞いたなら1、ほかは0へ寄せる
+（聞いた時にミルクが一緒だった割合。古典的条件づけ、Rescorla & Wagner 1972）。お腹がすいた時に思い浮かぶ語（food の選択肢に
+出す順）にだけ足す。選ぶのは今までどおり言って通じた見込みで（パブロフ型の手がかりが、どの行動が思い浮かぶかを変える＝
+Pavlovian-instrumental transfer、Cartoni et al. 2016。ミルクと一緒に聞く音を赤ちゃんが多く出す、Sundberg et al. 1996）。
+見込みそのものに足すと、ママに向けた全部の行動の見込みが上がって（共有の重み）失敗した（2026-10-19）。
 * know：わかった時、前の分にそばにいた人（教えてくれた人）
 * stop：「いや」が止まって飲まされなかった時、そばにいた人（やめてくれた人）。飲まされたら全部0
 * social：喜んで応えてくれた人
@@ -68,6 +76,8 @@ PRIOR = 0.1                    # 生まれた時の値（どの合図も・誰�
 LR = 0.2                       # 学び方の速さ
 SAME_PERSON = 0.3              # 荷札の似かたがこれより大きければ同じ人（見るたびに少し揺れるので）
 NEAR = 0.9                     # 地図の [0, 0] がこれより大きい人＝そばに来た人
+PAIR_MIN = 2                   # ミルクを飲んでから何分の間に届いた語をミルクと結ぶか（耳を通る遅れの分）
+PAIR_LR = 0.1                  # 「聞いた時にミルクが一緒だった割合」の覚える速さ
 EXPLORE = 0.1                  # 新しさのおまけ（一度も言っていない語）［仮置き］
 ECHO = 0.15                    # まねしたさ1（聞いたばかり）のおまけ。まだ言っていない語のおまけより少し大きく、
                                # 覚えた見込みが0.25を超えた語には負ける（まねは選択肢に入れるだけ）［仮置き］
@@ -102,13 +112,16 @@ class Worth(Box):
         self.frozen = False    # True なら覚えない（対照）
         self.known_words: list[torch.Tensor] = []   # できる行動として知っている語（reset で消えない）
         self.said: list[int] = []                    # known_words ごとの言った回数
+        self.paired: list[float] = []                # known_words ごとの、聞いた時にミルクが一緒だった割合（思い浮かびやすさ）
 
     def get_extra_state(self):
-        return {"known_words": [w.tolist() for w in self.known_words], "said": list(self.said)}
+        return {"known_words": [w.tolist() for w in self.known_words], "said": list(self.said),
+                "paired": list(self.paired)}
 
     def set_extra_state(self, state) -> None:
         self.known_words = [torch.tensor(w, dtype=DTYPE) for w in state.get("known_words", [])]
         self.said = list(state.get("said", [0] * len(self.known_words)))
+        self.paired = list(state.get("paired", [0.0] * len(self.known_words)))
 
     def reset(self) -> None:
         self.n = 0
@@ -165,6 +178,7 @@ class Worth(Box):
             if i is None:
                 self.known_words.append(word.clone())
                 self.said.append(0)
+                self.paired.append(0.0)
                 i = len(self.known_words) - 1
             self.__dict__.setdefault("_echo", {})[i] = float(m[0, 0])
         if p == WORTH_PHASE:
@@ -175,6 +189,13 @@ class Worth(Box):
             smiled = next((t for t, m in people if float(m[1, 0]) > 0.5), None)
             self.__dict__["_came"] = came
             self.unmet, self.joy = 0.0, 0.0
+            # ミルクと結び付いた語：聞いた語が、ミルクの1〜2分前後に聞いたものだったか（耳を通る遅れの分 PAIR_MIN）
+            if fed and b.get("overfed", 0.0) <= 0.5:
+                self.__dict__["_fed_at"] = minute
+            near_milk = minute - self.__dict__.get("_fed_at", -99) <= PAIR_MIN
+            for i, e in self.__dict__.get("_echo", {}).items():
+                if e >= 1.0 and not self.frozen:
+                    self.paired[i] += PAIR_LR * ((1.0 if near_milk else 0.0) - self.paired[i])
             if fed:
                 if self.recent["food"]:
                     self.joy = 1.0 - self.recent["food"][-1][3]
@@ -197,7 +218,12 @@ class Worth(Box):
                 self._expire("social", minute)
             self.people = [t for t, _ in people]
             ep = inbox.get("episodic")
-            self.offer = self._make_offer(ep if isinstance(ep, list) else [])
+            tell = ep if isinstance(ep, list) else []
+            seen = inbox.get("eyein")
+            # 今その欲求が起こりうる見込みだけ、語を思い浮かべる（物がある・いや・話せる思い出がある）
+            heads = ["food"] + ["know"] * bool(isinstance(seen, list) and seen) + ["stop"] * (aversion > 0.0) \
+                + ["social"] * bool(tell)
+            self.offer = self._make_offer(tell, heads)
         elif p == WANT_PHASE + 1:
             for act, m in inbox.get("want") or []:
                 j = int(m[0].argmax())
@@ -215,21 +241,23 @@ class Worth(Box):
         out["feel"] = torch.tensor(self.joy, dtype=DTYPE)
         return out
 
-    def _make_offer(self, tell) -> list:
-        """選択肢：泣く・手・話す（話せる人だけ）＋言える語を欲求の順に1つずつ（語は選んだ欲求の行だけに見込みを書く）。"""
+    def _make_offer(self, tell, heads=HEADS) -> list:
+        """選択肢：泣く・手・話す（話せる人だけ）＋言える語を、今起こりうる欲求 heads の順に1つずつ
+        （語は選んだ欲求の行だけに見込みを書く）。"""
         echo = self.__dict__.get("_echo", {})
 
         def key(head):
             def k(i):
                 v = max((self.value(self.known_words[i], who, head) for who in self.people), default=0.0)
-                return v + EXPLORE / math.sqrt(1 + self.said[i]) + ECHO * echo.get(i, 0.0)
+                k = v + EXPLORE / math.sqrt(1 + self.said[i]) + ECHO * echo.get(i, 0.0)
+                return k + self.paired[i] if head == "food" else k
             return k
 
         acts = [(a, None, HEADS) for a in ACT_TAGS.values()] + [(a, m, HEADS) for a, m in tell]
         n_words = MAX_OBJECTS - len(acts)
         left, pick = list(range(len(self.known_words))), []
         while left and len(pick) < n_words:
-            for h in HEADS:
+            for h in heads:
                 if not left or len(pick) >= n_words:
                     break
                 i = max(left, key=key(h))
