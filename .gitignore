@@ -204,3 +204,6 @@ doc/文献調査/
 
 # 本物の物の元ファイル（GSO・Objaverse、約600MB。core_v2/tools/make_real_objects --fetch で取り直せる）
 G/assets/
+
+# 6段目の親役の遊びの続き（TaroPlay.bat が保存する）
+play_saves/

@@ -4,6 +4,7 @@
   python -m core_v2.tools.board_play --session 遊び.pt "ボールを見せる"
   python -m core_v2.tools.board_play --session 遊び.pt "「ボールだよ」"
   python -m core_v2.tools.board_play --session 遊び.pt "待つ 30分"
+  python -m core_v2.tools.board_play --interactive                                 # 続けて書いて遊ぶ（TaroPlay.bat）
 1回ごとに、ママのしたこと・太郎のしたこと・その時の太郎の頭の中・今の様子を書き、遊びの続きを --session に保存する。
 """
 
@@ -14,7 +15,18 @@ import json
 
 import torch
 
+import os
+
 from core_v2.board.play import HEAD_JA, Play, load, save
+
+DATA = os.path.join(os.path.dirname(__file__), os.pardir, "data")
+GROWN = os.path.join(DATA, "親役_太郎.pt")     # 当て推量の世界で5段目まで育てた太郎（種0、2026-10-20）
+SAVES = os.path.join(DATA, os.pardir, os.pardir, "play_saves")
+HELP = """ママの役で、することを書いて Enter を押してください。太郎が何かするまで世界が進みます。
+  ミルクをあげる ／ 飲ませる ／ やめる ／ ボールを見せる ／ 片付ける ／ 笑う ／ 出ていく ／ 戻る ／ 待つ 10分
+  話しかける時はかぎかっこで：「ぼーるだよ」（話す言葉はひらがな・カタカナで。漢字は太郎の耳に届きません）
+  見せられる物：ボール コップ くつ わんわん くるま バナナ りんご ぼうし いす ほん にゃんにゃん でんしゃ など
+  はじめから ＝ 太郎を育った時に戻す ／ おわり ＝ やめる（続きは保存されます）"""
 
 HEAD_SHORT = {"food": "おなか", "know": "知りたい", "stop": "いや", "social": "相手"}
 
@@ -35,7 +47,7 @@ def report(r: dict) -> str:
     if r["notes"]:
         lines.append("ママ：" + " / ".join(r["notes"]))
     acted = [a for a in r["steps"] if a["action"] != "nothing"]
-    if not acted:
+    if not acted and r["steps"]:
         lines.append(f"太郎：{len(r['steps'])}分のあいだ何もしなかった")
     for a in acted:
         lines.append(f"太郎（{a['t']}分め）：{describe(a)}")
@@ -55,15 +67,44 @@ def report(r: dict) -> str:
     return "\n".join(lines)
 
 
+def interactive(session: str, fullness: float, wait: int) -> None:
+    """続けて書いて遊ぶ。1回ごとに保存するので、閉じても続きから始まる。"""
+    os.makedirs(os.path.dirname(os.path.abspath(session)), exist_ok=True)
+    fresh = lambda: setattr(p := Play.new(torch.load(GROWN, weights_only=False)), "fullness", fullness) or p
+    play = load(session) if os.path.exists(session) else fresh()
+    print(HELP)
+    print(report({"notes": [], "steps": [], "state": play.state()}))
+    while True:
+        try:
+            text = input("\nママ> ").strip()
+        except EOFError:
+            break
+        if text in ("おわり", "終わり", "exit", "quit"):
+            break
+        if text in ("はじめから", "最初から"):
+            play = fresh()
+            print("太郎を育った時に戻しました。")
+            print(report({"notes": [], "steps": [], "state": play.state()}))
+            continue
+        if text in ("", "?", "？", "help", "ヘルプ"):
+            print(HELP)
+            continue
+        print(report(play.turn(text, wait=wait)))
+        save(play, session)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--session", required=True)
+    ap.add_argument("--session", default=os.path.join(SAVES, "遊び.pt"))
+    ap.add_argument("--interactive", action="store_true")
     ap.add_argument("--new", help="育った太郎（torch.save した Brain）から遊びを始める")
     ap.add_argument("--fullness", type=float, default=0.5)
     ap.add_argument("--wait", type=int, default=5, help="太郎が何かするまで待つ最長の分")
     ap.add_argument("--json", action="store_true")
     ap.add_argument("text", nargs="?", default="")
     args = ap.parse_args()
+    if args.interactive:
+        return interactive(args.session, args.fullness, args.wait)
     if args.new:
         play = Play.new(torch.load(args.new, weights_only=False))
         play.fullness = args.fullness
