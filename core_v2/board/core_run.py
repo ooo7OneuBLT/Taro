@@ -174,7 +174,9 @@ def grow_core(rule: str, seed: int, days: int, frozen: bool = False, keep_log: b
         # 大人が物を見て話した一言は、耳を通って届き終わるまで（ATTEND_MIN 分）「一緒に見ている」が続く
         attend_left = ATTEND_MIN if obs.get("attend") else max(0, attend_left - 1)
         if action != "nothing":
-            cur.append((t, action if action != "say" else "say:" + word, strength, target, tuple(present)))
+            # 6つめ：どの欲求のために動いたか（food・know・stop・social）
+            cur.append((t, action if action != "say" else "say:" + word, strength, target, tuple(present),
+                        want.last.get("head", "food")))
         if keep_log:
             log.append({"t": t, "fullness": round(f0, 3), "action": action, "strength": round(strength, 3),
                         "target": target, "present": present, "busy": obs["busy"], "fed": fed,

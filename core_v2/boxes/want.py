@@ -80,7 +80,8 @@ class Want(Box):
                         break
                 strength = min(1.0, BASE_STRENGTH + 0.5 * disc + stress + total - drives["food"])
                 kind = next((k for k, t in ACT_OUT.items() if float(t @ act) > 0.99), "wordplan")
-                self.last = {"action": kind if kind != "wordplan" else "say", "strength": strength, "tag": act, "to": j}
+                self.last = {"action": kind if kind != "wordplan" else "say", "strength": strength, "tag": act, "to": j,
+                             "head": head}
                 m = torch.zeros(GRID, GRID, dtype=DTYPE)
                 m[0, j] = strength
                 out[kind] = [(act, m)]

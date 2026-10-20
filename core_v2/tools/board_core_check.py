@@ -112,6 +112,13 @@ def main():
             per_seed.append(r)
             print(f"  {len(per_seed)}/{args.seeds}人 終わり", flush=True)   # 途中経過
     runs = {k: [{"episodes": r[k]} for r in per_seed] for k in per_seed[0]}
+    # 1〜3段目の線は「お腹がすいた時の合図」＝ミルクの欲求のために動いた行動だけで数える（人が戻った時の
+    # 「相手」の欲求の行動は、ミルクを頼む合図ではない。前は混ざっていて、2段目のママへの割合が0.72→0.60に下がった）
+    for k in ("cry", "reach", "frozen", "mama_good", "papa_good", "frozen2", "words", "no_words"):
+        if k in runs:
+            runs[k] = [{"episodes": [kept for ep in r["episodes"]
+                                     if (kept := [e for e in ep if len(e) < 6 or e[5] == "food"])]}
+                       for r in runs[k]]
     with open(os.path.join(args.out, "per_seed.json"), "w") as f:
         json.dump(per_seed, f, ensure_ascii=False)
     res = {}
