@@ -87,10 +87,14 @@ class Wordplan(Box):
                 pick = fresh + [i for i in (sayable[k:] + sayable[:k]) if i not in fresh][:MAX_SAYABLE - len(fresh)]
                 self.__dict__["_turn"] = k + MAX_SAYABLE
                 out["worth"] = []
+                ms = self.__dict__.setdefault("_ms", {})   # 速くするため：同じ値の地図は作り直さない（受け手は書き換えない約束）
                 for i in pick:
-                    m = torch.zeros(GRID, GRID, dtype=DTYPE)
-                    m[0, 0] = echo.get(i, 0.0)
-                    out["worth"].append((self.words[i], m))
+                    e = echo.get(i, 0.0)
+                    if e not in ms:
+                        m = torch.zeros(GRID, GRID, dtype=DTYPE)
+                        m[0, 0] = e
+                        ms[e] = m
+                    out["worth"].append((self.words[i], ms[e]))
             if inbox.get("want"):
                 out["voiceout"] = []
                 from .worth import TELL_TAGS

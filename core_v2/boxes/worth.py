@@ -261,8 +261,15 @@ class Worth(Box):
                 vals[key] = self.value(act, who, head)
             return vals[key]
 
+        keys: dict = {}
+
         def key(head):
             def k(i):
+                if (i, head) not in keys:
+                    keys[(i, head)] = k0(i)
+                return keys[(i, head)]
+
+            def k0(i):
                 v = max((val(self.known_words[i], j, who, head) for j, who in enumerate(self.people)), default=0.0)
                 k = v + EXPLORE / math.sqrt(1 + self.said[i]) + ECHO * echo.get(i, 0.0)
                 return k + self.paired[i] if head == "food" else k

@@ -45,6 +45,7 @@ class Brain(nn.Module):
         }
         self.delivered: set[tuple[str, str]] = set()
         self._memo: dict[str, tuple[tuple, dict]] = {}   # {係id: (前の回に届いた値, そのときの outbox)}
+        self._checked: dict[str, tuple] = {}
         self.t = 0
         for box in self.boxes.values():
             box.reset()
@@ -96,19 +97,32 @@ class Brain(nn.Module):
 
         new_buffer: dict[tuple[str, str], Any] = {}
         to_env: dict[str, Any] = {}
+        checked = self.__dict__.setdefault("_checked", {})   # 配線と合うと確かめ済みの outbox（使い回しの分は確かめ直さない）
         for bid in wiring.BOX_IDS:
-            out = dict(outboxes[bid])
-            if ENV in out:
-                to_env[bid] = out.pop(ENV)
+            ob = outboxes[bid]
+            hit = checked.get(bid)
+            if hit is not None and hit[0] is ob:
+                if hit[2]:
+                    to_env[bid] = hit[3]
+                new_buffer.update(hit[1])
+                continue
+            out = dict(ob)
+            env = out.pop(ENV) if ENV in out else None
+            if ENV in ob:
+                to_env[bid] = env
             expected = self._out_dsts[bid]
             if out.keys() != expected:
                 missing, extra = expected - set(out), set(out) - expected
                 raise FormatError(f"{bid} の outbox が配線と合わない（不足 {sorted(missing)}・余分 {sorted(extra)}）")
+            pairs = {}
             for dst, value in out.items():
                 if self.check_formats:
                     edge = self.edges[(bid, dst)]
                     check(edge.fmt, value, edge.size, name=f"{bid}→{dst}")
-                new_buffer[(bid, dst)] = value
+                pairs[(bid, dst)] = value
+            new_buffer.update(pairs)
+            if bid in memo and memo[bid][1] is ob:
+                checked[bid] = (ob, pairs, ENV in ob, env)
 
         self.buffer = new_buffer
         self.delivered = set(new_buffer)
