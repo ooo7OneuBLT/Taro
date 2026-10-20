@@ -59,6 +59,8 @@ class Want(Box):
                     vs = [rows[r][j] for r in range(len(HEADS))]
                     if max(vs) > 0:
                         options.append((act, j, vs))
+            # 何をなぜ選んだかを見せるため（6段目の親役で話す道具）：欲求の強さと、思い浮かんだ選択肢を残す
+            self.last["drives"], self.last["options"] = drives, list(options)
             if options and float(torch.rand(())) < arousal:
                 # どの欲求のために動くか（ミルクの欲求しか無ければ乱数を引かない＝3段目までと同じ乱数の並び）
                 head = "food"
@@ -81,8 +83,8 @@ class Want(Box):
                         break
                 strength = min(1.0, BASE_STRENGTH + 0.5 * disc + stress + total - drives["food"])
                 kind = next((k for k, t in ACT_OUT.items() if float(t @ act) > 0.99), "wordplan")
-                self.last = {"action": kind if kind != "wordplan" else "say", "strength": strength, "tag": act, "to": j,
-                             "head": head}
+                self.last.update({"action": kind if kind != "wordplan" else "say", "strength": strength, "tag": act,
+                                  "to": j, "head": head})
                 m = torch.zeros(GRID, GRID, dtype=DTYPE)
                 m[0, j] = strength
                 out[kind] = [(act, m)]

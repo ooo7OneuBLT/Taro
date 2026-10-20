@@ -41,5 +41,10 @@ class Social(Box):
                     self.reunion = 1.0
                 self.before = now
             out["want"] = torch.tensor(self.reunion, dtype=DTYPE)
+        elif isinstance(people, list) and phase(self.n) == 1:
+            # 部屋にだれもいない分（盤面の世界では起きない。6段目の親役で、ママだけの時に出ていくと起きる）：
+            # 前の分にいた人を空にする（戻ってきた人を「戻ってきた」と分かるように）
+            self.reunion *= REUNION_DECAY
+            self.before = []
         self.n += 1
         return out
