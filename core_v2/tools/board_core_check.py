@@ -132,6 +132,9 @@ def _one(args):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--seeds", type=int, default=20)
+    ap.add_argument("--seed-from", type=int, default=0,
+                    help="この番号の人から回す（PCとクラウドで分けて回す時。あとで seed_*.json を1つのフォルダに集め、"
+                         "--seeds 全員の数 で回し直すと、終わった人は読むだけでまとめが出る）")
     ap.add_argument("--days", type=int, default=5)
     ap.add_argument("--days2", type=int, default=15)
     ap.add_argument("--days3", type=int, default=15)
@@ -155,9 +158,9 @@ def main():
         for r in pool.imap(_one, [(s, args.days, args.days2, args.days3, args.days4, args.days4b, args.days5,
                                    not args.no_controls, args.out, args.brains3,
                                    args.reuse if args.from_stage > 1 else None, args.from_stage if args.reuse else 1)
-                                  for s in range(args.seeds)]):
+                                  for s in range(args.seed_from, args.seeds)]):
             per_seed.append(r)
-            print(f"  {len(per_seed)}/{args.seeds}人 終わり", flush=True)   # 途中経過
+            print(f"  {len(per_seed)}/{args.seeds - args.seed_from}人 終わり", flush=True)   # 途中経過
     runs = {k: [{"episodes": r[k]} for r in per_seed] for k in per_seed[0]}
     # 1〜3段目の線は「お腹がすいた時の合図」＝ミルクの欲求のために動いた行動だけで数える（人が戻った時の
     # 「相手」の欲求の行動は、ミルクを頼む合図ではない。前は混ざっていて、2段目のママへの割合が0.72→0.60に下がった）
