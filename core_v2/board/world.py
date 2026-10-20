@@ -9,6 +9,8 @@
 * 泣き声は部屋にいる全員に聞こえる。向けられていない大人は、その3割の気づきやすさで気づく
 * 合図でない方の行動（rule が泣き声なら手を伸ばす）には、向けられた大人だけがまれに気づく
 * 気づいたら、太郎のお腹が満ちていなければミルクを飲ませる（満ちていれば何もしない）
+* 泣き声・手・名前を呼ぶ声は「何か困っている」しか伝えない（CRY_GUESS）。気づいた大人は当て推量をし、ミルクと当てる割合は
+  前のミルクからの時間で上がる。外れたら来てあやすだけ。食べ物の語（まんま・みるく）ならその通りに伝わる
 * 放っておかれてお腹が空のまま長くたつと、部屋にいる大人が自分から様子を見に来る（飢えないため）
 * 1段目：大人はママだけ、いつもいる。2段目：ママとパパ。いる時間と気づきやすさが違う
 * 3段目（言葉）：大人は話す（speech に場面ごとの一言の表を渡したとき。LLM で先に作った物）。
@@ -68,6 +70,13 @@ REFUSE_WORDS = ("いや", "いらない", "ないない", "もう", "もうい�
 # 5段目「前のことを話す」：戻ってきた大人は、自分がいなかった間の物の話を喜ぶ
 NEWS_JOY = 0.9                 # 自分がいなかった間の物の名前を言われて、気づいた大人が喜ぶ割合［仮置き］
 PLAIN_JOY = 0.2                # 自分も見ていた物・目の前の物の名前の時に喜ぶ割合
+# 泣き声は「何か困っている」しか伝えない（2026-10-20 ユーザー「言葉の方が正確に伝わるから」）：気づいた大人は
+# 当て推量をする。ミルクと当てる割合は、前のミルクからの時間で上がる（GUESS_MILK_MIN 分たてばいつもミルク）。
+# 外れれば、来てあやすだけ（おむつ・だっこ）。すすめの最中の泣き声は、半分だけ「いやなのね」と受け取る。
+# 言葉（まんま・いや など）はその通りに伝わる
+CRY_GUESS = True
+GUESS_MILK_MIN = 180
+CRY_AS_REFUSAL = 0.5
 OBJECT_STAY_MIN = 15           # 目の前の物が替わるまでの平均（分）
 NO_OBJECT = 0.3                # 替わった時に何も置かれない割合
 
@@ -112,6 +121,7 @@ class Board:
     seen_by: dict = field(default_factory=dict)   # 物 → その物が目の前にあった間に部屋にいた大人
     t: int = 0
     empty_min: int = 0
+    since_fed: int = 0                     # 前のミルクからの分（大人の当て推量に使う）
     rng: random.Random = field(init=False)
 
     def __post_init__(self):
@@ -178,8 +188,8 @@ class Board:
         if special:
             a = next((x for x in free if x.name == target), None)
             if a is not None and offerer == target:
-                if action in ("cry", "reach"):                     # いやがる（泣く・押しのける）
-                    p = a.notice * strength
+                if action in ("cry", "reach"):                     # いやがる（泣く・押しのける）。当て推量では半分だけ断りと分かる
+                    p = a.notice * strength * (CRY_AS_REFUSAL if CRY_GUESS else 1.0)
                 elif action == "say" and word in REFUSE_WORDS:
                     p = min(1.0, a.notice * WORD_GAIN * strength) if self.understand_words else NOTICE_OTHER
                 else:
@@ -218,10 +228,13 @@ class Board:
 
         fed = False
         came = noticed_by or checked_by
+        # 泣き声・手・名前を呼ぶ・ほかの語で気づいた大人は、何がほしいかを当て推量する（食べ物の語ならミルクと分かる）
+        guessed_wrong = (CRY_GUESS and noticed_by is not None and not (self.understand_words and action == "say" and word in FOOD_WORDS)
+                         and self.rng.random() >= min(1.0, self.since_fed / GUESS_MILK_MIN))
         asked = action == "say" and word in QUESTION_WORDS and noticed_by is not None and bool(self.object)
         if asked:
             came = checked_by          # 聞かれて来た大人は名前を教える（ミルクはあげない）
-        if came and self.fullness < FEED_IF_BELOW:
+        if came and self.fullness < FEED_IF_BELOW and not (guessed_wrong and not checked_by):
             self.fullness = min(1.0, self.fullness + FEED_AMOUNT)
             self.empty_min = 0
             fed = True
@@ -279,6 +292,7 @@ class Board:
             if self.object:
                 self.seen_by[self.object] = set(self.present())      # 新しく置かれた（前に見た人の分は消える）
 
+        self.since_fed = 0 if (fed or overfed) else self.since_fed + 1
         self.fullness -= 1.0 / EMPTY_AFTER_MIN
         if action == "cry":
             self.fullness -= CRY_COST * strength
