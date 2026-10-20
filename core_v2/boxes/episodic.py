@@ -23,7 +23,7 @@ from .base import Box
 
 DIARY_N = 6          # 覚えておく思い出の数
 DIARY_MIN = 180      # 思い出を話せる長さ（分）
-SAME_THING = 0.9     # 物の荷札がこれより似ていれば同じ物
+SAME_THING = 0.3     # 物の荷札がこれより似ていれば同じ物（見るたびの揺れで同じ物でも約0.6。semantic.SAME_OBJECT と同じ）
 SAME_PERSON = 0.3    # 人の荷札がこれより似ていれば同じ人（worth と同じ）
 
 
