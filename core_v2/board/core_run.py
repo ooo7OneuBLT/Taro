@@ -193,7 +193,8 @@ def grow_core(rule: str, seed: int, days: int, frozen: bool = False, keep_log: b
         offered, overfed, smiled = obs["offered"], obs["overfed"], obs["smiled"]
         if stage >= 4 and board.object and f0 >= HUNGRY_FROM:
             k = sem.knowing(_base("obj:" + board.object))
-            curious.append((t, board.object, k >= 1.0, action if action != "say" else "say:" + word))
+            curious.append((t, board.object, k >= 1.0, action if action != "say" else "say:" + word,
+                            want.last.get("head", "food")))   # 5つめ：どの欲求のために動いたか
         fed, came, heard, spoke = obs["fed"], obs["came"], obs["heard"], obs["spoke"]
         # 大人が物を見て話した一言は、耳を通って届き終わるまで（ATTEND_MIN 分）「一緒に見ている」が続く
         attend_left = ATTEND_MIN if obs.get("attend") else max(0, attend_left - 1)

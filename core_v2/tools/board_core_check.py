@@ -7,14 +7,14 @@
 3段目は2段目（ママがよく応える世界）まで育った同じ脳の続きから、--days3 日。
 
 4段目（あれなに？）の線（3段目まで育った脳の続き。目の前に物24種類 --days4 日、そのあと初めて見る物6種類 --days4b 日）：
-* G4 わからない物の前で、問う語（なに・なあに・これ…）を言う割合が、知っている物の前の2倍以上（4段目の全部の日、合計）
+* G4 わからない物の前で、問う語（なに・なあに・これ…）を「知りたい」の欲求のために言う割合が、知っている物の前の2倍以上（4段目の全部の日、合計）
 * H4 問う語に名前で答える世界の太郎は、答えない世界の太郎より、わからない物の前で問う語を2倍以上言う（4段目の全部の日）
 * I4 初めて見る物でも同じ（初めて見る物の --days4b 日、答える世界÷答えない世界が2倍以上）
 5段目（断る・前のことを話す）の線（4段目まで育った脳の続き、--days5 日。対照＝言葉に応えず、話を特に喜ばない世界）：
 * I5 断る語：最後の半分で、すすめた人に向けた断り（泣く・手で押す・いや・いらない）のうち、言葉が半分以上（20人の合計）
 * J5 おなかがすいた時には断る語をほとんど言わない（最後の半分のおなかすきの合図のうち5%未満）
 * K5 対照の世界では、言葉の断りが I5 の半分未満
-* L5 話す：最後の半分で、相手がいなかった間の物を話す割合（話せた人×分あたり）が、相手も見ていた物を話す割合の2倍以上
+* L5 話す：最後の半分で、「相手」の欲求のために、相手がいなかった間の物を話す割合（話せた人×分あたり）が、相手も見ていた物を話す割合の2倍以上
 * M5 対照の世界では L5 の比が、元の世界の比の半分以下
 
 使い方：
@@ -208,15 +208,17 @@ def main():
 
 
 def _asks(logs, t_from=0):
-    """curious の記録 → {"unknown": (問う語の回数, 分), "known": (同)}。"""
+    """curious の記録 → {"unknown": (問う語の回数, 分), "known": (同)}。問う語は「知りたい」の欲求のために言ったものだけ数える
+    （ほかの欲求の時の「なに」＝聞いた語のまねや、お腹がすいて呼ぶ声は、問いではない。1〜3段目をミルクの欲求の合図だけで
+    数えるのと同じ）。欲求の記録が無い古い記録は全部数える。"""
     out = {"unknown": [0, 0], "known": [0, 0]}
     for log in logs:
-        for t, _, known, act in log:
+        for t, _, known, act, *head in log:
             if t < t_from:
                 continue
             k = out["known" if known else "unknown"]
             k[1] += 1
-            k[0] += act.startswith("say:") and act[4:] in QUESTION_WORDS
+            k[0] += act.startswith("say:") and act[4:] in QUESTION_WORDS and (not head or head[0] == "know")
     return out
 
 
@@ -267,8 +269,10 @@ def stage5(per_seed, days5):
                     if e[0] >= half:
                         hungry_all += 1
                         hungry_refuse += e[1].startswith("say:") and e[1][4:] in REFUSE_WORDS
+            # 話すは「相手」の欲求のために話したものだけ数える（お腹・知りたいの時の話す行動は、話したい合図ではない）
+            heads = {e[0]: e[5] for ep in d["episodes"] for e in ep if len(e) > 5}
             for t, kind, *_ in d["tells"]:
-                if t >= half and kind in tell:
+                if t >= half and kind in tell and heads.get(t, "social") == "social":
                     tell[kind] += 1
             for t, a in d["can_tell"]:
                 if t >= half:
