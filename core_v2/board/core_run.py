@@ -45,6 +45,29 @@ def speech_data() -> dict:
     return d
 
 
+@lru_cache(maxsize=1)
+def _own_words() -> dict:
+    """大人がその物について話す時だけ使う語（かな）→ 物。ほかの物や、物以外の場面のせりふに一度でも出る語は入れない。"""
+    d = speech_data()
+    objs, other = {}, set()
+    for k, lines in d["lines"].items():
+        for line in lines:
+            for w in d["ear"].get(line, []):
+                if k.startswith("name:"):
+                    objs.setdefault(normalize_kana(w), set()).add(k.split(":")[1])
+                else:
+                    other.add(normalize_kana(w))
+    return {w: next(iter(os)) for w, os in objs.items() if len(os) == 1 and w not in other}
+
+
+def object_words(objs: list) -> dict:
+    """5段目：大人が「あの物のことだ」と分かる語（かな）→ 物。物の名前と、大人自身がその物についてだけ使う語
+    （「ブーブー」「めしあがれ」など。子どもが親の言い方をまねた語は親には通じる）。"""
+    words = {w: o for w, o in _own_words().items() if o in objs}
+    words.update({normalize_kana(o): o for o in objs})
+    return words
+
+
 def use_language(brain: Brain) -> None:
     """3段目：耳と口の下駄を入れ、言う語を組み立てる係を盤面の使い方にする。"""
     d = speech_data()
@@ -106,7 +129,7 @@ def grow_core(rule: str, seed: int, days: int, frozen: bool = False, keep_log: b
                   speech=speech_data()["lines"] if stage >= 3 else None, understand_words=understand_words,
                   objects=objs if stage >= 4 else None, answer_questions=answer_questions,
                   offers=stage >= 5, news=stage >= 5, joy_news=joy_news,
-                  object_words={normalize_kana(o): o for o in objs} if stage >= 5 else None)
+                  object_words=object_words(objs) if stage >= 5 else None)
     if brain is None:
         brain = new_brain(seed, frozen)
     else:
