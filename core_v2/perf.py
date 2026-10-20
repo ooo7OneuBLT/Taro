@@ -12,6 +12,9 @@ G/scripts/pass_test.py には無かった。そのため torch が物理コア�
    これは numpy・torch を import する前に環境変数で決める必要がある
 2. torch の計算スレッドを1本に（set_num_threads・set_num_interop_threads）
 3. Windows では優先度を「通常以下」に下げ、ブラウザなどほかの作業を先に通す（旧太郎 B/perf_setup.py と同じ）
+4. Windows の省電力の絞り（EcoQoS）を断る（2026-10-20）。後ろで動く・優先度の低い仕事は、Windows が遅い芯（E コア）の
+   低い速さに寄せることがあり、依頼19では16本中12本が2割ほどの速さだった（クラウドで1人17分の所がPCで107分）。
+   優先度は低いままなので、ほかの作業が先に通るのは変わらない。絞らせたいときは TARO_ECO=1
 
 本数を変えたいときは環境変数 TARO_THREADS（既定 1）。
 """
@@ -64,3 +67,22 @@ def setup() -> None:
             psutil.Process(os.getpid()).nice(psutil.BELOW_NORMAL_PRIORITY_CLASS)
         except Exception:  # noqa: BLE001
             pass
+        if os.environ.get("TARO_ECO") != "1":
+            _no_power_throttling()
+
+
+def _no_power_throttling() -> None:
+    """Windows に「この仕事の速さを省電力で絞らないで」と伝える（SetProcessInformation、ProcessPowerThrottling）。"""
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class _State(ctypes.Structure):
+            _fields_ = [("Version", wintypes.ULONG), ("ControlMask", wintypes.ULONG), ("StateMask", wintypes.ULONG)]
+
+        PROCESS_POWER_THROTTLING_EXECUTION_SPEED = 0x1
+        state = _State(1, PROCESS_POWER_THROTTLING_EXECUTION_SPEED, 0)   # 速さを自分で決め、絞りは切る
+        k32 = ctypes.windll.kernel32
+        k32.SetProcessInformation(k32.GetCurrentProcess(), 4, ctypes.byref(state), ctypes.sizeof(state))  # 4＝ProcessPowerThrottling
+    except Exception:  # noqa: BLE001  古い Windows などでは何もしない
+        pass

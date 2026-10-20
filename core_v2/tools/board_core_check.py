@@ -20,7 +20,10 @@
 使い方：
   python -m core_v2.tools.board_core_check [--seeds 20] [--days 5] [--days2 15] [--days3 15] [--days4 5] [--days4b 3]
                                           [--days5 15] [--procs 4] [--out 出力フォルダ]
-1人1日およそ7秒（1分に脳を8回進めるため）。人ごとに別の手で並べて回す。
+                                          [--reuse 前の出力フォルダ --from-stage N]
+1人1日およそ3.5〜8秒（クラウド、1段目〜5段目。2026-10-20）。人ごとに別の手で並べて回す。
+直した係が使われ始めるのが N 段目なら --reuse 前の出力 --from-stage N で、それより前の段（対照も）は回し直さず
+前の結果と育った太郎（brain1・frozen1・brain2・brain3・brain4_種.pt）を使う。一緒に回した時と結果は同じ。
 """
 
 from __future__ import annotations
