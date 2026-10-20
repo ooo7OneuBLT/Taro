@@ -24,6 +24,7 @@ from .base import ENV, Box
 
 class Voiceout(Box):
     BOX_ID = "voiceout"
+    PURE = True   # 出すものは届いた値だけで決まる（同じ値が届き続ける回は計算しない、brain.tick）
 
     def reset(self) -> None:
         self.last_char = ""

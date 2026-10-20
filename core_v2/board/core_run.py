@@ -135,6 +135,7 @@ def grow_core(rule: str, seed: int, days: int, frozen: bool = False, keep_log: b
     else:
         torch.manual_seed(20_000 + seed)
     brain.skip = set(BOARD_IDLE)
+    brain.reuse_pure = True        # 盤面の世界は入口へ渡す値を毎分新しく作るので、同じ値が続く回は計算しない
     if stage >= 3:
         use_language(brain)
     if stage >= 4:

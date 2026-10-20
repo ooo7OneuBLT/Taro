@@ -9,6 +9,7 @@ from .base import Box
 
 class Vars(Box):
     BOX_ID = "vars"
+    PURE = True   # 出すものは届いた値だけで決まる（同じ値が届き続ける回は計算しない、brain.tick）
 
     def step(self, inbox):
         out = self.passthrough()

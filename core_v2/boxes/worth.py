@@ -122,6 +122,7 @@ class Worth(Box):
         self.known_words = [torch.tensor(w, dtype=DTYPE) for w in state.get("known_words", [])]
         self.said = list(state.get("said", [0] * len(self.known_words)))
         self.paired = list(state.get("paired", [0.0] * len(self.known_words)))
+        self.__dict__.pop("_found", None)
 
     def reset(self) -> None:
         self.n = 0
@@ -173,8 +174,15 @@ class Worth(Box):
             if float(inbox.get("semantic", 0.0)) > 0.0:
                 self._reward("know", minute - 1, self.__dict__.get("_came"))
             self._expire("know", minute - 1)
+        found = self.__dict__.setdefault("_found", {})   # 速くするため：同じ荷札の物（id）→ (荷札, 何番目)。毎回全部と比べない
         for word, m in inbox.get("wordplan") or []:
-            i = next((i for i, k in enumerate(self.known_words) if float(word @ k) > 0.99), None)
+            hit = found.get(id(word))
+            if hit is not None and hit[0] is word:
+                i = hit[1]
+            else:
+                i = next((i for i, k in enumerate(self.known_words) if float(word @ k) > 0.99), None)
+                if i is not None:
+                    found[id(word)] = (word, i)
             if i is None:
                 self.known_words.append(word.clone())
                 self.said.append(0)
@@ -245,10 +253,17 @@ class Worth(Box):
         """選択肢：泣く・手・話す（話せる人だけ）＋言える語を、今起こりうる欲求 heads の順に1つずつ
         （語は選んだ欲求の行だけに見込みを書く）。"""
         echo = self.__dict__.get("_echo", {})
+        vals: dict = {}   # この選択肢づくりの間は重みが変わらないので、見込みは1回だけ計算する
+
+        def val(act, j, who, head):
+            key = (id(act), j, head)
+            if key not in vals:
+                vals[key] = self.value(act, who, head)
+            return vals[key]
 
         def key(head):
             def k(i):
-                v = max((self.value(self.known_words[i], who, head) for who in self.people), default=0.0)
+                v = max((val(self.known_words[i], j, who, head) for j, who in enumerate(self.people)), default=0.0)
                 k = v + EXPLORE / math.sqrt(1 + self.said[i]) + ECHO * echo.get(i, 0.0)
                 return k + self.paired[i] if head == "food" else k
             return k
@@ -271,6 +286,6 @@ class Worth(Box):
                 if avail is not None and float(avail[0, j]) <= 0.0:
                     continue                    # この人には話せない
                 for h in heads:
-                    m[HEAD_ROW[h], j] = self.value(act, who, h)
+                    m[HEAD_ROW[h], j] = val(act, j, who, h)
             offer.append((act, m))
         return offer

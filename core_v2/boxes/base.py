@@ -28,6 +28,9 @@ ENV = "env"  # 環境とのやり取りに使う特別なキー（係の id と�
 
 class Box(nn.Module):
     BOX_ID: str = ""
+    # True の係は、出すものが届いた値だけで決まる（中に前の回から持ち越す状態が無い）。brain.tick は、届いた値が
+    # 前の回とすべて同じ物なら step を呼ばず前の outbox を使う。状態を持つ係は False のまま
+    PURE: bool = False
 
     def __init__(self) -> None:
         super().__init__()

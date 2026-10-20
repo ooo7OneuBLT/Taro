@@ -31,6 +31,11 @@ class Brain(nn.Module):
         self._out_dsts = {bid: {e.dst for e in self.boxes[bid].outputs} for bid in wiring.BOX_IDS}
         self.check_formats = check_formats
         self.skip: set[str] = set()   # 動かさない係（出すものはゼロのまま）。盤面の世界で使わない係を飛ばして速くする
+        # 何も新しく届かない係は計算しない（2026-10-20）：PURE（出すものが届いた値だけで決まる）係は、届いた値が
+        # 前の回とすべて同じ物なら、前の回の outbox をそのまま使う。値は書き換えない約束なので同じ物を渡してよい
+        # 世界が入口へ渡す値を毎回新しく作る時だけ正しいので、使う世界で reuse_pure=True にする（今は盤面の世界）
+        self._pure = {bid for bid in wiring.BOX_IDS if getattr(boxes[bid], "PURE", False)}
+        self.reuse_pure = False
         self.reset()
 
     def reset(self) -> None:
@@ -39,6 +44,7 @@ class Brain(nn.Module):
             k: zero(e.fmt, e.size) for k, e in self.edges.items()
         }
         self.delivered: set[tuple[str, str]] = set()
+        self._memo: dict[str, tuple[tuple, dict]] = {}   # {係id: (前の回に届いた値, そのときの outbox)}
         self.t = 0
         for box in self.boxes.values():
             box.reset()
@@ -65,15 +71,28 @@ class Brain(nn.Module):
 
         outboxes = {}
         skip = getattr(self, "skip", ())
+        pure = self._pure if getattr(self, "reuse_pure", False) else ()
+        memo, buf = self._memo, self.buffer
         for bid in order:
             if bid in skip:
-                outboxes[bid] = self.boxes[bid].passthrough()
+                # 飛ばす係の素通しは毎回同じゼロなので、1回作って使い回す
+                if bid not in memo:
+                    memo[bid] = ((), self.boxes[bid].passthrough())
+                outboxes[bid] = memo[bid][1]
                 continue
-            buf = self.buffer
             inbox = {src: buf[key] for src, key in self._in_keys[bid]}
             if bid in external:
                 inbox[ENV] = external[bid]
-            outboxes[bid] = self.boxes[bid].step(inbox)
+            if bid in pure:
+                got = tuple(inbox.items())
+                prev = memo.get(bid)
+                if prev is not None and _same(prev[0], got):
+                    outboxes[bid] = prev[1]
+                    continue
+                outboxes[bid] = self.boxes[bid].step(inbox)
+                memo[bid] = (got, outboxes[bid])
+            else:
+                outboxes[bid] = self.boxes[bid].step(inbox)
 
         new_buffer: dict[tuple[str, str], Any] = {}
         to_env: dict[str, Any] = {}
@@ -95,3 +114,18 @@ class Brain(nn.Module):
         self.delivered = set(new_buffer)
         self.t += 1
         return to_env
+
+
+def _same(a: tuple, b: tuple) -> bool:
+    """前の回と今の回の届いた値が同じ物か（同じ物＝同じ object。空の組 [] どうしも同じとみなす）。"""
+    if len(a) != len(b):
+        return False
+    for (ka, va), (kb, vb) in zip(a, b):
+        if ka != kb:
+            return False
+        if va is vb:
+            continue
+        if type(va) is list and type(vb) is list and not va and not vb:
+            continue
+        return False
+    return True

@@ -14,6 +14,7 @@ HUNGRY_FROM = 0.6
 
 class Need(Box):
     BOX_ID = "need"
+    PURE = True   # 出すものは届いた値だけで決まる（同じ値が届き続ける回は計算しない、brain.tick）
 
     def step(self, inbox):
         out = self.passthrough()

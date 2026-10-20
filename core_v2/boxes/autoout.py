@@ -8,3 +8,4 @@ from .base import Box
 
 class Autoout(Box):
     BOX_ID = "autoout"
+    PURE = True   # 出すものは届いた値だけで決まる（同じ値が届き続ける回は計算しない、brain.tick）

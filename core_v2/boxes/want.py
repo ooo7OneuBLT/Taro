@@ -54,8 +54,9 @@ class Want(Box):
             arousal = min(1.0, total)
             options = []
             for act, m in inbox.get("worth") or []:
+                rows = m[:len(HEADS)].tolist()      # 速くするため：要素ごとに float(m[r, j]) と読まない（値は同じ）
                 for j in range(GRID):
-                    vs = [float(m[r, j]) for r in range(len(HEADS))]
+                    vs = [rows[r][j] for r in range(len(HEADS))]
                     if max(vs) > 0:
                         options.append((act, j, vs))
             if options and float(torch.rand(())) < arousal:

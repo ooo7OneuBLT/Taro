@@ -9,6 +9,7 @@ from .base import Box
 
 class Reach(Box):
     BOX_ID = "reach"
+    PURE = True   # 出すものは届いた値だけで決まる（同じ値が届き続ける回は計算しない、brain.tick）
 
     def step(self, inbox):
         out = self.passthrough()

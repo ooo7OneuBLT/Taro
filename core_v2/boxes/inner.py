@@ -14,6 +14,7 @@ from .base import Box
 
 class Inner(Box):
     BOX_ID = "inner"
+    PURE = True   # 出すものは届いた値だけで決まる（同じ値が届き続ける回は計算しない、brain.tick）
 
     def step(self, inbox):
         out = self.passthrough()

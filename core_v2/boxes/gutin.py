@@ -31,6 +31,7 @@ def body_list(**amounts) -> list:
 
 class Gutin(Box):
     BOX_ID = "gutin"
+    PURE = True   # 出すものは届いた値だけで決まる（同じ値が届き続ける回は計算しない、brain.tick）
 
     def step(self, inbox):
         out = self.passthrough()
