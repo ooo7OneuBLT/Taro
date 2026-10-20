@@ -231,7 +231,8 @@ class Board:
             clear = action == "say" and ((self.understand_words and word in FOOD_WORDS)
                                          or (self.answer_questions and word in QUESTION_WORDS))
             # 泣き声・手・名前を呼ぶ・意味の分からない語：大人は、ミルクか（目の前に物があれば）その物かを当て推量する
-            asked = asked if clear else bool(self.object) and self.rng.random() < 0.5
+            # （答えない世界＝比べる用の大人は、太郎の合図に物の名前で応えることがない）
+            asked = asked if clear else self.answer_questions and bool(self.object) and self.rng.random() < 0.5
         if asked:
             came = checked_by          # 聞かれて来た大人は名前を教える（ミルクはあげない）
         if came and self.fullness < FEED_IF_BELOW:
