@@ -38,50 +38,88 @@ from core_v2.board.world import MINUTES_PER_DAY, QUESTION_WORDS, REFUSE_WORDS
 from core_v2.tools.board_stage1 import alone_asks, escalation, summarize, target_share
 
 
+# 段ごとの記録の名前（--reuse で前の段の結果を使い回すとき、この段より前の名前だけ写す）
+STAGE_KEYS = {1: ("cry", "reach", "frozen"), 2: ("mama_good", "papa_good", "frozen2"), 3: ("words", "no_words"),
+              4: ("ask", "no_ask", "ask_new", "no_ask_new"), 5: ("five", "five_ctrl")}
+# 段の終わりに保存する太郎（次の段の始まり）。frozen1 は覚えない太郎（2段目の対照 frozen2 の始まり）
+SAVED = {1: ("brain1", "frozen1"), 2: ("brain2",), 3: ("brain3",), 4: ("brain4",)}
+
+
+def _save(brain, out_dir, name, seed):
+    # 脳を丸ごと保存する（state_dict だけだと、意味の辞書の乱数・言える語の順番・思い出の帳面などが抜け、
+    # 読み直した続きが一緒に回した時と変わった。2026-10-20）
+    torch.save(brain, os.path.join(out_dir, f"{name}_{seed}.pt"))
+
+
+def _load(src, name, seed, frozen=False):
+    x = torch.load(os.path.join(src, f"{name}_{seed}.pt"), weights_only=False)
+    if isinstance(x, torch.nn.Module):
+        return x
+    b = new_brain(seed, frozen)                  # 前の形（state_dict だけ）の保存
+    b.load_state_dict(x)
+    return b
+
+
 def _one(args):
-    seed, days, days2, days3, days4, days4b, days5, controls, out_dir, brains = args
+    seed, days, days2, days3, days4, days4b, days5, controls, out_dir, brains, reuse, start = args
     path = os.path.join(out_dir, f"seed_{seed}.json")
     if os.path.exists(path):                     # 前に終わった人は読むだけ（止めて回し直せる）
         with open(path) as f:
             return json.load(f)
-    out = {}
-    saved3 = os.path.join(brains, f"brain3_{seed}.pt") if brains else None
-    if saved3 and os.path.exists(saved3):
-        # 3段目まで育った太郎を読み、4・5段目だけ回す（育った太郎は段ごとに保存し、0から育て直さない）
-        b3 = new_brain(seed)
-        b3.load_state_dict(torch.load(saved3, weights_only=False))
-        controls = False
-    else:
+    out, b = {}, {}
+    if brains and os.path.exists(os.path.join(brains, f"brain3_{seed}.pt")):
+        # （前からの使い方）3段目まで育った太郎を読み、4・5段目だけ回す。1〜3段目の結果は持たない
+        start, reuse, controls = 4, brains, False
+    elif reuse:
+        # 直していない段は回し直さない：start の段より前の結果と、start の段の始まりの太郎を reuse のフォルダから使う
+        with open(os.path.join(reuse, f"seed_{seed}.json")) as f:
+            old = json.load(f)
+        out = {k: old[k] for st in range(1, start) for k in STAGE_KEYS[st] if k in old}
+        controls = controls and all(k in old for k in STAGE_KEYS[1])
+    if start > 1:
+        for name in SAVED[start - 1]:
+            if start == 2 and name == "frozen1" and not controls:
+                continue
+            b[name] = _load(reuse or brains, name, seed, frozen=name == "frozen1")
+    if start <= 1:
         cry = grow_core("cry", seed, days)
-        out["cry"] = cry["episodes"]
+        out["cry"], b["brain1"] = cry["episodes"], cry["brain"]
         if controls:
             out["reach"] = grow_core("reach", seed, days)["episodes"]
             frozen = grow_core("cry", seed, days, frozen=True)
-            out["frozen"] = frozen["episodes"]
-        mama = grow_core("cry", seed, days2, stage=2, brain=copy.deepcopy(cry["brain"]))
-        out["mama_good"] = mama["episodes"]
-        words = grow_core("cry", seed, days3, stage=3, brain=copy.deepcopy(mama["brain"]))
-        out["words"] = words["episodes"]
-        out["no_words"] = grow_core("cry", seed, days3, stage=3, brain=copy.deepcopy(mama["brain"]),
+            out["frozen"], b["frozen1"] = frozen["episodes"], frozen["brain"]
+            _save(b["frozen1"], out_dir, "frozen1", seed)   # 2段目の対照 frozen2 がこの太郎をそのまま育てるので先に保存
+    if start <= 2:
+        mama = grow_core("cry", seed, days2, stage=2, brain=copy.deepcopy(b["brain1"]))
+        out["mama_good"], b["brain2"] = mama["episodes"], mama["brain"]
+        if controls:
+            out["papa_good"] = grow_core("cry", seed, days2, stage=2, swap=True,
+                                         brain=copy.deepcopy(b["brain1"]))["episodes"]
+            out["frozen2"] = grow_core("cry", seed, days2, stage=2, brain=b["frozen1"])["episodes"]
+    if start <= 3:
+        words = grow_core("cry", seed, days3, stage=3, brain=copy.deepcopy(b["brain2"]))
+        out["words"], b["brain3"] = words["episodes"], words["brain"]
+        out["no_words"] = grow_core("cry", seed, days3, stage=3, brain=copy.deepcopy(b["brain2"]),
                                     understand_words=False)["episodes"]
-        b3 = words["brain"]
-        torch.save(b3.state_dict(), os.path.join(out_dir, f"brain3_{seed}.pt"))
-    if days4:
+    if days4 and start <= 4:
         for arm, answer in (("ask", True), ("no_ask", False)):
-            r4 = grow_core("cry", seed, days4, stage=4, brain=copy.deepcopy(b3), answer_questions=answer)
+            r4 = grow_core("cry", seed, days4, stage=4, brain=copy.deepcopy(b["brain3"]), answer_questions=answer)
             out[arm] = r4["curious"]
             r4b = grow_core("cry", seed, days4b, stage=4, brain=r4["brain"], answer_questions=answer,
                             objects=NEW_OBJECTS)
             out[arm + "_new"] = r4b["curious"]
             if answer:
-                b4 = r4b["brain"]
+                b["brain4"] = r4b["brain"]
+    if days4 and start <= 5:
         for arm, kind in (("five", True), ("five_ctrl", False)):
-            r5 = grow_core("cry", seed, days5, stage=5, brain=copy.deepcopy(b4), understand_words=kind, joy_news=kind)
+            r5 = grow_core("cry", seed, days5, stage=5, brain=copy.deepcopy(b["brain4"]), understand_words=kind,
+                           joy_news=kind)
             out[arm] = {k: r5[k] for k in ("offers", "tells", "can_tell", "episodes")}
-    if controls:
-        out["papa_good"] = grow_core("cry", seed, days2, stage=2, swap=True,
-                                     brain=copy.deepcopy(cry["brain"]))["episodes"]
-        out["frozen2"] = grow_core("cry", seed, days2, stage=2, brain=frozen["brain"])["episodes"]
+    # 育った太郎は段ごとに保存する（次に直していない段を回し直さないため）。frozen1 は1段目の直後に保存済み
+    for st, names in SAVED.items():
+        for name in names:
+            if name in b and st >= start and name != "frozen1":
+                _save(b[name], out_dir, name, seed)
     with open(path, "w") as f:                   # 1人ずつ書く
         json.dump(out, f, ensure_ascii=False)
     with open(path) as f:
@@ -101,6 +139,10 @@ def main():
     ap.add_argument("--out", default="board_core_out")
     ap.add_argument("--brains3", default=None,
                     help="3段目まで育った太郎（brain3_種.pt）のあるフォルダ。あれば1〜3段目を飛ばして4・5段目だけ回す")
+    ap.add_argument("--reuse", default=None,
+                    help="前に回した出力フォルダ。--from-stage より前の段は回し直さず、その結果と育った太郎を使う")
+    ap.add_argument("--from-stage", type=int, default=1, choices=[1, 2, 3, 4, 5],
+                    help="この段から回す（--reuse と一緒に。直した係が使われ始める段を選ぶ）")
     ap.add_argument("--no-controls", action="store_true",
                     help="1・2段目の対照（手・覚えない・パパがよく応える・覚えない2段目）を回さない")
     args = ap.parse_args()
@@ -108,7 +150,9 @@ def main():
     per_seed = []
     with Pool(args.procs) as pool:
         for r in pool.imap(_one, [(s, args.days, args.days2, args.days3, args.days4, args.days4b, args.days5,
-                                   not args.no_controls, args.out, args.brains3) for s in range(args.seeds)]):
+                                   not args.no_controls, args.out, args.brains3,
+                                   args.reuse if args.from_stage > 1 else None, args.from_stage if args.reuse else 1)
+                                  for s in range(args.seeds)]):
             per_seed.append(r)
             print(f"  {len(per_seed)}/{args.seeds}人 終わり", flush=True)   # 途中経過
     runs = {k: [{"episodes": r[k]} for r in per_seed] for k in per_seed[0]}
