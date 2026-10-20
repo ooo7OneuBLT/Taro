@@ -18,7 +18,7 @@
 * M5 対照の世界では L5 の比が、元の世界の比の半分以下
 
 使い方：
-  python -m core_v2.tools.board_core_check [--seeds 20] [--days 5] [--days2 15] [--days3 15] [--days4 5] [--days4b 3]
+  python -m core_v2.tools.board_core_check [--seeds 20] [--days 3] [--days2 6] [--days3 8] [--days4 5] [--days4b 3]
                                           [--days5 15] [--procs 4] [--out 出力フォルダ]
                                           [--reuse 前の出力フォルダ --from-stage N]
 1人1日およそ3.5〜8秒（クラウド、1段目〜5段目。2026-10-20）。人ごとに別の手で並べて回す。
@@ -135,9 +135,9 @@ def main():
     ap.add_argument("--seed-from", type=int, default=0,
                     help="この番号の人から回す（PCとクラウドで分けて回す時。あとで seed_*.json を1つのフォルダに集め、"
                          "--seeds 全員の数 で回し直すと、終わった人は読むだけでまとめが出る）")
-    ap.add_argument("--days", type=int, default=5)
-    ap.add_argument("--days2", type=int, default=15)
-    ap.add_argument("--days3", type=int, default=15)
+    ap.add_argument("--days", type=int, default=3)   # 2026-10-20 5→3：3日目で横ばい（5人）
+    ap.add_argument("--days2", type=int, default=6)   # 15→6：5日目ごろ横ばい
+    ap.add_argument("--days3", type=int, default=8)   # 15→8：7日目で横ばい
     ap.add_argument("--days4", type=int, default=5, help="4段目の日数（0なら4段目・5段目を回さない）")
     ap.add_argument("--days4b", type=int, default=3)
     ap.add_argument("--days5", type=int, default=15)
