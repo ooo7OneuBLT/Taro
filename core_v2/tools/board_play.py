@@ -25,7 +25,8 @@ def describe(a: dict) -> str:
     if a["action"] == "reach":
         return f"{a['to']}に手を伸ばした（強さ {a['strength']:.1f}）"
     if a["action"] == "say":
-        return f"{a['to']}に「{a['say']}」と言った（強さ {a['strength']:.1f}）"
+        about = f"。{a['about']}のことを、太郎はこの語で呼んでいる" if a.get("about") else ""
+        return f"{a['to']}に「{a['say']}」と言った（強さ {a['strength']:.1f}{about}）"
     return "何もしなかった"
 
 

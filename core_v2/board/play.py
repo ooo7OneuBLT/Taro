@@ -72,14 +72,20 @@ class Play:
         key = normalize_kana(text)
         if key in ear:
             return ear[key]
-        vocab, words, i = self._vocab(), [], 0
-        while i < len(key):
-            w = next((v for v in vocab if key.startswith(v, i)), None)
-            if w:
-                words.append(w)
-                i += len(w)
-            else:
-                i += 1
+        # 知っている語で区切る：拾えない字が一番少なく、その中で語の数が一番少ない区切り方（左から長い順に拾うと
+        # 「これはなあに」が これ／はな になった）
+        vocab = set(self._vocab())
+        best = [(0, 0, [])] + [None] * len(key)
+        for i in range(len(key)):
+            if best[i] is None:
+                continue
+            miss, n, ws = best[i]
+            cands = [(i + 1, miss + 1, n, ws)] + [(i + len(v), miss, n + 1, ws + [v]) for v in vocab
+                                                  if key.startswith(v, i)]
+            for j, m, k, w in cands:
+                if best[j] is None or (m, k) < best[j][:2]:
+                    best[j] = (m, k, w)
+        words = best[len(key)][2]
         ear[key] = words
         return words
 
@@ -96,6 +102,7 @@ class Play:
             self.people["パパ"] = False; did = True; ev["notes"].append("パパが部屋を出た")
         elif re.search(r"出ていく|出て行く|部屋を出|でかけ|出かけ|いなくなる", rest):
             self.people["ママ"] = False; did = True; ev["notes"].append("ママが部屋を出た")
+            self.offered = False                       # すすめていたら、やめて出ていく
         elif re.search(r"戻る|もどる|帰る|かえる|ただいま", rest):
             self.people["ママ"] = True; did = True; ev["notes"].append("ママが部屋に戻った")
         if re.search(r"飲ませ", rest):
@@ -178,6 +185,8 @@ class Play:
             act.update(action="reach", strength=body["reach"], to=_who(body["to"], present))
         if act["to"] is None:
             act["action"] = "nothing"
+        if act["action"] == "say":
+            act["about"] = self._about(act["word"])
         act["why"] = self._why(want.last, present)
         self.fullness -= 1.0 / EMPTY_AFTER_MIN
         if act["action"] == "cry":
@@ -211,6 +220,15 @@ class Play:
                 "present": self._present(), "offered": self.offered}
 
     # ---- 頭の中を言葉にする ----
+    def _about(self, word: str) -> str | None:
+        """言った語が思い出の帳面の名前なら、その思い出の物（見せるため。太郎はその物をその語で呼んでいる）。"""
+        tag = word_tag(word)
+        diary = [e for e in self.brain.boxes["episodic"].diary if e["word"] is not None]
+        e = max(diary, key=lambda e: float(e["word"] @ tag), default=None)
+        if e is None or float(e["word"] @ tag) < 0.7:    # 帳面の名前の語は意味の辞書から来るので少し揺れる（約0.9）
+            return None
+        return max(ALL_OBJECTS, key=lambda o: float(e["obj"] @ word_tag("obj:" + o)))
+
     def _label(self, tag) -> str:
         for k, t in {**ACT_TAGS, **TELL_TAGS}.items():
             if float(t @ tag) > 0.99:
