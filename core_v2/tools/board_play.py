@@ -11,11 +11,11 @@
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
+import os
 
 import torch
-
-import os
 
 from core_v2.board.play import HEAD_JA, Play, load, save
 
@@ -83,14 +83,21 @@ def interactive(session: str, fullness: float, wait: int) -> None:
             break
         if text in ("はじめから", "最初から"):
             play = fresh()
+            save(play, session)
+            with open(os.path.splitext(session)[0] + "_記録.txt", "a", encoding="utf-8") as f:
+                f.write(f"\n[{datetime.datetime.now():%Y-%m-%d %H:%M}] はじめから（太郎を育った時に戻した）\n")
             print("太郎を育った時に戻しました。")
             print(report({"notes": [], "steps": [], "state": play.state()}))
             continue
         if text in ("", "?", "？", "help", "ヘルプ"):
             print(HELP)
             continue
-        print(report(play.turn(text, wait=wait)))
+        out = report(play.turn(text, wait=wait))
+        print(out)
         save(play, session)
+        # やり取りを文字でも残す（あとで読み返す・Claude に渡すため）
+        with open(os.path.splitext(session)[0] + "_記録.txt", "a", encoding="utf-8") as f:
+            f.write(f"\n[{datetime.datetime.now():%Y-%m-%d %H:%M}] ママ> {text}\n{out}\n")
 
 
 def main() -> None:
