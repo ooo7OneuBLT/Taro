@@ -295,8 +295,8 @@ A 70〜90%（16語以上が70%以上に届くかは半々）、B4 65〜85%、B2 
 
 状態：済（2026-10-19 04:26 窓あり WSLg で成功・GPU描画、CloudRendering は Vulkan が無く不可。毎秒17.9回）（2026-10-19 04:08 ユーザー「僕から見えないっていうのが気になるけど、一回やってみよう」）
 
-**WSL2 を入れる**（管理者の PowerShell。再起動が要るので、上野さんに声をかけてから）：
-1. `wsl --install -d Ubuntu-22.04` → 再起動 → Ubuntu が開いたら利用者名とパスワードを作る（上野さんに入力してもらう）。
+**WSL2 を入れる**（管理者の PowerShell。再起動が要るので、利用者に声をかけてから）：
+1. `wsl --install -d Ubuntu-22.04` → 再起動 → Ubuntu が開いたら利用者名とパスワードを作る（利用者に入力してもらう）。
 2. Ubuntu の中で `nvidia-smi` が GPU を表示するか（Windows の NVIDIA ドライバが新しければ出る）。出なければ、その表示を返して止める。
 
 **AI2-THOR**（Ubuntu の中。リポジトリは Windows 側の C:\claude\AI\Taro を /mnt/c/claude/AI/Taro から使ってよい）：
@@ -342,7 +342,7 @@ A 70〜90%（16語以上が70%以上に届くかは半々）、B4 65〜85%、B2 
    `mkdir -p ~/.cache/torch && cp -r /mnt/c/Users/<利用者名>/.cache/torch/hub ~/.cache/torch/`
    （中に facebookresearch_dinov2_main と checkpoints/dinov2_vits14_pretrain.pth があること）
 6. 確かめ：`python -m core_v2.world_eye.eye_backend` が「作れる」、`python -c "import torch; print(torch.cuda.is_available())"` が True
-7. 日本語の字体（動画の字）：`sudo apt install -y fonts-ipafont-gothic`（上野さんにパスワードを頼む。無くても動くが字が四角になる）
+7. 日本語の字体（動画の字）：`sudo apt install -y fonts-ipafont-gothic`（利用者にパスワードを頼む。無くても動くが字が四角になる）
 
 **回すコマンド**（~/taro_repo で、`source ~/taro/bin/activate` のあと。負荷の決まり core_v2/perf.py はそのまま効く：torch のスレッド1本。
 変えるときだけ TARO_THREADS。AI2-THOR の窓が Windows の画面に出る。閉じないこと）：
