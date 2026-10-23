@@ -707,6 +707,10 @@ class ToySupineEnv(SupineMimoEnv):
                  #   WordSchedule(schedule=None)相当になり1ビットも挙動が変わらない。
                  #   `world.word_test`（辞書）をkwargs直渡しする。
                  word_test=None,
+                 # 【2026-10-17新設・段階6（スミスとユーの再現）】物を2つずつ左右に出す予定表。
+                 #   既定None＝何もしない（1ビット不変）。`world.pairs`（辞書）をkwargs直渡し。
+                 #   形式と実体は _setup_pairs / _hold_pairs の docstring。
+                 pairs=None,
                  eye_rest_vertical_deg=None, eye_centering=None,
                  eye_muscle_scale=None,
                  # F2-15新設・輻輳反射。既定None→False相当（E_VERGENCE=0）で
@@ -1180,6 +1184,9 @@ class ToySupineEnv(SupineMimoEnv):
                 "bid": int(_bid), "body": _bname,
                 "qadr": int(self.model.jnt_qposadr[_jadr]),
                 "dadr": int(self.model.jnt_dofadr[_jadr])}
+
+        # 【2026-10-17新設・段階6】物を2つずつ出す予定表（既定None＝空＝1ビット不変）
+        self._setup_pairs(pairs, _find_body_id)
 
         # 【2026-08-18新設・F1-3】親のfollow-in labeling。parent_labeling未指定(None)なら
         #   ParentLabeling(enabled=False)になり、update()は毎stepNoneを返すだけ＝
@@ -2152,6 +2159,103 @@ class ToySupineEnv(SupineMimoEnv):
         self.data.qvel[self._obj4_dadr:self._obj4_dadr + 6] = 0.0
         self.data.xfrc_applied[self._obj4_bid, :3] = 0.0
 
+    def _setup_pairs(self, pairs, find_body_id):
+        """物を2つずつ左右に出す予定表（段階6・スミスとユーの再現、2026-10-17）を登録する。
+
+        pairs（辞書。None なら何もしない＝1ビット不変）:
+          objects  : [{"shape": "sphere"|"cylinder"|"box"|"ellipsoid", "radius": m, "rgba": [r,g,b,a]}, ...]
+                     物の番号＝この並びの番号。物の body は bodies の同じ番号
+          bodies   : 物の body 名の並び（既定 ["sy_obj0", ...]。XML は run/scene_tools/make_sy6_xml.py）
+          schedule : [{"t0": 秒, "t1": 秒, "left": 番号|None, "right": 番号|None}, ...]
+                     t0 ≤ 時刻 < t1 の間、left の物を toy1 の定位置（左）に、right の物を toy2 の
+                     定位置（右）に置く。どの区間にも入らない時刻は、どの物も出さない（空の画面）。
+                     時計は env.data.time（エピソードの始まり＝0。語の予定表 WordSchedule と同じ時計）
+        左右の置き場所は toy1・toy2 の定位置（_set_anchor が視線の正面から ±toy_angle_deg に決め、
+        保存した姿勢で直したもの）をそのまま借りる。なので toy・toy2 は enabled が要る。
+        予定表があるあいだ、toy1・toy2 の物そのものは毎歩見えない所へ退避させる（置き場所だけ使う）。
+        """
+        self._pairs = None
+        self._pairs_now = (None, None)
+        if not pairs:
+            return
+        objs = list(pairs.get("objects") or [])
+        names = list(pairs.get("bodies") or [f"sy_obj{i}" for i in range(len(objs))])
+        if len(names) < len(objs):
+            raise ValueError(f"pairs: 物 {len(objs)} 個に対して body 名が {len(names)} 個しかない")
+        if not (self._toy and self._toy2):
+            raise ValueError("pairs は toy1・toy2 の定位置を左右の置き場所に使うので、"
+                             "world.toy と world.toy2 を enabled にすること")
+        slots = []
+        for i, o in enumerate(objs):
+            nm = names[i]
+            bid = find_body_id(nm)
+            if bid is None:
+                raise ValueError(f"pairs: body {nm!r} がこの場面のXMLに無い"
+                                 "（run/scene_tools/make_sy6_xml.py の XML を world.xml に指定すること）")
+            jadr = self.model.body(nm).jntadr[0]
+            gadr = int(self.model.body(nm).geomadr[0])
+            rgba = np.array(o.get("rgba", [0.8, 0.8, 0.8, 1.0]), dtype=float)
+            self._configure_toy_geom(bid, gadr, str(o.get("shape", "sphere")),
+                                     float(o.get("radius", TOY_RADIUS)), rgba)
+            slots.append({"bid": int(bid), "body": nm, "gadr": gadr,
+                          "qadr": int(self.model.jnt_qposadr[jadr]),
+                          "dadr": int(self.model.jnt_dofadr[jadr])})
+        sched = []
+        for e in list(pairs.get("schedule") or []):
+            t0, t1 = float(e["t0"]), float(e["t1"])
+            if t1 <= t0:
+                raise ValueError(f"pairs.schedule: t1 は t0 より後に（{e}）")
+            for side in ("left", "right"):
+                k = e.get(side)
+                if k is not None and not (0 <= int(k) < len(slots)):
+                    raise ValueError(f"pairs.schedule: 物の番号 {k} が範囲外（物は {len(slots)} 個）")
+            if e.get("left") is not None and e.get("left") == e.get("right"):
+                raise ValueError(f"pairs.schedule: 左右に同じ物は出せない（{e}）")
+            sched.append((t0, t1, e.get("left"), e.get("right")))
+        sched.sort(key=lambda x: x[0])
+        for a, b in zip(sched, sched[1:]):
+            if b[0] < a[1]:
+                raise ValueError(f"pairs.schedule: 区間が重なっている（{a} と {b}）")
+        self._pairs = {"slots": slots, "schedule": sched}
+
+    def _hold_pairs(self):
+        """予定表どおりに物を2つずつ置く（_setup_pairs 参照）。毎歩、全部の物を置き直す
+        （_hold_toy2 と同じ「毎step置く」流儀。出さない物は見えない所＝地下の遠方へ）。"""
+        if self._pairs is None or not self._pairs["schedule"]:
+            # 予定表が空なら何も触らない（場面を保存するとき toy1・toy2 を定位置に残すため。
+            #   apply_state は保存した toy2 の位置を _rest_pos2 に写すので、退避させたまま
+            #   保存すると置き場所が遠方になる）
+            return
+        t = float(self.data.time)
+        left = right = None
+        for t0, t1, lk, rk in self._pairs["schedule"]:
+            if t0 <= t < t1:
+                left, right = lk, rk
+                break
+            if t < t0:
+                break
+        self._pairs_now = (left, right)
+        for k, sl in enumerate(self._pairs["slots"]):
+            if k == left and self._rest_pos is not None:
+                pos = self._rest_pos
+            elif k == right and self._rest_pos2 is not None:
+                pos = self._rest_pos2
+            else:
+                pos = FAR_AWAY + np.array([2.0 + 0.5 * k, 1.0, -2.0])
+            self._place(sl["qadr"], pos)
+            self.data.qvel[sl["dadr"]:sl["dadr"] + 6] = 0.0
+            self.data.xfrc_applied[sl["bid"], :3] = 0.0
+        # toy1・toy2 の物そのものは使わない（置き場所だけ借りる）
+        self._place(self._toy_qadr, FAR_AWAY)
+        self.data.qvel[self._toy_dadr:self._toy_dadr + 6] = 0.0
+        self.data.xfrc_applied[self._toy_bid, :3] = 0.0
+        self._place(self._obj2_qadr, FAR_AWAY + np.array([0.5, 0.0, 0.0]))
+        self.data.qvel[self._obj2_dadr:self._obj2_dadr + 6] = 0.0
+
+    def pairs_showing(self):
+        """今出している (左の物の番号, 右の物の番号)。出していなければ None。予定表が無ければ (None, None)。"""
+        return getattr(self, "_pairs_now", (None, None))
+
     def _spawn_toy(self):
         # おもちゃの登場を遅らせる（TOY_APPEAR_DELAY 参照）。
         #   最初は遠くに置き、太郎が落ち着いてから親が運んでくる。
@@ -2426,6 +2530,7 @@ class ToySupineEnv(SupineMimoEnv):
         self._hold_toy3()          # 3個目のおもちゃ（2026-08-25新設・toy3=False/無しなら何もしない）
         self._flash_move_toy3()    # 【2026-10-15・段階2】toy3を光らせて動かす（flash_move無しなら何もしない）
         self._hold_toy4()          # 4個目のおもちゃ（同上）
+        self._hold_pairs()         # 【2026-10-17・段階6】物を2つずつ出す予定表（pairs無しなら何もしない）
         # 【2026-08-18新設・F1-3】親のfollow-in labeling。_hold_toy2の直後に呼ぶ
         #   ＝振っている間はここでtoy1/toy2の位置を上乗せで揺らす（_apply_shake）。
         #   parent_labeling未指定（enabled=False）なら常にNoneを返すだけ＝

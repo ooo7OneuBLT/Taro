@@ -19,8 +19,10 @@ detector="sam" で段階2までの切り出しに戻せる）。
 * eyein→gaze  : 物ごとの (荷札, 地図)。荷札＝見た目384を固定の乱数行列で64へ縮めて
                 L2正規化し雑音を足したもの（tagging.py）。地図＝物の中心にガウスの山
 * eyein→prio  : 目立ちの地図（28×28、0〜1）
-* eyein→semantic / orienteye : gaze と同じ物ごとの (荷札, 地図)（段階3。意味の辞書が覚えるとき／
-                復帰抑制の印を物に付けて動かすとき）
+* eyein→kind  : 段階9から。下の eyein→gaze・eyein→objfile の列は種類の層（boxes/kind.py）を通ってから gaze・名簿へ届く
+                （gaze の分は名簿と同じ最大7個。eyein→gaze・eyein→objfile は空）
+* eyein→objfile: gaze と同じ物ごとの (荷札, 地図)＋最後に目の動きの地図（段階4、物の名簿へ）。
+                段階3の eyein→semantic / orienteye は名簿へ移したので、今はゼロ
 * それ以外    : 素通し（ゼロ）
 
 **仕様書 §2-2 からの変更（2026-10-15、実測による）**：仕様書は旧太郎の「物体ファイル」
@@ -49,12 +51,28 @@ detector="sam" で段階2までの切り出しに戻せる）。
   外へ出ないため）。復帰抑制の印をこの分だけずらす。目を動かす指令の写しではなく、実際に目が
   動いた分なので、跳びが指令より小さくても印は物に残る［Tier3・モデル上の選択］
 
+**目を動かす指令の写しで、目が動いた分を先に知る（段階9、2026-10-18）**：画像のずれ（位相相関）だけでは、物から物への
+大きな跳び（8〜12マス）で 29%、12〜16マスで 4% しか合わなかった（look_diag、`太郎/2026-10-18_段階9_見る時間が短いわけ.md`）。
+外れると名簿の「今見ている物」の印が物から外れ、1.2秒で次へ跳んでいた。人間の脳も、目を動かす指令の写し
+（上丘→視床→前頭眼野、Sommer・Wurtz）で目が動く分を先に知り、画像だけには頼らない。そこで：
+* 目を向ける反射（orienteye）が撃った指令 (h, v) の写しを受け取る（orienteye→eyein、手で足した矢印）。
+  写しは目の出口と同じ回に届き、目が動くのはそのあと（その回の画像は動く前）なので、次の画像まで控えて足し合わせる
+* 指令から画像のずれを予想する：指令1で視野の半分（30度）回る（体の決まり＝生まれつきの較正）。中身は逆へずれ、
+  ずれ＝焦点距離×tan(角度)（旧太郎 taro_core/src/brain/midbrain/efference_copy.py と同じ式・同じ向き）
+* 画像のずれは「予想のまわり（±EFF_WINDOW_PX＋予想の大きさ×EFF_WINDOW_FRAC）の中で一番合う所」だけを残りの
+  小さな直しとして使う。その中の相関の山が EFF_PEAK_MIN より低ければ予想をそのまま使う
+* 旧太郎から持ってきたもの：指令の写しを感覚の側へ先回りして送る考え、角度→画素の式と符号、
+  「使う側が読むまでの分をためて、読むときにまとめて1回渡す」（consume_shift。人間でも写しは跳び1回の振幅として
+  まとめて運ばれる）。旧太郎は目の関節の角度（体の正解）を読んでいたが、ここは指令だけを使う（体の中は読まない）
+* 前の決まり（画像のずれだけ）は ego="image" で選べる（既定は "efference"）
+
 環境からの入力（inbox[ENV]）：左目の画像（224×224×3、uint8）。
 setup() を呼ぶまでは素通し（骨組みのテストは重い視覚を作らずに回る）。
 """
 
 from __future__ import annotations
 
+import math
 import os
 import sys
 
@@ -87,6 +105,15 @@ SAME_COS = 0.6            # これ未満なら見失った［仮置き］
 SCENE_SAME_COS = 0.9      # 画面全体の似かたがこれ未満なら目が跳んだとみて切り出し直す［仮置き］
 JUMP_PX = 28.0            # 画面全体のずれがこれを超えたら切り出し直す（DINOv2 の2マス）
 EGO_SCALE = 0.5           # 目の動きの地図：真ん中からのずれ（マス）にこれを掛けた所に山を置く
+# 指令の写し（段階9）
+EGO_SOURCE = "efference"  # "efference"（指令の写し＋画像の小さな直し）／"image"（前の決まり：画像のずれだけ）
+EYE_HALF_FOV_DEG = 30.0   # 指令 1 で目が回る角度（視野の半分。world_eye/eye.py・orienting.py の HALF_FOV×SACCADE_FRAC）
+F_PX = 112.0 / math.tan(math.radians(30.0))   # 224画素・画角60度の焦点距離（画素）
+EFF_WINDOW_PX = 16.0      # 予想のまわりで画像のずれを探す幅（DINOv2 の約1マス、±）［仮置き］
+EFF_WINDOW_FRAC = 0.25    # 大きい跳びほど体の誤差が大きいので、予想の大きさのこの割合だけ幅を広げる［仮置き］
+EFF_PEAK_MIN = 0.1        # 幅の中の相関の山がこれ未満なら画像を当てにせず予想を使う。代わりの目の40場面で、跳んだ回の山は
+                          # 0.01〜0.12（重なりが小さく当てにならない。山を使うと誤差の真ん中が予想だけの0.6マス→1.0マス）、
+                          # 跳ばない回は1.0。跳んだ回は予想、跳びの残り・体の小さなずれは画像で直す［仮置き］
 
 
 def bump(cx_px: float, cy_px: float, sigma: float = BUMP_SIGMA_CELLS) -> torch.Tensor:
@@ -101,19 +128,48 @@ def bump(cx_px: float, cy_px: float, sigma: float = BUMP_SIGMA_CELLS) -> torch.T
 _HANN = np.outer(np.hanning(224), np.hanning(224)).astype(np.float32)
 
 
-def image_shift(prev_gray: np.ndarray, gray: np.ndarray) -> tuple[float, float, float]:
-    """前の画像から今の画像へ、中身が (dx, dy) 画素ずれたかを位相相関で求める。
-    3つ目は相関の山の高さ（0〜1、低いほど当てにならない）。"""
+def _phase_corr(prev_gray: np.ndarray, gray: np.ndarray) -> np.ndarray:
     f1 = np.fft.fft2(prev_gray * _HANN)
     f2 = np.fft.fft2(gray * _HANN)
     r = f2 * np.conj(f1)
     r /= np.abs(r) + 1e-8
-    c = np.fft.ifft2(r).real
+    return np.fft.ifft2(r).real
+
+
+def image_shift(prev_gray: np.ndarray, gray: np.ndarray) -> tuple[float, float, float]:
+    """前の画像から今の画像へ、中身が (dx, dy) 画素ずれたかを位相相関で求める。
+    3つ目は相関の山の高さ（0〜1、低いほど当てにならない）。"""
+    c = _phase_corr(prev_gray, gray)
     py, px = np.unravel_index(int(np.argmax(c)), c.shape)
     h, w = c.shape
     dy = py - h if py > h // 2 else py
     dx = px - w if px > w // 2 else px
     return float(dx), float(dy), float(c[py, px])
+
+
+def image_shift_near(prev_gray: np.ndarray, gray: np.ndarray, pred: tuple[float, float],
+                     window: float) -> tuple[float, float, float]:
+    """位相相関の山を、予想のずれ pred（画素）のまわり ±window の中だけで探す。(dx, dy, 山の高さ)。"""
+    c = _phase_corr(prev_gray, gray)
+    h, w = c.shape
+    r = int(math.ceil(window))
+    px0, py0 = int(round(pred[0])), int(round(pred[1]))
+    best = (float(px0), float(py0), -1.0)
+    for dy in range(py0 - r, py0 + r + 1):
+        row = c[dy % h]
+        xs = np.arange(px0 - r, px0 + r + 1)
+        vals = row[xs % w]
+        k = int(np.argmax(vals))
+        if float(vals[k]) > best[2]:
+            best = (float(xs[k]), float(dy), float(vals[k]))
+    return best
+
+
+def command_shift(h_dir: float, v_dir: float) -> tuple[float, float]:
+    """目を動かす指令 (h, v)（右・上が正、[-1,1]）から、画像の中身がずれる分 (dx, dy) 画素を予想する。
+    目が右へ回ると中身は左へ（dx<0）、上へ回ると中身は下へ（dy>0。画像の行は下が正）。"""
+    return (-F_PX * math.tan(math.radians(EYE_HALF_FOV_DEG * float(h_dir))),
+            F_PX * math.tan(math.radians(EYE_HALF_FOV_DEG * float(v_dir))))
 
 
 def ego_map(dx_px: float, dy_px: float) -> torch.Tensor:
@@ -196,8 +252,11 @@ def track(prev_dets: list[dict], feats: np.ndarray, n: int, prev_feats: np.ndarr
 class Eyein(Box):
     BOX_ID = "eyein"
 
-    def __init__(self, detect_every: int = DETECT_EVERY, detector: str = "floor") -> None:
+    def __init__(self, detect_every: int = DETECT_EVERY, detector: str = "floor", ego: str = EGO_SOURCE) -> None:
         super().__init__()
+        if ego not in ("efference", "image"):
+            raise ValueError(f"ego は efference か image（{ego}）")
+        self.ego = ego                    # 目が動いた分の求め方（上の説明）
         self.va = None
         self.detector = detector          # "floor"（段階3 作り直し）／"sam"（段階2までの MobileSAM）
         self.detect_every = int(detect_every)
@@ -215,6 +274,8 @@ class Eyein(Box):
             sys.path.insert(0, core_src)
         cfg = dict(DEFAULT_CONFIG)
         cfg.update(config or {})
+        if cfg.get("ego") is not None:
+            self.ego = str(cfg["ego"])
         self.cohesion_gap_px = cfg.get("cohesion_gap_px")
         if self.detector == "sam" or answer_check:
             from brain.cerebral_cortex.parietal_lobe.visual_attention import VisualAttention
@@ -240,7 +301,12 @@ class Eyein(Box):
         self._since_detect = 0
         self._prev_feats = None
         self._prev_gray = None
-        self.last_shift_px = (0.0, 0.0)   # 記録用：前の回から画面全体がずれた分（画素）
+        self.last_shift_px = (0.0, 0.0)   # 前の回から画面全体がずれた分（画素）。目の動きの地図はこれで作る
+        self.last_image_shift_px = (0.0, 0.0)   # 記録用：画像のずれだけで求めた分（前の決まり）
+        self.last_pred_px = (0.0, 0.0)    # 記録用：指令の写しから予想した分
+        self.last_ego_peak = 0.0          # 記録用：予想のまわりの相関の山の高さ
+        self.last_ego_mode = ""           # 記録用："image"／"pred"（予想だけ）／"pred+image"（予想を画像で直した）
+        self._eff_pending = [0.0, 0.0]    # 届いた指令の写しのうち、まだ画像に出ていない分（画素）
         self.last_mode = ""       # 記録用："floor"／"detect"（MobileSAM で全体を切り出した）／"track"
 
     def see(self, img) -> tuple[list, torch.Tensor]:
@@ -253,11 +319,7 @@ class Eyein(Box):
         sal = self._sal.update(img224, (0.0, 0.0), False)["salience"]
         sal = np.clip(np.nan_to_num(np.asarray(sal, dtype=np.float32)), 0.0, 1.0)
         gray = img224.astype(np.float32).mean(axis=2)
-        dx, dy = 0.0, 0.0
-        if self._prev_gray is not None:
-            dx, dy, _peak = image_shift(self._prev_gray, gray)
-        self._prev_gray = gray
-        self.last_shift_px = (dx, dy)
+        dx, dy = self.ego_shift(gray)
         if self.detector == "floor":
             from .. import floor_objects
             dets = floor_objects.detect(self._model, self.device, img224)
@@ -273,6 +335,38 @@ class Eyein(Box):
         self.last_dets = dets
         objs = [(noisy(appearance_tag(d["appearance"])), bump(*d["pos"])) for d in dets]
         return objs, torch.as_tensor(sal, dtype=DTYPE)
+
+    def ego_shift(self, gray: np.ndarray) -> tuple[float, float]:
+        """前の画像から今の画像へ、目が動いたぶん中身がずれた分（画素）。last_shift_px に置いて返す（上の説明）。"""
+        pred = (self._eff_pending[0], self._eff_pending[1])
+        self._eff_pending = [0.0, 0.0]          # 写しはこの画像でまとめて使う（旧太郎の consume_shift）
+        prev, self._prev_gray = self._prev_gray, gray
+        self.last_pred_px = pred
+        if prev is None:
+            self.last_shift_px = self.last_image_shift_px = (0.0, 0.0)
+            self.last_ego_mode = ""
+            return self.last_shift_px
+        ix, iy, _peak = image_shift(prev, gray)
+        self.last_image_shift_px = (ix, iy)
+        if self.ego == "image":
+            self.last_shift_px, self.last_ego_mode = (ix, iy), "image"
+            return self.last_shift_px
+        window = EFF_WINDOW_PX + EFF_WINDOW_FRAC * math.hypot(*pred)
+        nx, ny, peak = image_shift_near(prev, gray, pred, window)
+        self.last_ego_peak = peak
+        if peak >= EFF_PEAK_MIN:
+            self.last_shift_px, self.last_ego_mode = (nx, ny), "pred+image"
+        else:
+            self.last_shift_px, self.last_ego_mode = pred, "pred"
+        return self.last_shift_px
+
+    def take_efference(self, cmd) -> None:
+        """目を動かす指令の写しを受け取り、次の画像まで控える（動くのは、写しが届いた回のあと）。"""
+        if cmd is None or float(torch.linalg.vector_norm(cmd)) <= 0.0:
+            return
+        dx, dy = command_shift(float(cmd[0]), float(cmd[1]))
+        self._eff_pending[0] += dx
+        self._eff_pending[1] += dy
 
     def _see_sam(self, img224, dx, dy) -> list[dict]:
         """段階2までの切り出し（MobileSAM。DETECT_EVERY 回に1回、間は前の物を見た目で追う）。"""
@@ -301,10 +395,13 @@ class Eyein(Box):
         if not getattr(self, "_ready", False) or inbox.get(ENV) is None:
             return out
         objs, sal = self.see(inbox[ENV])
-        out["gaze"] = objs
-        out["semantic"] = objs      # 段階3：意味の辞書が名前と見ている物を結び付ける
-        # 段階3：復帰抑制の印を物に付けて動かす。最後に目の動きの地図（荷札ゼロ）を足す
-        out["orienteye"] = objs[:MAX_OBJECTS - 1] + [(torch.zeros(TAG_DIM, dtype=DTYPE),
-                                                     ego_map(*self.last_shift_px))]
+        # 段階9：この回に届いた指令の写しは、この画像のあとの動き（次の画像で使う）
+        self.take_efference(inbox.get("orienteye"))
+        # 段階4：物は物の名簿へ。最後に目の動きの地図（荷札ゼロ）を足す。段階3で意味の辞書・目を向ける
+        # 反射へ直接送っていた物の列は、名簿が引き受けたので送らない（矢印は構造図どおり残し、ゼロ）
+        # 段階9：名簿と gaze へは種類の層（kind）を通して渡す。kind へは段階4〜8の eyein→objfile と同じ列を送る
+        # （gaze の分は kind が同じ列から作る。eyein→gaze の矢印は構造図どおり残し、空）
+        out["kind"] = objs[:MAX_OBJECTS - 1] + [(torch.zeros(TAG_DIM, dtype=DTYPE),
+                                                ego_map(*self.last_shift_px))]
         out["prio"] = sal
         return out

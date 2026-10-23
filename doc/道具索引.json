@@ -3210,9 +3210,30 @@
    "_qpos_by_joint",
    "make_scene"
   ],
-  "lines": 143,
+  "lines": 146,
   "goal": "",
   "last_commit": "2026-10-15"
+ },
+ {
+  "path": "run/scene_tools/make_sy6_xml.py",
+  "doc": "benchmarkv2_scene_sy6.xml（スミスとユーの6物体入りの舞台）を作る。",
+  "defs": [
+   "_extra",
+   "main"
+  ],
+  "lines": 58,
+  "goal": "",
+  "last_commit": ""
+ },
+ {
+  "path": "run/scene_tools/make_sy_scene.py",
+  "doc": "段階6（スミスとユーの再現）の場面を作る：6つの物を2つずつ左右に出す。",
+  "defs": [
+   "make_scene"
+  ],
+  "lines": 99,
+  "goal": "",
+  "last_commit": ""
  },
  {
   "path": "run/scene_tools/scene_io.py",
@@ -3251,7 +3272,7 @@
    "from_env_var",
    "open_scene"
   ],
-  "lines": 1830,
+  "lines": 1834,
   "goal": "",
   "last_commit": "2026-10-15"
  },

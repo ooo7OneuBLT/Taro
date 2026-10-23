@@ -201,3 +201,6 @@ doc/文献調査/
 *.mp4
 *.mov
 *.avi
+
+# 本物の物の元ファイル（GSO・Objaverse、約600MB。core_v2/tools/make_real_objects --fetch で取り直せる）
+G/assets/

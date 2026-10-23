@@ -4,6 +4,7 @@
   **同じ行列**を使わないと、登録した荷札と見えている荷札が比べられなくなる。
   だから行列はここ1か所で、種を固定して作る（学習しない。段階3でNNに替える対象）
 * 語→荷札：聞き分ける係（listen）が使う。語ごとに種を決めた乱数ベクトル
+* 状態→荷札（段階8）：驚きの荷札。語と同じ作り方で、別の種
 * 雑音：仮部品の荷札はきれいすぎて、NNに替えたときに初めて問題が出る（設計書 リスク1）。
   semantic と eyein が出す荷札に N(0, NOISE_SIGMA²) を足して正規化し直す
 """
@@ -44,6 +45,12 @@ def word_tag(word: str) -> torch.Tensor:
     seed = int.from_bytes(hashlib.sha256(word.encode("utf-8")).digest()[:8], "little")
     g = np.random.default_rng(seed)
     return make_tag(g.standard_normal(TAG_DIM).astype(np.float32))
+
+
+def state_tag(name: str) -> torch.Tensor:
+    """段階8：体の中の状態（例「予想外」）の荷札。語の荷札と同じ作り方（決まった乱数・生まれつきの符号）だが、
+    種の頭に "state:" を付けて、同じ字の語の荷札とは別の数にする。見た目とは無関係。"""
+    return word_tag("state:" + name)
 
 
 def noisy(tag: torch.Tensor, sigma: float = NOISE_SIGMA) -> torch.Tensor:

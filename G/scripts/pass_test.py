@@ -24,6 +24,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, os.pardir, os.pardir))
 sys.path.insert(0, REPO)
+import core_v2  # noqa: E402,F401  負荷の決まり（core_v2/perf.py：スレッド1本など）を numpy・torch より先に効かせる
 
 import numpy as np
 
@@ -53,6 +54,8 @@ def judge(rows, target, cfg):
         return res
     i0 = heard[0]
     res["heard_t"] = rows[i0]["t"]
+    # 段階5のC：発話のあと目的が置かれたか（知らない語では置かれないはず）
+    res["goal_set"] = any(r.get("goal.age") not in ("", None) for r in rows[i0:])
     res["already_on_target"] = look[i0] == target
     res["n_saccades_after"] = sum(1 for r in rows[i0:] if r["cmd_h"] not in (None, ""))
     need = int(round(cfg["b_hold_s"] / dt))
@@ -189,7 +192,8 @@ def plot(trials, cfg, out):
 def main(cfg_path, quick=False, plot_only=False):
     with open(cfg_path, encoding="utf-8") as f:
         cfg = json.load(f)
-    out = os.path.join(REPO, cfg["out"] + ("_quick" if quick else ""))
+    from core_v2.world_eye.switch import suffix
+    out = os.path.join(REPO, suffix(cfg["out"]) + ("_quick" if quick else ""))
     os.makedirs(out, exist_ok=True)
     seeds = cfg["seeds"][:1] if quick else cfg["seeds"]
     trials = []
@@ -204,10 +208,15 @@ def main(cfg_path, quick=False, plot_only=False):
         if cfg.get("semantic_table"):
             meta_sem = {"table": sem.load_table(os.path.join(REPO, cfg["semantic_table"]))}
         elif cfg.get("semantic_learned"):
-            meta_sem = {"learned": sem.load_learned(os.path.join(REPO, cfg["semantic_learned"]))}
+            # 目だけの場面では、目だけの場面で学んだ表（learn_names --world eye の出力 *_目だけ.pt）を読む
+            meta_sem = {"learned": sem.load_learned(os.path.join(REPO, suffix(cfg["semantic_learned"][:-3]) + ".pt"))}
         else:
             meta_sem = {"empty": True}
         sem.learning = False
+        # 段階5：聞き分ける係を親の話しかけで育てた耳（core_v2/tools/hear_parent.py）。無ければ何も聞き取れない
+        if cfg.get("listen_ear"):
+            meta_sem["ear"] = brain.boxes["listen"].load_ear(os.path.join(REPO, cfg["listen_ear"]))
+        brain.boxes["listen"].learning = False
         brain.boxes["orienteye"].use_ior = bool(cfg.get("use_ior", True))
         t_start = time.time()
         for scene in cfg["scenes"]:
@@ -232,7 +241,7 @@ def main(cfg_path, quick=False, plot_only=False):
                 finally:
                     run_v2.close_env(env)
         # 脳の保存（段階2の仮部品に学習する重みは無いが、型どおり版と配線の指紋を残す）
-        save(brain, os.path.join(REPO, "G", "models", cfg.get("brain_out", "段階2_合格テスト_brain.pt")),
+        save(brain, os.path.join(REPO, "G", "models", suffix(cfg.get("brain_out", "段階2_合格テスト_brain.pt")[:-3]) + ".pt"),
              extra={"experiment": cfg["name"], "semantic": meta_sem,
                     "use_ior": bool(cfg.get("use_ior", True))})
         print(f"全体 {time.time() - t_start:.0f}秒", flush=True)
@@ -260,9 +269,12 @@ def main(cfg_path, quick=False, plot_only=False):
             "n_reached": len(d),
             "dwell_s_median": float(np.median([t["res"]["dwell_s"] for t in sel])),
             "B_control": (sum(t["res"].get("B_control", 0) for t in sel) if cfg.get("control") else None),
+            "goal_set": sum(bool(t["res"].get("goal_set")) for t in sel),
             # 段階3の③（学ぶ前は分からない）は「B − B_control が max_diff 以下」で合格
-            "pass": ((sum(t["res"]["B"] for t in sel) - sum(t["res"].get("B_control", 0) for t in sel)
-                      <= cfg["max_diff"]) if "max_diff" in cfg
+            # 段階5のC（知らない語）は「目的が置かれた試行が0」で合格
+            "pass": ((sum(bool(t["res"].get("goal_set")) for t in sel) == 0) if cfg.get("expect_no_goal")
+                     else (sum(t["res"]["B"] for t in sel) - sum(t["res"].get("B_control", 0) for t in sel)
+                           <= cfg["max_diff"]) if "max_diff" in cfg
                      else sum(t["res"]["B"] for t in sel) >= cfg["pass_count"]) and not quick}
     # 同じ物を見た数を、言葉どうしで比べる（2026-10-16）：物 X について「X を指す言葉のとき X を見た数」
     # − 「ほかの言葉（X を control に持つ）のとき X を見た数」。B − B_control（同じ言葉で物どうし）は物の
@@ -295,5 +307,7 @@ def main(cfg_path, quick=False, plot_only=False):
 
 
 if __name__ == "__main__":
+    from core_v2.world_eye.switch import pop_world_flag, select
+    select(pop_world_flag(sys.argv))      # --world eye|mimo（既定 mimo）
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     main(args[0], quick="--quick" in sys.argv, plot_only="--plot-only" in sys.argv)

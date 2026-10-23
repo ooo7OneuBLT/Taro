@@ -1,0 +1,39 @@
+{
+  "name": "段階5_D3_学ぶ前_2026-10-16",
+  "about": "聞き分ける係をNNに替えた版（段階5、仕様書 2026-10-16_段階5_仕様書_聞き分ける係をNNに.md）。耳は親の話しかけ1000文で育てたもの（core_v2/tools/hear_parent.py 1000、G/models/段階5_耳.pt）。D③：空の辞書。言葉どうしの差（same_object_across_words）2以下なら合格",
+  "scenes": [
+    "段階2b_3物体_ボール左_2026-10-15",
+    "段階2b_3物体_ボール右_2026-10-15"
+  ],
+  "seeds": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9
+  ],
+  "word_t": 4.0,
+  "duration_s": 10.0,
+  "look_deg": 10.0,
+  "b_within_s": 3.0,
+  "b_hold_s": 1.0,
+  "pass_count": 18,
+  "words": {
+    "ボールはどこ？": "ball",
+    "コップはどこ？": "cup"
+  },
+  "use_ior": true,
+  "brain_out": "段階5_D3_学ぶ前_brain.pt",
+  "out": "G/logs/段階5_D3_学ぶ前_2026-10-16",
+  "listen_ear": "G/models/段階5_耳.pt",
+  "control": {
+    "ボールはどこ？": "cup",
+    "コップはどこ？": "ball"
+  },
+  "max_diff": 2
+}

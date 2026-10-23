@@ -24,10 +24,15 @@ from core_v2.formats import GRID, TAG_DIM, FormatError, Fmt, check, make_tag, ze
 # ---------------------------------------------------------------- 配線表
 
 def test_wiring_counts():
-    assert len(wiring.BOX_IDS) == 41
-    assert len(wiring.EDGES) == 118
+    assert len(wiring.BOX_IDS) == 44                # 段階4で物の名簿（objfile）、段階9で種類の層（kind）・物の音の入口（soundin）を足した
+    assert len(wiring.EDGES) == 132                 # 段階8で objfile→surprise・surprise→semantic、段階9で7本足し eyein→objfile を eyein→kind に替えた、orienteye→eyein（指令の写し）
     added = [e for e in wiring.EDGES if e.added]
-    assert [(e.src, e.dst) for e in added] == [("listen", "semantic")]
+    assert [(e.src, e.dst) for e in added] == [("listen", "semantic"), ("eyein", "kind"), ("kind", "objfile"),
+                                               ("kind", "gaze"), ("objfile", "kind"), ("listen", "kind"),
+                                               ("soundin", "kind"), ("soundin", "semantic"), ("prio", "objfile"),
+                                               ("orienteye", "objfile"), ("orienteye", "eyein"), ("objfile", "orienteye"),
+                                               ("objfile", "semantic"), ("objfile", "surprise"),
+                                               ("surprise", "semantic")]
 
 
 def test_every_box_has_its_own_file():
@@ -45,7 +50,12 @@ def test_path_formats():
     assert fmt[("gaze", "eyeout")] == (Fmt.TAG, None)  # 追従の道は段階2では素通し
     assert fmt[("eyein", "semantic")] == (Fmt.TAG_AND_MAP, None)  # 段階3
     assert fmt[("eyein", "orienteye")] == (Fmt.TAG_AND_MAP, None)  # 段階3
-    assert sum(1 for e in wiring.EDGES if e.key in wiring.PATH_FORMATS) == 16
+    assert fmt[("listen", "voice")] == (Fmt.TEXT, None)   # 段階7
+    assert fmt[("voice", "voiceout")] == (Fmt.MOTOR, 22)
+    assert fmt[("voice", "listen")] == (Fmt.TEXT, None)    # 段階9：戻るはずの自分の音
+    assert fmt[("objfile", "surprise")] == (Fmt.TAG_AND_MAP, None)   # 段階8
+    assert fmt[("surprise", "semantic")] == (Fmt.AMOUNT, None)
+    assert sum(1 for e in wiring.EDGES if e.key in wiring.PATH_FORMATS) == 36   # 段階9で7本（7本足し eyein→objfile を外した、orienteye→eyein）
 
 
 # ---------------------------------------------------------------- 書式

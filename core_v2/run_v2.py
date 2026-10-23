@@ -87,13 +87,19 @@ def frame_at(env) -> np.ndarray:
 
 
 def directions(env, R0: np.ndarray) -> dict[str, float]:
-    """視線と3つの物の方向を、基準の向き R0 の右・上の角度（度）で表す（絵の軌跡用）。"""
+    """視線と3つの物の方向を、基準の向き R0 の右・上の角度（度）で表す（絵の軌跡用）。
+    場面に無い物は書かない（目だけの場面の段階6は test_object1・2 と sy_obj0〜5 だけで、test_object3 が無い。
+    2026-10-18 smith_yu --world eye が KeyError で止まった）。"""
     u = env.unwrapped
     cid = int(u.model.camera("eye_left").id)
     eye = np.array(u.data.cam_xpos[cid], dtype=float)
     vecs = {"gaze": u._gaze_dir()}
     for k, body in OBJECTS.items():
-        v = np.array(u.data.body(body).xpos, dtype=float) - eye
+        try:
+            pos = u.data.body(body).xpos
+        except KeyError:
+            continue
+        v = np.array(pos, dtype=float) - eye
         vecs[k] = v / np.linalg.norm(v)
     out = {}
     for k, v in vecs.items():
@@ -135,18 +141,40 @@ def path_record(brain) -> dict[str, Any]:
     rec["orienteye.reason"] = oe.last_reason
     rec["orienteye.ior_max"] = round(float(oe.ior.max()), 3)
     rec["orienteye.ior_at_peak"] = round(oe.last_ior_at_peak, 3)
-    rec["orienteye.n_dishab"] = oe.n_dishab
-    rec["orienteye.shift"] = f"{oe.last_shift[0]:.2f},{oe.last_shift[1]:.2f}"   # 印をずらした分（行,列）
+    of = brain.boxes["objfile"]
+    rec["objfile.rows"] = of.summary()          # 番号:かけら数:強さ@行,列（*＝今見ている行）
+    rec["objfile.named"] = of.named.number if of.named is not None and of.named in of.rows else ""
+    rec["objfile.n_merge"] = of.n_merge
+    rec["objfile.n_dishab"] = of.n_dishab
+    rec["objfile.shift"] = f"{of.last_shift[0]:.2f},{of.last_shift[1]:.2f}"   # 行をずらした分（行,列）
+    ear = brain.boxes["listen"]
+    rec["listen.chunks"] = " / ".join("|".join(c) for c in ear.last_chunks)   # 切ったかたまり（段階5）
+    rec["listen.word"] = ear.last_word                                          # 意味の辞書へ渡した語
     sem = brain.boxes["semantic"]
     rec["semantic.event"] = sem.last_event
     rec["semantic.recall_norm"] = round(sem.last_recall_norm, 3)
     return rec
 
 
+SAID_GAP_TICKS = 6     # 太郎の声がこれだけ途切れたら1つの声が終わったとみなす（voice_bed.END_GAP_TICKS と同じ）
+
+
+def taro_said(u, text: str) -> None:
+    """太郎の声を親の耳へ：目だけの場面は env.taro_said、MIMo の場面は旧太郎と同じ合図（_taro_voice_signal・_taro_voice_text）。"""
+    f = getattr(u, "taro_said", None)
+    if callable(f):
+        f(text)
+    else:
+        u._taro_voice_signal = True
+        u._taro_voice_text = str(text)
+
+
 def run_trial(brain, env, *, seed: int, duration_s: float = 10.0,
               on_tick: Callable[[dict[str, Any]], None] | None = None,
               manual_eye: Callable[[int, Any], tuple[float, float] | None] | None = None,
-              use_brain: bool = True, start_jitter: float = START_JITTER) -> list[dict[str, Any]]:
+              use_brain: bool = True, start_jitter: float = START_JITTER,
+              age_months: float | None = None,
+              on_image: Callable[[int, Any], None] | None = None) -> list[dict[str, Any]]:
     """1試行を回し、脳1回ごとの記録（辞書）の列を返す。
 
     manual_eye : 確かめ用。(tick 番号, 脳が出した方向 or None) を受けて、目へ入れる方向（None なら入れない）を返す。
@@ -154,6 +182,11 @@ def run_trial(brain, env, *, seed: int, duration_s: float = 10.0,
     use_brain  : False なら脳を回さない（環境だけ・確かめ用）
     start_jitter : 試行の頭で、目を種ごとに決まった少しずれた向きへ1回跳ばす大きさ（[-1,1]の方向の幅）。
                  0 なら跳ばさない
+    on_image   : 段階8。(tick 番号, その回に脳へ入れた左目の画像) を毎回受ける（環境を変える道具が、変える前後の画像を残すため）
+    age_months : 段階7。太郎の月齢（か月）。声の出口へ毎回渡す（口の表が月齢で変わる）。None なら渡さない（0か月＝母音だけ）。
+                 声の出口が出した字は、次の回に親の声と一緒に耳の入口へ入れる（自分の声を聞く。声の係→聞き分けの
+                 「自分の声の写し」は脳の中の矢印なので、ここでは何もしない）。声の係は既定で覚えず喃語も出さないので、
+                 段階2〜6の試行は声を出さず、結果は変わらない。記録の "voice" にその回に出た字
 
     **段階3の確かめで見つけた不具合（2026-10-16）**：前の試行の最後に出した目の指令が、反応の遅れの
     ぶん実行されないまま、目の仕組みの控え（_orienting._map_target）に残り、次の試行の頭で撃たれて
@@ -175,27 +208,49 @@ def run_trial(brain, env, *, seed: int, duration_s: float = 10.0,
     R0 = frame_at(env)
     act = zero_action(env)
     rows = []
+    echo = ""
+    said, quiet = "", 0
     n_ticks = int(round(duration_s / (K * DT)))
     for i in range(n_ticks):
         heard = []
+        sound = None
         for _ in range(K):
             obs, _r, term, trunc, info = env.step(act)
+            if info.get("object_sound") is not None:     # 段階9：物の音（波形、16kHz）。環境が鳴らした歩だけ
+                sound = info["object_sound"]
             utt = info.get("parent_utterance")
             if utt and utt.get("text"):
                 heard.append(str(utt["text"]))
             if term or trunc:
                 raise RuntimeError(f"試行の途中で環境が終わった（t={u.data.time:.2f}）")
         text = " ".join(heard)
+        if on_image is not None:
+            on_image(i, obs["eye_left"])
         cmd = None
         to_env = {}
         if use_brain:
-            to_env = brain.tick({"eyein": obs["eye_left"], "earin": text})
+            ext = {"eyein": obs["eye_left"], "earin": " ".join(x for x in (echo, text) if x)}
+            if age_months is not None:
+                ext["voiceout"] = float(age_months)
+            if sound is not None:
+                ext["soundin"] = sound
+            to_env = brain.tick(ext)
             cmd = to_env.get("eyeout")
+        echo = to_env.get("voiceout", "")
+        # 段階9：太郎の声を親の耳へも（ParentLabeling の respond_to_voice が読む合図。旧太郎の brain_tick と同じ約束）。
+        # 1音ずつではなく、声が SAID_GAP_TICKS 回途切れたら1つの声として渡す。今の場面は respond_to_voice を使っていないので親は変わらない
+        if echo:
+            said, quiet = said + echo, 0
+        elif said:
+            quiet += 1
+            if quiet >= SAID_GAP_TICKS:
+                taro_said(u, said)
+                said, quiet = "", 0
         if manual_eye is not None:
             cmd = manual_eye(i, cmd)
         if cmd is not None:
             u._orienting.set_map_target(float(cmd[0]), float(cmd[1]))
-        row = {"tick": i, "t": float(u.data.time), "heard": text,
+        row = {"tick": i, "t": float(u.data.time), "heard": text, "voice": echo,
                "cmd_h": None if cmd is None else float(cmd[0]),
                "cmd_v": None if cmd is None else float(cmd[1])}
         row.update({f"ang_{k}": v for k, v in gaze_angles(env).items()})

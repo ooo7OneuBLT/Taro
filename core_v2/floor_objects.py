@@ -46,8 +46,10 @@ def dino_features(model, device, img224: np.ndarray) -> tuple[np.ndarray, np.nda
     mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
     std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
     x = torch.from_numpy(((big.astype(np.float32) / 255.0 - mean) / std).transpose(2, 0, 1))[None]
-    with torch.no_grad():
-        p = model.forward_features(x.to(device))["x_norm_patchtokens"][0].cpu().numpy()
+    # GPU では半分の精度で計算（約2倍速い。特徴の似かた 0.99 以上・目だけのテストの成績は同じ、2026-10-17）
+    half = torch.autocast("cuda", dtype=torch.float16, enabled=str(device).startswith("cuda"))
+    with torch.no_grad(), half:
+        p = model.forward_features(x.to(device))["x_norm_patchtokens"][0].float().cpu().numpy()
     n = int(round(np.sqrt(p.shape[0])))
     f = p / (np.linalg.norm(p, axis=1, keepdims=True) + 1e-8)
     return p, f, n

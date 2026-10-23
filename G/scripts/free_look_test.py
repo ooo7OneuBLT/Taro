@@ -18,6 +18,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, os.pardir, os.pardir))
 sys.path.insert(0, REPO)
+import core_v2  # noqa: E402,F401  負荷の決まり（core_v2/perf.py：スレッド1本など）を numpy・torch より先に効かせる
 sys.path.insert(0, HERE)
 
 from pass_test import OBJ_JA, load_rows, looking  # noqa: E402
@@ -69,7 +70,8 @@ def plot(summary, out):
 def main(cfg_path, quick=False, plot_only=False, only=None):
     with open(cfg_path, encoding="utf-8") as f:
         cfg = json.load(f)
-    out = os.path.join(REPO, cfg["out"] + ("_quick" if quick else ""))
+    from core_v2.world_eye.switch import suffix
+    out = os.path.join(REPO, suffix(cfg["out"]) + ("_quick" if quick else ""))
     os.makedirs(out, exist_ok=True)
     seeds = cfg["seeds"][:1] if quick else cfg["seeds"]
     trials = []
@@ -136,6 +138,8 @@ def main(cfg_path, quick=False, plot_only=False, only=None):
 
 
 if __name__ == "__main__":
+    from core_v2.world_eye.switch import pop_world_flag, select
+    select(pop_world_flag(sys.argv))      # --world eye|mimo（既定 mimo）
     argv = sys.argv[1:]
     only = argv[argv.index("--only") + 1] if "--only" in argv else None
     args = [a for a in argv if not a.startswith("--") and a != only]
