@@ -192,6 +192,24 @@ def test_resolution_keeps_shapes():
             assert len({im.astype(np.uint8).tobytes() for im in imgs}) == S.N_SHAPES, (P, vt, c, pr)
 
 
+def test_top_agent_differs_from_buttons_and_deco():
+    """P=5 で、上からの「自分」の絵（床の上）と、すべてのボタン・飾りとの画素の差が、ボタンどうしの差の最小より大きい。"""
+    env = ButtonWorld(Config(P=5))
+    L = S.layout()
+    table = np.asarray(env.table).astype(np.float32)
+    a = np.asarray(env.agent_alpha)[0][..., None]
+    for th in range(S.N_THEMES):
+        vt = 0 * S.N_THEMES + th
+        floor = table[L["bg0"] + vt * S.N_BG + 0]
+        agent = np.round(floor * (1 - a) + np.asarray(env.agent_img)[0] * a)
+        btns = [table[L["btn0"] + ((vt * S.N_SHAPES + s) * S.N_COLORS + c) * 2 + pr] for s in range(S.N_SHAPES) for c in range(S.N_COLORS) for pr in (0, 1)]
+        decos = [table[L["deco0"] + vt * S.N_COLORS + c] for c in range(S.N_COLORS)]
+        b = np.stack(btns).reshape(len(btns), -1)
+        dmin_btn = min(np.abs(b[i] - b[j]).mean() for i in range(len(b)) for j in range(i + 1, len(b)))
+        d_agent = min(np.abs(agent - x).mean() for x in btns + decos)
+        assert d_agent > dmin_btn, (th, d_agent, dmin_btn)
+
+
 def test_similarity_knob_by_pixels():
     tr, far = (3, 0, 1, 2), (0, 1, 0, 1)
     assert features_for_similarity(tr, far, 1.0) == tr
