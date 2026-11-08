@@ -1,0 +1,3 @@
+{"n_envs": 4096, "P": 5, "render": true, "obs": "45x45x3", "steps_per_sec": 5819037, "compile_s": 5.5, "gpu_peak_gb": 0.088, "ram_peak_gb": 1.19, "version": "2026-11-08 直し1回目（3段の床とはしご）"}
+{"n_envs": 4096, "P": 5, "render": true, "obs": "45x45x3", "steps_per_sec": 6083530, "compile_s": 5.1, "gpu_peak_gb": 0.088, "ram_peak_gb": 1.2, "version": "2026-11-08 直し1回目（3段の床とはしご）"}
+{"n_envs": 4096, "P": 5, "render": true, "obs": "45x45x3", "steps_per_sec": 5692067, "compile_s": 5.1, "gpu_peak_gb": 0.088, "ram_peak_gb": 1.2, "version": "2026-11-08 直し1回目（3段の床とはしご）"}
