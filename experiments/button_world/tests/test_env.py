@@ -242,6 +242,18 @@ def test_strict_rules_give_solvable_layouts():
                 assert np.array_equal(ok, np.asarray(st.layout_ok))
 
 
+def test_good_rank_is_uniform():
+    """厳しいルールの配置では、効くボタンが始めの場所から近い順で何番目かが均等になる（近さの手がかりが無い）。"""
+    for nb in (3, 6):
+        for view in (0, 1):
+            env = ButtonWorld(Config(P=3, wrong_button="end_episode", n_buttons=nb, views=(view,), layout_pool=nb * 200))
+            _, st = jax.jit(jax.vmap(env.reset))(jax.random.split(jax.random.PRNGKey(view + 7 * nb), 1200))
+            ranks = np.asarray(jax.vmap(env.good_rank)(st, jax.random.split(jax.random.PRNGKey(3), 1200)))
+            freq = np.bincount(ranks, minlength=nb) / len(ranks)
+            assert np.all(np.abs(freq - 1 / nb) < 0.06), (nb, view, freq)
+            assert np.asarray(jax.vmap(env.solvable)(st)).all()
+
+
 def test_deco_colors_match_buttons():
     for seed in range(50):
         _, s = ENV.reset(jax.random.PRNGKey(seed))

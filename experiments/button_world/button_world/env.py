@@ -337,27 +337,81 @@ class ButtonWorld:
         r2 = self._reach(state._replace(door_open=jnp.array(True)), good, wrong)
         return r1[good] & r2[door]
 
-    def _build_pool(self):
-        """解ける配置を視点ごとに layout_pool 個つくる。効くボタンは番号0に置いておく（引く時に並べ替える）。"""
+    def distances(self, state, src, terminal):
+        """src からの歩数（届かなければ大きな値）。terminal のマスには入れるが、その先へは進まない。"""
+        T = self.transitions(state)
+        big = 9999
+        f = jnp.full((H * W,), big).at[src].set(0)
+
+        def body(_, f):
+            ok = (~terminal | (jnp.arange(H * W) == src)) & (f < big)
+            vals = jnp.broadcast_to(jnp.where(ok, f + 1, big)[:, None], (H * W, 5))
+            return f.at[T.reshape(-1)].min(vals.reshape(-1))
+
+        return jax.lax.fori_loop(0, 48, body, f)
+
+    def good_rank(self, state, key=None):
+        """効くボタンが、始めの場所から近い順で何番目か（0 が一番近い）。ほかのボタンは通り抜けない最短路で測る。
+        同じ距離のボタンがある時は、その中での順番をでたらめに決める（key が無ければ一番前とみなす）。"""
         cfg = self.cfg
+        bidx = state.btn_pos[:, 0] * W + state.btn_pos[:, 1]
+        is_btn = jnp.zeros((H * W,), bool).at[bidx].set(True)
+        d = self.distances(state, state.start[0] * W + state.start[1], is_btn)[bidx]
+        g = state.game.good
+        others = jnp.arange(cfg.n_buttons) != g
+        closer = jnp.sum((d < d[g]) & others)
+        if key is None:
+            return closer
+        ties = jnp.sum((d == d[g]) & others)
+        return closer + jax.random.randint(key, (), 0, ties + 1)
+
+    def _build_pool(self):
+        """解ける配置を視点ごとに layout_pool 個つくる。効くボタンは番号0に置いておく（引く時に並べ替える）。
+
+        同じ配置でボタンのどれを効くボタンにするかも全部試し、効くボタンが「始めの場所から近い順で何番目か」が
+        均等になるように、順位ごとに layout_pool / n_buttons 個ずつ集める（近いボタンほど当たりやすい手がかりを消す）。
+        """
+        cfg = self.cfg
+        nb = cfg.n_buttons
+        per_rank = cfg.layout_pool // nb
         pools, stats = [], {}
         for view in range(S.N_VIEWS):
-            game = Game(jnp.array(view, jnp.int32), jnp.array(0, jnp.int32), jnp.arange(cfg.n_buttons, dtype=jnp.int32),
+            game = Game(jnp.array(view, jnp.int32), jnp.array(0, jnp.int32), jnp.arange(nb, dtype=jnp.int32),
                         jnp.array(0, jnp.int32), jnp.zeros((cfg.n_deco,), jnp.int32))
             make = jax.jit(jax.vmap(lambda k: self._layout_state(k, game, 0, 0)))
-            check = jax.jit(jax.vmap(self.solvable))
-            kept, n_drawn, n_ok, seed = [], 0, 0, 0
-            while n_ok < cfg.layout_pool:
+            check = jax.jit(jax.vmap(lambda st, k: (self.solvable(st), self.good_rank(st, k))))
+            buckets = [[] for _ in range(nb)]
+            counts = [0] * nb
+            n_drawn = n_ok = 0
+            seed = 0
+            while min(counts) < per_rank and seed < 400:
                 cands = make(jax.random.split(jax.random.PRNGKey(10_000 + 97 * view + seed), 4096))
-                ok = np.asarray(check(cands))
-                kept.append(jax.tree.map(lambda x: x[np.flatnonzero(ok)], cands))
-                n_drawn += len(ok)
-                n_ok += int(ok.sum())
+                for j in range(nb):
+                    order = (jnp.arange(nb) + j) % nb  # 番号 j のボタンを番号0（効くボタン）にする
+                    var = cands._replace(btn_pos=cands.btn_pos[:, order])
+                    ok, rank = map(np.asarray, check(var, jax.random.split(jax.random.PRNGKey(77_000 + 1000 * seed + j + 97 * view), len(var.game.view))))
+                    n_drawn += len(ok)
+                    n_ok += int(ok.sum())
+                    for r in range(nb):
+                        if counts[r] >= per_rank:
+                            continue
+                        sel = np.flatnonzero(ok & (rank == r))[: per_rank - counts[r]]
+                        if len(sel):
+                            buckets[r].append(jax.tree.map(lambda x: x[sel], var))
+                            counts[r] += len(sel)
                 seed += 1
-            pool = jax.tree.map(lambda *xs: jnp.concatenate(xs)[: cfg.layout_pool], *kept)
+            parts = [b for r in range(nb) for b in buckets[r]]
+            pool = jax.tree.map(lambda *xs: jnp.concatenate(xs), *parts)
+            size = min(c for c in counts) * nb
+            # 順位ごとに同じ数だけ残す（足りない順位があればそれに合わせる）
+            keep = np.concatenate([np.arange(sum(counts[:r]), sum(counts[:r]) + min(counts)) for r in range(nb)])
+            keep = keep[np.random.RandomState(view).permutation(len(keep))]  # 順位の並びを混ぜる（あとで数を切りそろえても偏らないように）
+            pool = jax.tree.map(lambda x: x[keep], pool)
             pools.append(pool)
-            stats[view] = dict(drawn=n_drawn, solvable=n_ok, solvable_rate=n_ok / n_drawn)
-        self.pool = jax.tree.map(lambda a, b: jnp.stack([a, b]), *pools)
+            stats[view] = dict(drawn=n_drawn, solvable=n_ok, solvable_rate=n_ok / max(n_drawn, 1), per_rank=min(counts), size=size)
+        size = min(st["size"] for st in stats.values())
+        self.pool = jax.tree.map(lambda a, b: jnp.stack([a[:size], b[:size]]), *pools)
+        self.pool_size = size
         self.pool_stats = stats
 
     def _new_episode(self, key, game, episode_in_game, game_id):
@@ -367,7 +421,7 @@ class ButtonWorld:
             return self._layout_state(key, game, episode_in_game, game_id)
         if not hasattr(self, "pool"):
             self._build_pool()
-        i = jax.random.randint(key, (), 0, cfg.layout_pool)
+        i = jax.random.randint(key, (), 0, self.pool_size)
         e = jax.tree.map(lambda x: x[game.view, i], self.pool)
         # ためた配置は効くボタンが番号0。このゲームの効くボタンの番号 good へ並べ替える
         slots = (jnp.arange(cfg.n_buttons) - game.good) % cfg.n_buttons
