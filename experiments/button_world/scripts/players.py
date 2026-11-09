@@ -28,6 +28,8 @@ p = argparse.ArgumentParser()
 p.add_argument("--n_envs", type=int, default=1024)
 p.add_argument("--steps", type=int, default=1200)
 p.add_argument("--out", required=True)
+p.add_argument("--rules", default="none,reset_to_start,end_episode")
+p.add_argument("--nbs", default="3,6")
 args = p.parse_args()
 os.makedirs(args.out, exist_ok=True)
 
@@ -189,10 +191,17 @@ def summarize(o):
 results = {}
 timing = {}
 t_all = time.time()
-for nb in (3, 6):
-    for rule in RULES:
+pool_stats = {}
+for nb in [int(x) for x in args.nbs.split(",")]:
+    for rule in args.rules.split(","):
         for view in (0, 1):
+            t_env = time.time()
             env = ButtonWorld(Config(P=3, views=(view,), n_buttons=nb, wrong_button=rule))
+            if hasattr(env, "pool_stats"):
+                st = env.pool_stats[view]
+                pool_stats[f"{rule}・ボタン{nb}個・{VIEWS[view]}"] = {
+                    "引いた配置": st["drawn"], "解ける配置": st["solvable"], "1回で解ける割合": round(st["solvable_rate"], 4),
+                    "引き直しの割合": round(1 - st["solvable_rate"], 4), "ためるのにかかった秒数": round(time.time() - t_env, 1)}
             run = make_runner(env, nb, rule != "none")
             name = f"{rule}・ボタン{nb}個・{VIEWS[view]}"
             results[name] = {}
@@ -208,6 +217,6 @@ for nb in (3, 6):
                       "回ごとの点", [x["点の平均"] for x in r["回ごと"]], f"{dt:.1f}秒", flush=True)
 timing["全部"] = round(time.time() - t_all, 1)
 with open(os.path.join(args.out, "results.json"), "w", encoding="utf-8") as f:
-    json.dump({"結果": results, "計測にかかった秒数（各行は jit の初回を含む）": timing,
+    json.dump({"結果": results, "計測にかかった秒数（各行は jit の初回を含む）": timing, "解ける配置をためた時の数": pool_stats,
                "条件": {"並列": args.n_envs, "歩数": args.steps, "1回の長さ": 60, "1ゲームの回数": 4, "P": 3}}, f, ensure_ascii=False, indent=1)
 print("全部", timing["全部"], "秒", flush=True)

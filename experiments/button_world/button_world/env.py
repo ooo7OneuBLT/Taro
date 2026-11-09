@@ -49,6 +49,10 @@ class Config:
     # "reset_to_start"＝その回の始めの場所に戻される（配置・扉はそのまま、時計は止まらない、押された見た目は付かない）、
     # "end_episode"＝扉が開く前にどれかのボタンを押した時点で選択は終わり。外れならその回は失敗で即終わり（点0）
     wrong_button: str = "none"
+    # 厳しいルール（end_episode / reset_to_start）の時、外れを踏まずに 始め→効くボタン→扉 と行ける配置だけを出す。
+    # 起動時に解ける配置を視点ごとに layout_pool 個ためておき、回の始めにそこから引く（毎歩の計算を増やさないため）
+    solvable_layout: bool = True
+    layout_pool: int = 8192
     # 形: 練習側の視点（train_view）は train_features。もう一方は、形の似方 similarity で決める。
     # similarity=0 で far_features（4特徴とも違う）、1 で train_features と同じ。
     # 間は、train_features との画素の差（P=5、押す前、灰色の背景）が (1−similarity)×差0% に一番近い組。
@@ -58,6 +62,11 @@ class Config:
     similarity: float = 0.0
     # 視点・絵柄ごとに特徴を直接決めたい時: {(view, theme): (外形, 輪, 高さ, 中の印)}
     shape_override: Optional[dict] = field(default=None, hash=False, compare=False)
+
+    @staticmethod
+    def preset(name, **overrides):
+        """名前で設定の組を選ぶ。例: Config.preset("train_v1", P=5)"""
+        return Config(**{**PRESETS[name], **overrides})
 
     def __post_init__(self):
         assert 1 + self.n_buttons + self.n_deco <= 7 * 7, "上からの部屋に物が入りきらない"
@@ -134,6 +143,14 @@ class State(NamedTuple):
     game_id: jnp.ndarray
     first_touch: jnp.ndarray
     success: jnp.ndarray
+    layout_tries: jnp.ndarray  # この回の配置を何個目の候補で選んだか（1 なら引き直しなし）
+    layout_ok: jnp.ndarray  # 外れを踏まずに解ける配置か（厳しいルールの時だけ調べる。それ以外は True）
+
+
+# 学習で使う設定の組。Config.preset("train_v1") で選ぶ（そのほかの値は上書きできる）
+PRESETS = {
+    "train_v1": dict(wrong_button="end_episode", n_buttons=3),
+}
 
 
 def _ring_doors():
@@ -184,6 +201,8 @@ class ButtonWorld:
         top_walls[0, :] = top_walls[-1, :] = top_walls[:, 0] = top_walls[:, -1] = True
         self.top_walls = jnp.asarray(top_walls)
         self.top_interior = jnp.asarray(~top_walls)
+        if cfg.wrong_button in ("end_episode", "reset_to_start") and cfg.solvable_layout:
+            self._build_pool()
 
     @property
     def obs_shape(self):
@@ -254,7 +273,7 @@ class ButtonWorld:
         side = (walls, ladders, side_door, side_cells)
         return jax.tree.map(lambda x, y: jnp.where(view == 0, x, y), top, side)
 
-    def _new_episode(self, key, game, episode_in_game, game_id):
+    def _layout_state(self, key, game, episode_in_game, game_id):
         cfg = self.cfg
         walls, ladders, door, cells = self.sample_layout(key, game.view)
         nb, nd = cfg.n_buttons, cfg.n_deco
@@ -279,6 +298,84 @@ class ButtonWorld:
             game_id=jnp.asarray(game_id, jnp.int32),
             first_touch=jnp.array(TOUCH_NONE, jnp.int32),
             success=jnp.array(False),
+            layout_tries=jnp.array(1, jnp.int32),
+            layout_ok=jnp.array(True),
+        )
+
+    def transitions(self, state):
+        """T[c, a] = マス c（番号 行×9＋列）で行動 a をした後のマスの番号。ゲームの本当の動き（はしご・落下も含む）。"""
+        cells = jnp.stack([jnp.arange(H * W) // W, jnp.arange(H * W) % W], axis=-1).astype(jnp.int32)
+
+        def one(cell):
+            st = state._replace(agent=cell)
+            return jax.vmap(lambda a: self._move(st, a))(jnp.arange(5))
+
+        nxt = jax.vmap(one)(cells)
+        return nxt[..., 0] * W + nxt[..., 1]
+
+    def _reach(self, state, src, avoid):
+        """src から行けるマス（avoid のマスには入らない）。"""
+        T = self.transitions(state).reshape(-1)
+        r = jnp.zeros((H * W,), bool).at[src].set(True)
+
+        def body(_, r):
+            add = jnp.zeros((H * W,), bool).at[T].max(jnp.repeat(r, 5))
+            return r | (add & ~avoid)
+
+        return jax.lax.fori_loop(0, 48, body, r)
+
+    def solvable(self, state):
+        """外れのボタンを踏まずに、始めの場所→効くボタン（扉は閉じたまま）→扉（開いた状態）と行けるか。"""
+        cfg = self.cfg
+        bidx = state.btn_pos[:, 0] * W + state.btn_pos[:, 1]
+        good_mask = jnp.arange(cfg.n_buttons) == state.game.good
+        wrong = jnp.zeros((H * W,), bool).at[bidx].max(~good_mask)
+        good = bidx[state.game.good]
+        start = state.start[0] * W + state.start[1]
+        door = state.door[0] * W + state.door[1]
+        r1 = self._reach(state._replace(door_open=jnp.array(False)), start, wrong)
+        r2 = self._reach(state._replace(door_open=jnp.array(True)), good, wrong)
+        return r1[good] & r2[door]
+
+    def _build_pool(self):
+        """解ける配置を視点ごとに layout_pool 個つくる。効くボタンは番号0に置いておく（引く時に並べ替える）。"""
+        cfg = self.cfg
+        pools, stats = [], {}
+        for view in range(S.N_VIEWS):
+            game = Game(jnp.array(view, jnp.int32), jnp.array(0, jnp.int32), jnp.arange(cfg.n_buttons, dtype=jnp.int32),
+                        jnp.array(0, jnp.int32), jnp.zeros((cfg.n_deco,), jnp.int32))
+            make = jax.jit(jax.vmap(lambda k: self._layout_state(k, game, 0, 0)))
+            check = jax.jit(jax.vmap(self.solvable))
+            kept, n_drawn, n_ok, seed = [], 0, 0, 0
+            while n_ok < cfg.layout_pool:
+                cands = make(jax.random.split(jax.random.PRNGKey(10_000 + 97 * view + seed), 4096))
+                ok = np.asarray(check(cands))
+                kept.append(jax.tree.map(lambda x: x[np.flatnonzero(ok)], cands))
+                n_drawn += len(ok)
+                n_ok += int(ok.sum())
+                seed += 1
+            pool = jax.tree.map(lambda *xs: jnp.concatenate(xs)[: cfg.layout_pool], *kept)
+            pools.append(pool)
+            stats[view] = dict(drawn=n_drawn, solvable=n_ok, solvable_rate=n_ok / n_drawn)
+        self.pool = jax.tree.map(lambda a, b: jnp.stack([a, b]), *pools)
+        self.pool_stats = stats
+
+    def _new_episode(self, key, game, episode_in_game, game_id):
+        cfg = self.cfg
+        strict = cfg.wrong_button in ("end_episode", "reset_to_start")
+        if not (strict and cfg.solvable_layout):
+            return self._layout_state(key, game, episode_in_game, game_id)
+        if not hasattr(self, "pool"):
+            self._build_pool()
+        i = jax.random.randint(key, (), 0, cfg.layout_pool)
+        e = jax.tree.map(lambda x: x[game.view, i], self.pool)
+        # ためた配置は効くボタンが番号0。このゲームの効くボタンの番号 good へ並べ替える
+        slots = (jnp.arange(cfg.n_buttons) - game.good) % cfg.n_buttons
+        return e._replace(
+            game=game,
+            btn_pos=e.btn_pos[slots],
+            episode_in_game=jnp.asarray(episode_in_game, jnp.int32),
+            game_id=jnp.asarray(game_id, jnp.int32),
         )
 
     def reset(self, key):
@@ -388,6 +485,8 @@ class ButtonWorld:
             "steps_open_to_enter": jnp.where(success, t - t_open, -1),
             "entered_button": entered_button,  # この歩で入ったボタンの番号（-1 は無し）
             "wrong_end": wrong_end,  # end_episode で外れを押して終わった
+            "layout_tries": end.layout_tries,  # この回の配置を何個目の候補で選んだか
+            "layout_ok": end.layout_ok,  # 外れを踏まずに解ける配置か
             "success": success,
             "episode_done": done,
             "episode_in_game": end.episode_in_game,

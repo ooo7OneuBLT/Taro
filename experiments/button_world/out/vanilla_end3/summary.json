@@ -1,0 +1,15 @@
+{
+ "n_params": 1599686,
+ "n_envs": 256,
+ "updates": 1644,
+ "steps": 26935296,
+ "wall_s_after_jit": 1080.5,
+ "compile_s": 16.5,
+ "sps_median": 25015,
+ "gpu_peak_gb": 1.93,
+ "ram_peak_gb": 2.37,
+ "last10_top_success": 0.329,
+ "last10_side_success": 0.3813,
+ "last10_top_score": 0.2682,
+ "last10_side_score": 0.3027
+}

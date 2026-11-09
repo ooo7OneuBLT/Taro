@@ -44,6 +44,7 @@ p.add_argument("--eval", default="", help="保存したモデルを評価する�
 p.add_argument("--themes", type=int, default=-1, help="評価で使う絵柄（-1 なら練習用 0・1）")
 p.add_argument("--eval_steps", type=int, default=600)
 p.add_argument("--out", required=True)
+p.add_argument("--preset", default="", help="ゲームの設定の組（例 train_v1）。空なら初期値")
 args = p.parse_args()
 
 GAMMA, LAMBDA, CLIP, ENT, VF, MAX_GRAD, EPOCHS = 0.99, 0.95, 0.2, 0.01, 0.5, 0.5, 4
@@ -84,7 +85,12 @@ class Net(nn.Module):
 
 
 themes = ((0, 1), (0, 1)) if args.themes < 0 else ((args.themes,), (args.themes,))
-env = ButtonWorld(Config(P=args.P, themes=themes))
+def make_cfg(**kw):
+    base = dict(P=args.P, themes=themes, **kw)
+    return Config.preset(args.preset, **base) if args.preset else Config(**base)
+
+
+env = ButtonWorld(make_cfg())
 N, T = args.n_envs, args.n_steps
 net = Net(args.hidden)
 rng = jax.random.PRNGKey(args.seed)
@@ -213,7 +219,7 @@ if args.eval:
         params = from_bytes(params, f.read())
     out = {}
     for v, name in ((0, "上から"), (1, "横から")):
-        ev = ButtonWorld(Config(P=args.P, themes=themes, views=(v,)))
+        ev = ButtonWorld(make_cfg(views=(v,)))
         env = ev  # rollout は env を参照する
         o, st = jax.vmap(ev.reset)(jax.random.split(jax.random.PRNGKey(100 + v), N))
         c = (st, o, jnp.ones((N,), bool), pa0, pr0, h0, jax.random.PRNGKey(200 + v))
@@ -227,7 +233,7 @@ if args.eval:
             "最初に踏んだ物": {lab: round(m[f"{key}_first_{k}"], 4) for lab, k in (("効くボタン", "good"), ("効かないボタン", "bad"), ("飾り", "deco"), ("なし", "none"))},
             "ゲームの中の回ごとの成功率（1〜4回目）": [round(m[f"{key}_success_ep{e}"], 4) for e in range(1, 5)],
             "回ごとの平均の点（1〜4回目）": [round(m[f"{key}_score_ep{e}"], 4) for e in range(1, 5)],
-            "最初に踏んだボタンのうち効くボタンの割合（1〜4回目、偶然なら0.333）": [round(m[f"{key}_goodshare_ep{e}"], 4) for e in range(1, 5)],
+            "最初に踏んだボタンのうち効くボタンの割合（1〜4回目）": [round(m[f"{key}_goodshare_ep{e}"], 4) for e in range(1, 5)],
         }
     out["絵柄"] = "試し用の2" if args.themes == 2 else ("練習用の0・1" if args.themes < 0 else str(args.themes))
     with open(os.path.join(args.out, f"eval_themes{args.themes}.json"), "w", encoding="utf-8") as f:

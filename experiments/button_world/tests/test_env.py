@@ -158,7 +158,7 @@ def _with_rule(env, view, agent, good=0, **kw):
 
 
 def test_reset_to_start_rule():
-    env = ButtonWorld(Config(P=3, wrong_button="reset_to_start"))
+    env = ButtonWorld(Config(P=3, wrong_button="reset_to_start", layout_pool=256))
     step = jax.jit(env.step)
     s = _with_rule(env, 0, [6, 4], good=0, **{k: v for k, v in TOP.items() if k != "view"})
     _, s, _, _, _ = step(KEY, s, LEFT)  # (6,3)
@@ -178,7 +178,7 @@ def test_reset_to_start_rule():
 
 
 def test_end_episode_rule():
-    env = ButtonWorld(Config(P=3, wrong_button="end_episode"))
+    env = ButtonWorld(Config(P=3, wrong_button="end_episode", layout_pool=256))
     step = jax.jit(env.step)
     s = _with_rule(env, 0, [6, 5], good=0, **{k: v for k, v in TOP.items() if k != "view"})
     _, _, r, done, info = step(KEY, s, RIGHT)  # 効かないボタン
@@ -205,6 +205,41 @@ def test_six_buttons_layout():
             walls = np.asarray(s.walls)
             for r, c in cells:
                 assert r in (2, 4, 6) and walls[r + 1, c]
+
+
+def test_preset_train_v1():
+    cfg = Config.preset("train_v1", P=3)
+    assert cfg.wrong_button == "end_episode" and cfg.n_buttons == 3 and cfg.P == 3
+    assert Config().wrong_button == "none"
+
+
+def test_solvable_check_on_hand_made_layouts():
+    """解けるかの判定を、手で作った配置で確かめる。"""
+    env = ButtonWorld(Config(P=3, wrong_button="end_episode", layout_pool=256))
+    # 横から: 効くボタン (6,2)、外れ (6,6)・(4,6)、扉 (6,8)、始め (6,3)。扉の前の (6,6)〜(6,7) を通るには外れ (6,6) を踏む → 解けない
+    s = _with_rule(env, 1, [6, 3], good=0, **{k: v for k, v in SIDE.items() if k != "view"})
+    assert not bool(env.solvable(s))
+    # 扉を左端 (6,0) にして、間の飾りだけなら解ける
+    side = {k: v for k, v in SIDE.items() if k != "view"}
+    side["door"] = [6, 0]
+    side["deco_pos"] = [[6, 1], [4, 2], [2, 5]]
+    s = _with_rule(env, 1, [6, 3], good=0, **side)
+    assert bool(env.solvable(s))
+    # 上から: 開けた部屋なので解ける
+    s = _with_rule(env, 0, [4, 4], good=0, **{k: v for k, v in TOP.items() if k != "view"})
+    assert bool(env.solvable(s))
+
+
+def test_strict_rules_give_solvable_layouts():
+    for rule in ("end_episode", "reset_to_start"):
+        for nb in (3, 6):
+            for view in (0, 1):
+                env = ButtonWorld(Config(P=3, wrong_button=rule, n_buttons=nb, views=(view,), layout_pool=512))
+                reset = jax.jit(jax.vmap(env.reset))
+                _, st = reset(jax.random.split(jax.random.PRNGKey(nb * 10 + view), 256))
+                ok = np.asarray(jax.vmap(env.solvable)(st))
+                assert ok.mean() > 0.99, (rule, nb, view, ok.mean())
+                assert np.array_equal(ok, np.asarray(st.layout_ok))
 
 
 def test_deco_colors_match_buttons():
