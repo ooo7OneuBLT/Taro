@@ -53,6 +53,10 @@ class Config:
     # 起動時に解ける配置を視点ごとに layout_pool 個ためておき、回の始めにそこから引く（毎歩の計算を増やさないため）
     # end_episode で外れを押した時、押した瞬間の画面を1枚見せてから終わる（次の1歩はどの行動でも終わり）
     show_wrong_frame: bool = True
+    # 自分がボタンか飾りのマスにいる時、自分をマスの半分ほどに描いて、下の物の色が周りに見えるようにする（上から・横から同じ）
+    small_agent_on_items: bool = False
+    # 扉が開く前に外れのボタンを押した歩の点（罰）。0.3 なら −0.3
+    wrong_penalty: float = 0.0
     solvable_layout: bool = True
     layout_pool: int = 8192
     # 形: 練習側の視点（train_view）は train_features。もう一方は、形の似方 similarity で決める。
@@ -153,6 +157,8 @@ class State(NamedTuple):
 # 学習で使う設定の組。Config.preset("train_v1") で選ぶ（そのほかの値は上書きできる）
 PRESETS = {
     "train_v1": dict(wrong_button="end_episode", n_buttons=3),
+    # 関門（2026-11-09）: train_v1 に、物の上の小さな自分と外れの罰 −0.3 を足した物
+    "gate_v1": dict(wrong_button="end_episode", n_buttons=3, small_agent_on_items=True, wrong_penalty=0.3),
 }
 
 
@@ -185,6 +191,9 @@ class ButtonWorld:
         self.table = jnp.asarray(table)
         self.agent_img = jnp.asarray(agents, jnp.float32)
         self.agent_alpha = jnp.asarray(alphas)
+        small, small_alpha = S.build_small_agents(cfg.P)
+        self.small_agent_img = jnp.asarray(small, jnp.float32)
+        self.small_agent_alpha = jnp.asarray(small_alpha)
         self.L = S.layout()
         feats = features_per_vt(cfg)
         self.features = feats
@@ -511,6 +520,7 @@ class ButtonWorld:
         t_open = jnp.where((state.t_open < 0) & door_open, t, state.t_open)
         done = success | wrong_end | (t >= cfg.episode_len)
         reward = jnp.where(success, 1.0 - 0.5 * t / cfg.episode_len, 0.0)
+        reward = reward - cfg.wrong_penalty * (hit_bad & ~state.door_open)
         end = state._replace(
             agent=pos,
             pressed=pressed,
@@ -591,6 +601,11 @@ class ButtonWorld:
         r0, c0 = state.agent[0] * P, state.agent[1] * P
         patch = jax.lax.dynamic_slice(img, (r0, c0, 0), (P, P, 3))
         v = state.game.view
-        a = self.agent_alpha[v][..., None]
-        patch = jnp.round(patch * (1 - a) + self.agent_img[v] * a).astype(jnp.uint8)
+        img_a, alpha = self.agent_img[v], self.agent_alpha[v]
+        if self.cfg.small_agent_on_items:
+            on_item = jnp.any(jnp.all(state.btn_pos == state.agent, axis=-1)) | jnp.any(jnp.all(state.deco_pos == state.agent, axis=-1))
+            img_a = jnp.where(on_item, self.small_agent_img[v], img_a)
+            alpha = jnp.where(on_item, self.small_agent_alpha[v], alpha)
+        a = alpha[..., None]
+        patch = jnp.round(patch * (1 - a) + img_a * a).astype(jnp.uint8)
         return jax.lax.dynamic_update_slice(img, patch, (r0, c0, 0))

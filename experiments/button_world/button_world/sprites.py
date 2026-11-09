@@ -153,10 +153,11 @@ def door_sprite(bg, P, opened, side, frame_color):
     return img
 
 
-def agent_sprite(P, side):
-    """自分。白と黒だけ（6色と紛れない）。(P,P,3) と、描く所の印 (P,P)。"""
+def agent_sprite(P, side, scale=1.0):
+    """自分。白と黒だけ（6色と紛れない）。(P,P,3) と、描く所の印 (P,P)。scale<1 でマスの真ん中に小さく描く。"""
     img = np.zeros((P, P, 3), np.float32)
     x, y = _grid(P)
+    x, y = x / scale, y / scale
     if side:
         head = x**2 + (y + 0.27) ** 2 < 0.15**2
         body = (np.abs(x) < 0.17) & (y > -0.12) & (y < 0.3)
@@ -276,3 +277,18 @@ def button_on_neutral(P, shape_idx, color_idx=2):
 def shape_pixel_diff(a, b, P=5):
     """2つの形の画素の差（0〜255 の平均の絶対差）。"""
     return float(np.abs(button_on_neutral(P, a) - button_on_neutral(P, b)).mean())
+
+
+def build_small_agents(P, scale=0.5):
+    """物（ボタン・飾り）の上にいる時に使う、小さな自分の絵。周りに下の物の色が見える。build_tables と同じ形で返す。"""
+    K = _factor(P)
+    Q = P * K
+    agents = np.zeros((N_VIEWS, P, P, 3), np.float32)
+    alphas = np.zeros((N_VIEWS, P, P), np.float32)
+    for view in range(N_VIEWS):
+        img, mask = agent_sprite(Q, view == 1, scale)
+        a = _down(mask.astype(np.float32), P, K)
+        col = _down(img * mask[..., None], P, K)
+        agents[view] = np.where(a[..., None] > 0, col / np.maximum(a[..., None], 1e-6), 0)
+        alphas[view] = a
+    return np.clip(np.round(agents), 0, 255).astype(np.uint8), alphas

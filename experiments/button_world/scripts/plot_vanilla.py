@@ -29,7 +29,7 @@ def smooth(y, w=15):
     return np.convolve(np.pad(y, (w // 2, w - 1 - w // 2), mode="edge"), k, mode="valid")
 
 
-VIEWS = (("top", "上から"), ("side", "横から"))
+VIEWS = tuple((k, ja) for k, ja in (("top", "上から"), ("side", "横から")) if any(float(r.get(f"{k}_n", 1)) > 0 for r in rows))
 COL = {"top": "#2a78d6", "side": "#eb6834"}
 ref = None
 if len(sys.argv) > 4:
@@ -82,8 +82,11 @@ ax = axes[2]
 names = (("good", "効くボタン"), ("bad", "効かないボタン"), ("deco", "飾り"), ("none", "なし"))
 cols = ["#1baf7a", "#e87ba4", "#eda100", "#888"]
 for (k2, ja2), c in zip(names, cols):
-    ax.plot(x, smooth(col(f"top_first_{k2}")), color=c, lw=2, label=f"{ja2}（上から）")
-    ax.plot(x, smooth(col(f"side_first_{k2}")), color=c, lw=1.5, ls="--", label=f"{ja2}（横から）")
+    for k, ja in VIEWS:
+        ax.plot(x, smooth(col(f"{k}_first_{k2}")), color=c, lw=2 if k == "top" else 1.5, ls="-" if k == "top" else "--", label=f"{ja2}（{ja}）")
+    if "top_nopress" in rows[0] and k2 == "none":
+        for k, ja in VIEWS:
+            ax.plot(x, smooth(col(f"{k}_nopress")), color="#333", lw=2, ls=":", label=f"押さずに終わった回（{ja}）")
 ax.set_title("最初に踏んだ物の割合")
 ax.set_xlabel("学習の歩数（百万）")
 ax.set_ylim(0, 1)

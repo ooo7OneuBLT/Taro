@@ -48,6 +48,8 @@ p.add_argument("--themes", type=int, default=-1, help="評価で使う絵柄（-
 p.add_argument("--eval_steps", type=int, default=600)
 p.add_argument("--out", required=True)
 p.add_argument("--preset", default="", help="ゲームの設定の組（例 train_v1）。空なら初期値")
+p.add_argument("--views", default="0,1", help="学習に使う視点（0 上から、1 横から）")
+p.add_argument("--total_steps", type=float, default=0, help="この歩数で学習を終える。学習率もここで 0 になるよう直線で下げる（0 なら一定・時間で止める）")
 args = p.parse_args()
 
 GAMMA, LAMBDA, CLIP, ENT, VF, MAX_GRAD, EPOCHS = 0.99, 0.95, 0.2, 0.01, 0.5, 0.5, 4
@@ -89,8 +91,12 @@ class Net(nn.Module):
 
 
 themes = ((0, 1), (0, 1)) if args.themes < 0 else ((args.themes,), (args.themes,))
+VIEWS = tuple(int(v) for v in args.views.split(","))
+
+
 def make_cfg(**kw):
-    base = dict(P=args.P, themes=themes, **kw)
+    base = dict(P=args.P, themes=themes, views=VIEWS)
+    base.update(kw)
     return Config.preset(args.preset, **base) if args.preset else Config(**base)
 
 
@@ -105,7 +111,13 @@ pa0 = -jnp.ones((N,), jnp.int32)
 pr0 = jnp.zeros((N,))
 pd0 = jnp.zeros((N,))
 params = net.init(k_init, h0, obs0[None], pa0[None], pr0[None], pd0[None], jnp.ones((1, N), bool))
-tx = optax.chain(optax.clip_by_global_norm(MAX_GRAD), optax.adam(args.lr, eps=1e-5))
+TOTAL_UPDATES = int(args.total_steps // (N * T)) if args.total_steps else 0
+if TOTAL_UPDATES:
+    # 学習率を、決めた更新の回数で 0 になるよう直線で下げる（1回の更新は EPOCHS×MINIBATCHES 回の勾配計算）
+    lr = optax.linear_schedule(args.lr, 0.0, TOTAL_UPDATES * EPOCHS * MINIBATCHES)
+else:
+    lr = args.lr
+tx = optax.chain(optax.clip_by_global_norm(MAX_GRAD), optax.adam(lr, eps=1e-5))
 train_state = TrainState.create(apply_fn=net.apply, params=params, tx=tx)
 n_params = sum(x.size for x in jax.tree.leaves(params))
 
@@ -124,7 +136,8 @@ def rollout(params, c, n, keep_obs=True):
         logp = jax.nn.log_softmax(logits)[jnp.arange(N), action]
         obs2, env_state, reward, done, info = jax.vmap(env.step)(jax.random.split(ks, N), env_state, action)
         tr = dict(obs=obs if keep_obs else jnp.zeros((), jnp.uint8), resets=resets, prev_a=pa, prev_r=pr, prev_d=pd, action=action, logp=logp, value=value, reward=reward, done=done,
-                  game_end=info["new_game"], success=info["success"], view=info["view"], ep=info["episode_in_game"], first=info["first_touch"])
+                  game_end=info["new_game"], success=info["success"], view=info["view"], ep=info["episode_in_game"], first=info["first_touch"],
+                  pressed_any=(info["n_good"] + info["n_bad"]) > 0)
         return (env_state, obs2, info["new_game"], action, reward, done.astype(jnp.float32), h, rng), tr
 
     return jax.lax.scan(env_step, c, None, n)
@@ -140,6 +153,7 @@ def episode_metrics(tr):
         out[f"{name}_n"] = m.sum()
         out[f"{name}_success"] = (tr["success"] & m).sum() / n
         out[f"{name}_score"] = (tr["reward"] * m).sum() / n
+        out[f"{name}_nopress"] = (m & ~tr["pressed_any"]).sum() / n  # 1つもボタンを押さずに終わった回
         for k, fname in ((0, "good"), (1, "bad"), (2, "deco"), (-1, "none")):
             out[f"{name}_first_{fname}"] = (m & (tr["first"] == k)).sum() / n
         for e in range(4):
@@ -227,6 +241,7 @@ if args.eval:
             "成功率": round(m[f"{key}_success"], 4),
             "1回の平均の点": round(m[f"{key}_score"], 4),
             "最初に踏んだ物": {lab: round(m[f"{key}_first_{k}"], 4) for lab, k in (("効くボタン", "good"), ("効かないボタン", "bad"), ("飾り", "deco"), ("なし", "none"))},
+            "1つもボタンを押さずに終わった回": round(m[f"{key}_nopress"], 4),
             "ゲームの中の回ごとの成功率（1〜4回目）": [round(m[f"{key}_success_ep{e}"], 4) for e in range(1, 5)],
             "回ごとの平均の点（1〜4回目）": [round(m[f"{key}_score_ep{e}"], 4) for e in range(1, 5)],
             "最初に踏んだボタンのうち効くボタンの割合（1〜4回目）": [round(m[f"{key}_goodshare_ep{e}"], 4) for e in range(1, 5)],
@@ -252,7 +267,8 @@ next_save = args.save_every_min * 60
 u = 1
 with open(os.path.join(args.out, "metrics.csv"), "w", newline="", encoding="utf-8") as f:
     w = None
-    while u < args.max_updates and time.time() - t_start < args.minutes * 60:
+    max_u = TOTAL_UPDATES if TOTAL_UPDATES else args.max_updates
+    while u < max_u and time.time() - t_start < args.minutes * 60:
         t1 = time.time()
         carry, m = update(carry)
         m = jax.device_get(m)

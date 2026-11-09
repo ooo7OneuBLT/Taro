@@ -211,6 +211,46 @@ def test_show_wrong_frame():
         assert list(np.asarray(info3["agent"])) == [6, 6] and int(info3["t"]) == 2
 
 
+def test_small_agent_on_items_shows_item_color():
+    """物の上にいる時は自分を小さく描き、下のボタンの色が周りに見える（上から・横から）。"""
+    L = S.layout()
+    for view, base, agent in ((0, TOP, [4, 5]), (1, SIDE, [6, 2])):
+        seen = {}
+        for small in (False, True):
+            env = ButtonWorld(Config(P=10, small_agent_on_items=small))
+            s = make_state(agent=agent, good=0, **base)
+            img = np.asarray(env.render(s)).astype(int)
+            r, c = agent
+            cell = img[r * 10:(r + 1) * 10, c * 10:(c + 1) * 10]
+            vt = view * S.N_THEMES + int(s.game.theme)
+            shape = int(env.shape_of_vt[vt])
+            tile = np.asarray(env.table)[L["btn0"] + ((vt * S.N_SHAPES + shape) * S.N_COLORS + int(s.game.btn_colors[0])) * 2 + 0].astype(int)
+            seen[small] = (np.abs(cell - tile).sum(-1) == 0).mean()  # ボタンの絵がそのまま見えている画素の割合
+        assert seen[True] > 0.7 and seen[True] > seen[False] + 0.1, (view, seen)
+    # 物の上にいない時は、いつもの大きさ
+    env = ButtonWorld(Config(P=10, small_agent_on_items=True))
+    s = make_state(agent=[5, 5], **TOP)
+    env0 = ButtonWorld(Config(P=10))
+    assert np.array_equal(np.asarray(env.render(s)), np.asarray(env0.render(s)))
+
+
+def test_wrong_penalty():
+    env = ButtonWorld(Config(P=3, wrong_button="end_episode", wrong_penalty=0.3, layout_pool=256))
+    step = jax.jit(env.step)
+    s = _with_rule(env, 0, [6, 5], good=0, **{k: v for k, v in TOP.items() if k != "view"})
+    _, s2, r, done, info = step(KEY, s, RIGHT)  # 外れ
+    assert abs(float(r) + 0.3) < 1e-6 and not bool(done)
+    _, _, r2, done2, _ = step(KEY, s2, NOOP)  # 見せた後の歩: 罰は1回だけ
+    assert float(r2) == 0.0 and bool(done2)
+    s = _with_rule(env, 0, [4, 4], good=0, **{k: v for k, v in TOP.items() if k != "view"})
+    _, s3, r3, _, info3 = step(KEY, s, RIGHT)  # 当たり: 罰なし
+    assert float(r3) == 0.0 and bool(info3["door_open"])
+    # 扉が開いた後に外れを踏んでも罰なし
+    _, _, r4, _, _ = step(KEY, s3._replace(agent=jnp.array([6, 5], jnp.int32)), RIGHT)
+    assert float(r4) == 0.0
+    assert Config.preset("gate_v1").wrong_penalty == 0.3 and Config.preset("gate_v1").small_agent_on_items
+
+
 def test_six_buttons_layout():
     env = ButtonWorld(Config(P=3, n_buttons=6))
     for seed in range(200):
