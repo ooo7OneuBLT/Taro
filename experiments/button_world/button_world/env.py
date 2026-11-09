@@ -30,6 +30,7 @@ FEATURE_NAMES = ("外形", "輪", "高さ", "中の印")
 # 最初に踏んだ物の番号（info["first_touch"]）
 TOUCH_NONE, TOUCH_GOOD, TOUCH_BAD, TOUCH_DECO = -1, 0, 1, 2
 DECO_COLOR_MODES = ("match", "random", "random_with_good")
+WRONG_BUTTON_RULES = ("none", "reset_to_start", "end_episode")
 
 
 @dataclass(frozen=True)
@@ -44,6 +45,10 @@ class Config:
     # 飾りの色: "match"＝ボタンと同じ色を1つずつ（色だけでは半分しか当たらない、初期値）
     #           "random"＝6色から独立、"random_with_good"＝独立だが1つは必ず効く色
     deco_colors: str = "match"
+    # 効かないボタンを踏んだ時: "none"＝何も起きない（初期値）、
+    # "reset_to_start"＝その回の始めの場所に戻される（配置・扉はそのまま、時計は止まらない、押された見た目は付かない）、
+    # "end_episode"＝扉が開く前にどれかのボタンを押した時点で選択は終わり。外れならその回は失敗で即終わり（点0）
+    wrong_button: str = "none"
     # 形: 練習側の視点（train_view）は train_features。もう一方は、形の似方 similarity で決める。
     # similarity=0 で far_features（4特徴とも違う）、1 で train_features と同じ。
     # 間は、train_features との画素の差（P=5、押す前、灰色の背景）が (1−similarity)×差0% に一番近い組。
@@ -61,7 +66,8 @@ class Config:
         assert 0.0 <= self.similarity <= 1.0
         assert self.deco_colors in DECO_COLOR_MODES
         if self.deco_colors == "match":
-            assert self.n_deco == self.n_buttons, "match は飾りとボタンの数が同じ時だけ"
+            assert self.n_deco <= self.n_buttons, "match は飾りがボタンより多くない時だけ"
+        assert self.wrong_button in WRONG_BUTTON_RULES
         assert all(x != y for x, y in zip(self.train_features, self.far_features)), "far_features は4特徴とも train_features と違うこと"
 
 
@@ -113,6 +119,7 @@ class State(NamedTuple):
     walls: jnp.ndarray  # (9,9) 通れないマス（扉は別）
     ladders: jnp.ndarray  # (9,9) はしご（横からだけ）
     agent: jnp.ndarray  # (2,) 行・列
+    start: jnp.ndarray  # (2,) その回の始めの場所（reset_to_start で戻る先）
     btn_pos: jnp.ndarray  # (n_buttons, 2)
     deco_pos: jnp.ndarray  # (n_deco, 2)
     door: jnp.ndarray  # (2,)
@@ -192,7 +199,7 @@ class ButtonWorld:
         btn_colors = jax.random.permutation(kc, S.N_COLORS)[: cfg.n_buttons].astype(jnp.int32)
         good = jax.random.randint(kg, (), 0, cfg.n_buttons)
         if cfg.deco_colors == "match":
-            deco_colors = jax.random.permutation(kd, btn_colors)
+            deco_colors = jax.random.permutation(kd, btn_colors)[: cfg.n_deco]
         else:
             deco_colors = jax.random.randint(kd, (cfg.n_deco,), 0, S.N_COLORS)
             if cfg.deco_colors == "random_with_good":
@@ -257,6 +264,7 @@ class ButtonWorld:
             walls=walls,
             ladders=ladders,
             agent=cells[0],
+            start=cells[0],
             btn_pos=cells[1 : 1 + nb],
             deco_pos=cells[1 + nb : 1 + nb + nd],
             door=door.astype(jnp.int32),
@@ -311,20 +319,32 @@ class ButtonWorld:
         cfg = self.cfg
         pos = self._move(state, action)
         entered = jnp.any(pos != state.agent)
-        on_btn = jnp.all(state.btn_pos == pos, axis=-1)
+        on_btn = jnp.all(state.btn_pos == pos, axis=-1) & entered
         on_deco = jnp.any(jnp.all(state.deco_pos == pos, axis=-1))
         good_mask = jnp.arange(cfg.n_buttons) == state.game.good
-        hit_good = entered & jnp.any(on_btn & good_mask)
-        hit_bad = entered & jnp.any(on_btn & ~good_mask)
+        hit_good = jnp.any(on_btn & good_mask)
+        hit_bad = jnp.any(on_btn & ~good_mask)
         hit_deco = entered & on_deco
-        pressed = state.pressed | on_btn
-        door_open = state.door_open | jnp.any(on_btn & good_mask)
+        entered_button = jnp.where(jnp.any(on_btn), jnp.argmax(on_btn), -1)
+        door_open = state.door_open | hit_good
         success = state.door_open & jnp.all(pos == state.door)
+        if cfg.wrong_button == "reset_to_start":
+            # 外れ: 始めの場所に戻す。押された見た目は付けない
+            pressed = state.pressed | (on_btn & good_mask)
+            pos = jnp.where(hit_bad, state.start, pos)
+            wrong_end = jnp.array(False)
+        elif cfg.wrong_button == "end_episode":
+            # 扉が開く前に外れを押したら、その回は失敗で終わり
+            pressed = state.pressed | on_btn
+            wrong_end = hit_bad & ~state.door_open
+        else:
+            pressed = state.pressed | on_btn
+            wrong_end = jnp.array(False)
         touch = jnp.where(hit_good, TOUCH_GOOD, jnp.where(hit_bad, TOUCH_BAD, jnp.where(hit_deco, TOUCH_DECO, TOUCH_NONE)))
         first_touch = jnp.where(state.first_touch == TOUCH_NONE, touch, state.first_touch)
         t = state.t + 1
         t_open = jnp.where((state.t_open < 0) & door_open, t, state.t_open)
-        done = success | (t >= cfg.episode_len)
+        done = success | wrong_end | (t >= cfg.episode_len)
         reward = jnp.where(success, 1.0 - 0.5 * t / cfg.episode_len, 0.0)
         end = state._replace(
             agent=pos,
@@ -366,6 +386,8 @@ class ButtonWorld:
             "n_deco": end.n_deco,
             # 扉が開いてから（扉はいつも見えている）入るまでの歩数。成功しなければ -1
             "steps_open_to_enter": jnp.where(success, t - t_open, -1),
+            "entered_button": entered_button,  # この歩で入ったボタンの番号（-1 は無し）
+            "wrong_end": wrong_end,  # end_episode で外れを押して終わった
             "success": success,
             "episode_done": done,
             "episode_in_game": end.episode_in_game,

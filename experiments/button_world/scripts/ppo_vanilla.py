@@ -134,7 +134,11 @@ def episode_metrics(tr):
             out[f"{name}_first_{fname}"] = (m & (tr["first"] == k)).sum() / n
         for e in range(4):
             me = m & (tr["ep"] == e)
-            out[f"{name}_success_ep{e + 1}"] = (tr["success"] & me).sum() / jnp.maximum(me.sum(), 1)
+            n_e = jnp.maximum(me.sum(), 1)
+            out[f"{name}_success_ep{e + 1}"] = (tr["success"] & me).sum() / n_e
+            out[f"{name}_score_ep{e + 1}"] = (tr["reward"] * me).sum() / n_e
+            btn_first = me & ((tr["first"] == 0) | (tr["first"] == 1))
+            out[f"{name}_goodshare_ep{e + 1}"] = (me & (tr["first"] == 0)).sum() / jnp.maximum(btn_first.sum(), 1)
     return out
 
 
@@ -222,6 +226,8 @@ if args.eval:
             "1回の平均の点": round(m[f"{key}_score"], 4),
             "最初に踏んだ物": {lab: round(m[f"{key}_first_{k}"], 4) for lab, k in (("効くボタン", "good"), ("効かないボタン", "bad"), ("飾り", "deco"), ("なし", "none"))},
             "ゲームの中の回ごとの成功率（1〜4回目）": [round(m[f"{key}_success_ep{e}"], 4) for e in range(1, 5)],
+            "回ごとの平均の点（1〜4回目）": [round(m[f"{key}_score_ep{e}"], 4) for e in range(1, 5)],
+            "最初に踏んだボタンのうち効くボタンの割合（1〜4回目、偶然なら0.333）": [round(m[f"{key}_goodshare_ep{e}"], 4) for e in range(1, 5)],
         }
     out["絵柄"] = "試し用の2" if args.themes == 2 else ("練習用の0・1" if args.themes < 0 else str(args.themes))
     with open(os.path.join(args.out, f"eval_themes{args.themes}.json"), "w", encoding="utf-8") as f:

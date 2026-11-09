@@ -7,7 +7,7 @@ export XLA_PYTHON_CLIENT_PREALLOCATE=false
 export XLA_PYTHON_CLIENT_MEM_FRACTION=0.65  # 画面表示などが約1.5〜1.9GB 使うので、全体で 7.6GB を超えないように
 LOG="$1"; shift
 mkdir -p "$(dirname "$LOG")"
-if pgrep -f "craftax_play/venv/bin/python" > /dev/null; then
+if pgrep -f "^/home/syun5/craftax_play/venv/bin/python" > /dev/null; then  # 先頭が python のプロセスだけを数える（外側の bash -c の文字列に引っかからないように）
   echo "既に venv の python が動いているので始めない"; exit 1
 fi
 /home/syun5/craftax_play/venv/bin/python "$@" > "$LOG" 2>&1 &

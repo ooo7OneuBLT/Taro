@@ -34,6 +34,7 @@ def make_state(view, agent, btn_pos, deco_pos, door, good=0, door_open=False, si
         walls=walls,
         ladders=ladders,
         agent=jnp.array(agent, jnp.int32),
+        start=jnp.array(agent, jnp.int32),
         btn_pos=jnp.array(btn_pos, jnp.int32),
         deco_pos=jnp.array(deco_pos, jnp.int32),
         door=jnp.array(door, jnp.int32),
@@ -147,6 +148,63 @@ def test_enter_counts_and_open_to_enter_steps():
         _, s, _, done, info = STEP(KEY, s, a)
     assert bool(info["success"])
     assert int(info["steps_open_to_enter"]) == 11 - 1, int(info["steps_open_to_enter"])  # 1歩目で開き、11歩目で入った
+
+
+def _with_rule(env, view, agent, good=0, **kw):
+    """別の Config の env で、決めた配置の状態を作る。"""
+    _, s = env.reset(KEY)
+    base = make_state(view=view, agent=agent, good=good, **kw)
+    return base._replace(game=base.game._replace(btn_colors=s.game.btn_colors[:3], deco_colors=s.game.deco_colors[:3]))
+
+
+def test_reset_to_start_rule():
+    env = ButtonWorld(Config(P=3, wrong_button="reset_to_start"))
+    step = jax.jit(env.step)
+    s = _with_rule(env, 0, [6, 4], good=0, **{k: v for k, v in TOP.items() if k != "view"})
+    _, s, _, _, _ = step(KEY, s, LEFT)  # (6,3)
+    _, s, _, _, _ = step(KEY, s, RIGHT)  # (6,4)
+    _, s2, r, done, info = step(KEY, s, RIGHT)
+    _, s2, r, done, info = step(KEY, s2, RIGHT)  # (6,6) は効かないボタン → 始めの (6,4) へ
+    assert pos(s2) == [6, 4] and int(s2.t) == 4 and not bool(done) and not bool(info["door_open"])
+    assert not bool(s2.pressed[1]) and int(info["entered_button"]) == 1 and int(info["n_bad"]) == 1
+    # 効くボタンなら戻されず扉が開く
+    s = _with_rule(env, 0, [4, 4], good=0, **{k: v for k, v in TOP.items() if k != "view"})
+    _, s2, _, _, info = step(KEY, s, RIGHT)
+    assert pos(s2) == [4, 5] and bool(info["door_open"])
+    # 横からも
+    s = _with_rule(env, 1, [6, 7], good=0, **{k: v for k, v in SIDE.items() if k != "view"})
+    _, s2, _, _, info = step(KEY, s, LEFT)
+    assert pos(s2) == [6, 7] and int(s2.t) == 1
+
+
+def test_end_episode_rule():
+    env = ButtonWorld(Config(P=3, wrong_button="end_episode"))
+    step = jax.jit(env.step)
+    s = _with_rule(env, 0, [6, 5], good=0, **{k: v for k, v in TOP.items() if k != "view"})
+    _, _, r, done, info = step(KEY, s, RIGHT)  # 効かないボタン
+    assert bool(done) and bool(info["wrong_end"]) and not bool(info["success"]) and float(r) == 0.0
+    s = _with_rule(env, 0, [4, 4], good=0, **{k: v for k, v in TOP.items() if k != "view"})
+    _, s2, _, done, info = step(KEY, s, RIGHT)  # 効くボタン
+    assert not bool(done) and bool(info["door_open"]) and not bool(info["wrong_end"])
+    # 扉が開いた後は、外れを踏んでも終わらない
+    s3 = s2._replace(agent=jnp.array([6, 5], jnp.int32))
+    _, _, _, done, info = step(KEY, s3, RIGHT)
+    assert not bool(done) and not bool(info["wrong_end"])
+
+
+def test_six_buttons_layout():
+    env = ButtonWorld(Config(P=3, n_buttons=6))
+    for seed in range(200):
+        _, s = env.reset(jax.random.PRNGKey(seed))
+        cells = np.concatenate([np.asarray(s.agent)[None], np.asarray(s.btn_pos), np.asarray(s.deco_pos), np.asarray(s.door)[None]])
+        assert len({tuple(c) for c in cells}) == len(cells) == 11
+        bc = np.asarray(s.game.btn_colors).tolist()
+        assert sorted(bc) == list(range(6))
+        assert set(np.asarray(s.game.deco_colors).tolist()) <= set(bc) and len(set(np.asarray(s.game.deco_colors).tolist())) == 3
+        if int(s.game.view) == 1:
+            walls = np.asarray(s.walls)
+            for r, c in cells:
+                assert r in (2, 4, 6) and walls[r + 1, c]
 
 
 def test_deco_colors_match_buttons():
