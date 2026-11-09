@@ -178,7 +178,7 @@ def test_reset_to_start_rule():
 
 
 def test_end_episode_rule():
-    env = ButtonWorld(Config(P=3, wrong_button="end_episode", layout_pool=256))
+    env = ButtonWorld(Config(P=3, wrong_button="end_episode", show_wrong_frame=False, layout_pool=256))
     step = jax.jit(env.step)
     s = _with_rule(env, 0, [6, 5], good=0, **{k: v for k, v in TOP.items() if k != "view"})
     _, _, r, done, info = step(KEY, s, RIGHT)  # 効かないボタン
@@ -190,6 +190,25 @@ def test_end_episode_rule():
     s3 = s2._replace(agent=jnp.array([6, 5], jnp.int32))
     _, _, _, done, info = step(KEY, s3, RIGHT)
     assert not bool(done) and not bool(info["wrong_end"])
+
+
+def test_show_wrong_frame():
+    """押したら終わり（初期値）: 外れを押した瞬間の画面を1枚見せ、次の歩でどの行動でも終わる。"""
+    env = ButtonWorld(Config(P=5, wrong_button="end_episode", layout_pool=256))
+    step = jax.jit(env.step)
+    s = _with_rule(env, 0, [6, 5], good=0, **{k: v for k, v in TOP.items() if k != "view"})
+    obs, s2, r, done, info = step(KEY, s, RIGHT)  # (6,6) は外れ
+    assert not bool(done) and bool(info["ending"]) and not bool(info["wrong_end"]) and float(r) == 0.0
+    assert pos(s2) == [6, 6] and bool(s2.pressed[1]) and int(info["entered_button"]) == 1
+    # 見せる1枚: 押したボタンのマスに自分（白い矢印）が描かれている
+    cell = np.asarray(obs)[6 * 5:7 * 5, 6 * 5:7 * 5].astype(int)
+    away = np.asarray(env.render(s2._replace(agent=jnp.array([4, 4], jnp.int32))))[6 * 5:7 * 5, 6 * 5:7 * 5].astype(int)
+    assert np.abs(cell - away).mean() > 10, "押したボタンの上に自分が見えない"
+    assert np.array_equal(np.asarray(obs), np.asarray(env.render(s2)))
+    for a in (UP, NOOP):
+        _, s3, r3, done3, info3 = step(KEY, s2, a)
+        assert bool(done3) and bool(info3["wrong_end"]) and not bool(info3["success"]) and float(r3) == 0.0
+        assert list(np.asarray(info3["agent"])) == [6, 6] and int(info3["t"]) == 2
 
 
 def test_six_buttons_layout():

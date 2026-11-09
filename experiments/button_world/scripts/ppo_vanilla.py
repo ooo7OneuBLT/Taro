@@ -29,15 +29,18 @@ from flax.training.train_state import TrainState
 
 from button_world import ButtonWorld, Config
 
+sys.path.insert(0, os.path.dirname(__file__))
+from rl_utils import compute_gae, prev_inputs  # noqa: E402
+
 p = argparse.ArgumentParser()
 p.add_argument("--n_envs", type=int, default=1024)
-p.add_argument("--n_steps", type=int, default=64)
+p.add_argument("--n_steps", type=int, default=256, help="1回の rollout の歩数＝記憶を通して勾配が流れる窓（2026-11-09 に 64→256）")
 p.add_argument("--P", type=int, default=5)
 p.add_argument("--minutes", type=float, default=18.0, help="この時間で止める（最初の jit を除く）")
 p.add_argument("--max_updates", type=int, default=100000)
 p.add_argument("--lr", type=float, default=3e-4)
 p.add_argument("--hidden", type=int, default=256)
-p.add_argument("--mb_envs", type=int, default=128, help="1回の勾配計算で使う並列の数（メモリを並列数によらずそろえる）")
+p.add_argument("--mb_envs", type=int, default=0, help="1回の勾配計算で使う並列の数。0 なら 4096÷n_steps（1回の勾配計算の画面の枚数を約4096にそろえる）")
 p.add_argument("--seed", type=int, default=0)
 p.add_argument("--save_every_min", type=float, default=5.0)
 p.add_argument("--eval", default="", help="保存したモデルを評価する（学習しない）")
@@ -48,7 +51,8 @@ p.add_argument("--preset", default="", help="ゲームの設定の組（例 trai
 args = p.parse_args()
 
 GAMMA, LAMBDA, CLIP, ENT, VF, MAX_GRAD, EPOCHS = 0.99, 0.95, 0.2, 0.01, 0.5, 0.5, 4
-MINIBATCHES = max(1, args.n_envs // args.mb_envs)
+MB_ENVS = args.mb_envs or max(1, 4096 // args.n_steps)
+MINIBATCHES = max(1, args.n_envs // MB_ENVS)
 N_ACT = 5
 os.makedirs(args.out, exist_ok=True)
 
@@ -67,8 +71,8 @@ class Net(nn.Module):
     hidden: int
 
     @nn.compact
-    def __call__(self, h, obs, prev_a, prev_r, resets):
-        """obs (T,B,H,W,3) uint8、prev_a (T,B) int（-1 は無し）、prev_r (T,B)、resets (T,B)。"""
+    def __call__(self, h, obs, prev_a, prev_r, prev_d, resets):
+        """obs (T,B,H,W,3) uint8、prev_a (T,B) int（-1 は無し）、prev_r (T,B)、prev_d (T,B) 前の歩で回が終わったか、resets (T,B)。"""
         T, B = obs.shape[:2]
         x = obs.reshape((T * B,) + obs.shape[2:]).astype(jnp.float32) / 255.0
         x = nn.relu(nn.Conv(32, (3, 3), strides=(2, 2))(x))
@@ -77,7 +81,7 @@ class Net(nn.Module):
         x = x.reshape((T * B, -1))
         x = nn.relu(nn.Dense(self.hidden)(x)).reshape(T, B, self.hidden)
         a_oh = jax.nn.one_hot(prev_a, N_ACT)  # -1 は全部 0
-        x = jnp.concatenate([x, a_oh, prev_r[..., None]], axis=-1)
+        x = jnp.concatenate([x, a_oh, prev_r[..., None], prev_d[..., None]], axis=-1)
         h, y = ScannedGRU()(h, (x, resets))
         logits = nn.Dense(N_ACT, kernel_init=nn.initializers.orthogonal(0.01))(y)
         value = nn.Dense(1, kernel_init=nn.initializers.orthogonal(1.0))(y)[..., 0]
@@ -99,29 +103,29 @@ obs0, env_state = jax.vmap(env.reset)(jax.random.split(k_reset, N))
 h0 = jnp.zeros((N, args.hidden))
 pa0 = -jnp.ones((N,), jnp.int32)
 pr0 = jnp.zeros((N,))
-params = net.init(k_init, h0, obs0[None], pa0[None], pr0[None], jnp.ones((1, N), bool))
+pd0 = jnp.zeros((N,))
+params = net.init(k_init, h0, obs0[None], pa0[None], pr0[None], pd0[None], jnp.ones((1, N), bool))
 tx = optax.chain(optax.clip_by_global_norm(MAX_GRAD), optax.adam(args.lr, eps=1e-5))
 train_state = TrainState.create(apply_fn=net.apply, params=params, tx=tx)
 n_params = sum(x.size for x in jax.tree.leaves(params))
 
 
 def rollout(params, c, n, keep_obs=True):
-    """n 歩ぶん動かして、軌跡を返す。c = (env_state, obs, resets, prev_a, prev_r, h, rng)。
+    """n 歩ぶん動かして、軌跡を返す。c = (env_state, obs, resets, prev_a, prev_r, prev_d, h, rng)。
     評価では keep_obs=False にして画面を記録しない（長く回すとメモリが足りなくなるため）。"""
 
     def env_step(c, _):
-        env_state, obs, resets, pa, pr, h, rng = c
-        pa = jnp.where(resets, -1, pa)
-        pr = jnp.where(resets, 0.0, pr)
+        env_state, obs, resets, pa, pr, pd, h, rng = c
+        pa, pr, pd = prev_inputs(resets, pa, pr, pd)
         rng, ka, ks = jax.random.split(rng, 3)
-        h, logits, value = net.apply(params, h, obs[None], pa[None], pr[None], resets[None])
+        h, logits, value = net.apply(params, h, obs[None], pa[None], pr[None], pd[None], resets[None])
         logits, value = logits[0], value[0]
         action = jax.random.categorical(ka, logits)
         logp = jax.nn.log_softmax(logits)[jnp.arange(N), action]
         obs2, env_state, reward, done, info = jax.vmap(env.step)(jax.random.split(ks, N), env_state, action)
-        tr = dict(obs=obs if keep_obs else jnp.zeros((), jnp.uint8), resets=resets, prev_a=pa, prev_r=pr, action=action, logp=logp, value=value, reward=reward, done=done,
-                  success=info["success"], view=info["view"], ep=info["episode_in_game"], first=info["first_touch"])
-        return (env_state, obs2, info["new_game"], action, reward, h, rng), tr
+        tr = dict(obs=obs if keep_obs else jnp.zeros((), jnp.uint8), resets=resets, prev_a=pa, prev_r=pr, prev_d=pd, action=action, logp=logp, value=value, reward=reward, done=done,
+                  game_end=info["new_game"], success=info["success"], view=info["view"], ep=info["episode_in_game"], first=info["first_touch"])
+        return (env_state, obs2, info["new_game"], action, reward, done.astype(jnp.float32), h, rng), tr
 
     return jax.lax.scan(env_step, c, None, n)
 
@@ -151,26 +155,18 @@ def episode_metrics(tr):
 @jax.jit
 def update(carry):
     train_state, env_c = carry
-    h_start = env_c[5]
+    h_start = env_c[6]
     env_c, traj = rollout(train_state.params, env_c, T)
-    env_state, obs, resets, pa, pr, h, rng = env_c
-    pa_n = jnp.where(resets, -1, pa)
-    pr_n = jnp.where(resets, 0.0, pr)
-    _, _, last_value = net.apply(train_state.params, h, obs[None], pa_n[None], pr_n[None], resets[None])
+    env_state, obs, resets, pa, pr, pd, h, rng = env_c
+    pa_n, pr_n, pd_n = prev_inputs(resets, pa, pr, pd)
+    _, _, last_value = net.apply(train_state.params, h, obs[None], pa_n[None], pr_n[None], pd_n[None], resets[None])
     last_value = last_value[0]
-
-    def gae(c, x):
-        adv_next, v_next = c
-        r, v, d = x
-        delta = r + GAMMA * v_next * (1 - d) - v
-        adv = delta + GAMMA * LAMBDA * (1 - d) * adv_next
-        return (adv, v), adv
-
-    _, adv = jax.lax.scan(gae, (jnp.zeros(N), last_value), (traj["reward"], traj["value"], traj["done"].astype(jnp.float32)), reverse=True)
+    # 割引の和はゲームの終わり（new_game）でだけ切る（RL² の形。回の終わりでは切らない）
+    adv = compute_gae(traj["reward"], traj["value"], traj["game_end"], last_value, GAMMA, LAMBDA)
     targets = adv + traj["value"]
 
     def loss_fn(params, idx):
-        _, logits, value = net.apply(params, h_start[idx], traj["obs"][:, idx], traj["prev_a"][:, idx], traj["prev_r"][:, idx], traj["resets"][:, idx])
+        _, logits, value = net.apply(params, h_start[idx], traj["obs"][:, idx], traj["prev_a"][:, idx], traj["prev_r"][:, idx], traj["prev_d"][:, idx], traj["resets"][:, idx])
         logp_all = jax.nn.log_softmax(logits)
         logp = jnp.take_along_axis(logp_all, traj["action"][:, idx][..., None], -1)[..., 0]
         ratio = jnp.exp(logp - traj["logp"][:, idx])
@@ -195,8 +191,8 @@ def update(carry):
         ts, losses = jax.lax.scan(mb, ts, perm)
         return (ts, rng), losses
 
-    rng, k = jax.random.split(env_c[6])
-    env_c = env_c[:6] + (rng,)
+    rng, k = jax.random.split(env_c[7])
+    env_c = env_c[:7] + (rng,)
     (train_state, _), losses = jax.lax.scan(epoch, (train_state, k), None, EPOCHS)
     m = episode_metrics(traj)
     m["entropy"] = losses[3].mean()
@@ -212,7 +208,7 @@ def save(params, name):
     return path
 
 
-env_c = (env_state, obs0, jnp.ones((N,), bool), pa0, pr0, h0, rng)
+env_c = (env_state, obs0, jnp.ones((N,), bool), pa0, pr0, pd0, h0, rng)
 
 if args.eval:
     with open(args.eval, "rb") as f:
@@ -222,7 +218,7 @@ if args.eval:
         ev = ButtonWorld(make_cfg(views=(v,)))
         env = ev  # rollout は env を参照する
         o, st = jax.vmap(ev.reset)(jax.random.split(jax.random.PRNGKey(100 + v), N))
-        c = (st, o, jnp.ones((N,), bool), pa0, pr0, h0, jax.random.PRNGKey(200 + v))
+        c = (st, o, jnp.ones((N,), bool), pa0, pr0, pd0, h0, jax.random.PRNGKey(200 + v))
         _, tr = jax.jit(lambda c: rollout(params, c, args.eval_steps, keep_obs=False))(c)
         m = {k: float(x) for k, x in episode_metrics(tr).items()}
         key = "top" if v == 0 else "side"

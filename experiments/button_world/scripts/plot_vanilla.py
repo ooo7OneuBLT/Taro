@@ -1,5 +1,6 @@
 """バニラモデルの学習の曲線を1枚の図にする。
-python plot_vanilla.py <metrics.csv> <出力 png> [手書きのプレイヤーの results.json] [その条件の名前（例 end_episode・ボタン3個）]"""
+python plot_vanilla.py <metrics.csv> <出力 png> [手書きのプレイヤーの results.json] [その条件の名前（例 end_episode・ボタン3個）] [前回の metrics.csv]
+前回の metrics.csv を渡すと、成功率と当たりの割合（2〜4回目の平均）に前回の線を灰色で重ねる。"""
 import csv
 import sys
 
@@ -37,12 +38,23 @@ if len(sys.argv) > 4:
     ref = json.load(open(sys.argv[3], encoding="utf-8"))["結果"]
     cond = sys.argv[4]
 has_share = "top_goodshare_ep1" in rows[0]
+prev = None
+if len(sys.argv) > 5:
+    prev_rows = list(csv.DictReader(open(sys.argv[5], encoding="utf-8")))
+    prev = (np.array([float(r["steps"]) for r in prev_rows]) / 1e6, prev_rows)
+
+
+def pcol(k):
+    return np.array([float(r[k]) for r in prev[1]])
 fig, axes = plt.subplots(1, 4 if has_share else 3, figsize=(22 if has_share else 17, 4.8), dpi=120)
 
 ax = axes[0]
 for k, ja in VIEWS:
     ax.plot(x, smooth(col(f"{k}_success")), color=COL[k], lw=2, label=ja)
 ax.axhline(0.031, color="#888", ls="--", lw=1, label="でたらめ（3.1%）")
+if prev:
+    ax.plot(prev[0], smooth(pcol("top_success")), color="#9a9a9a", lw=1.2, label="前回・上から")
+    ax.plot(prev[0], smooth(pcol("side_success")), color="#9a9a9a", lw=1.2, ls="--", label="前回・横から")
 ax.set_title("成功率（練習用の絵柄）")
 ax.set_xlabel("学習の歩数（百万）")
 ax.set_ylim(0, 1)
@@ -89,6 +101,10 @@ if has_share:
                 vals = [xx["最初に押したボタンが当たりの割合"] for xx in ref[f"{cond}・{vja}"][pl]["回ごと"]]
                 for v in vals:
                     ax.axhline(v, color=COL[k], ls=":", lw=0.8, alpha=0.6)
+    if prev and "top_goodshare_ep2" in prev[1][0]:
+        for k, ls in (("top", "-"), ("side", "--")):
+            avg = (pcol(f"{k}_goodshare_ep2") + pcol(f"{k}_goodshare_ep3") + pcol(f"{k}_goodshare_ep4")) / 3
+            ax.plot(prev[0], smooth(avg), color="#9a9a9a", lw=1.2, ls=ls, label=f"前回・{'上から' if k == 'top' else '横から'}（2〜4回目の平均）")
     ax.set_title("最初に押したボタンが当たりの割合（回ごと）\n（理想: 1回目33%→2回目50%以上→ほぼ100%。点線は手書き）")
     ax.set_xlabel("学習の歩数（百万）")
     ax.set_ylim(0, 1)

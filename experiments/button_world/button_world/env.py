@@ -51,6 +51,8 @@ class Config:
     wrong_button: str = "none"
     # 厳しいルール（end_episode / reset_to_start）の時、外れを踏まずに 始め→効くボタン→扉 と行ける配置だけを出す。
     # 起動時に解ける配置を視点ごとに layout_pool 個ためておき、回の始めにそこから引く（毎歩の計算を増やさないため）
+    # end_episode で外れを押した時、押した瞬間の画面を1枚見せてから終わる（次の1歩はどの行動でも終わり）
+    show_wrong_frame: bool = True
     solvable_layout: bool = True
     layout_pool: int = 8192
     # 形: 練習側の視点（train_view）は train_features。もう一方は、形の似方 similarity で決める。
@@ -145,6 +147,7 @@ class State(NamedTuple):
     success: jnp.ndarray
     layout_tries: jnp.ndarray  # この回の配置を何個目の候補で選んだか（1 なら引き直しなし）
     layout_ok: jnp.ndarray  # 外れを踏まずに解ける配置か（厳しいルールの時だけ調べる。それ以外は True）
+    ending: jnp.ndarray  # 外れを押した画面を見せている途中（次の歩で終わる）
 
 
 # 学習で使う設定の組。Config.preset("train_v1") で選ぶ（そのほかの値は上書きできる）
@@ -300,6 +303,7 @@ class ButtonWorld:
             success=jnp.array(False),
             layout_tries=jnp.array(1, jnp.int32),
             layout_ok=jnp.array(True),
+            ending=jnp.array(False),
         )
 
     def transitions(self, state):
@@ -468,7 +472,8 @@ class ButtonWorld:
 
     def step(self, key, state, action):
         cfg = self.cfg
-        pos = self._move(state, action)
+        frozen = state.ending  # 外れの画面を見せた次の歩: 動かずに終わる
+        pos = jnp.where(frozen, state.agent, self._move(state, action))
         entered = jnp.any(pos != state.agent)
         on_btn = jnp.all(state.btn_pos == pos, axis=-1) & entered
         on_deco = jnp.any(jnp.all(state.deco_pos == pos, axis=-1))
@@ -485,12 +490,21 @@ class ButtonWorld:
             pos = jnp.where(hit_bad, state.start, pos)
             wrong_end = jnp.array(False)
         elif cfg.wrong_button == "end_episode":
-            # 扉が開く前に外れを押したら、その回は失敗で終わり
+            # 扉が開く前に外れを押したら、その回は失敗で終わり。
+            # show_wrong_frame なら、押した瞬間の画面（押したボタンの上に自分がいる）を1枚見せ、次の歩で終わる
             pressed = state.pressed | on_btn
-            wrong_end = hit_bad & ~state.door_open
+            wrong_now = hit_bad & ~state.door_open
+            if cfg.show_wrong_frame:
+                ending = wrong_now
+                wrong_end = frozen
+            else:
+                ending = jnp.array(False)
+                wrong_end = wrong_now
         else:
             pressed = state.pressed | on_btn
             wrong_end = jnp.array(False)
+        if cfg.wrong_button != "end_episode":
+            ending = jnp.array(False)
         touch = jnp.where(hit_good, TOUCH_GOOD, jnp.where(hit_bad, TOUCH_BAD, jnp.where(hit_deco, TOUCH_DECO, TOUCH_NONE)))
         first_touch = jnp.where(state.first_touch == TOUCH_NONE, touch, state.first_touch)
         t = state.t + 1
@@ -508,6 +522,7 @@ class ButtonWorld:
             n_deco=state.n_deco + hit_deco,
             first_touch=first_touch,
             success=success,
+            ending=ending,
         )
 
         # 回が終わったら自動で次の回へ。episodes_per_game 回で新しいゲーム
@@ -539,6 +554,7 @@ class ButtonWorld:
             "steps_open_to_enter": jnp.where(success, t - t_open, -1),
             "entered_button": entered_button,  # この歩で入ったボタンの番号（-1 は無し）
             "wrong_end": wrong_end,  # end_episode で外れを押して終わった
+            "ending": ending,  # 外れを押した画面を見せている（次の歩で終わる）
             "layout_tries": end.layout_tries,  # この回の配置を何個目の候補で選んだか
             "layout_ok": end.layout_ok,  # 外れを踏まずに解ける配置か
             "success": success,
